@@ -348,7 +348,6 @@ async def execute_run(workflow_id: str):
 | `GET /workflows/{id}` | Status + results | read `Step.status`, `context.value_for_step()` |
 
 Minimal FastAPI sketch:
-
 ```python
 from fastapi import FastAPI, HTTPException
 from simple_steps_core import ValidationError
@@ -370,6 +369,13 @@ def create_workflow(payload: dict):
     db.save(payload["workflow_id"], snapshot)
     return {"workflow_id": payload["workflow_id"]}
 ```
+
+> A complete, **runnable** version of this server — with `/operations`,
+> `/workflows`, `/workflows/{id}/run`, `/workflows/{id}` and a
+> `/workflows/{id}/dag` endpoint, plus CORS for a local React dev server —
+> lives in [../examples/api_server](../examples/api_server). Install with
+> `pip install -e ".[api]"` and run
+> `uvicorn examples.api_server.app:app --reload`.
 
 ---
 

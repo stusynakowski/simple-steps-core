@@ -19,7 +19,7 @@ from ..domain.models import (
     StepStatus,
     ToolCall,
 )
-from ..domain.references import is_reference
+from ..domain.references import is_reference, split_reference
 from ..execution.context import SessionContext
 from ..execution.engine import CoreEngine, ExecutionHandle
 from ..execution.resolver import ReferenceResolver
@@ -55,6 +55,7 @@ __all__ = [
     "is_reference",
     "parse_formula",
     "render_formula",
+    "split_reference",
     # operations
     "Operation",
     "OperationRegistry",

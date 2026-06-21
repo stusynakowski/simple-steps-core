@@ -92,6 +92,13 @@ validating workflows from user input, async execution, orchestrators
 (`map`/`filter`/`expand`/`collapse`), full-session snapshot persistence, per-user
 isolation, and a suggested HTTP API surface.
 
+A complete, runnable FastAPI server is in [examples/api_server](examples/api_server):
+
+```bash
+python -m pip install -e ".[api]"
+uvicorn examples.api_server.app:app --reload   # http://127.0.0.1:8000/docs
+```
+
 ## Publish to PyPI
 
 1. Build distributions:

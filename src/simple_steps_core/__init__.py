@@ -29,6 +29,7 @@ from .api.public import (
     register_operation,
     register_orchestrators,
     render_formula,
+    split_reference,
     validate_tool_call,
 )
 
@@ -63,5 +64,6 @@ __all__ = [
     "register_operation",
     "register_orchestrators",
     "render_formula",
+    "split_reference",
     "validate_tool_call",
 ]
