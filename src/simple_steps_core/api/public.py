@@ -10,6 +10,8 @@ sub-packages directly.
 
 from ..domain.formulas import parse_formula, render_formula
 from ..domain.models import (
+    ItemOutcome,
+    MapResult,
     OperationDefinition,
     OperationParam,
     Step,
@@ -19,14 +21,31 @@ from ..domain.models import (
 )
 from ..domain.references import is_reference
 from ..execution.context import SessionContext
-from ..execution.engine import CoreEngine
+from ..execution.engine import CoreEngine, ExecutionHandle
 from ..execution.resolver import ReferenceResolver
+from ..execution.session_io import (
+    DEFAULT_CODECS,
+    CodecRegistry,
+    PayloadEnvelope,
+    SessionSnapshot,
+    SnapshotError,
+)
+from ..execution.session_manager import SessionManager, make_session_id
 from ..execution.workflow import Workflow
-from ..operations.registry import REGISTRY, Operation, OperationRegistry, register_operation
+from ..operations.orchestrations import register_orchestrators
+from ..operations.registry import (
+    REGISTRY,
+    Operation,
+    OperationRegistry,
+    RegistryFrozenError,
+    register_operation,
+)
 from ..operations.validation import ValidationError, validate_tool_call
 
 __all__ = [
     # domain
+    "ItemOutcome",
+    "MapResult",
     "OperationDefinition",
     "OperationParam",
     "Step",
@@ -39,13 +58,24 @@ __all__ = [
     # operations
     "Operation",
     "OperationRegistry",
+    "RegistryFrozenError",
     "REGISTRY",
     "register_operation",
+    "register_orchestrators",
     "ValidationError",
     "validate_tool_call",
     # execution
     "CoreEngine",
+    "ExecutionHandle",
     "ReferenceResolver",
     "SessionContext",
+    "SessionManager",
+    "make_session_id",
     "Workflow",
+    # session snapshot / codecs
+    "CodecRegistry",
+    "DEFAULT_CODECS",
+    "PayloadEnvelope",
+    "SessionSnapshot",
+    "SnapshotError",
 ]

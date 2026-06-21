@@ -30,19 +30,21 @@ def build_arg_model(registry: OperationRegistry, operation_id: str) -> type[Base
     """
     Build a Pydantic model describing the arguments of one operation.
 
-    Each parameter becomes a model field; required params have no default,
-    optional params use their default. ``extra="forbid"`` makes unknown
-    argument names an error.
+    Every field is declared **optional** here on purpose: a required argument
+    may legitimately arrive as a reference token (e.g. ``data="step1"``), which
+    is stripped before this model runs because its real value is only known at
+    execution time. Required-*presence* is therefore enforced separately in
+    :func:`validate_tool_call`; this model only type-checks the literal values
+    that are actually supplied. ``extra="forbid"`` still flags unknown names.
     """
     definition = registry.get_definition(operation_id)
     fields: dict[str, tuple[Any, Any]] = {}
     for param in definition.params:
         # We keep field types permissive (Any) because reference tokens may
         # stand in for any declared type; real coercion happens post-resolve.
-        if param.required:
-            fields[param.name] = (Any, ...)            # ... means "required"
-        else:
-            fields[param.name] = (Any, param.default)
+        # Defaulting required params to None keeps a missing literal (it was a
+        # reference) from being mis-reported as an absent required argument.
+        fields[param.name] = (Any, param.default if not param.required else None)
 
     return create_model(
         f"{operation_id}_Args",

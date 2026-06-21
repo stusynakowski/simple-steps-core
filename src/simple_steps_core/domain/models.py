@@ -106,3 +106,58 @@ class Step(BaseModel):
     status: StepStatus = StepStatus.PENDING
     output: StepOutput = Field(default_factory=StepOutput)
     error: str | None = None
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Orchestrator outcomes (iterative / partial-failure results)
+# ─────────────────────────────────────────────────────────────────────────
+class ItemOutcome(BaseModel):
+    """The result of processing one item inside an orchestrator (e.g. ``map``).
+
+    A single item may succeed or fail independently of its siblings, so each
+    carries its own status and either a ``value`` or an ``error``.
+    """
+
+    index: int
+    status: StepStatus = StepStatus.PENDING
+    value: Any = None
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.status is StepStatus.COMPLETED
+
+
+class MapResult(BaseModel):
+    """Aggregate result of an orchestrator that processes a collection.
+
+    ``outcomes`` preserves per-item order and status. The ``ok`` / ``failed``
+    helpers are exposed as attributes so downstream steps can reference them
+    with dotted tokens, e.g. ``=summarize(rows=step2.ok)`` keeps only the
+    successful values, while ``step2.failed`` drives a retry pass.
+    """
+
+    outcomes: list[ItemOutcome] = Field(default_factory=list)
+
+    @property
+    def ok(self) -> list[Any]:
+        """Successful values, in original order."""
+        return [o.value for o in self.outcomes if o.status is StepStatus.COMPLETED]
+
+    @property
+    def failed(self) -> list[ItemOutcome]:
+        """Outcomes that failed, for inspection or re-driving."""
+        return [o for o in self.outcomes if o.status is StepStatus.FAILED]
+
+    @property
+    def values(self) -> list[Any]:
+        """All values in order (failed items contribute ``None``)."""
+        return [o.value for o in self.outcomes]
+
+    @property
+    def ok_count(self) -> int:
+        return sum(1 for o in self.outcomes if o.status is StepStatus.COMPLETED)
+
+    @property
+    def failed_count(self) -> int:
+        return sum(1 for o in self.outcomes if o.status is StepStatus.FAILED)

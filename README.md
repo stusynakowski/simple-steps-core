@@ -84,6 +84,14 @@ print(ref_id, value)
 ./scripts/run_checks.sh
 ```
 
+## Integrating into a backend
+
+See the [Integration Guide](docs/integration.md) for a task-oriented walkthrough:
+registering operations, exposing the operation palette to a frontend, building and
+validating workflows from user input, async execution, orchestrators
+(`map`/`filter`/`expand`/`collapse`), full-session snapshot persistence, per-user
+isolation, and a suggested HTTP API surface.
+
 ## Publish to PyPI
 
 1. Build distributions:
