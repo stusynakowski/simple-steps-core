@@ -33,3 +33,7 @@ def render_formula(tool_call: ToolCall) -> str:
         raise ValueError("operation_id is required")
     parts = [f"{key}={value!r}" for key, value in tool_call.arguments.items()]
     return f"={tool_call.operation_id}({', '.join(parts)})"
+
+
+def build_formula(tool_call: ToolCall) -> str:
+    return render_formula(tool_call)

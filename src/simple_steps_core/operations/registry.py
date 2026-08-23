@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from ..domain.models import OperationDefinition, OperationParam, ToolCall
 
@@ -114,13 +114,23 @@ class OperationRegistry:
                 "before serving concurrent requests."
             )
 
-    def register(self, operation_id: str, fn: Callable, description: str = "") -> Operation:
+    def register(
+        self,
+        operation_id: str,
+        fn: Callable,
+        description: str = "",
+        *,
+        category: str = "",
+        type: Literal["source", "dataframe", "raw_output"] = "raw_output",
+    ) -> Operation:
         """Introspect *fn*, store its definition, and return an Operation wrapper."""
         self._guard_mutable()
         params = _params_from_signature(fn)
         definition = OperationDefinition(
             operation_id=operation_id,
             description=description,
+            category=category,
+            type=type,
             params=params,
         )
         operation = Operation(
@@ -135,7 +145,12 @@ class OperationRegistry:
         return operation
 
     def register_orchestrator(
-        self, operation_id: str, fn: Callable, description: str = ""
+        self,
+        operation_id: str,
+        fn: Callable,
+        description: str = "",
+        *,
+        category: str = "orchestration",
     ) -> Operation:
         """Register a higher-order operation that receives an execution handle.
 
@@ -148,6 +163,8 @@ class OperationRegistry:
         definition = OperationDefinition(
             operation_id=operation_id,
             description=description,
+            category=category,
+            type=operation_id if operation_id in {"map", "filter", "expand"} else "orchestrator",
             params=params,
         )
         operation = Operation(
@@ -201,7 +218,13 @@ class OperationRegistry:
 REGISTRY = OperationRegistry()
 
 
-def register_operation(operation_id: str | None = None, description: str = ""):
+def register_operation(
+    operation_id: str | None = None,
+    description: str = "",
+    *,
+    category: str = "",
+    type: Literal["source", "dataframe", "raw_output"] = "raw_output",
+):
     """
     Decorator that registers a function as an operation.
 
@@ -212,6 +235,12 @@ def register_operation(operation_id: str | None = None, description: str = ""):
 
     def decorator(fn: Callable) -> Operation:
         resolved_id = operation_id or fn.__name__
-        return REGISTRY.register(resolved_id, fn, description=description)
+        return REGISTRY.register(
+            resolved_id,
+            fn,
+            description=description,
+            category=category,
+            type=type,
+        )
 
     return decorator

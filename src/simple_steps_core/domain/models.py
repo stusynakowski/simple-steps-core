@@ -15,7 +15,7 @@ All models are Pydantic v2 so we get, for free:
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -39,6 +39,16 @@ class OperationDefinition(BaseModel):
 
     operation_id: str
     description: str = ""
+    category: str = ""
+    type: Literal[
+        "source",
+        "map",
+        "filter",
+        "dataframe",
+        "expand",
+        "raw_output",
+        "orchestrator",
+    ] = "raw_output"
     params: list[OperationParam] = Field(default_factory=list)
 
     model_config = {"frozen": True}
@@ -96,6 +106,50 @@ class StepOutput(BaseModel):
     ref: str | None = None          # session-store key for the full data
     value: Any = None               # inline value for small results (optional)
     kind: str | None = None         # "dataframe", "raw", "list", etc.
+
+
+class Shape(BaseModel):
+    """Lightweight metadata describing a referenced payload."""
+
+    kind: Literal["dataframe", "raw"]
+    rows: int
+    columns: list[str] = Field(default_factory=list)
+    value_type: str | None = None
+
+    model_config = {"frozen": True}
+
+
+class Cell(BaseModel):
+    """JSON-safe value cell for grid-oriented frontend views."""
+
+    row_id: str
+    column_id: str
+    value: Any = None
+    display_value: str = ""
+
+    model_config = {"frozen": True}
+
+
+class StepError(BaseModel):
+    """Structured details for an operation failure."""
+
+    message: str
+    type: str
+    traceback: str | None = None
+
+    model_config = {"frozen": True}
+
+
+class StepResult(BaseModel):
+    """Reference-only result returned by the runtime contract execution API."""
+
+    step_id: str
+    ref_id: str
+    status: Literal["success", "failed"]
+    shape: Shape
+    error: StepError | None = None
+
+    model_config = {"frozen": True}
 
 
 class Step(BaseModel):

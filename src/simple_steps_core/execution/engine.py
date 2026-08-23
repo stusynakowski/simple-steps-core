@@ -29,10 +29,11 @@ registry and the active session context.
 from __future__ import annotations
 
 import asyncio
+import traceback as traceback_module
 import uuid
 from typing import Any
 
-from ..domain.models import ToolCall
+from ..domain.models import Shape, StepError, StepResult, ToolCall
 from ..operations.registry import OperationRegistry
 from ..operations.validation import validate_tool_call
 from .context import SessionContext
@@ -91,6 +92,37 @@ class CoreEngine:
         context.put(ref_id, value)
         return ref_id, value
 
+    async def aexecute_step(
+        self,
+        call: ToolCall,
+        ctx: SessionContext,
+        *,
+        step_id: str,
+        preview: bool = False,
+    ) -> StepResult:
+        """Async contract entry point returning a reference-only result."""
+        try:
+            ref_id, value = await self.aexecute(call, ctx)
+        except Exception as exc:
+            return StepResult(
+                step_id=step_id,
+                ref_id="",
+                status="failed",
+                shape=Shape(kind="raw", rows=0, columns=[], value_type=None),
+                error=StepError(
+                    message=str(exc),
+                    type=type(exc).__name__,
+                    traceback=traceback_module.format_exc(),
+                ),
+            )
+        ctx.bind_step(step_id, ref_id)
+        return StepResult(
+            step_id=step_id,
+            ref_id=ref_id,
+            status="success",
+            shape=ctx.codecs.shape(value),
+        )
+
     # ── sync wrapper ─────────────────────────────────────────────────────
     def execute(self, tool_call: ToolCall, context: SessionContext) -> tuple[str, Any]:
         """Synchronous entry point.
@@ -112,6 +144,41 @@ class CoreEngine:
             return ref_id, value
 
         return _run_coro(self.aexecute(tool_call, context))
+
+    def execute_step(
+        self,
+        call: ToolCall,
+        ctx: SessionContext,
+        *,
+        step_id: str,
+        preview: bool = False,
+    ) -> StepResult:
+        """Contract entry point returning a reference-only StepResult."""
+        operation = self.registry.get_operation(call.operation_id)
+        if operation.is_async or operation.is_orchestrator:
+            return _run_coro(self.aexecute_step(call, ctx, step_id=step_id, preview=preview))
+
+        try:
+            ref_id, value = self.execute(call, ctx)
+        except Exception as exc:
+            return StepResult(
+                step_id=step_id,
+                ref_id="",
+                status="failed",
+                shape=Shape(kind="raw", rows=0, columns=[], value_type=None),
+                error=StepError(
+                    message=str(exc),
+                    type=type(exc).__name__,
+                    traceback=traceback_module.format_exc(),
+                ),
+            )
+        ctx.bind_step(step_id, ref_id)
+        return StepResult(
+            step_id=step_id,
+            ref_id=ref_id,
+            status="success",
+            shape=ctx.codecs.shape(value),
+        )
 
     # ── internal: low-level sub-operation call (no resolve, no store) ─────
     async def _call_operation(self, operation_id: str, kwargs: dict[str, Any]) -> Any:

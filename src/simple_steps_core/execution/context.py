@@ -18,12 +18,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .session_io import DEFAULT_CODECS, CodecRegistry
+from ..domain.models import Cell, Shape
+
 
 @dataclass
 class SessionContext:
     session_id: str
     outputs: dict[str, Any] = field(default_factory=dict)      # ref -> value
     step_to_ref: dict[str, str] = field(default_factory=dict)  # step_id -> ref
+    codecs: CodecRegistry = field(default_factory=lambda: DEFAULT_CODECS)
 
     # ── payload store ────────────────────────────────────────────────────
     def put(self, ref_id: str, value: Any) -> None:
@@ -36,6 +40,22 @@ class SessionContext:
 
     def has(self, ref_id: str) -> bool:
         return ref_id in self.outputs
+
+    def owns(self, ref_id: str) -> bool:
+        """True when this context owns a reference."""
+        return self.has(ref_id)
+
+    def get_meta(self, ref_id: str) -> Shape:
+        """Return shape metadata for a stored payload."""
+        if not self.owns(ref_id):
+            raise KeyError(f"Unknown reference: {ref_id!r}")
+        return self.codecs.shape(self.outputs[ref_id])
+
+    def get_view(self, ref_id: str, offset: int = 0, limit: int = 50) -> list[Cell]:
+        """Return a paginated, JSON-safe cell view for a stored payload."""
+        if not self.owns(ref_id):
+            raise KeyError(f"Unknown reference: {ref_id!r}")
+        return self.codecs.to_view(self.outputs[ref_id], offset=offset, limit=limit)
 
     # ── step → ref index ─────────────────────────────────────────────────
     def bind_step(self, step_id: str, ref_id: str) -> None:

@@ -8,14 +8,18 @@ their behavior. Import from ``simple_steps_core`` rather than reaching into
 sub-packages directly.
 """
 
-from ..domain.formulas import parse_formula, render_formula
+from ..domain.formulas import build_formula, parse_formula, render_formula
 from ..domain.models import (
+    Cell,
     ItemOutcome,
     MapResult,
     OperationDefinition,
     OperationParam,
+    Shape,
     Step,
+    StepError,
     StepOutput,
+    StepResult,
     StepStatus,
     ToolCall,
 )
@@ -26,9 +30,11 @@ from ..execution.resolver import ReferenceResolver
 from ..execution.session_io import (
     DEFAULT_CODECS,
     CodecRegistry,
+    InMemoryStore,
     PayloadEnvelope,
     SessionSnapshot,
     SnapshotError,
+    StoreBackend,
 )
 from ..execution.session_manager import SessionManager, make_session_id
 from ..execution.workflow import Workflow
@@ -44,14 +50,19 @@ from ..operations.validation import ValidationError, validate_tool_call
 
 __all__ = [
     # domain
+    "Cell",
     "ItemOutcome",
     "MapResult",
     "OperationDefinition",
     "OperationParam",
+    "Shape",
     "Step",
+    "StepError",
     "StepOutput",
+    "StepResult",
     "StepStatus",
     "ToolCall",
+    "build_formula",
     "is_reference",
     "parse_formula",
     "render_formula",
@@ -76,7 +87,9 @@ __all__ = [
     # session snapshot / codecs
     "CodecRegistry",
     "DEFAULT_CODECS",
+    "InMemoryStore",
     "PayloadEnvelope",
     "SessionSnapshot",
     "SnapshotError",
+    "StoreBackend",
 ]

@@ -99,6 +99,35 @@ python -m pip install -e ".[api]"
 uvicorn examples.api_server.app:app --reload   # http://127.0.0.1:8000/docs
 ```
 
+## Roadmap: tool decoration, orchestration & agents
+
+We are extending the core so that a single decorated function can drive both an
+**MCP server** and an **agentic workflow UI** — fusing MCP tool-calling with
+LangGraph-style session management. Full design in
+[specs/011](specs/011-tool-orchestration-and-agent-workflows.md).
+
+What we are adding:
+
+- **Real JSON Schema tool definitions** — decoration derives an `input_schema`
+  (and `output_schema`) from type annotations, consumable as-is by MCP, OpenAI
+  function-calling, and the UI.
+- **Two-layer model** — a static **tool definition** (the contract) vs. a
+  per-call **step config** (`StepSpec`) that carries its own orchestration and
+  execution settings.
+- **Three-kind parameters** — `data` (a value the caller/agent supplies),
+  `reference` (a data slot wired to a prior step's output via `{"$ref": ...}`),
+  and `resource` (an injected runtime object like a db connection, hidden from
+  the schema).
+- **Orchestration & execution config** — per-step `map`/`filter`/`expand`/
+  `collapse` with concurrency and per-item error policy, plus sync/async,
+  manual/auto run, timeouts, whole-step retries, and caching.
+- **Data-centric session** — `SessionContext` reorganized into a `DataStore` of
+  self-describing `DataEntry` records plus a separate `ResourceContainer`.
+- **Integration adapters** — thin, optional, bidirectional adapters for MCP,
+  LangGraph, and OpenAI; the core stays Pydantic-only.
+- **Agent planner** — proposes and modifies a validated list of steps that users
+  trace, edit, and run under their own control.
+
 ## Publish to PyPI
 
 1. Build distributions:
