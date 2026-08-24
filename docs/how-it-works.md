@@ -38,16 +38,57 @@ and run step-by-step.
 The code is layered so each layer depends only on the ones below it:
 
 ```
-api/         public.py — the single stable import surface
-  ▲
-execution/   engine, workflow, context, data_store, resources, resolver,
-  │          session_io, session_manager  (how things run + where data lives)
-  ▲
-operations/  registry, schema, validation, dependencies, orchestrations
-  │          (what a tool is; introspection; arg checking)
-  ▲
-domain/      models, references  (pure pydantic shapes + reference grammar)
+simple_steps_core/                    ← import only from the package root
+│
+├─ api/                    STABLE PUBLIC SURFACE
+│  ├─ public.py            re-exports every name below (the only import point)
+│  └─ decorators.py        register_operation (alias)
+│
+├─ serving.py              OPTIONAL HTTP LAYER  (needs the `api` extra)
+│  ├─ build_app(registry, engine)   → FastAPI: GET /tools · POST /call · POST /run
+│  ├─ load_tools_module(path)       import a user script (runs its decorators)
+│  └─ main()                        console script `simple-steps-core-server`
+│
+├─ execution/              HOW things run + WHERE data lives
+│  ├─ workflow.py   Workflow           ordered steps; run()/arun()/run_step();
+│  │                                   author via  wf[id] = ToolCall | StepSpec
+│  ├─ engine.py     CoreEngine          validate → resolve → inject → run → store
+│  │               ExecutionHandle      handed to orchestrators for per-item sub-calls
+│  ├─ resolver.py   ReferenceResolver   turns "step1.field" into the real value
+│  ├─ context.py    SessionContext      facade over the two stores below
+│  │  ├─ data_store.py  DataStore       all outputs as DataEntry records
+│  │  │                 DataEntry       ref, value, step_id, kind, shape, codec, …
+│  │  └─ resources.py   ResourceContainer  injected db/clients (never serialized)
+│  ├─ session_io.py     SessionSnapshot · CodecRegistry · DEFAULT_CODECS
+│  │                                    structure + payloads persistence
+│  └─ session_manager.py SessionManager · make_session_id   per-user isolation
+│
+├─ operations/             WHAT a tool is; introspection; checking
+│  ├─ registry.py   Operation           dual-mode: op(**kw)→ToolCall / op.run(**kw)
+│  │               OperationRegistry    name→op; list_definitions(); freeze()
+│  │               register_operation   the decorator
+│  ├─ schema.py     build_input_schema / build_output_schema   (JSON Schema)
+│  ├─ dependencies.py  Resource()       marks an injected resource parameter
+│  ├─ validation.py    validate_tool_call   do the args satisfy the contract?
+│  └─ orchestrations.py map · filter · expand · collapse + register_orchestrators
+│
+├─ domain/                 PURE shapes + grammar  (depends on NOTHING above)
+│  ├─ models.py     ToolCall            {operation_id, arguments}      ← the call
+│  │               StepSpec            {name, arguments, orchestration, execution}
+│  │               OrchestrationConfig · ExecutionConfig
+│  │               Step · StepOutput · StepResult · Shape · Cell · StepError
+│  │               OperationDefinition · OperationParam           ← the contract
+│  │               MapResult · ItemOutcome                 ← orchestrator results
+│  └─ references.py is_reference / split_reference    grammar: token starts with `step`
+│
+└─ packs/  loader.py       load a module of operations at boot
 ```
+
+**The one rule that prevents leaky abstractions:** dependencies point *downward
+only* — `api → serving → execution → operations → domain`. No layer imports a
+layer above it. `domain` is pure data (Pydantic + grammar) and imports nothing
+else; `operations` never touches a live session; `execution` is the only place
+with runtime state.
 
 Import everything from the top-level package:
 
@@ -59,6 +100,41 @@ from simple_steps_core import (
     register_orchestrators, validate_tool_call,
 )
 ```
+
+### What crosses each boundary
+
+Only these small, well-defined objects move between layers — everything else is
+an internal detail:
+
+| Crossing | Object | Direction |
+| --- | --- | --- |
+| author → engine | `ToolCall` (or `StepSpec`, compiled to one) | a call to run |
+| registry → UI / agent | `OperationDefinition` (+ `input_schema`) | the tool contract |
+| inside `ToolCall.arguments` | reference token `"step1.field"` | wiring, resolved at run time |
+| engine → session | `ref` string + `DataEntry` | where an output went |
+| session → disk/DB | `SessionSnapshot` | persistence |
+| tool ← container | a resource object (db/client) | injected, never serialized |
+
+### Lifecycle of one step
+
+```
+Workflow.run_step("step2")
+└─ step.call : ToolCall(operation_id="total", arguments={"data": "step1"})
+   └─ CoreEngine.execute(call, ctx)
+      ├─ 1. validate_tool_call(call, registry)        operations/validation
+      ├─ 2. ReferenceResolver.resolve_arguments(...)  "step1" → value   (reads session)
+      ├─ 3. inject resource params from ctx.resources execution/resources
+      ├─ 4. run the function
+      │     ├─ sync         → asyncio.to_thread(fn, **args)
+      │     ├─ async        → await fn(**args)
+      │     └─ orchestrator → fn(handle, **args)  → drives sub-ops per item
+      └─ 5. ctx.data.put(ref, value) → DataEntry ; bind "step2" → ref
+         └─ back on the Step: status=COMPLETED, output.ref/value set
+```
+
+A `StepSpec` adds one step in front of this: `StepSpec.to_tool_call()` compiles
+it to the `ToolCall` above (a `single` step → a direct call; `map`/`filter`/
+`expand`/`collapse` → a call to that orchestrator with the step's tool as `op`).
 
 ---
 
