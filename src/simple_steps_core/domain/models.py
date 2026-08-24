@@ -30,6 +30,7 @@ class OperationParam(BaseModel):
     type_name: str = "Any"          # human-readable annotation, e.g. "str"
     required: bool = False          # True when the param has no default
     default: Any = None             # default value when not required
+    kind: Literal["data", "resource"] = "data"  # resource params are injected
 
     model_config = {"frozen": True}
 
@@ -50,6 +51,9 @@ class OperationDefinition(BaseModel):
         "orchestrator",
     ] = "raw_output"
     params: list[OperationParam] = Field(default_factory=list)
+    input_schema: dict[str, Any] = Field(default_factory=dict)   # JSON Schema (data params)
+    output_schema: dict[str, Any] | None = None                  # JSON Schema (return type)
+    dependencies: list[str] = Field(default_factory=list)        # resource param names
 
     model_config = {"frozen": True}
 
@@ -61,9 +65,9 @@ class ToolCall(BaseModel):
     """
     A deferred call: "run operation X with these keyword arguments."
 
-    This is the canonical intermediate representation a formula parses into
-    and renders back from. Arguments are plain JSON-safe values or reference
-    tokens (e.g. ``"step1"``) that the execution layer resolves at run time.
+    This is the canonical, durable representation of an operation invocation.
+    Arguments are plain JSON-safe values or reference tokens (e.g. ``"step1"``)
+    that the execution layer resolves at run time.
     """
 
     operation_id: str
@@ -152,11 +156,99 @@ class StepResult(BaseModel):
     model_config = {"frozen": True}
 
 
+class OrchestrationConfig(BaseModel):
+    """How a step applies its tool across inputs (breadth).
+
+    ``single`` runs the tool once. ``map``/``filter``/``expand``/``collapse``
+    apply the step's own tool across the collection referenced by ``over``.
+    """
+
+    mode: Literal["single", "map", "filter", "expand", "collapse"] = "single"
+    over: str | None = None          # step reference to the collection (e.g. "step1")
+    item_arg: str | None = None      # tool param each item binds to (default: inferred)
+    concurrency: int = 1
+    on_error: Literal["collect", "fail_fast", "skip"] | None = None
+    retries: int = 0
+    initial: Any = None              # seed accumulator for ``collapse``
+
+    model_config = {"frozen": True}
+
+
+class ExecutionConfig(BaseModel):
+    """How a step is invoked (orthogonal to orchestration)."""
+
+    mode: Literal["sync", "async"] = "sync"
+    run: Literal["auto", "manual"] = "manual"   # user controls execution by default
+    timeout: float | None = None
+    retries: int = 0
+    cache: bool = False
+
+    model_config = {"frozen": True}
+
+
+# Default per-item failure policy by orchestration mode.
+_ORCH_DEFAULT_ON_ERROR = {"map": "collect", "expand": "collect", "filter": "skip"}
+
+
+class StepSpec(BaseModel):
+    """A structured step: a tool to run plus how to orchestrate and execute it.
+
+    Orchestration is declared **when the step is defined**: the step names the
+    tool (``name``) and the orchestration config says whether to run it once or
+    fan it out across a collection. :meth:`to_tool_call` compiles the spec into
+    the executable :class:`ToolCall` the engine runs.
+    """
+
+    step_id: str
+    name: str                                    # operation to run
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    orchestration: OrchestrationConfig = Field(default_factory=OrchestrationConfig)
+    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
+
+    model_config = {"frozen": True}
+
+    def to_tool_call(self) -> ToolCall:
+        """Compile this spec into the executable ToolCall.
+
+        ``single`` yields a direct call; the orchestrated modes yield a call to
+        the matching orchestrator (``map``/``filter``/``expand``/``collapse``)
+        with this step's tool as the per-item ``op``.
+        """
+        orch = self.orchestration
+        if orch.mode == "single":
+            if orch.over is not None:
+                raise ValueError("orchestration.over is only valid when mode != 'single'")
+            return ToolCall(operation_id=self.name, arguments=dict(self.arguments))
+
+        if not orch.over:
+            raise ValueError(
+                f"orchestration.over (a step reference) is required for mode {orch.mode!r}"
+            )
+        if self.arguments:
+            raise ValueError(
+                f"shared constant arguments are not yet supported for {orch.mode!r} steps; "
+                "each item is bound to the tool's item parameter"
+            )
+
+        args: dict[str, Any] = {"over": orch.over, "op": self.name}
+        if orch.item_arg is not None:
+            args["arg"] = orch.item_arg
+        if orch.mode == "collapse":
+            args["initial"] = orch.initial
+            return ToolCall(operation_id="collapse", arguments=args)
+
+        args["concurrency"] = orch.concurrency
+        args["on_error"] = orch.on_error or _ORCH_DEFAULT_ON_ERROR[orch.mode]
+        args["retries"] = orch.retries
+        return ToolCall(operation_id=orch.mode, arguments=args)
+
+
 class Step(BaseModel):
     """A single workflow step: what to run and what it produced."""
 
     step_id: str
-    formula: str                    # e.g. "=load_csv(filepath='a.csv')"
+    call: ToolCall                  # the structured operation invocation
+    spec: StepSpec | None = None    # structured authoring intent (if built from a StepSpec)
     status: StepStatus = StepStatus.PENDING
     output: StepOutput = Field(default_factory=StepOutput)
     error: str | None = None

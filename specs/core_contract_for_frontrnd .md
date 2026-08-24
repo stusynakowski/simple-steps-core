@@ -1,5 +1,12 @@
 # 010 - Core Runtime Contract (simple-steps-core)
 
+> **Superseded in part by [011](011-tool-orchestration-and-agent-workflows.md).**
+> The string *formula* parser (`parse_formula` / `build_formula` /
+> `render_formula`) has been removed. A step is now `{step_id, call}` where
+> `call` is a structured `ToolCall` (`operation_id` + `arguments`). Wherever this
+> spec says "formula," read "`ToolCall`"; the `/api/parse_formula` and
+> `/api/build_formula` routes no longer apply.
+
 ## 1. Overview
 
 Spec [009 - Core Library Split](009-core-library-split.md) defines *where* code
@@ -83,20 +90,19 @@ from simple_steps_core import (
 
 ## 4. Single-Step Execution Contract
 
-### 4.1 A step is `{step_id, formula}`
+### 4.1 A step is `{step_id, call}`
 
 - **REQ-RT-EXEC-001:** A step shall be fully described by its `step_id` and its
-  `formula`. The formula is the single source of truth for the operation and
-  its arguments, including references to upstream step outputs.
+  structured `call` (a `ToolCall`: `operation_id` + `arguments`). The `call` is
+  the single source of truth for the operation and its arguments, including
+  references to upstream step outputs.
 - **REQ-RT-EXEC-002:** The contract shall not require separate transmission of
-  operation id, argument dict, input reference id, or step-id→reference map as
-  distinct inputs to execution. All of these shall be derivable from the formula
-  plus the session context. (The host may accept legacy fields at its boundary
-  and translate them; see §12.)
-- **REQ-RT-EXEC-003:** Upstream wiring shall be expressed exclusively as quoted
-  step-id references inside the formula (e.g. `data="step_load"`). The execution
-  context resolves a referenced `step_id` to that step's *current* reference and
-  value at execution time.
+  input reference id or step-id→reference map as distinct inputs to execution.
+  These shall be derivable from the `call` plus the session context.
+- **REQ-RT-EXEC-003:** Upstream wiring shall be expressed as string step-id
+  references inside the `call` arguments (e.g. `"data": "step_load"`). The
+  execution context resolves a referenced `step_id` to that step's *current*
+  reference and value at execution time.
 
 ### 4.2 Execution entry points
 
@@ -166,9 +172,9 @@ from simple_steps_core import (
 - **REQ-RT-OP-004:** The registry shall be frozen after startup
   (`registry.freeze()`); registration after freeze shall raise. A frozen
   registry shall be safe for concurrent reads without locks.
-- **REQ-RT-OP-005:** `parse_formula(text) -> ToolCall` and `build_formula(call)
-  -> str` shall be inverse operations for all valid formulas, preserving
-  argument values and quoted references.
+- **REQ-RT-OP-005:** `ToolCall` shall serialize to and from JSON losslessly
+  (`operation_id` + `arguments`), preserving argument values and string
+  references.
 - **REQ-RT-OP-006:** `validate_tool_call(call, registry)` shall raise
   `ValidationError` for unknown operations, unknown/missing required arguments,
   and references that violate the reference grammar. Validation shall be

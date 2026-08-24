@@ -7,12 +7,12 @@ It is designed for services that need:
 - Deterministic step execution
 - Clear operation contracts
 - Session-scoped data references
-- Serializable workflow formulas
+- Serializable, structured tool calls
 
 ## Design goals
 
 - Tool-first runtime: operations are the only executable units.
-- Formula-first persistence: workflows store tool calls as formulas.
+- Structured-call persistence: workflows store tool calls as structured data.
 - Session isolation: each run context is scoped by session ID.
 - Optional agent layer: planner can suggest tool calls without owning execution.
 
@@ -92,12 +92,47 @@ validating workflows from user input, async execution, orchestrators
 (`map`/`filter`/`expand`/`collapse`), full-session snapshot persistence, per-user
 isolation, and a suggested HTTP API surface.
 
+For a top-to-bottom explanation of how the pieces fit together, see
+[How simple-steps-core works](docs/how-it-works.md).
+
+Building the `simple-steps` app (React + a LangGraph agent) on top of this? See
+the [simple-steps integration guide](docs/simple-steps-integration.md) and the
+runnable reference backend in
+[examples/simple_steps_backend](examples/simple_steps_backend).
+
 A complete, runnable FastAPI server is in [examples/api_server](examples/api_server):
 
 ```bash
 python -m pip install -e ".[api]"
 uvicorn examples.api_server.app:app --reload   # http://127.0.0.1:8000/docs
 ```
+
+## One-command tool server
+
+Write a script that only declares tools, then serve it with the bundled command
+— no server boilerplate:
+
+```python
+# mytools.py
+from simple_steps_core import register_operation
+
+@register_operation("add", description="Add two numbers.")
+def add(a: int, b: int) -> int:
+    return a + b
+
+CONFIG = {"title": "My Tools", "port": 8000}   # optional
+```
+
+```bash
+python -m pip install -e ".[api]"
+simple-steps-core-server mytools.py            # http://127.0.0.1:8000/docs
+```
+
+The command imports your script, adds the built-in orchestrators, and serves
+`GET /tools`, `POST /call` (run one tool), and `POST /run` (run a workflow of
+steps). A runnable script is in [example_server.py](example_server.py). Optional
+script settings: `CONFIG` (`title`/`host`/`port`/`orchestrators`/`freeze`) and
+`RESOURCES` (name → factory) for tools that declare `Resource()` parameters.
 
 ## Roadmap: tool decoration, orchestration & agents
 

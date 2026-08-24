@@ -9,6 +9,7 @@ from simple_steps_core import (
     OperationRegistry,
     SessionSnapshot,
     SnapshotError,
+    ToolCall,
     Workflow,
     register_orchestrators,
 )
@@ -32,8 +33,8 @@ def _registry():
 def _built_workflow():
     engine = CoreEngine(_registry())
     wf = Workflow(engine, session_id="snap")
-    wf["step_nums"] = "=make_list(n=4)"
-    wf["step_mapped"] = '=map(over="step_nums", op="double")'
+    wf["step_nums"] = ToolCall(operation_id="make_list", arguments={"n": 4})
+    wf["step_mapped"] = ToolCall(operation_id="map", arguments={"over": "step_nums", "op": "double"})
     wf.run()
     return engine, wf
 

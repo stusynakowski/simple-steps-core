@@ -40,6 +40,8 @@ def build_arg_model(registry: OperationRegistry, operation_id: str) -> type[Base
     definition = registry.get_definition(operation_id)
     fields: dict[str, tuple[Any, Any]] = {}
     for param in definition.params:
+        if param.kind == "resource":
+            continue  # resources are injected at run time, never caller-supplied
         # We keep field types permissive (Any) because reference tokens may
         # stand in for any declared type; real coercion happens post-resolve.
         # Defaulting required params to None keeps a missing literal (it was a
@@ -65,7 +67,7 @@ def validate_tool_call(call: ToolCall, registry: OperationRegistry) -> None:
         raise ValidationError(f"Unknown operation: {call.operation_id!r}")
 
     definition = registry.get_definition(call.operation_id)
-    known = {p.name for p in definition.params}
+    known = {p.name for p in definition.params if p.kind != "resource"}
 
     # Reject unexpected argument names early for a clear message.
     unexpected = set(call.arguments) - known
@@ -75,8 +77,10 @@ def validate_tool_call(call: ToolCall, registry: OperationRegistry) -> None:
             f"{', '.join(sorted(unexpected))}"
         )
 
-    # Required params must be present (a reference token counts as present).
+    # Required data params must be present (a reference token counts as present).
     for param in definition.params:
+        if param.kind == "resource":
+            continue  # injected by the engine, not part of the tool call
         if param.required and param.name not in call.arguments:
             raise ValidationError(
                 f"Missing required argument {param.name!r} for {call.operation_id!r}"

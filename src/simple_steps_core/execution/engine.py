@@ -56,6 +56,7 @@ class ExecutionHandle:
 
     async def run(self, operation_id: str, /, **kwargs: Any) -> Any:
         """Execute a sub-operation by id with literal keyword arguments."""
+        self._engine._inject_resources(operation_id, kwargs, self.context)
         return await self._engine._call_operation(operation_id, kwargs)
 
     def get_definition(self, operation_id: str):
@@ -82,9 +83,11 @@ class CoreEngine:
             handle = ExecutionHandle(self, context)
             value = await operation.fn(handle, **arguments)
         elif operation.is_async:
+            self._inject_resources(tool_call.operation_id, arguments, context)
             value = await operation.fn(**arguments)
         else:
             # Run blocking sync work off the event loop so it can't stall it.
+            self._inject_resources(tool_call.operation_id, arguments, context)
             value = await asyncio.to_thread(operation.fn, **arguments)
 
         # 4. Store the payload under a unique, session-scoped reference.
@@ -138,6 +141,7 @@ class CoreEngine:
             validate_tool_call(tool_call, self.registry)
             resolver = ReferenceResolver(context)
             arguments = resolver.resolve_arguments(tool_call.arguments)
+            self._inject_resources(tool_call.operation_id, arguments, context)
             value = operation.fn(**arguments)
             ref_id = f"{context.session_id}__{uuid.uuid4().hex}"
             context.put(ref_id, value)
@@ -181,6 +185,15 @@ class CoreEngine:
         )
 
     # ── internal: low-level sub-operation call (no resolve, no store) ─────
+    def _inject_resources(
+        self, operation_id: str, arguments: dict[str, Any], context: SessionContext
+    ) -> None:
+        """Fill an operation's declared resource params from the session container."""
+        definition = self.registry.get_definition(operation_id)
+        for name in definition.dependencies:
+            if name not in arguments:
+                arguments[name] = context.resources.get(name)
+
     async def _call_operation(self, operation_id: str, kwargs: dict[str, Any]) -> Any:
         """Run an operation's callable directly, awaiting/offloading as needed.
 

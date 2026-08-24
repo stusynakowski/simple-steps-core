@@ -248,6 +248,21 @@ class CodecRegistry:
             f"codec via CodecRegistry.register(...) to include it in a snapshot."
         )
 
+    def codec_name_for(self, value: Any) -> str | None:
+        """Return the codec name that *would* encode *value*, without encoding it.
+
+        Returns ``None`` when no codec applies (the value is ephemeral and will
+        be omitted from snapshots), so callers can classify data cheaply.
+        """
+        for name, (type_, _enc, _dec, _shape, _to_view) in self._codecs.items():
+            if isinstance(value, type_):
+                return name
+        if isinstance(value, BaseModel):
+            return "pydantic"
+        if _is_jsonable(value):
+            return "json"
+        return None
+
     def shape(self, value: Any) -> Shape:
         """Return lightweight metadata for *value*."""
         for type_, _enc, _dec, shape, _to_view in self._codecs.values():

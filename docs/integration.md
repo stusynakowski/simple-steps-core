@@ -33,11 +33,12 @@ from simple_steps_core import (
 ## 2. Mental model
 
 The backend owns the only Python callables. The frontend never executes
-anything — it **authors formulas** (strings like `=load_csv(filepath='x.csv')`)
-and reads back step status/results.
+anything — it **authors structured tool calls** (JSON like
+`{"operation_id": "load_csv", "arguments": {"filepath": "x.csv"}}`) and reads
+back step status/results.
 
 ```
-React UI  ──(JSON: steps as formulas)──▶  Backend API
+React UI  ──(JSON: steps as tool calls)──▶  Backend API
    ▲                                          │
    │                                          ├─ REGISTRY.list_definitions()  → operation palette
    └──(status + results)──────────────────────┤─ Workflow.export_session()    → persist run
@@ -49,7 +50,7 @@ Three roles:
 | Concept | Role |
 | --- | --- |
 | **Operation** | A registered Python function (the unit of work). |
-| **Workflow** | An ordered list of steps; each step is a formula. |
+| **Workflow** | An ordered list of steps; each step is a structured tool call. |
 | **SessionContext** | Per-run payload store, isolated by `session_id`. |
 
 ---
@@ -131,12 +132,12 @@ The frontend renders these as form fields or graph nodes. `required` and
 
 ## 5. Build and validate a workflow from user input
 
-The frontend sends steps as `{step_id, formula}`. Validate each formula at the
-API boundary before persisting:
+The frontend sends steps as `{step_id, operation_id, arguments}`. Validate each
+call at the API boundary before persisting:
 
 ```python
 from simple_steps_core import (
-    CoreEngine, Workflow, parse_formula, validate_tool_call, ValidationError,
+    CoreEngine, Workflow, ToolCall, validate_tool_call, ValidationError,
 )
 
 engine = CoreEngine(registry)
@@ -144,22 +145,23 @@ engine = CoreEngine(registry)
 def build_workflow(session_id: str, steps: list[dict]) -> Workflow:
     wf = Workflow(engine, session_id=session_id)
     for step in steps:
-        call = parse_formula(step["formula"])
+        call = ToolCall(operation_id=step["operation_id"], arguments=step["arguments"])
         validate_tool_call(call, registry)   # raises ValidationError on bad input
-        wf[step["step_id"]] = step["formula"]
+        wf[step["step_id"]] = call
     return wf
 ```
 
 ### Reference rules (important)
 
 A step output is referenced by **another step's id**, but the reference grammar
-requires the token to **start with `step`** and be written as a **quoted
-string** in a formula:
+requires the token to **start with `step`** and be written as a **string**
+value in the arguments:
 
 ```python
-wf["step_load"]   = "=load_csv(filepath='data.csv')"
-wf["step_filter"] = '=filter_rows(data="step_load", min_value=100)'
-#                                       ^^^^^^^^^^^ quoted reference to step_load
+wf["step_load"]   = ToolCall(operation_id="load_csv", arguments={"filepath": "data.csv"})
+wf["step_filter"] = ToolCall(operation_id="filter_rows",
+                             arguments={"data": "step_load", "min_value": 100})
+#                                                ^^^^^^^^^^^ string reference to step_load
 ```
 
 - Valid references: `"step_load"`, `"step_load.field"`, `"step_load.rows[0]"`.
@@ -202,8 +204,10 @@ Orchestrators apply an existing operation across a collection produced by a
 prior step, isolating per-item failures.
 
 ```python
-wf["step_ids"]   = "=load_ids()"                                  # -> [1, 2, 3, ...]
-wf["step_fetch"] = '=map(over="step_ids", op="fetch_record", concurrency=8, retries=2)'
+wf["step_ids"]   = ToolCall(operation_id="load_ids", arguments={})       # -> [1, 2, 3, ...]
+wf["step_fetch"] = ToolCall(operation_id="map",
+                            arguments={"over": "step_ids", "op": "fetch_record",
+                                       "concurrency": 8, "retries": 2})
 await wf.arun()
 
 result = wf.context.value_for_step("step_fetch")   # MapResult
@@ -220,7 +224,7 @@ result.failed_count
 | `expand` | flat-map (1 → many, flattened) | `collect` |
 | `collapse` | reduce N → 1 via a 2-arg op | n/a |
 
-Common parameters: `over` (quoted reference), `op` (sub-operation id),
+Common parameters: `over` (string reference), `op` (sub-operation id),
 `concurrency`, `retries`, `on_error` (`collect` | `fail_fast` | `skip`),
 `arg` (override which sub-op param receives each item).
 
@@ -228,14 +232,15 @@ Common parameters: `over` (quoted reference), `op` (sub-operation id),
 only the failures or feed successes onward:
 
 ```python
-wf["step_total"] = '=collapse(over="step_fetch.ok", op="sum_amounts", initial=0)'
+wf["step_total"] = ToolCall(operation_id="collapse",
+                            arguments={"over": "step_fetch.ok", "op": "sum_amounts", "initial": 0})
 ```
 
 ---
 
 ## 8. Persistence: save and resume an entire run
 
-`to_json()` saves **structure only** (formulas/status), not the data. To
+`to_json()` saves **structure only** (tool calls/status), not the data. To
 persist a run *with its computed payloads*, use the session snapshot.
 
 ```python

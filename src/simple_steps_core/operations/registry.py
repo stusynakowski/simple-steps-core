@@ -24,6 +24,8 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from ..domain.models import OperationDefinition, OperationParam, ToolCall
+from .dependencies import ResourceMarker
+from .schema import build_input_schema, build_output_schema
 
 
 class RegistryFrozenError(RuntimeError):
@@ -80,21 +82,34 @@ def _params_from_signature(fn: Callable, *, skip: int = 0) -> list[OperationPara
     for index, (name, parameter) in enumerate(signature.parameters.items()):
         if index < skip:
             continue
-        # A parameter is required when it has no default value.
-        required = parameter.default is inspect._empty
-        default = None if required else parameter.default
         annotation = parameter.annotation
         type_name = (
             getattr(annotation, "__name__", "Any")
             if annotation is not inspect._empty
             else "Any"
         )
+        if isinstance(parameter.default, ResourceMarker):
+            # Resource params are injected at run time: required, no literal default.
+            params.append(
+                OperationParam(
+                    name=name,
+                    type_name=type_name,
+                    required=True,
+                    default=None,
+                    kind="resource",
+                )
+            )
+            continue
+        # A data parameter is required when it has no default value.
+        required = parameter.default is inspect._empty
+        default = None if required else parameter.default
         params.append(
             OperationParam(
                 name=name,
                 type_name=type_name,
                 required=required,
                 default=default,
+                kind="data",
             )
         )
     return params
@@ -128,10 +143,13 @@ class OperationRegistry:
         params = _params_from_signature(fn)
         definition = OperationDefinition(
             operation_id=operation_id,
-            description=description,
+            description=description or (inspect.getdoc(fn) or "").split("\n\n")[0].strip(),
             category=category,
             type=type,
             params=params,
+            input_schema=build_input_schema(fn),
+            output_schema=build_output_schema(fn),
+            dependencies=[p.name for p in params if p.kind == "resource"],
         )
         operation = Operation(
             operation_id,
@@ -166,6 +184,9 @@ class OperationRegistry:
             category=category,
             type=operation_id if operation_id in {"map", "filter", "expand"} else "orchestrator",
             params=params,
+            input_schema=build_input_schema(fn, skip=1),
+            output_schema=build_output_schema(fn),
+            dependencies=[p.name for p in params if p.kind == "resource"],
         )
         operation = Operation(
             operation_id,

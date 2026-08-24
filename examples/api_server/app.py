@@ -30,11 +30,11 @@ from pydantic import BaseModel, Field
 
 from simple_steps_core import (
     SessionManager,
+    ToolCall,
     ValidationError,
     Workflow,
     is_reference,
     make_session_id,
-    parse_formula,
     split_reference,
     validate_tool_call,
 )
@@ -59,7 +59,8 @@ SESSIONS = SessionManager()
 # ── request / response models ────────────────────────────────────────────
 class StepIn(BaseModel):
     step_id: str = Field(..., examples=["step_nums"])
-    formula: str = Field(..., examples=['=make_list(n=5)'])
+    operation_id: str = Field(..., examples=["make_list"])
+    arguments: dict[str, Any] = Field(default_factory=dict, examples=[{"n": 5}])
 
 
 class CreateWorkflowIn(BaseModel):
@@ -70,7 +71,8 @@ class CreateWorkflowIn(BaseModel):
 
 class StepOut(BaseModel):
     step_id: str
-    formula: str
+    operation_id: str
+    arguments: dict[str, Any]
     status: str
     value: Any = None
     error: str | None = None
@@ -84,10 +86,10 @@ class WorkflowOut(BaseModel):
 
 # ── helpers ──────────────────────────────────────────────────────────────
 def _validate_steps(steps: list[StepIn]) -> None:
-    """Reject malformed formulas / unknown ops before persisting."""
+    """Reject unknown ops / bad arguments before persisting."""
     for step in steps:
         try:
-            call = parse_formula(step.formula)
+            call = ToolCall(operation_id=step.operation_id, arguments=step.arguments)
             validate_tool_call(call, REGISTRY)
         except (ValidationError, ValueError) as exc:
             raise HTTPException(
@@ -99,7 +101,7 @@ def _validate_steps(steps: list[StepIn]) -> None:
 def _build_workflow(session_id: str, steps: list[StepIn]) -> Workflow:
     wf = Workflow(ENGINE, session_id=session_id)
     for step in steps:
-        wf[step.step_id] = step.formula
+        wf[step.step_id] = ToolCall(operation_id=step.operation_id, arguments=step.arguments)
     return wf
 
 
@@ -110,7 +112,8 @@ def _workflow_out(workflow_id: str, status: str, wf: Workflow) -> WorkflowOut:
         steps=[
             StepOut(
                 step_id=s.step_id,
-                formula=s.formula,
+                operation_id=s.call.operation_id,
+                arguments=s.call.arguments,
                 status=s.status.value,
                 value=_jsonable(s.output.value),
                 error=s.error,
@@ -194,7 +197,7 @@ def get_workflow(workflow_id: str) -> WorkflowOut:
 
 @app.get("/workflows/{workflow_id}/dag")
 def get_workflow_dag(workflow_id: str) -> dict:
-    """Derive a DAG (nodes + edges) from step formulas for graph rendering."""
+    """Derive a DAG (nodes + edges) from step references for graph rendering."""
     record = STORE.load(workflow_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Unknown workflow")
@@ -206,8 +209,7 @@ def get_workflow_dag(workflow_id: str) -> dict:
 
     for step in wf.steps:
         nodes.append({"id": step.step_id, "status": step.status.value})
-        call = parse_formula(step.formula)
-        for value in call.arguments.values():
+        for value in step.call.arguments.values():
             if is_reference(value):
                 source, _field = split_reference(value)
                 if source in step_ids:

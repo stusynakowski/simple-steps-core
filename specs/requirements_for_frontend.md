@@ -1,5 +1,10 @@
 # 009 - Core Library Split
 
+> **Superseded in part by [011](011-tool-orchestration-and-agent-workflows.md).**
+> The string *formula* encoding (`formulas.py` / `safe_formula.py`) has been
+> removed; the structured `ToolCall` is now the canonical durable encoding of a
+> tool invocation. References to formulas below should be read as `ToolCall`.
+
 ## 1. Overview
 This specification defines how Simple Steps will be separated into two repositories:
 
@@ -54,9 +59,9 @@ The application repository shall import `simple-steps-core` and provide product-
 
 ### 4.2 Tool / Operation Model
 - **REQ-CORE-005:** A registered operation shall be treated as the canonical production tool abstraction.
-- **REQ-CORE-006:** The formula representation shall remain the canonical durable encoding of a tool invocation.
-- **REQ-CORE-007:** The core library shall provide a structured representation of a tool call before rendering to formula text.
-- **REQ-CORE-008:** Structured tool calls shall be renderable to formula syntax and parseable back into validated call data.
+- **REQ-CORE-006:** The structured `ToolCall` shall be the canonical durable encoding of a tool invocation.
+- **REQ-CORE-007:** The core library shall provide a structured, serializable representation of a tool call (`ToolCall`: `operation_id` + `arguments`).
+- **REQ-CORE-008:** Tool calls shall serialize to and from JSON and be validatable against the operation registry.
 - **REQ-CORE-009:** Production execution shall be constrained to registered operations and validated arguments.
 
 ### 4.3 Session and Execution Context
@@ -107,9 +112,7 @@ simple-steps-core/
 │       ├── domain/
 │       │   ├── __init__.py
 │       │   ├── models.py
-│       │   ├── formulas.py
 │       │   ├── tool_calls.py
-│       │   ├── safe_formula.py
 │       │   └── progress.py
 │       ├── execution/
 │       │   ├── __init__.py

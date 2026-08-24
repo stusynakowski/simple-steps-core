@@ -6,16 +6,14 @@ from simple_steps_core import (
     Shape,
     StepResult,
     ToolCall,
-    build_formula,
-    parse_formula,
 )
 
 
-def test_contract_symbols_and_formula_alias():
+def test_contract_symbols_and_tool_call():
     call = ToolCall(operation_id="op", arguments={"value": "step_a"})
 
-    assert build_formula(call) == '=op(value="step_a")'
-    assert parse_formula(build_formula(call)) == call
+    assert call.operation_id == "op"
+    assert call.arguments == {"value": "step_a"}
     assert Cell(row_id="0", column_id="value", value=1, display_value="1")
     assert Shape(kind="raw", rows=1, columns=["value"], value_type="int")
 

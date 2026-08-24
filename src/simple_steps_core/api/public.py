@@ -8,25 +8,29 @@ their behavior. Import from ``simple_steps_core`` rather than reaching into
 sub-packages directly.
 """
 
-from ..domain.formulas import build_formula, parse_formula, render_formula
 from ..domain.models import (
     Cell,
+    ExecutionConfig,
     ItemOutcome,
     MapResult,
     OperationDefinition,
     OperationParam,
+    OrchestrationConfig,
     Shape,
     Step,
     StepError,
     StepOutput,
     StepResult,
+    StepSpec,
     StepStatus,
     ToolCall,
 )
 from ..domain.references import is_reference, split_reference
 from ..execution.context import SessionContext
+from ..execution.data_store import DataEntry, DataStore
 from ..execution.engine import CoreEngine, ExecutionHandle
 from ..execution.resolver import ReferenceResolver
+from ..execution.resources import ResourceContainer, ResourceMissingError
 from ..execution.session_io import (
     DEFAULT_CODECS,
     CodecRegistry,
@@ -38,6 +42,7 @@ from ..execution.session_io import (
 )
 from ..execution.session_manager import SessionManager, make_session_id
 from ..execution.workflow import Workflow
+from ..operations.dependencies import Resource
 from ..operations.orchestrations import register_orchestrators
 from ..operations.registry import (
     REGISTRY,
@@ -61,11 +66,11 @@ __all__ = [
     "StepOutput",
     "StepResult",
     "StepStatus",
+    "StepSpec",
+    "OrchestrationConfig",
+    "ExecutionConfig",
     "ToolCall",
-    "build_formula",
     "is_reference",
-    "parse_formula",
-    "render_formula",
     "split_reference",
     # operations
     "Operation",
@@ -84,6 +89,12 @@ __all__ = [
     "SessionManager",
     "make_session_id",
     "Workflow",
+    # resources
+    "Resource",
+    "ResourceContainer",
+    "ResourceMissingError",
+    "DataEntry",
+    "DataStore",
     # session snapshot / codecs
     "CodecRegistry",
     "DEFAULT_CODECS",

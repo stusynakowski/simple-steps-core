@@ -40,10 +40,11 @@ def test_workflow_runs_steps_in_order_with_references():
     assert wf["step2"].output.value == 6
 
 
-def test_workflow_accepts_formula_strings():
-    engine, _ = _engine()
+def test_workflow_accepts_tool_calls():
+    engine, registry = _engine()
+    make_list = registry.get_operation("make_list")
     wf = Workflow(engine, session_id="s")
-    wf["step1"] = "=make_list(n=3)"
+    wf["step1"] = make_list(n=3)
     wf.run()
     assert wf["step1"].output.value == [0, 1, 2]
 
@@ -55,9 +56,10 @@ def test_failed_step_records_error_and_raises():
         raise RuntimeError("kaboom")
 
     registry.register("boom", boom)
+    boom_op = registry.get_operation("boom")
 
     wf = Workflow(engine, session_id="s")
-    wf["step1"] = "=boom()"
+    wf["step1"] = boom_op()
     with pytest.raises(RuntimeError):
         wf.run()
 
@@ -66,12 +68,13 @@ def test_failed_step_records_error_and_raises():
 
 
 def test_workflow_json_roundtrip_preserves_steps():
-    engine, _ = _engine()
+    engine, registry = _engine()
+    make_list = registry.get_operation("make_list")
     wf = Workflow(engine, session_id="s")
-    wf["step1"] = "=make_list(n=2)"
+    wf["step1"] = make_list(n=2)
 
     data = wf.to_json()
     restored = Workflow.from_json(data, engine, session_id="s")
 
     assert "step1" in restored
-    assert restored["step1"].formula == wf["step1"].formula
+    assert restored["step1"].call == wf["step1"].call

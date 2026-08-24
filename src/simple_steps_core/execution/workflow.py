@@ -11,19 +11,17 @@ in the execution layer and supports an ergonomic, spreadsheet-like API::
     wf["step2"] = filter_rows(data="step1")       # reference an earlier step
     wf.run()                                       # execute in order
 
-Assignment accepts either a :class:`ToolCall` (from deferred operation calls)
-or a formula string (``"=load_csv(filepath='a.csv')"``), which is parsed into
-a ToolCall. Running a step records its status, output reference, and any error
-back onto the :class:`Step` record, and binds the produced payload to the
-step id in the session so later steps can reference it.
+Assignment takes a :class:`ToolCall` (produced by a deferred operation call).
+Running a step records its status, output reference, and any error back onto
+the :class:`Step` record, and binds the produced payload to the step id in the
+session so later steps can reference it.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..domain.formulas import parse_formula, render_formula
-from ..domain.models import Step, StepOutput, StepStatus, ToolCall
+from ..domain.models import Step, StepOutput, StepSpec, StepStatus, ToolCall
 from .context import SessionContext
 from .engine import CoreEngine
 
@@ -39,10 +37,27 @@ class Workflow:
         self._steps: dict[str, Step] = {}
 
     # ── dict-like authoring API ──────────────────────────────────────────
-    def __setitem__(self, step_id: str, value: ToolCall | str) -> None:
-        """Add or replace a step from a ToolCall or a formula string."""
-        formula = self._to_formula(value)
-        self._steps[step_id] = Step(step_id=step_id, formula=formula)
+    def __setitem__(self, step_id: str, value: ToolCall | StepSpec) -> None:
+        """Add or replace a step from a ToolCall or a StepSpec.
+
+        A :class:`StepSpec` is compiled to its executable ToolCall and retained
+        on the step so the orchestration/execution intent stays inspectable.
+        """
+        if isinstance(value, StepSpec):
+            self._steps[step_id] = Step(
+                step_id=step_id, call=value.to_tool_call(), spec=value
+            )
+        elif isinstance(value, ToolCall):
+            self._steps[step_id] = Step(step_id=step_id, call=value)
+        else:
+            raise TypeError(
+                "Workflow steps must be assigned a ToolCall or a StepSpec, "
+                f"got {type(value).__name__}"
+            )
+
+    def add(self, spec: StepSpec) -> None:
+        """Add a step from a StepSpec, keyed by its own ``step_id``."""
+        self[spec.step_id] = spec
 
     def __getitem__(self, step_id: str) -> Step:
         return self._steps[step_id]
@@ -62,7 +77,7 @@ class Workflow:
     def run_step(self, step_id: str) -> Step:
         """Execute a single step and record its outcome on the Step record."""
         step = self._steps[step_id]
-        tool_call = parse_formula(step.formula)
+        tool_call = step.call
 
         step.status = StepStatus.RUNNING
         try:
@@ -91,7 +106,7 @@ class Workflow:
     async def arun_step(self, step_id: str) -> Step:
         """Async counterpart of :meth:`run_step` (awaits the engine)."""
         step = self._steps[step_id]
-        tool_call = parse_formula(step.formula)
+        tool_call = step.call
 
         step.status = StepStatus.RUNNING
         try:
@@ -189,17 +204,3 @@ class Workflow:
         from .session_io import SessionSnapshot
 
         return cls.import_session(SessionSnapshot.from_json(data), engine, codecs)
-
-    # ── helpers ──────────────────────────────────────────────────────────
-    @staticmethod
-    def _to_formula(value: ToolCall | str) -> str:
-        """Normalize an assigned value to a canonical formula string."""
-        if isinstance(value, ToolCall):
-            return render_formula(value)
-        if isinstance(value, str):
-            # Validate/normalize by round-tripping through the parser.
-            return render_formula(parse_formula(value))
-        raise TypeError(
-            "Workflow steps must be assigned a ToolCall or a formula string, "
-            f"got {type(value).__name__}"
-        )

@@ -18,8 +18,9 @@ The intent is to *fuse and extend* two ecosystems:
   that an agent can propose and modify, and that a user can trace, edit, and run
   step-by-step under their own control.
 
-The design keeps the existing formula engine intact: everything below layers a
-structured surface **on top of** the current `ToolCall` / formula / engine.
+The structured `ToolCall` is the durable encoding of an operation invocation:
+everything below layers a richer surface **on top of** the existing
+`ToolCall` / engine. The legacy string *formula* parser has been removed.
 
 ## 2. Scope
 
@@ -38,7 +39,6 @@ structured surface **on top of** the current `ToolCall` / formula / engine.
 **Out of Scope (v1):**
 - Cross-session long-term memory store (deferred; see §11).
 - HTTP/WebSocket transport, auth, and UI rendering (owned by the app host).
-- Replacing the formula engine (it remains the durable execution encoding).
 
 ## 3. Architecture Intent
 
@@ -221,8 +221,8 @@ Stripping `id` + `orchestration` and resolving `$ref`s yields a literal MCP
   schema can be produced).
 
 ### 6.2 Step & workflow
-- **REQ-TOOL-006:** A step shall be represented structurally (`StepSpec`) with a
-  bijection to the existing formula encoding.
+- **REQ-TOOL-006:** A step shall be represented structurally (`StepSpec`), which
+  supersedes the removed string-formula encoding.
 - **REQ-TOOL-007:** A data argument shall accept either a literal or a reference
   `{"$ref": "stepN[.field]"}`; references shall validate without type-checking.
 - **REQ-TOOL-008:** `OrchestrationConfig.over` shall be required iff `mode` is not
@@ -289,7 +289,7 @@ and never authors arbitrary Python (consistent with spec 009's tool-first model)
 
 1. **Schema foundation** — real annotations → `input_schema`/`output_schema`.
 2. **Parameter kinds** — `data`/`resource` split + `Resource()` marker.
-3. **Structured step config** — `StepSpec` + orchestration/execution ⇄ formula.
+3. **Structured step config** — `StepSpec` + orchestration/execution over `ToolCall`.
 4. **Data-centric session** — `DataEntry`/`DataStore`/`ResourceContainer`.
 5. **Workflow introspection/trace** — DAG, `available_refs`, per-step status.
 6. **Agent planner** — validated `list[StepSpec]` proposals.
