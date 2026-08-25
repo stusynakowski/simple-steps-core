@@ -9,6 +9,7 @@ from simple_steps_core import (
     OperationRegistry,
     OrchestrationConfig,
     StepSpec,
+    StepStatus,
     ToolCall,
     Workflow,
     register_orchestrators,
@@ -112,3 +113,34 @@ def test_workflow_runs_step_specs_with_inline_map():
 def test_execution_config_defaults_to_manual():
     spec = StepSpec(step_id="s", name="double")
     assert spec.execution == ExecutionConfig(mode="sync", run="manual")
+
+
+def test_run_stage_runs_only_that_stage():
+    engine = _engine()
+    wf = Workflow(engine, session_id="stages")
+    wf.add(StepSpec(step_id="step_a", name="make_list", arguments={"n": 3}, stage=0))
+    wf.add(StepSpec(step_id="step_b", name="double",
+                    orchestration=OrchestrationConfig(mode="map", over="step_a"), stage=0))
+    wf.add(StepSpec(step_id="step_c", name="make_list", arguments={"n": 2}, stage=1))
+
+    assert wf.stages() == [0, 1]
+    assert [s.step_id for s in wf.steps_in_stage(0)] == ["step_a", "step_b"]
+
+    wf.run_stage(0)
+    assert wf["step_a"].status is StepStatus.COMPLETED
+    assert wf["step_b"].status is StepStatus.COMPLETED
+    assert wf["step_c"].status is StepStatus.PENDING   # stage 1 untouched
+
+    wf.run_stage(1)
+    assert wf["step_c"].output.value == [0, 1]
+
+
+def test_run_by_stages_runs_everything_in_stage_order():
+    engine = _engine()
+    wf = Workflow(engine, session_id="stages2")
+    wf.add(StepSpec(step_id="step_a", name="make_list", arguments={"n": 4}, stage=0))
+    wf.add(StepSpec(step_id="step_b", name="double",
+                    orchestration=OrchestrationConfig(mode="map", over="step_a"), stage=1))
+    wf.run_by_stages()
+    assert wf["step_b"].output.value.ok == [0, 2, 4, 6]
+

@@ -113,6 +113,7 @@ What the UI/agent produces per step. Orchestration is declared **inline**:
 {
   "step_id": "step_totals",
   "name": "order_total",
+  "stage": 1,
   "arguments": { "currency": "USD" },
   "orchestration": {
     "mode": "map", "over": "step_orders", "concurrency": 8,
@@ -126,6 +127,8 @@ What the UI/agent produces per step. Orchestration is declared **inline**:
   (`"step_orders"`, `"step_orders.rows"`). References must start with `step`.
 - `orchestration.mode`: `single` runs the tool once; `map`/`filter`/`expand`/
   `collapse` apply it across the collection referenced by `over`.
+- `stage` (optional, int or string) groups steps into phases you can run
+  independently (`POST /workflows/{id}/stages/{stage}/run`).
 - `execution.run` is `manual` by default — the user triggers each run.
 
 ### 3.3 WorkflowOut (results/trace)
@@ -156,6 +159,7 @@ Implemented in [app.py](../examples/simple_steps_backend/app.py):
 | `GET /workflows/{id}` | Status + per-step results. |
 | `POST /workflows/{id}/run` | Run all steps (async), persist, return trace. |
 | `POST /workflows/{id}/steps/{sid}/run` | Run a single step. |
+| `POST /workflows/{id}/stages/{stage}/run` | Run all steps in one stage. |
 | `GET /workflows/{id}/dag` | `{nodes, edges}` from references + `orchestration.over`. |
 | `POST /agent/propose` | Agent proposes/edits a validated `StepSpec[]`. |
 

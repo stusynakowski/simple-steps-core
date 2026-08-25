@@ -30,6 +30,7 @@ uvicorn examples.simple_steps_backend.demo:app --reload   # http://127.0.0.1:800
 | `GET /workflows/{id}` | Status + per-step results. |
 | `POST /workflows/{id}/run` | Run all steps (async). |
 | `POST /workflows/{id}/steps/{sid}/run` | Run one step. |
+| `POST /workflows/{id}/stages/{stage}/run` | Run all steps in one stage. |
 | `GET /workflows/{id}/dag` | Nodes + edges (from references and `orchestration.over`). |
 | `POST /agent/propose` | Agent proposes/edits a validated `StepSpec[]`. |
 

@@ -55,6 +55,7 @@ export type Argument = unknown;
 export interface StepSpec {
   step_id: string;
   name: string;                  // operation_id of the tool to run
+  stage?: number | string | null; // optional group for staged execution
   arguments: Record<string, Argument>;
   orchestration: OrchestrationConfig;
   execution: ExecutionConfig;
@@ -80,6 +81,7 @@ export interface StepView {
   step_id: string;
   name: string;
   mode: OrchestrationMode;
+  stage: number | string | null;
   status: StepStatus;
   value: unknown;
   error: string | null;
@@ -138,6 +140,9 @@ export class SimpleStepsClient {
   }
   runStep(id: string, stepId: string) {
     return this.json<WorkflowOut>(`/workflows/${id}/steps/${stepId}/run`, { method: "POST" });
+  }
+  runStage(id: string, stage: number | string) {
+    return this.json<WorkflowOut>(`/workflows/${id}/stages/${stage}/run`, { method: "POST" });
   }
   dag(id: string) {
     return this.json<Dag>(`/workflows/${id}/dag`);

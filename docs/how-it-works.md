@@ -472,6 +472,27 @@ matching orchestrator with this step's tool as the per-item `op`. (Shared
 constant arguments for orchestrated steps are not yet supported — each item
 binds to the tool's item parameter.)
 
+### Stages — grouping steps into phases
+
+A step may declare a `stage` (an int or string). Stages let you run the workflow
+in groups — e.g. run stage 0, inspect, then run stage 1 — instead of all at once.
+
+```python
+wf.add(StepSpec(step_id="step_load",  name="load",    stage=0))
+wf.add(StepSpec(step_id="step_clean", name="clean",   stage=0, arguments={"data": "step_load"}))
+wf.add(StepSpec(step_id="step_report",name="report",  stage=1, arguments={"data": "step_clean"}))
+
+wf.stages()            # [0, 1]  (first-appearance order)
+wf.run_stage(0)        # runs step_load + step_clean only
+wf.run_stage(1)        # runs step_report (references stage 0's outputs)
+wf.run_by_stages()     # runs every stage in order (async: arun_stage / arun_by_stages)
+```
+
+Steps within a stage still run **sequentially** (a later step may reference an
+earlier one, even in the same stage); the stage is a grouping/checkpoint
+boundary, not a parallel batch. Steps assigned as a raw `ToolCall` (no spec) are
+ungrouped (`stage=None`).
+
 ---
 
 ## 13. Orchestrators — applying an operation across a collection

@@ -201,6 +201,7 @@ class StepSpec(BaseModel):
 
     step_id: str
     name: str                                    # operation to run
+    stage: int | str | None = None               # optional group for staged execution
     arguments: dict[str, Any] = Field(default_factory=dict)
     orchestration: OrchestrationConfig = Field(default_factory=OrchestrationConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)

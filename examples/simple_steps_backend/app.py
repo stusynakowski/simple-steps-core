@@ -48,6 +48,7 @@ class StepView(BaseModel):
     step_id: str
     name: str
     mode: str
+    stage: int | str | None = None
     status: str
     value: Any = None
     error: str | None = None
@@ -85,6 +86,7 @@ def _step_view(step) -> StepView:
         step_id=step.step_id,
         name=spec.name if spec else step.call.operation_id,
         mode=spec.orchestration.mode if spec else "single",
+        stage=spec.stage if spec else None,
         status=step.status.value,
         value=_jsonable(step.output.value),
         error=step.error,
@@ -120,6 +122,22 @@ def create_app(
         wf = Workflow(engine, session_id=workflow_id)
         for spec in steps:
             wf.add(spec)
+        return wf
+
+    async def _run_and_save(workflow_id: str, runner) -> Workflow:
+        """Import the stored snapshot, run via *runner(wf)*, and re-save it."""
+        record = store.load(workflow_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Unknown workflow")
+        wf = Workflow.import_session_json(record.snapshot_json, engine)
+        await sessions.get_or_create(workflow_id)
+        try:
+            async with sessions.lock(workflow_id):
+                await runner(wf)
+        except Exception:
+            pass  # per-step failures are recorded on the steps
+        finally:
+            store.update_snapshot(workflow_id, wf.export_session_json())
         return wf
 
     # ── palette ──────────────────────────────────────────────────────────
@@ -188,17 +206,25 @@ def create_app(
         record = store.load(workflow_id)
         if record is None:
             raise HTTPException(status_code=404, detail="Unknown workflow")
-        wf = Workflow.import_session_json(record.snapshot_json, engine)
-        if step_id not in wf:
+        if step_id not in Workflow.import_session_json(record.snapshot_json, engine):
             raise HTTPException(status_code=404, detail="Unknown step")
-        await sessions.get_or_create(workflow_id)
-        try:
-            async with sessions.lock(workflow_id):
-                await wf.arun_step(step_id)
-        except Exception:
-            pass  # failure is recorded on the step
-        finally:
-            store.update_snapshot(workflow_id, wf.export_session_json())
+        wf = await _run_and_save(workflow_id, lambda w: w.arun_step(step_id))
+        return WorkflowOut(
+            workflow_id=workflow_id, status=store.load(workflow_id).status,
+            steps=[_step_view(s) for s in wf.steps],
+        )
+
+    @app.post("/workflows/{workflow_id}/stages/{stage}/run", response_model=WorkflowOut)
+    async def run_stage(workflow_id: str, stage: str) -> WorkflowOut:
+        record = store.load(workflow_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Unknown workflow")
+        wf0 = Workflow.import_session_json(record.snapshot_json, engine)
+        # Path params are strings; match against int or str stages by name.
+        match = next((s for s in wf0.stages() if str(s) == stage), None)
+        if match is None:
+            raise HTTPException(status_code=404, detail=f"Unknown stage {stage!r}")
+        wf = await _run_and_save(workflow_id, lambda w: w.arun_stage(match))
         return WorkflowOut(
             workflow_id=workflow_id, status=store.load(workflow_id).status,
             steps=[_step_view(s) for s in wf.steps],

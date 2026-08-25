@@ -132,6 +132,49 @@ class Workflow:
             await self.arun_step(step_id)
         return self.steps
 
+    # ── stages ──────────────────────────────────────────────────────
+    # A step's stage comes from its StepSpec; steps assigned as a raw ToolCall
+    # (no spec) are ungrouped (stage ``None``).
+    @staticmethod
+    def _stage_of(step: Step) -> int | str | None:
+        return step.spec.stage if step.spec is not None else None
+
+    def stages(self) -> list[int | str | None]:
+        """Distinct stages in first-appearance (execution) order."""
+        ordered: list[int | str | None] = []
+        for step in self._steps.values():
+            stage = self._stage_of(step)
+            if stage not in ordered:
+                ordered.append(stage)
+        return ordered
+
+    def steps_in_stage(self, stage: int | str | None) -> list[Step]:
+        """Steps belonging to *stage*, in insertion order."""
+        return [s for s in self._steps.values() if self._stage_of(s) == stage]
+
+    def run_stage(self, stage: int | str | None) -> list[Step]:
+        """Run every step in *stage* (in order) and return those steps."""
+        return [self.run_step(s.step_id) for s in self.steps_in_stage(stage)]
+
+    def run_by_stages(self) -> list[Step]:
+        """Run the whole workflow one stage at a time, in stage order."""
+        for stage in self.stages():
+            self.run_stage(stage)
+        return self.steps
+
+    async def arun_stage(self, stage: int | str | None) -> list[Step]:
+        """Async counterpart of :meth:`run_stage`."""
+        ran: list[Step] = []
+        for step in self.steps_in_stage(stage):
+            ran.append(await self.arun_step(step.step_id))
+        return ran
+
+    async def arun_by_stages(self) -> list[Step]:
+        """Async counterpart of :meth:`run_by_stages`."""
+        for stage in self.stages():
+            await self.arun_stage(stage)
+        return self.steps
+
     # ── persistence ──────────────────────────────────────────────────────
     def to_json(self) -> str:
         """Serialize the workflow's steps to JSON (payloads excluded)."""
