@@ -53,12 +53,15 @@ def _infer_item_arg(handle, op: str) -> str | None:
     return None
 
 
-async def _run_item(handle, op: str, arg: str | None, item: Any, retries: int):
+async def _run_item(handle, op: str, arg: str | None, item: Any, retries: int, shared: dict | None = None):
     """Invoke *op* for one *item*, retrying up to *retries* times.
 
-    Returns the produced value. Raises the last exception if all attempts fail.
+    ``shared`` supplies constant keyword arguments passed to every sub-call; the
+    item overrides any shared value for the item parameter.
     """
-    kwargs = {arg: item} if arg is not None else {}
+    kwargs = dict(shared or {})
+    if arg is not None:
+        kwargs[arg] = item
     attempt = 0
     while True:
         try:
@@ -78,6 +81,7 @@ async def _gather_outcomes(
     concurrency: int,
     on_error: OnError,
     retries: int,
+    shared: dict | None = None,
 ) -> list[ItemOutcome]:
     """Run *op* across *over* with bounded concurrency, isolating failures."""
     items = list(over)
@@ -88,7 +92,7 @@ async def _gather_outcomes(
     async def run_one(index: int, item: Any) -> ItemOutcome | None:
         async with semaphore:
             try:
-                value = await _run_item(handle, op, arg, item, retries)
+                value = await _run_item(handle, op, arg, item, retries, shared)
                 return ItemOutcome(index=index, status=StepStatus.COMPLETED, value=value)
             except Exception as exc:
                 if on_error == "fail_fast":
@@ -107,6 +111,7 @@ async def map_op(
     over: Iterable[Any],
     op: str,
     arg: str | None = None,
+    args: dict | None = None,
     concurrency: int = 8,
     on_error: OnError = "collect",
     retries: int = 0,
@@ -115,7 +120,8 @@ async def map_op(
 
     With ``on_error="collect"`` (default), failures are captured as failed
     outcomes instead of aborting the batch. ``step.ok`` / ``step.failed`` then
-    let downstream steps consume successes or re-drive failures.
+    let downstream steps consume successes or re-drive failures. ``args`` supplies
+    constant keyword arguments shared across every item's sub-call.
     """
     outcomes = await _gather_outcomes(
         handle,
@@ -125,6 +131,7 @@ async def map_op(
         concurrency=concurrency,
         on_error=on_error,
         retries=retries,
+        shared=args,
     )
     return MapResult(outcomes=outcomes)
 
@@ -135,6 +142,7 @@ async def filter_op(
     over: Iterable[Any],
     op: str,
     arg: str | None = None,
+    args: dict | None = None,
     concurrency: int = 8,
     on_error: OnError = "skip",
     retries: int = 0,
@@ -142,7 +150,8 @@ async def filter_op(
     """Keep the items of *over* for which *op* returns a truthy value.
 
     Order is preserved. Items whose predicate raises are dropped under the
-    default ``on_error="skip"``; use ``"fail_fast"`` to abort instead.
+    default ``on_error="skip"``; use ``"fail_fast"`` to abort instead. ``args``
+    supplies constant keyword arguments shared across every item's sub-call.
     """
     items = list(over)
     if arg is None:
@@ -155,6 +164,7 @@ async def filter_op(
         concurrency=concurrency,
         on_error=on_error,
         retries=retries,
+        shared=args,
     )
     keep = {o.index for o in outcomes if o.status is StepStatus.COMPLETED and o.value}
     return [item for index, item in enumerate(items) if index in keep]
@@ -166,6 +176,7 @@ async def expand_op(
     over: Iterable[Any],
     op: str,
     arg: str | None = None,
+    args: dict | None = None,
     concurrency: int = 8,
     on_error: OnError = "collect",
     retries: int = 0,
@@ -173,7 +184,8 @@ async def expand_op(
     """Flat-map: each item yields an iterable from *op*; results are flattened.
 
     Successful per-item iterables are concatenated in original item order.
-    Failures are skipped (``collect``/``skip``) or abort (``fail_fast``).
+    Failures are skipped (``collect``/``skip``) or abort (``fail_fast``). ``args``
+    supplies constant keyword arguments shared across every item's sub-call.
     """
     outcomes = await _gather_outcomes(
         handle,
@@ -183,6 +195,7 @@ async def expand_op(
         concurrency=concurrency,
         on_error=on_error,
         retries=retries,
+        shared=args,
     )
     flattened: list[Any] = []
     for outcome in sorted(outcomes, key=lambda o: o.index):
@@ -202,12 +215,14 @@ async def collapse_op(
     over: Iterable[Any],
     op: str,
     initial: Any = None,
+    args: dict | None = None,
 ) -> Any:
     """Reduce *over* to a single value with a two-argument *op*.
 
     *op*'s first parameter receives the accumulator, its second the next item.
     When *initial* is ``None`` the first item seeds the accumulator. Runs
-    sequentially because each step depends on the previous accumulator.
+    sequentially because each step depends on the previous accumulator. ``args``
+    supplies constant keyword arguments shared across every reduction call.
     """
     items = list(over)
     definition = handle.get_definition(op)
@@ -217,6 +232,7 @@ async def collapse_op(
             f"collapse requires a 2-argument operation; {op!r} declares {params}"
         )
     acc_name, item_name = params[0], params[1]
+    shared = {k: v for k, v in (args or {}).items() if k not in (acc_name, item_name)}
 
     if initial is not None:
         accumulator = initial
@@ -228,7 +244,7 @@ async def collapse_op(
         rest = items[1:]
 
     for item in rest:
-        accumulator = await handle.run(op, **{acc_name: accumulator, item_name: item})
+        accumulator = await handle.run(op, **{acc_name: accumulator, item_name: item}, **shared)
     return accumulator
 
 

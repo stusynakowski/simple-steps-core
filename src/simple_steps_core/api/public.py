@@ -9,8 +9,10 @@ sub-packages directly.
 """
 
 from ..domain.models import (
+    ArgGuardrail,
     Cell,
     ExecutionConfig,
+    Guardrails,
     ItemOutcome,
     MapResult,
     OperationDefinition,
@@ -51,11 +53,26 @@ from ..operations.registry import (
     RegistryFrozenError,
     register_operation,
 )
-from ..operations.validation import ValidationError, validate_tool_call
+from ..operations.ui import build_default_ui
+from ..operations.validation import (
+    ValidationError,
+    check_reference_types,
+    validate_tool_call,
+)
+
+# Tool-first aliases — `tool` is the preferred term; the Operation* names remain
+# synonyms so existing code keeps working.
+Tool = Operation
+ToolRegistry = OperationRegistry
+ToolDefinition = OperationDefinition
+ToolParam = OperationParam
+register_tool = register_operation
 
 __all__ = [
     # domain
+    "ArgGuardrail",
     "Cell",
+    "Guardrails",
     "ItemOutcome",
     "MapResult",
     "OperationDefinition",
@@ -70,6 +87,12 @@ __all__ = [
     "OrchestrationConfig",
     "ExecutionConfig",
     "ToolCall",
+    "Tool",
+    "ToolDefinition",
+    "ToolParam",
+    "ToolRegistry",
+    "register_tool",
+    "build_default_ui",
     "is_reference",
     "split_reference",
     # operations
@@ -81,6 +104,7 @@ __all__ = [
     "register_orchestrators",
     "ValidationError",
     "validate_tool_call",
+    "check_reference_types",
     # execution
     "CoreEngine",
     "ExecutionHandle",

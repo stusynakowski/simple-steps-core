@@ -157,7 +157,7 @@ Implemented in [app.py](../examples/simple_steps_backend/app.py):
 | `GET /operations` | Tool palette (`OperationDefinition[]`). |
 | `POST /workflows` | Create from `{workflow_id, steps: StepSpec[]}` (validates each step). |
 | `GET /workflows/{id}` | Status + per-step results. |
-| `POST /workflows/{id}/run` | Run all steps (async), persist, return trace. |
+| `POST /workflows/{id}/run` | Run all steps (async), persist, return trace. `?confirm=true` required when a tool has `guardrails.requires_confirmation`. |
 | `POST /workflows/{id}/steps/{sid}/run` | Run a single step. |
 | `POST /workflows/{id}/stages/{stage}/run` | Run all steps in one stage. |
 | `GET /workflows/{id}/dag` | `{nodes, edges}` from references + `orchestration.over`. |

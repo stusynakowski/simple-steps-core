@@ -19,8 +19,8 @@ from __future__ import annotations
 from typing import Protocol
 
 from simple_steps_core import (
-    OperationRegistry,
     StepSpec,
+    ToolRegistry,
     ValidationError,
     validate_tool_call,
 )
@@ -32,7 +32,7 @@ class Planner(Protocol):
     def propose(self, goal: str, current: list[StepSpec]) -> list[StepSpec]: ...
 
 
-def validate_step(spec: StepSpec, registry: OperationRegistry) -> None:
+def validate_step(spec: StepSpec, registry: ToolRegistry) -> None:
     """Raise ValidationError/ValueError if *spec* is not runnable as-is."""
     if not registry.has(spec.name):
         raise ValidationError(f"Unknown operation: {spec.name!r}")
@@ -40,7 +40,7 @@ def validate_step(spec: StepSpec, registry: OperationRegistry) -> None:
 
 
 def validate_steps(
-    steps: list[StepSpec], registry: OperationRegistry
+    steps: list[StepSpec], registry: ToolRegistry
 ) -> tuple[list[StepSpec], list[dict]]:
     """Split *steps* into (valid, invalid). Invalid items carry a reason."""
     valid: list[StepSpec] = []
@@ -60,7 +60,7 @@ def validate_steps(
 # Lazily imports langchain/langgraph so importing this module never requires
 # them. Configure an LLM (e.g. OPENAI_API_KEY) to use it.
 # ─────────────────────────────────────────────────────────────────────────
-def build_langgraph_planner(registry: OperationRegistry, *, model: str = "openai:gpt-4o-mini") -> Planner:
+def build_langgraph_planner(registry: ToolRegistry, *, model: str = "openai:gpt-4o-mini") -> Planner:
     """Build an LLM planner that emits a validated ``list[StepSpec]``.
 
     Uses structured output (the LLM must return objects matching ``StepSpec``),
@@ -99,7 +99,7 @@ _SYSTEM_PROMPT = (
 )
 
 
-def _palette_prompt(registry: OperationRegistry) -> str:
+def _palette_prompt(registry: ToolRegistry) -> str:
     lines = ["AVAILABLE TOOLS:"]
     for d in registry.list_definitions():
         required = [p.name for p in d.params if p.required and p.kind == "data"]

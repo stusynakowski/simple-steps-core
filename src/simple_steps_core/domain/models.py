@@ -35,6 +35,38 @@ class OperationParam(BaseModel):
     model_config = {"frozen": True}
 
 
+class ArgGuardrail(BaseModel):
+    """Constraints on one argument's acceptable values (JSON-Schema-like)."""
+
+    enum: list[Any] | None = None
+    minimum: float | None = None
+    maximum: float | None = None
+    min_length: int | None = None
+    max_length: int | None = None
+    pattern: str | None = None
+    note: str = ""
+
+    model_config = {"frozen": True}
+
+
+class Guardrails(BaseModel):
+    """Policy for how a tool may be used and which arguments are acceptable.
+
+    ``arguments`` is enforced at validation time (on literal values; reference
+    tokens are checked at run time). The remaining fields are declarative
+    guidance the UI and agent read.
+    """
+
+    usage: str = ""                                   # how/when to use the tool
+    rules: list[str] = Field(default_factory=list)    # free-form policy statements
+    arguments: dict[str, ArgGuardrail] = Field(default_factory=dict)
+    read_only: bool = False
+    destructive: bool = False
+    requires_confirmation: bool = False
+
+    model_config = {"frozen": True}
+
+
 class OperationDefinition(BaseModel):
     """A registered operation's public contract (id + params + docs)."""
 
@@ -54,9 +86,14 @@ class OperationDefinition(BaseModel):
     input_schema: dict[str, Any] = Field(default_factory=dict)   # JSON Schema (data params)
     output_schema: dict[str, Any] | None = None                  # JSON Schema (return type)
     dependencies: list[str] = Field(default_factory=list)        # resource param names
+    ui: dict[str, Any] | None = None                             # prefab-ui protocol (auto-built if None)
+    guardrails: Guardrails | None = None                         # usage + argument policy
 
     model_config = {"frozen": True}
-
+    @property
+    def tool_id(self) -> str:
+        """Preferred alias for :attr:`operation_id` (a definition names a tool)."""
+        return self.operation_id
 
 # ─────────────────────────────────────────────────────────────────────────
 # ToolCall (a durable, serialized invocation of one operation)
@@ -74,7 +111,10 @@ class ToolCall(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"frozen": True}
-
+    @property
+    def tool_id(self) -> str:
+        """Preferred alias for :attr:`operation_id` (a call names a tool)."""
+        return self.operation_id
 
 # ─────────────────────────────────────────────────────────────────────────
 # Step lifecycle
@@ -225,23 +265,23 @@ class StepSpec(BaseModel):
             raise ValueError(
                 f"orchestration.over (a step reference) is required for mode {orch.mode!r}"
             )
-        if self.arguments:
-            raise ValueError(
-                f"shared constant arguments are not yet supported for {orch.mode!r} steps; "
-                "each item is bound to the tool's item parameter"
-            )
 
-        args: dict[str, Any] = {"over": orch.over, "op": self.name}
+        # Orchestrated modes call the matching orchestrator with this step's tool
+        # as the per-item ``op``; this step's ``arguments`` become shared constant
+        # kwargs passed to every sub-call (the item fills the item parameter).
+        call_args: dict[str, Any] = {"over": orch.over, "op": self.name}
         if orch.item_arg is not None:
-            args["arg"] = orch.item_arg
+            call_args["arg"] = orch.item_arg
+        if self.arguments:
+            call_args["args"] = dict(self.arguments)
         if orch.mode == "collapse":
-            args["initial"] = orch.initial
-            return ToolCall(operation_id="collapse", arguments=args)
+            call_args["initial"] = orch.initial
+            return ToolCall(operation_id="collapse", arguments=call_args)
 
-        args["concurrency"] = orch.concurrency
-        args["on_error"] = orch.on_error or _ORCH_DEFAULT_ON_ERROR[orch.mode]
-        args["retries"] = orch.retries
-        return ToolCall(operation_id=orch.mode, arguments=args)
+        call_args["concurrency"] = orch.concurrency
+        call_args["on_error"] = orch.on_error or _ORCH_DEFAULT_ON_ERROR[orch.mode]
+        call_args["retries"] = orch.retries
+        return ToolCall(operation_id=orch.mode, arguments=call_args)
 
 
 class Step(BaseModel):

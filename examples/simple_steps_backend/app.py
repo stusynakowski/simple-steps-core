@@ -25,11 +25,12 @@ from pydantic import BaseModel, Field
 
 from simple_steps_core import (
     CoreEngine,
-    OperationRegistry,
     SessionManager,
     StepSpec,
+    ToolRegistry,
     ValidationError,
     Workflow,
+    check_reference_types,
     is_reference,
     split_reference,
 )
@@ -58,6 +59,7 @@ class WorkflowOut(BaseModel):
     workflow_id: str
     status: str
     steps: list[StepView]
+    reference_issues: list[dict] = Field(default_factory=list)
 
 
 class ProposeIn(BaseModel):
@@ -100,8 +102,21 @@ def _step_refs(spec: StepSpec) -> list[str]:
     return refs
 
 
+def _steps_needing_confirmation(wf: Workflow, registry: ToolRegistry) -> list[str]:
+    """Step ids whose tool declares guardrails.requires_confirmation."""
+    needs: list[str] = []
+    for step in wf.steps:
+        name = step.spec.name if step.spec else step.call.operation_id
+        if not registry.has(name):
+            continue
+        guardrails = registry.get_definition(name).guardrails
+        if guardrails is not None and guardrails.requires_confirmation:
+            needs.append(step.step_id)
+    return needs
+
+
 def create_app(
-    registry: OperationRegistry,
+    registry: ToolRegistry,
     engine: CoreEngine,
     *,
     store: WorkflowStore | None = None,
@@ -166,6 +181,7 @@ def create_app(
         return WorkflowOut(
             workflow_id=payload.workflow_id, status="created",
             steps=[_step_view(s) for s in wf.steps],
+            reference_issues=check_reference_types(wf, registry),
         )
 
     @app.get("/workflows/{workflow_id}", response_model=WorkflowOut)
@@ -180,11 +196,19 @@ def create_app(
         )
 
     @app.post("/workflows/{workflow_id}/run", response_model=WorkflowOut)
-    async def run_workflow(workflow_id: str) -> WorkflowOut:
+    async def run_workflow(workflow_id: str, confirm: bool = False) -> WorkflowOut:
         record = store.load(workflow_id)
         if record is None:
             raise HTTPException(status_code=404, detail="Unknown workflow")
         wf = Workflow.import_session_json(record.snapshot_json, engine)
+        # Gate steps whose tool declares guardrails.requires_confirmation.
+        needs = _steps_needing_confirmation(wf, registry)
+        if needs and not confirm:
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "confirmation_required", "steps": needs,
+                        "hint": "re-run with ?confirm=true"},
+            )
         await sessions.get_or_create(workflow_id)
         store.set_status(workflow_id, "running")
         try:

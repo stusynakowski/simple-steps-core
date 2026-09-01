@@ -16,6 +16,28 @@ export interface OperationParam {
 /** JSON Schema (draft 2020-12 subset) for a tool's inputs/outputs. */
 export type JSONSchema = Record<string, unknown>;
 
+export interface ArgGuardrail {
+  enum?: unknown[] | null;
+  minimum?: number | null;
+  maximum?: number | null;
+  min_length?: number | null;
+  max_length?: number | null;
+  pattern?: string | null;
+  note?: string;
+}
+
+export interface Guardrails {
+  usage: string;
+  rules: string[];
+  arguments: Record<string, ArgGuardrail>;
+  read_only: boolean;
+  destructive: boolean;
+  requires_confirmation: boolean;
+}
+
+/** prefab-ui protocol document: { view: <component tree>, state: {...} }. */
+export type PrefabUI = Record<string, unknown>;
+
 export interface OperationDefinition {
   operation_id: string;
   description: string;
@@ -25,6 +47,8 @@ export interface OperationDefinition {
   input_schema: JSONSchema;      // data params only — render forms from this
   output_schema: JSONSchema | null;
   dependencies: string[];        // resource param names (injected, not user-supplied)
+  ui: PrefabUI | null;           // prefab-ui protocol (default auto-built; overridable)
+  guardrails: Guardrails | null; // usage policy + enforced argument constraints
 }
 
 // ── Step authoring (StepSpec) ─────────────────────────────────────────────
@@ -87,10 +111,13 @@ export interface StepView {
   error: string | null;
 }
 
+export interface ReferenceIssue { step_id: string; argument: string; reason: string; }
+
 export interface WorkflowOut {
   workflow_id: string;
   status: "created" | "running" | "completed" | "failed";
   steps: StepView[];
+  reference_issues: ReferenceIssue[];   // static wiring checks (unknown step, ordering, type mismatch)
 }
 
 export interface CreateWorkflowIn {

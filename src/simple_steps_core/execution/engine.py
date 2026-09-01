@@ -35,7 +35,7 @@ from typing import Any
 
 from ..domain.models import Shape, StepError, StepResult, ToolCall
 from ..operations.registry import OperationRegistry
-from ..operations.validation import validate_tool_call
+from ..operations.validation import enforce_arg_guardrails, validate_tool_call
 from .context import SessionContext
 from .resolver import ReferenceResolver
 
@@ -77,6 +77,11 @@ class CoreEngine:
         operation = self.registry.get_operation(tool_call.operation_id)
         resolver = ReferenceResolver(context)
         arguments = resolver.resolve_arguments(tool_call.arguments)
+        # Guardrail the resolved values: a reference's real value is finally
+        # checked against the tool's argument constraints here.
+        enforce_arg_guardrails(
+            tool_call.operation_id, arguments, operation.definition.guardrails
+        )
 
         if operation.is_orchestrator:
             # 2/3. Orchestrators receive an execution handle and drive sub-ops.
@@ -141,6 +146,9 @@ class CoreEngine:
             validate_tool_call(tool_call, self.registry)
             resolver = ReferenceResolver(context)
             arguments = resolver.resolve_arguments(tool_call.arguments)
+            enforce_arg_guardrails(
+                tool_call.operation_id, arguments, operation.definition.guardrails
+            )
             self._inject_resources(tool_call.operation_id, arguments, context)
             value = operation.fn(**arguments)
             ref_id = f"{context.session_id}__{uuid.uuid4().hex}"

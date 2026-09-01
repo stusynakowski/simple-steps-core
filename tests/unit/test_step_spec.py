@@ -78,15 +78,17 @@ def test_over_forbidden_for_single_mode():
         StepSpec(step_id="s", name="double", orchestration=OrchestrationConfig(over="s1")).to_tool_call()
 
 
-def test_shared_args_rejected_for_orchestrated_modes():
+def test_shared_args_compile_into_orchestrator_call():
     spec = StepSpec(
         step_id="s",
-        name="double",
+        name="scale",
         arguments={"factor": 2},
         orchestration=OrchestrationConfig(mode="map", over="s1"),
     )
-    with pytest.raises(ValueError):
-        spec.to_tool_call()
+    call = spec.to_tool_call()
+    assert call.operation_id == "map"
+    assert call.arguments["op"] == "scale"
+    assert call.arguments["args"] == {"factor": 2}   # shared constants passed through
 
 
 def test_workflow_runs_step_specs_with_inline_map():
@@ -143,4 +145,27 @@ def test_run_by_stages_runs_everything_in_stage_order():
                     orchestration=OrchestrationConfig(mode="map", over="step_a"), stage=1))
     wf.run_by_stages()
     assert wf["step_b"].output.value.ok == [0, 2, 4, 6]
+
+
+def test_map_shared_args_flow_to_each_item():
+    registry = OperationRegistry()
+
+    def make_list(n: int) -> list[int]:
+        return list(range(n))
+
+    def scale(x: int, factor: int) -> int:
+        return x * factor
+
+    registry.register("make_list", make_list)
+    registry.register("scale", scale)
+    register_orchestrators(registry)
+
+    wf = Workflow(CoreEngine(registry), session_id="shared")
+    wf.add(StepSpec(step_id="step_nums", name="make_list", arguments={"n": 4}))
+    wf.add(StepSpec(step_id="step_scaled", name="scale",
+                    orchestration=OrchestrationConfig(mode="map", over="step_nums"),
+                    arguments={"factor": 10}))
+    wf.run()
+    assert wf["step_scaled"].output.value.ok == [0, 10, 20, 30]
+
 

@@ -23,9 +23,10 @@ import inspect
 from collections.abc import Callable
 from typing import Any, Literal
 
-from ..domain.models import OperationDefinition, OperationParam, ToolCall
+from ..domain.models import Guardrails, OperationDefinition, OperationParam, ToolCall
 from .dependencies import ResourceMarker
 from .schema import build_input_schema, build_output_schema
+from .ui import build_default_ui
 
 
 class RegistryFrozenError(RuntimeError):
@@ -61,6 +62,11 @@ class Operation:
         self.definition = definition
         self.is_async = is_async
         self.is_orchestrator = is_orchestrator
+
+    @property
+    def tool_id(self) -> str:
+        """Preferred alias for :attr:`operation_id`."""
+        return self.operation_id
 
     def __call__(self, **kwargs: Any) -> ToolCall:
         """Deferred mode: build a serializable ToolCall (no execution)."""
@@ -137,19 +143,27 @@ class OperationRegistry:
         *,
         category: str = "",
         type: Literal["source", "dataframe", "raw_output"] = "raw_output",
+        ui: dict[str, Any] | None = None,
+        guardrails: Guardrails | None = None,
     ) -> Operation:
         """Introspect *fn*, store its definition, and return an Operation wrapper."""
         self._guard_mutable()
         params = _params_from_signature(fn)
+        input_schema = build_input_schema(fn)
+        resolved_description = description or (inspect.getdoc(fn) or "").split("\n\n")[0].strip()
         definition = OperationDefinition(
             operation_id=operation_id,
-            description=description or (inspect.getdoc(fn) or "").split("\n\n")[0].strip(),
+            description=resolved_description,
             category=category,
             type=type,
             params=params,
-            input_schema=build_input_schema(fn),
+            input_schema=input_schema,
             output_schema=build_output_schema(fn),
             dependencies=[p.name for p in params if p.kind == "resource"],
+            ui=ui if ui is not None else build_default_ui(
+                operation_id, input_schema, description=resolved_description, guardrails=guardrails
+            ),
+            guardrails=guardrails,
         )
         operation = Operation(
             operation_id,
@@ -169,6 +183,8 @@ class OperationRegistry:
         description: str = "",
         *,
         category: str = "orchestration",
+        ui: dict[str, Any] | None = None,
+        guardrails: Guardrails | None = None,
     ) -> Operation:
         """Register a higher-order operation that receives an execution handle.
 
@@ -178,15 +194,20 @@ class OperationRegistry:
         """
         self._guard_mutable()
         params = _params_from_signature(fn, skip=1)
+        input_schema = build_input_schema(fn, skip=1)
         definition = OperationDefinition(
             operation_id=operation_id,
             description=description,
             category=category,
             type=operation_id if operation_id in {"map", "filter", "expand"} else "orchestrator",
             params=params,
-            input_schema=build_input_schema(fn, skip=1),
+            input_schema=input_schema,
             output_schema=build_output_schema(fn),
             dependencies=[p.name for p in params if p.kind == "resource"],
+            ui=ui if ui is not None else build_default_ui(
+                operation_id, input_schema, description=description, guardrails=guardrails
+            ),
+            guardrails=guardrails,
         )
         operation = Operation(
             operation_id,
@@ -245,6 +266,8 @@ def register_operation(
     *,
     category: str = "",
     type: Literal["source", "dataframe", "raw_output"] = "raw_output",
+    ui: dict[str, Any] | None = None,
+    guardrails: Guardrails | None = None,
 ):
     """
     Decorator that registers a function as an operation.
@@ -262,6 +285,8 @@ def register_operation(
             description=description,
             category=category,
             type=type,
+            ui=ui,
+            guardrails=guardrails,
         )
 
     return decorator

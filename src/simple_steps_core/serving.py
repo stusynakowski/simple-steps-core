@@ -6,9 +6,9 @@ Turn a plain Python script that just *declares tools* into a running HTTP API.
 
 A user writes a script like::
 
-    from simple_steps_core import register_operation
+    from simple_steps_core import register_tool
 
-    @register_operation("add")
+    @register_tool("add")
     def add(a: int, b: int) -> int:
         return a + b
 

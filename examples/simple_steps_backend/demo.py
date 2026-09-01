@@ -14,15 +14,15 @@ from __future__ import annotations
 
 from simple_steps_core import (
     CoreEngine,
-    OperationRegistry,
     StepSpec,
+    ToolRegistry,
     register_orchestrators,
 )
 
 from .agent import Planner
 from .app import create_app
 
-registry = OperationRegistry()
+registry = ToolRegistry()
 
 
 def make_list(n: int) -> list[int]:

@@ -28,7 +28,7 @@ uvicorn examples.simple_steps_backend.demo:app --reload   # http://127.0.0.1:800
 | `GET /operations` | Tool palette: id, params, JSON Schema (for UI forms + agent grounding). |
 | `POST /workflows` | Create a workflow from `{workflow_id, steps: StepSpec[]}`. |
 | `GET /workflows/{id}` | Status + per-step results. |
-| `POST /workflows/{id}/run` | Run all steps (async). |
+| `POST /workflows/{id}/run` | Run all steps (async). `?confirm=true` is required if any tool has `guardrails.requires_confirmation` (else `409`). |
 | `POST /workflows/{id}/steps/{sid}/run` | Run one step. |
 | `POST /workflows/{id}/stages/{stage}/run` | Run all steps in one stage. |
 | `GET /workflows/{id}/dag` | Nodes + edges (from references and `orchestration.over`). |
@@ -37,11 +37,11 @@ uvicorn examples.simple_steps_backend.demo:app --reload   # http://127.0.0.1:800
 ## Wire it in your app
 
 ```python
-from simple_steps_core import OperationRegistry, CoreEngine, register_orchestrators
+from simple_steps_core import ToolRegistry, CoreEngine, register_orchestrators
 from examples.simple_steps_backend.app import create_app
 from examples.simple_steps_backend.agent import build_langgraph_planner
 
-registry = OperationRegistry()
+registry = ToolRegistry()
 # register your operations here ...
 register_orchestrators(registry)
 registry.freeze()

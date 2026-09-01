@@ -94,12 +94,18 @@ Import everything from the top-level package:
 
 ```python
 from simple_steps_core import (
-    register_operation, REGISTRY, OperationRegistry,
+    register_tool, REGISTRY, ToolRegistry,
     CoreEngine, Workflow, SessionContext, ToolCall,
     Resource, ResourceContainer,
     register_orchestrators, validate_tool_call,
 )
 ```
+
+**Terminology:** *tool* and *operation* are the same thing — `register_tool` /
+`register_operation`, `ToolRegistry` / `OperationRegistry`, `ToolDefinition` /
+`OperationDefinition`, `ToolParam` / `OperationParam` are interchangeable
+aliases; **`tool` is the preferred name**. The serialized field stays
+`operation_id` (also readable as `.tool_id`).
 
 ### What crosses each boundary
 
@@ -138,15 +144,147 @@ it to the `ToolCall` above (a `single` step → a direct call; `map`/`filter`/
 
 ---
 
-## 3. Operations — the decorated function
+## The object model: tool → step → workflow → session
 
-An **operation** is a registered Python function: the real unit of work (load a
-CSV, filter rows, call an API). You register one with `@register_operation`:
+The module tree above is the *code* stack. This is the *object* stack — built up
+one layer at a time, separating the reusable **tool** from the **data** that
+flows through it, up to the **session** that holds a whole run.
+
+### 1. The tool (a definition — static, reusable, holds no data)
+
+A tool is defined once. It bundles four things: the **contract** (schema), the
+**UI**, the **guardrails**, and the **callable**. None of these hold run data.
+
+```mermaid
+flowchart TB
+    subgraph Tool["TOOL — ToolDefinition (static, reusable)"]
+        C["contract<br/>params · input_schema · output_schema · dependencies"]
+        U["ui<br/>prefab-ui protocol (view, state)"]
+        G["guardrails<br/>usage · rules · ArgGuardrail (enum, min, max, …)"]
+        F["fn<br/>the Python callable"]
+    end
+```
+
+**How the UI component works.** The `ui` is auto-derived from the same
+`input_schema`, so a tool is renderable with zero extra work; a user can also
+supply their own. The frontend renders it and its inputs map back to a step's
+arguments by field `name`:
+
+```mermaid
+flowchart LR
+    IS["input_schema"] -->|build_default_ui| UI["ui protocol<br/>(view: Card + inputs, state: defaults)"]
+    UIcustom["custom ui (optional override)"] --> UI
+    UI -->|prefab renderer| Form["rendered React form"]
+    Form -->|"field name → value"| Args["a step's arguments"]
+```
+
+### 2. The step (one *invocation* of a tool + how to run it)
+
+A step doesn't contain a tool — it **names** one, and adds the run-specific
+config (arguments, orchestration, execution). This is where tool and data first
+meet.
+
+```mermaid
+flowchart TB
+    subgraph Step["STEP — StepSpec (one invocation)"]
+        SID["step_id"]
+        NM["name (which tool to run)"]
+        AR["arguments (data: literal or $ref)"]
+        OR["orchestration (single | map | filter | expand | collapse)"]
+        EX["execution (sync/async · run: manual/auto)"]
+    end
+    NM -.->|references by name| Tool["TOOL"]
+```
+
+### 3. Separating the tool from the data
+
+The **tool** is the *definition* (what can run — reused by many steps and runs).
+The **data** is the *values* (this run's inputs and outputs). The tool never
+holds data; data lives in the session, addressed by reference.
+
+```mermaid
+flowchart LR
+    Tool["TOOL<br/>(definition — no data)"]
+    subgraph Flow["DATA (values, per run)"]
+        In["arguments in<br/>literal value  OR  $ref → earlier output"]
+        Out["output value<br/>stored as a DataEntry"]
+    end
+    Step["STEP"] -->|names| Tool
+    Step -->|supplies| In
+    Step -->|produces| Out
+```
+
+### 4. The workflow (an ordered list of steps)
+
+```mermaid
+flowchart LR
+    subgraph WF["WORKFLOW (ordered steps)"]
+        s1["step1<br/>tool A"] --> s2["step2<br/>tool B · data=$ref step1"] --> s3["step3<br/>map tool C over step2"]
+    end
+```
+
+### 5. The workflow with resources
+
+Tools that declare `Resource()` params need runtime objects (db/clients). Those
+live in a **ResourceContainer** beside the workflow — injected at run time,
+never part of the data flow, never serialized.
+
+```mermaid
+flowchart TB
+    subgraph WFR["WORKFLOW + RESOURCES"]
+        WF["workflow (steps)"]
+        RC["ResourceContainer<br/>db · http · llm clients (injected)"]
+    end
+    RC -.->|injected into tools that declare them| WF
+```
+
+### 6. The session (workflow + resources + session state)
+
+A **session** is one isolated run: the **workflow** (the list of steps), the
+**resources**, and the **session state** — a `DataStore` holding each step's
+output as a self-describing `DataEntry`. References resolve *out of* this state.
+
+```mermaid
+flowchart TB
+    subgraph Session["SESSION (isolated by session_id)"]
+        subgraph WF["workflow (ordered steps)"]
+            s1["step1 · tool A"]
+            s2["step2 · tool B · x=$ref step1"]
+            s3["step3 · map tool C over step2"]
+        end
+        subgraph RC["resources — ResourceContainer"]
+            db["db / clients (injected)"]
+        end
+        subgraph DS["session state — DataStore"]
+            e1["DataEntry step1 → value (kind, shape, codec)"]
+            e2["DataEntry step2 → value"]
+            e3["DataEntry step3 → value"]
+        end
+    end
+    s1 --> e1
+    s2 --> e2
+    s3 --> e3
+    e1 -.->|$ref resolves| s2
+    RC -.->|injected| WF
+```
+
+So, top to bottom: a **tool** (definition + UI + guardrails + fn) is invoked by
+a **step** (which adds data + orchestration), steps are ordered into a
+**workflow**, and a **session** wraps that workflow with its **resources** and
+the **DataStore** that holds every step's produced **data**.
+
+---
+
+## 3. Tools (operations) — the decorated function
+
+A **tool** (a.k.a. **operation**) is a registered Python function: the real unit
+of work (load a CSV, filter rows, call an API). You register one with
+`@register_tool`:
 
 ```python
-from simple_steps_core import register_operation
+from simple_steps_core import register_tool
 
-@register_operation("make_list", description="Create [0..n-1]")
+@register_tool("make_list", description="Create [0..n-1]")
 def make_list(n: int) -> list[int]:
     return list(range(n))
 ```
@@ -232,6 +370,34 @@ produces:
 This schema is the shared currency for a UI form, an MCP tool, or an LLM
 function-calling tool — one signature, one schema, no hand-maintained duplicates.
 
+### UI and guardrails
+
+Each `OperationDefinition` also carries two optional, serializable fields:
+
+- **`ui`** — a [prefab-ui](https://prefab.prefect.io) protocol document
+  (`{"view": <component tree>, "state": {...}}`). It is **auto-built** from the
+  `input_schema` (a `Card` form, one input per data param) unless you pass your
+  own, so any tool renders out of the box and any tool can bring a custom UI.
+  When the tool has `guardrails`, they also **shape the default form** — an
+  argument `enum` becomes a dropdown, numeric bounds/lengths/patterns become
+  input attributes, and the note becomes help text:
+  ```python
+  @register_tool("pick_region", ui=my_prefab_protocol)   # override the default
+  def pick_region(region: str): ...
+  ```
+- **`guardrails`** — a `Guardrails` policy: `usage`/`rules` (guidance the UI and
+  agent read), safety flags (`read_only`/`destructive`/`requires_confirmation`),
+  and per-argument constraints (`ArgGuardrail`: `enum`/`minimum`/`maximum`/
+  `min_length`/`max_length`/`pattern`) that are **enforced** by
+  `validate_tool_call` on literal values (references are checked at run time):
+  ```python
+  @register_tool("charge", guardrails=Guardrails(
+      usage="Only after the user confirms the amount.",
+      destructive=True, requires_confirmation=True,
+      arguments={"amount": ArgGuardrail(minimum=0.01, maximum=10_000)}))
+  def charge(amount: float): ...
+  ```
+
 ---
 
 ## 6. ToolCall — a structured invocation
@@ -275,7 +441,17 @@ split_reference("step1.total")  # ("step1", "total")
 
 At run time the engine replaces reference tokens with the real value from the
 session before calling the function. Because a reference stands in for any type,
-validation lets it pass without type-checking.
+`validate_tool_call` lets it pass without type-checking — but a reference's type
+is still knowable and checked in two ways:
+
+- **Statically** — `check_reference_types(workflow, registry)` compares each
+  reference's producing tool `output_schema` against the consuming parameter's
+  type and returns issues (`unknown step`, ordering, definite type mismatch).
+  Great for authoring feedback in the UI/agent; best-effort (skips cases it
+  can't type, like dotted fields on a `dict` or `MapResult.ok`).
+- **At run time** — after resolution, the engine re-applies the tool's
+  `ArgGuardrail`s to the now-real value, so a reference whose resolved value
+  violates a constraint fails the step with a clear error.
 
 ---
 
@@ -468,9 +644,10 @@ wf["step_squared"].spec.orchestration.mode   # "map"  (intent retained)
   `timeout`, `retries`, `cache`.
 
 A `single` step compiles to a direct call; the orchestrated modes compile to the
-matching orchestrator with this step's tool as the per-item `op`. (Shared
-constant arguments for orchestrated steps are not yet supported — each item
-binds to the tool's item parameter.)
+matching orchestrator with this step's tool as the per-item `op`. An orchestrated
+step's `arguments` become **shared constant** keyword arguments passed to every
+per-item sub-call (the item fills the tool's item parameter); they should be
+literals — the collection itself goes in `orchestration.over`.
 
 ### Stages — grouping steps into phases
 

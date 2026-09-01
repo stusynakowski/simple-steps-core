@@ -49,9 +49,9 @@ python -m pip install -e ".[examples]"
 ## Quick example
 
 ```python
-from simple_steps_core import CoreEngine, OperationRegistry, ToolCall, Workflow
+from simple_steps_core import CoreEngine, ToolRegistry, ToolCall, Workflow
 
-registry = OperationRegistry()
+registry = ToolRegistry()
 
 
 def make_list(n: int) -> list[int]:
@@ -64,7 +64,6 @@ def total(data: list[int]) -> int:
 
 make_list_op = registry.register("make_list", make_list, description="Create [0..n-1]")
 registry.register("total", total, description="Sum a list of ints")
-
 engine = CoreEngine(registry)
 workflow = Workflow(engine, session_id="demo")
 workflow["step1"] = make_list_op(n=5)
@@ -114,9 +113,9 @@ Write a script that only declares tools, then serve it with the bundled command
 
 ```python
 # mytools.py
-from simple_steps_core import register_operation
+from simple_steps_core import register_tool
 
-@register_operation("add", description="Add two numbers.")
+@register_tool("add", description="Add two numbers.")
 def add(a: int, b: int) -> int:
     return a + b
 
