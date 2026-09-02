@@ -385,6 +385,17 @@ Each `OperationDefinition` also carries two optional, serializable fields:
   @register_tool("pick_region", ui=my_prefab_protocol)   # override the default
   def pick_region(region: str): ...
   ```
+  The `ui` (prefab) is for a React frontend. A single tool can also carry
+  renderers for *other* surfaces by passing a `{target: renderer}` map — e.g.
+  the optional **Streamlit dashboard** reads `ui={"streamlit": fn}`:
+  ```python
+  @register_tool("pick_region", ui={"streamlit": render_pick})
+  def pick_region(region: str): ...
+  ```
+  Every tool exposes a `ToolUI` (`operation.ui`) that holds these views keyed by
+  target; the `prefab` view is always present (auto-built when omitted). Look one
+  up with `registry.ui_for("pick_region", "streamlit")` (defaults to `"prefab"`).
+  All targets are just renderers of the same contract.
 - **`guardrails`** — a `Guardrails` policy: `usage`/`rules` (guidance the UI and
   agent read), safety flags (`read_only`/`destructive`/`requires_confirmation`),
   and per-argument constraints (`ArgGuardrail`: `enum`/`minimum`/`maximum`/

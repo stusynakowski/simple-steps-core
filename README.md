@@ -133,6 +133,52 @@ steps). A runnable script is in [example_server.py](example_server.py). Optional
 script settings: `CONFIG` (`title`/`host`/`port`/`orchestrators`/`freeze`) and
 `RESOURCES` (name → factory) for tools that declare `Resource()` parameters.
 
+## Streamlit dashboard (optional UI)
+
+The same tools file can also drive a local **Streamlit** dashboard for building
+and running workflows — a UI counterpart to the server:
+
+```bash
+python -m pip install -e ".[dashboard]"
+simple-steps-core-dashboard mytools.py
+```
+
+The tool **contract** is the generic UI schema, rendered many independent ways.
+A tool's `ui` is a `ToolUI` holding per-surface views keyed by target — it is a
+`{target: renderer}` map. The serializable `prefab` view (prefab-ui protocol)
+for a React frontend is always present (auto-built from the schema/guardrails),
+and you add others alongside it. This dashboard reads the `streamlit` target: a
+Python `render(st, key, defaults)` function. Tools without a Streamlit view get
+an auto-generated form:
+
+```python
+def _make_list_ui(st, *, key, defaults):
+    return {"n": st.slider("How many?", 1, 20, value=defaults.get("n", 5), key=key)}
+
+@register_tool("make_list", ui={"streamlit": _make_list_ui})   # custom form
+def make_list(n: int) -> list[int]:
+    return list(range(n))
+```
+
+Because `ui` is a map, one tool can carry several targets at once — e.g. a
+hand-written prefab view for React *and* a Streamlit view — each surface picks
+its own; omit `prefab` to keep the auto-built default:
+
+```python
+@register_tool("pick_region", ui={
+    "prefab": my_prefab_protocol,     # React frontend
+    "streamlit": _pick_region_form,   # this dashboard
+})
+def pick_region(region: str) -> str:
+    return region
+```
+
+Look up any view with `registry.ui_for("pick_region", "streamlit")` (the target
+defaults to `"prefab"`).
+
+A runnable example — with a walkthrough of each tool — is in
+[streamlit_example/](streamlit_example/README.md).
+
 ## Roadmap: tool decoration, orchestration & agents
 
 We are extending the core so that a single decorated function can drive both an

@@ -47,9 +47,13 @@ dev = [
   "build",
   "twine"
 ]
+dashboard = [
+  "streamlit>=1.30"
+]
 
 [project.scripts]
 simple-steps-core-server = "simple_steps_core.serving:main"
+simple-steps-core-dashboard = "simple_steps_core.streamlit.dashboard:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

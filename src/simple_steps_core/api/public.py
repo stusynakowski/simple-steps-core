@@ -53,7 +53,7 @@ from ..operations.registry import (
     RegistryFrozenError,
     register_operation,
 )
-from ..operations.ui import build_default_ui
+from ..operations.ui import ToolUI, build_default_ui
 from ..operations.validation import (
     ValidationError,
     check_reference_types,
@@ -93,6 +93,7 @@ __all__ = [
     "ToolRegistry",
     "register_tool",
     "build_default_ui",
+    "ToolUI",
     "is_reference",
     "split_reference",
     # operations

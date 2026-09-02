@@ -26,7 +26,21 @@ from typing import Any, Literal
 from ..domain.models import Guardrails, OperationDefinition, OperationParam, ToolCall
 from .dependencies import ResourceMarker
 from .schema import build_input_schema, build_output_schema
-from .ui import build_default_ui
+from .ui import ToolUI, build_default_ui
+
+
+def _normalize_ui(ui: Any) -> dict[str, Any]:
+    """Coerce the ``ui`` argument into a ``{target: renderer}`` mapping.
+
+    Accepts a prefab-ui protocol document (has a ``"view"`` key) as shorthand
+    for ``{"prefab": <doc>}``, or a target→renderer map like
+    ``{"streamlit": fn, "prefab": <doc>}``.
+    """
+    if ui is None:
+        return {}
+    if isinstance(ui, dict):
+        return {"prefab": ui} if "view" in ui else dict(ui)
+    raise TypeError("ui must be a prefab protocol dict or a {target: renderer} map")
 
 
 class RegistryFrozenError(RuntimeError):
@@ -56,12 +70,15 @@ class Operation:
         *,
         is_async: bool = False,
         is_orchestrator: bool = False,
+        ui: ToolUI | None = None,
     ):
         self.operation_id = operation_id
         self.fn = fn
         self.definition = definition
         self.is_async = is_async
         self.is_orchestrator = is_orchestrator
+        # UI views keyed by renderer target (prefab, streamlit, ...).
+        self.ui = ui if ui is not None else ToolUI()
 
     @property
     def tool_id(self) -> str:
@@ -143,7 +160,7 @@ class OperationRegistry:
         *,
         category: str = "",
         type: Literal["source", "dataframe", "raw_output"] = "raw_output",
-        ui: dict[str, Any] | None = None,
+        ui: Any = None,
         guardrails: Guardrails | None = None,
     ) -> Operation:
         """Introspect *fn*, store its definition, and return an Operation wrapper."""
@@ -151,6 +168,10 @@ class OperationRegistry:
         params = _params_from_signature(fn)
         input_schema = build_input_schema(fn)
         resolved_description = description or (inspect.getdoc(fn) or "").split("\n\n")[0].strip()
+        views = _normalize_ui(ui)
+        views["prefab"] = views.get("prefab") or build_default_ui(
+            operation_id, input_schema, description=resolved_description, guardrails=guardrails
+        )
         definition = OperationDefinition(
             operation_id=operation_id,
             description=resolved_description,
@@ -160,9 +181,7 @@ class OperationRegistry:
             input_schema=input_schema,
             output_schema=build_output_schema(fn),
             dependencies=[p.name for p in params if p.kind == "resource"],
-            ui=ui if ui is not None else build_default_ui(
-                operation_id, input_schema, description=resolved_description, guardrails=guardrails
-            ),
+            ui=views["prefab"],                 # serialized prefab view (for the API/React)
             guardrails=guardrails,
         )
         operation = Operation(
@@ -170,6 +189,7 @@ class OperationRegistry:
             fn,
             definition,
             is_async=inspect.iscoroutinefunction(fn),
+            ui=ToolUI(views),
         )
         self._definitions[operation_id] = definition
         self._callables[operation_id] = fn
@@ -183,7 +203,7 @@ class OperationRegistry:
         description: str = "",
         *,
         category: str = "orchestration",
-        ui: dict[str, Any] | None = None,
+        ui: Any = None,
         guardrails: Guardrails | None = None,
     ) -> Operation:
         """Register a higher-order operation that receives an execution handle.
@@ -195,6 +215,10 @@ class OperationRegistry:
         self._guard_mutable()
         params = _params_from_signature(fn, skip=1)
         input_schema = build_input_schema(fn, skip=1)
+        views = _normalize_ui(ui)
+        views["prefab"] = views.get("prefab") or build_default_ui(
+            operation_id, input_schema, description=description, guardrails=guardrails
+        )
         definition = OperationDefinition(
             operation_id=operation_id,
             description=description,
@@ -204,9 +228,7 @@ class OperationRegistry:
             input_schema=input_schema,
             output_schema=build_output_schema(fn),
             dependencies=[p.name for p in params if p.kind == "resource"],
-            ui=ui if ui is not None else build_default_ui(
-                operation_id, input_schema, description=description, guardrails=guardrails
-            ),
+            ui=views["prefab"],
             guardrails=guardrails,
         )
         operation = Operation(
@@ -215,6 +237,7 @@ class OperationRegistry:
             definition,
             is_async=inspect.iscoroutinefunction(fn),
             is_orchestrator=True,
+            ui=ToolUI(views),
         )
         self._definitions[operation_id] = definition
         self._callables[operation_id] = fn
@@ -252,6 +275,14 @@ class OperationRegistry:
             raise KeyError(f"Unknown operation: {operation_id}")
         return self._operations[operation_id]
 
+    def ui_for(self, operation_id: str, target: str = "prefab") -> Any:
+        """Return a tool's UI view for a renderer *target* (``prefab``/``streamlit``/…).
+
+        ``prefab`` is always available (auto-built if not supplied); other
+        targets return ``None`` when the tool declares none.
+        """
+        return self.get_operation(operation_id).ui.get(target)
+
     def has(self, operation_id: str) -> bool:
         """True when an operation with this id is registered."""
         return operation_id in self._definitions
@@ -266,7 +297,7 @@ def register_operation(
     *,
     category: str = "",
     type: Literal["source", "dataframe", "raw_output"] = "raw_output",
-    ui: dict[str, Any] | None = None,
+    ui: Any = None,
     guardrails: Guardrails | None = None,
 ):
     """
@@ -275,6 +306,9 @@ def register_operation(
     Returns the dual-mode :class:`Operation` wrapper (not the raw function),
     so the decorated name supports both ``name(**kwargs)`` -> ToolCall and
     ``name.run(**kwargs)`` -> immediate execution.
+
+    ``ui`` is a prefab-ui protocol dict, or a ``{target: renderer}`` map such as
+    ``{"streamlit": render_fn}`` (the prefab view auto-builds if omitted).
     """
 
     def decorator(fn: Callable) -> Operation:

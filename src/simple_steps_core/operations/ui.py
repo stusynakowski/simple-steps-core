@@ -16,6 +16,36 @@ from __future__ import annotations
 from typing import Any
 
 
+class ToolUI:
+    """A tool's UI *views*, keyed by renderer target (e.g. ``"prefab"``, ``"streamlit"``).
+
+    ``prefab`` is always present (auto-built from the tool's schema when not
+    supplied) so a React frontend can render any tool; other targets — like a
+    Streamlit render callable — are optional. Look one up with :meth:`get`.
+    """
+
+    def __init__(self, views: dict[str, Any] | None = None):
+        self._views: dict[str, Any] = dict(views or {})
+
+    def get(self, target: str) -> Any:
+        """The UI definition for *target*, or ``None`` if the tool has none."""
+        return self._views.get(target)
+
+    def set(self, target: str, view: Any) -> None:
+        self._views[target] = view
+
+    @property
+    def prefab(self) -> dict[str, Any] | None:
+        """The prefab-ui protocol document (for a React frontend)."""
+        return self._views.get("prefab")
+
+    def targets(self) -> list[str]:
+        return list(self._views)
+
+    def __contains__(self, target: str) -> bool:
+        return target in self._views
+
+
 def _title(name: str) -> str:
     return name.replace("_", " ").strip().title()
 

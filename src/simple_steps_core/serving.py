@@ -27,10 +27,6 @@ extra (``pip install "simple-steps-core[api]"``).
 from __future__ import annotations
 
 import argparse
-import importlib.util
-import sys
-from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -38,6 +34,7 @@ from pydantic import BaseModel, Field
 from .domain.models import StepSpec, ToolCall
 from .execution.engine import CoreEngine
 from .execution.workflow import Workflow
+from .loader import load_tools_module
 from .operations.orchestrations import register_orchestrators
 from .operations.registry import REGISTRY, OperationRegistry
 from .operations.validation import ValidationError, validate_tool_call
@@ -144,22 +141,6 @@ def build_app(
         return {"steps": results}
 
     return app
-
-
-def load_tools_module(path: str | Path):
-    """Import a user script by path, running its ``@register_operation`` calls."""
-    path = Path(path).resolve()
-    if not path.exists():
-        raise FileNotFoundError(f"No such script: {path}")
-    spec = importlib.util.spec_from_file_location("_simple_steps_user_tools", path)
-    if spec is None or spec.loader is None:  # pragma: no cover - defensive
-        raise ImportError(f"Cannot import {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    # Let the script import sibling modules relative to its own folder.
-    sys.path.insert(0, str(path.parent))
-    spec.loader.exec_module(module)
-    return module
 
 
 def app_from_module(module, *, registry: OperationRegistry = REGISTRY) -> tuple[Any, dict]:

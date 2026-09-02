@@ -84,3 +84,23 @@ def test_guardrails_shape_the_default_ui():
     score_input = fields[1]["children"][1]
     assert score_input["min"] == 0 and score_input["max"] == 100
 
+
+def test_unified_ui_holds_multiple_targets():
+    registry = OperationRegistry()
+
+    def pick(region: str) -> str:
+        return region
+
+    render = lambda st, *, key, defaults: {"region": "EMEA"}   # noqa: E731
+    registry.register("pick", pick, ui={"streamlit": render})
+
+    op = registry.get_operation("pick")
+    assert set(op.ui.targets()) == {"streamlit", "prefab"}
+    # prefab is auto-built and mirrored onto the serialized definition.
+    assert op.ui.prefab["view"]["type"] == "Card"
+    assert registry.ui_for("pick", "prefab") == registry.get_definition("pick").ui
+    # the streamlit view is retrievable; unknown targets return None.
+    assert registry.ui_for("pick", "streamlit") is render
+    assert registry.ui_for("pick", "vue") is None
+
+

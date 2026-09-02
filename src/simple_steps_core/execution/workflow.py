@@ -62,6 +62,9 @@ class Workflow:
     def __getitem__(self, step_id: str) -> Step:
         return self._steps[step_id]
 
+    def __delitem__(self, step_id: str) -> None:
+        del self._steps[step_id]
+
     def __contains__(self, step_id: str) -> bool:
         return step_id in self._steps
 
