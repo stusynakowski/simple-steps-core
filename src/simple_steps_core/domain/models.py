@@ -86,7 +86,7 @@ class OperationDefinition(BaseModel):
     input_schema: dict[str, Any] = Field(default_factory=dict)   # JSON Schema (data params)
     output_schema: dict[str, Any] | None = None                  # JSON Schema (return type)
     dependencies: list[str] = Field(default_factory=list)        # resource param names
-    ui: dict[str, Any] | None = None                             # prefab-ui protocol (auto-built if None)
+    ui: dict[str, Any] | None = None                             # prefab input, input/result, or full declaration
     guardrails: Guardrails | None = None                         # usage + argument policy
 
     model_config = {"frozen": True}

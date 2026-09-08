@@ -36,7 +36,16 @@ export interface Guardrails {
 }
 
 /** prefab-ui protocol document: { view: <component tree>, state: {...} }. */
-export type PrefabUI = Record<string, unknown>;
+export interface PrefabUIDocument {
+  view: Record<string, unknown>;
+  state?: Record<string, unknown>;
+}
+
+/** Recommended lifecycle composition, or an advanced view owning the full UI. */
+export type PrefabUI =
+  | PrefabUIDocument
+  | { input: PrefabUIDocument; result?: PrefabUIDocument; full?: never }
+  | { full: PrefabUIDocument; input?: never; result?: never };
 
 export interface OperationDefinition {
   operation_id: string;
@@ -47,7 +56,7 @@ export interface OperationDefinition {
   input_schema: JSONSchema;      // data params only — render forms from this
   output_schema: JSONSchema | null;
   dependencies: string[];        // resource param names (injected, not user-supplied)
-  ui: PrefabUI | null;           // prefab-ui protocol (default auto-built; overridable)
+  ui: PrefabUI | null;           // legacy input, composed input/result, or full UI
   guardrails: Guardrails | null; // usage policy + enforced argument constraints
 }
 

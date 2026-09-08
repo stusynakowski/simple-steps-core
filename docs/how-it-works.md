@@ -374,15 +374,19 @@ function-calling tool — one signature, one schema, no hand-maintained duplicat
 
 Each `OperationDefinition` also carries two optional, serializable fields:
 
-- **`ui`** — a [prefab-ui](https://prefab.prefect.io) protocol document
-  (`{"view": <component tree>, "state": {...}}`). It is **auto-built** from the
-  `input_schema` (a `Card` form, one input per data param) unless you pass your
-  own, so any tool renders out of the box and any tool can bring a custom UI.
+- **`ui`** — a [prefab-ui](https://prefab.prefect.io) protocol declaration. A
+  legacy declaration is one input document (`{"view": ..., "state": ...}`).
+  The recommended custom shape separates `input` and interactive `result`
+  documents; an advanced declaration can provide one exclusive `full` view.
+  The input is **auto-built** from `input_schema` unless you pass your own.
   When the tool has `guardrails`, they also **shape the default form** — an
   argument `enum` becomes a dropdown, numeric bounds/lengths/patterns become
   input attributes, and the note becomes help text:
   ```python
-  @register_tool("pick_region", ui=my_prefab_protocol)   # override the default
+  @register_tool("plot", ui={"prefab": {
+      "input": plot_options,
+      "result": interactive_plot,
+  }})
   def pick_region(region: str): ...
   ```
   The `ui` (prefab) is for a React frontend. A single tool can also carry
@@ -392,10 +396,11 @@ Each `OperationDefinition` also carries two optional, serializable fields:
   @register_tool("pick_region", ui={"streamlit": render_pick})
   def pick_region(region: str): ...
   ```
-  Every tool exposes a `ToolUI` (`operation.ui`) that holds these views keyed by
-  target; the `prefab` view is always present (auto-built when omitted). Look one
-  up with `registry.ui_for("pick_region", "streamlit")` (defaults to `"prefab"`).
-  All targets are just renderers of the same contract.
+  Every tool exposes a `ToolUI` (`operation.ui`) keyed by target. Read its
+  lifecycle with `input(target)`, `result(target)`, and `full(target)`. Existing
+  `get(target)` calls still return the input (or full) primary view. Full UI
+  ownership and host/developer responsibilities are specified in
+  [Tool UI developer contract](tool-ui.md).
 - **`guardrails`** — a `Guardrails` policy: `usage`/`rules` (guidance the UI and
   agent read), safety flags (`read_only`/`destructive`/`requires_confirmation`),
   and per-argument constraints (`ArgGuardrail`: `enum`/`minimum`/`maximum`/

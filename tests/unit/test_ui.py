@@ -2,7 +2,9 @@
 
 from typing import Literal
 
-from simple_steps_core import OperationRegistry, build_default_ui
+import pytest
+
+from simple_steps_core import OperationRegistry, ToolUIView, build_default_ui
 
 
 def test_default_ui_is_prefab_protocol():
@@ -102,5 +104,46 @@ def test_unified_ui_holds_multiple_targets():
     # the streamlit view is retrievable; unknown targets return None.
     assert registry.ui_for("pick", "streamlit") is render
     assert registry.ui_for("pick", "vue") is None
+
+
+def test_composed_ui_exposes_input_and_result_and_serializes_both():
+    registry = OperationRegistry()
+    input_ui = {"view": {"type": "Input"}, "state": {}}
+    result_ui = {"view": {"type": "Plot"}, "state": {}}
+
+    registry.register(
+        "plot",
+        lambda x: x,
+        ui={"prefab": {"input": input_ui, "result": result_ui}},
+    )
+
+    operation = registry.get_operation("plot")
+    assert operation.ui.input("prefab") == input_ui
+    assert operation.ui.result("prefab") == result_ui
+    assert operation.ui.full("prefab") is None
+    assert operation.ui.get("prefab") == input_ui
+    assert registry.get_definition("plot").ui == {
+        "input": input_ui,
+        "result": result_ui,
+    }
+
+
+def test_full_ui_is_exclusive_and_is_the_legacy_primary_view():
+    full_ui = {"view": {"type": "PlotBuilder"}, "state": {}}
+    registry = OperationRegistry()
+    registry.register("plot", lambda x: x, ui={"prefab": {"full": full_ui}})
+
+    operation = registry.get_operation("plot")
+    assert operation.ui.full("prefab") == full_ui
+    assert operation.ui.get("prefab") == full_ui
+    assert registry.get_definition("plot").ui == {"full": full_ui}
+
+    with pytest.raises(ValueError, match="either 'full'"):
+        ToolUIView(input={}, full={})
+
+
+def test_composed_ui_requires_an_input_view():
+    with pytest.raises(ValueError, match="must define an 'input'"):
+        ToolUIView(result={})
 
 

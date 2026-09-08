@@ -144,18 +144,27 @@ simple-steps-core-dashboard mytools.py
 ```
 
 The tool **contract** is the generic UI schema, rendered many independent ways.
-A tool's `ui` is a `ToolUI` holding per-surface views keyed by target — it is a
-`{target: renderer}` map. The serializable `prefab` view (prefab-ui protocol)
-for a React frontend is always present (auto-built from the schema/guardrails),
-and you add others alongside it. This dashboard reads the `streamlit` target: a
-Python `render(st, key, defaults)` function. Tools without a Streamlit view get
-an auto-generated form:
+A tool's `ui` is a `ToolUI` holding per-surface declarations keyed by target.
+The recommended declaration separates the pre-execution `input` view from the
+interactive post-execution `result` view. An advanced `full` view can instead
+own the entire visual experience. The serializable `prefab` input is always
+present when no prefab declaration is supplied.
+
+The dashboard reads Streamlit input renderers with
+`render(st, key, defaults) -> arguments` and result renderers with
+`render(st, key, result)`. Missing renderers use generated form and `st.write`
+fallbacks:
 
 ```python
 def _make_list_ui(st, *, key, defaults):
     return {"n": st.slider("How many?", 1, 20, value=defaults.get("n", 5), key=key)}
 
-@register_tool("make_list", ui={"streamlit": _make_list_ui})   # custom form
+def _make_list_result(st, *, key, result):
+  st.bar_chart(result.value)
+
+@register_tool("make_list", ui={
+  "streamlit": {"input": _make_list_ui, "result": _make_list_result},
+})
 def make_list(n: int) -> list[int]:
     return list(range(n))
 ```
@@ -173,8 +182,11 @@ def pick_region(region: str) -> str:
     return region
 ```
 
-Look up any view with `registry.ui_for("pick_region", "streamlit")` (the target
-defaults to `"prefab"`).
+Legacy single renderers remain input views. Use
+`operation.ui.input(target)`, `operation.ui.result(target)`, or
+`operation.ui.full(target)` for lifecycle-aware access; `get(target)` remains a
+compatibility alias for the input or full primary view. See the
+[Tool UI developer contract](docs/tool-ui.md) before implementing a full UI.
 
 A runnable example — with a walkthrough of each tool — is in
 [streamlit_example/](streamlit_example/README.md).

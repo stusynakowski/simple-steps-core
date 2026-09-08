@@ -57,7 +57,7 @@ def render_tool_form(
     defaults = defaults or {}
     available_steps = available_steps or []
 
-    renderer = operation.ui.get("streamlit")   # the tool's own Streamlit view, if any
+    renderer = operation.ui.input("streamlit")
     if renderer is not None:
         return renderer(st, key=key, defaults=defaults)
 
@@ -107,6 +107,15 @@ def render_tool_form(
             args[name] = text
 
     return args
+
+
+def render_tool_result(st, operation: Operation, result: Any, *, key: str) -> None:
+    """Render a completed output with the custom result view or a generic fallback."""
+    renderer = operation.ui.result("streamlit")
+    if renderer is not None:
+        renderer(st, key=key, result=result)
+        return
+    st.write(result.value)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -215,7 +224,7 @@ def _render_app() -> None:
             rec = wf[sid]
             if rec.status is StepStatus.COMPLETED:
                 st.success("output")
-                st.write(rec.output.value)
+                render_tool_result(st, op, rec.output, key=f"result_{sid}")
             elif rec.status is StepStatus.FAILED:
                 st.error(rec.error or "failed")
 

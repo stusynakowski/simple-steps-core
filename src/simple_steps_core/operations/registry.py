@@ -172,6 +172,7 @@ class OperationRegistry:
         views["prefab"] = views.get("prefab") or build_default_ui(
             operation_id, input_schema, description=resolved_description, guardrails=guardrails
         )
+        tool_ui = ToolUI(views)
         definition = OperationDefinition(
             operation_id=operation_id,
             description=resolved_description,
@@ -181,7 +182,7 @@ class OperationRegistry:
             input_schema=input_schema,
             output_schema=build_output_schema(fn),
             dependencies=[p.name for p in params if p.kind == "resource"],
-            ui=views["prefab"],                 # serialized prefab view (for the API/React)
+            ui=tool_ui.definition_for("prefab"),
             guardrails=guardrails,
         )
         operation = Operation(
@@ -189,7 +190,7 @@ class OperationRegistry:
             fn,
             definition,
             is_async=inspect.iscoroutinefunction(fn),
-            ui=ToolUI(views),
+            ui=tool_ui,
         )
         self._definitions[operation_id] = definition
         self._callables[operation_id] = fn
@@ -219,6 +220,7 @@ class OperationRegistry:
         views["prefab"] = views.get("prefab") or build_default_ui(
             operation_id, input_schema, description=description, guardrails=guardrails
         )
+        tool_ui = ToolUI(views)
         definition = OperationDefinition(
             operation_id=operation_id,
             description=description,
@@ -228,7 +230,7 @@ class OperationRegistry:
             input_schema=input_schema,
             output_schema=build_output_schema(fn),
             dependencies=[p.name for p in params if p.kind == "resource"],
-            ui=views["prefab"],
+            ui=tool_ui.definition_for("prefab"),
             guardrails=guardrails,
         )
         operation = Operation(
@@ -237,7 +239,7 @@ class OperationRegistry:
             definition,
             is_async=inspect.iscoroutinefunction(fn),
             is_orchestrator=True,
-            ui=ToolUI(views),
+            ui=tool_ui,
         )
         self._definitions[operation_id] = definition
         self._callables[operation_id] = fn
@@ -307,8 +309,9 @@ def register_operation(
     so the decorated name supports both ``name(**kwargs)`` -> ToolCall and
     ``name.run(**kwargs)`` -> immediate execution.
 
-    ``ui`` is a prefab-ui protocol dict, or a ``{target: renderer}`` map such as
-    ``{"streamlit": render_fn}`` (the prefab view auto-builds if omitted).
+    ``ui`` is a prefab-ui input document or a ``{target: declaration}`` map.
+    A target declaration may use separate ``input``/``result`` views or one
+    exclusive ``full`` view. The prefab input auto-builds when omitted.
     """
 
     def decorator(fn: Callable) -> Operation:

@@ -4,8 +4,8 @@ These exercise ``render_tool_form`` with a fake ``st`` so no Streamlit install
 or browser is needed.
 """
 
-from simple_steps_core import OperationRegistry
-from simple_steps_core.streamlit.dashboard import render_tool_form
+from simple_steps_core import OperationRegistry, StepOutput
+from simple_steps_core.streamlit.dashboard import render_tool_form, render_tool_result
 
 
 class FakeSt:
@@ -25,6 +25,9 @@ class FakeSt:
 
     def text_input(self, label, value="", key=None):
         return value
+
+    def write(self, value):
+        self.written = value
 
 
 def _registry():
@@ -82,3 +85,31 @@ def test_reference_picker_wires_an_argument_to_a_step():
     args = render_tool_form(PickStep(), registry.get_operation("scale"),
                             key="k", available_steps=["step_1"])
     assert args["x"] == "step_1"           # argument is now a reference
+
+
+def test_custom_streamlit_result_ui_is_used_when_provided():
+    registry = OperationRegistry()
+    rendered = {}
+
+    def render_result(st, *, key, result):
+        rendered.update(key=key, value=result.value)
+
+    operation = registry.register(
+        "plot",
+        lambda x: x,
+        ui={
+            "streamlit": {
+                "input": lambda st, *, key, defaults: {"x": 1},
+                "result": render_result,
+            }
+        },
+    )
+    render_tool_result(FakeSt(), operation, StepOutput(value={"points": []}), key="result")
+    assert rendered == {"key": "result", "value": {"points": []}}
+
+
+def test_streamlit_result_falls_back_to_write():
+    registry = _registry()
+    st = FakeSt()
+    render_tool_result(st, registry.get_operation("scale"), StepOutput(value=6), key="result")
+    assert st.written == 6

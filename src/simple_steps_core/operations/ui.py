@@ -1,43 +1,122 @@
 """
-Default UI builder (prefab-ui)
-==============================
+Tool UI lifecycle and default builder
+=====================================
 
-Turns a tool's ``input_schema`` into a **prefab-ui protocol** document — the
-native ``{"view": <component tree>, "state": {...}}`` shape rendered by the
-bundled prefab React renderer (https://prefab.prefect.io). Each data parameter
-becomes an input component inside a ``Card`` form; ``state`` seeds defaults.
+``ToolUIView`` lets each renderer provide a recommended pair of ``input`` and
+``result`` views, or an advanced ``full`` view that owns the complete visual
+experience. ``ToolUI`` stores those declarations by renderer target.
 
-Users can override this entirely by passing their own ``ui=`` protocol dict to
-``register_tool``; this builder only supplies the default.
+The default builder turns a tool's ``input_schema`` into a **prefab-ui
+protocol** input document. Legacy single-view declarations remain input views.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 
-class ToolUI:
-    """A tool's UI *views*, keyed by renderer target (e.g. ``"prefab"``, ``"streamlit"``).
+@dataclass(frozen=True)
+class ToolUIView:
+    """Views for one renderer target across a tool's execution lifecycle.
 
-    ``prefab`` is always present (auto-built from the tool's schema when not
-    supplied) so a React frontend can render any tool; other targets — like a
-    Streamlit render callable — are optional. Look one up with :meth:`get`.
+    Most tools should provide separate ``input`` and ``result`` views. Advanced
+    tools may instead provide one ``full`` view that owns the whole experience.
+    A full view is exclusive because mixing both ownership models leaves the
+    host unable to determine which view controls execution and result layout.
+    """
+
+    input: Any = None
+    result: Any = None
+    full: Any = None
+
+    def __post_init__(self) -> None:
+        composed = self.input is not None or self.result is not None
+        if self.full is not None and composed:
+            raise ValueError("define either 'full' or 'input'/'result' views, not both")
+        if self.full is None and self.input is None:
+            raise ValueError("a composed tool UI must define an 'input' view")
+
+    @property
+    def is_full(self) -> bool:
+        return self.full is not None
+
+    def primary(self) -> Any:
+        """Return the legacy view: composed input, or the full view."""
+        return self.full if self.is_full else self.input
+
+    def as_definition(self) -> Any:
+        """Return a serializable declaration, retaining legacy input-only shape."""
+        if self.result is None and not self.is_full:
+            return self.input
+        if self.is_full:
+            return {"full": self.full}
+        return {"input": self.input, "result": self.result}
+
+
+def _coerce_target_view(view: Any) -> ToolUIView:
+    if isinstance(view, ToolUIView):
+        return view
+    if isinstance(view, dict) and "view" not in view and any(
+        phase in view for phase in ("input", "result", "full")
+    ):
+        unknown = set(view) - {"input", "result", "full"}
+        if unknown:
+            raise ValueError(f"unknown tool UI phase(s): {', '.join(sorted(unknown))}")
+        return ToolUIView(**view)
+    return ToolUIView(input=view)
+
+
+class ToolUI:
+    """A tool's lifecycle views, keyed by renderer target.
+
+    Existing target values are treated as input views, so ``get(target)`` and
+    ``prefab`` remain backward compatible. New integrations should use
+    :meth:`input`, :meth:`result`, and :meth:`full` explicitly.
     """
 
     def __init__(self, views: dict[str, Any] | None = None):
-        self._views: dict[str, Any] = dict(views or {})
+        self._views = {
+            target: _coerce_target_view(view)
+            for target, view in (views or {}).items()
+        }
 
     def get(self, target: str) -> Any:
-        """The UI definition for *target*, or ``None`` if the tool has none."""
+        """The legacy primary view for *target*, or ``None`` when absent."""
+        view = self._views.get(target)
+        return view.primary() if view is not None else None
+
+    def for_target(self, target: str) -> ToolUIView | None:
+        """The lifecycle-aware declaration for *target*."""
         return self._views.get(target)
 
     def set(self, target: str, view: Any) -> None:
-        self._views[target] = view
+        self._views[target] = _coerce_target_view(view)
+
+    def input(self, target: str) -> Any:
+        """The pre-execution argument view for *target*, when composed."""
+        view = self._views.get(target)
+        return view.input if view is not None else None
+
+    def result(self, target: str) -> Any:
+        """The post-execution interactive result view for *target*."""
+        view = self._views.get(target)
+        return view.result if view is not None else None
+
+    def full(self, target: str) -> Any:
+        """The view that owns the complete tool experience for *target*."""
+        view = self._views.get(target)
+        return view.full if view is not None else None
+
+    def definition_for(self, target: str) -> Any:
+        """Return the serializable UI declaration for a renderer target."""
+        view = self._views.get(target)
+        return view.as_definition() if view is not None else None
 
     @property
     def prefab(self) -> dict[str, Any] | None:
-        """The prefab-ui protocol document (for a React frontend)."""
-        return self._views.get("prefab")
+        """The legacy primary prefab-ui protocol document."""
+        return self.get("prefab")
 
     def targets(self) -> list[str]:
         return list(self._views)
