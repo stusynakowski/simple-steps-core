@@ -78,3 +78,31 @@ def test_workflow_json_roundtrip_preserves_steps():
 
     assert "step1" in restored
     assert restored["step1"].call == wf["step1"].call
+
+
+def test_full_session_roundtrip_reproduces_the_same_results():
+    """Export a run workflow, import it elsewhere, and confirm re-running matches."""
+    engine, registry = _engine()
+    make_list = registry.get_operation("make_list")
+    total = registry.get_operation("total")
+
+    original = Workflow(engine, session_id="sample")
+    original["step1"] = make_list(n=4)
+    original["step2"] = total(data="step1")
+    original.run()
+
+    snapshot_json = original.export_session_json()
+
+    # Import into a brand-new Workflow/engine pair, as a second process would.
+    other_engine, _ = _engine()
+    restored = Workflow.import_session_json(snapshot_json, other_engine)
+
+    # The imported snapshot already carries the original outputs...
+    assert restored["step1"].status is StepStatus.COMPLETED
+    assert restored["step1"].output.value == original["step1"].output.value
+    assert restored["step2"].output.value == original["step2"].output.value
+
+    # ...and re-running it from scratch reproduces the exact same results.
+    restored.run()
+    assert restored["step1"].output.value == original["step1"].output.value
+    assert restored["step2"].output.value == original["step2"].output.value

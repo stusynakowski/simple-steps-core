@@ -154,20 +154,102 @@ def _render_app() -> None:
     st.set_page_config(page_title=config.get("title", "simple-steps"), layout="wide")
     #st.title(config.get("title", "simple-steps dashboard"))
 
+    def _register_resources(target: Workflow) -> None:
+        for name, provider in resources.items():
+            if callable(provider):
+                target.context.resources.register(name, provider)
+            else:
+                target.context.resources.register_value(name, provider)
+
+    st.session_state.setdefault("selected_steps", [])
+    st.session_state.setdefault("selected_steps_nonce", 0)
+
+    def _touch_selection_widget() -> None:
+        # The step-selector segmented control is keyed by this nonce (see
+        # below). Bumping it forces a fresh remount next render, reseeded
+        # from `selected_steps` via `default=` — needed whenever we set
+        # `selected_steps` from code rather than from a click on that widget
+        # itself, since a widget only re-reads `default=` on (re)mount.
+        st.session_state.selected_steps_nonce += 1
+
+    def _rerun() -> None:
+        # st.segmented_control's pressed/selected styling also desyncs from
+        # its true value after an *explicit* st.rerun() (a normal on_click-
+        # triggered rerun is fine), so treat it the same as a code-driven
+        # change above.
+        _touch_selection_widget()
+        st.rerun()
+
     # One Workflow for the whole session — the same object you'd build in Python:
     #   wf["step1"] = make_list(n=5); wf["step2"] = scale(x="step1"); wf.run()
     if "wf" not in st.session_state:
         wf = Workflow(CoreEngine(REGISTRY), session_id="dashboard")
-        for name, provider in resources.items():
-            if callable(provider):
-                wf.context.resources.register(name, provider)
-            else:
-                wf.context.resources.register_value(name, provider)
+        _register_resources(wf)
         st.session_state.wf = wf
     wf: Workflow = st.session_state.wf
 
+    def _draft_from_workflow(target: Workflow) -> list[dict[str, Any]]:
+        """Rebuild the lightweight `draft` list from a workflow's own steps."""
+        rebuilt = []
+        for step in target.steps:
+            spec = step.spec
+            rebuilt.append({
+                "id": step.step_id,
+                "op": spec.name if spec is not None else step.call.operation_id,
+                "stage": spec.stage if spec is not None else None,
+            })
+        return rebuilt
+
+    def _load_workflow(data: str) -> None:
+        """Replace the session's workflow with one imported from a full snapshot."""
+        imported = Workflow.import_session_json(data, CoreEngine(REGISTRY))
+        _register_resources(imported)
+        st.session_state.wf = imported
+        loaded_draft = _draft_from_workflow(imported)
+        st.session_state.draft = loaded_draft
+        # select every loaded step so the segmented control reflects them right away
+        st.session_state.selected_steps = [d["id"] for d in loaded_draft]
+        st.session_state.step_seq = len(imported.steps)
+        st.session_state.stage_seq = len({s.spec.stage for s in imported.steps if s.spec and s.spec.stage})
+
+    def _sample_workflow_json() -> str:
+        """A small make_list -> scale chain, already run, used as a demo/test fixture."""
+        sample = Workflow(CoreEngine(REGISTRY), session_id="sample")
+        sample["step1"] = StepSpec(step_id="step1", name="make_list", arguments={"n": 5})
+        sample["step2"] = StepSpec(step_id="step2", name="scale", arguments={"x": "step1", "factor": 3})
+        sample.run()
+        return sample.export_session_json()
+
     # ── Sidebar: the tools available in the registry ─────────────────────
     with st.sidebar:
+        with st.expander("Manage Workflow"):
+            try:
+                export_data = wf.export_session_json() if wf.steps else None
+            except Exception as exc:
+                export_data = None
+                st.caption(f"Can't export yet: {exc}")
+            st.download_button(
+                ":material/download: Export workflow",
+                data=export_data or "",
+                file_name="workflow.json",
+                mime="application/json",
+                disabled=export_data is None,
+            )
+            uploaded = st.file_uploader("Import workflow", type="json", key="wf_upload")
+            if uploaded is not None and st.button(":material/upload: Load uploaded workflow"):
+                try:
+                    _load_workflow(uploaded.getvalue().decode("utf-8"))
+                except Exception as exc:
+                    st.error(f"Couldn't load that workflow: {exc}")
+                else:
+                    _rerun()
+            if {"make_list", "scale"} <= set(tool_ids):
+                st.caption("Sample workflow — make_list → scale, already run.")
+                if st.button(":material/science: Load sample workflow"):
+                    _load_workflow(_sample_workflow_json())
+                    _rerun()
+
+        st.divider()
         with st.expander("Tools"):
             for d in definitions:
                 with st.expander(d.operation_id):
@@ -199,6 +281,7 @@ def _render_app() -> None:
         draft.append({"id": sid, "op": None, "stage": None})
         # newly added step is selected right away, ready to edit in the viewer
         st.session_state.selected_steps = [*_selected(), sid]
+        _touch_selection_widget()
 
     def _remove_selected() -> None:
         selected = set(_selected())
@@ -207,6 +290,7 @@ def _render_app() -> None:
             if sid in wf:
                 del wf[sid]
         st.session_state.selected_steps = []
+        _touch_selection_widget()
 
     def _swap_selected() -> None:
         selected = _selected()
@@ -226,6 +310,7 @@ def _render_app() -> None:
             if d["id"] in selected:
                 d["stage"] = stage
         st.session_state.selected_steps = []
+        _touch_selection_widget()
 
     def _ungroup_selected() -> None:
         selected = set(_selected())
@@ -233,11 +318,13 @@ def _render_app() -> None:
             if d["id"] in selected:
                 d["stage"] = None
         st.session_state.selected_steps = []
+        _touch_selection_widget()
 
     def _clear_all() -> None:
         st.session_state.draft = []
         st.session_state.selected_steps = []
         st.session_state.pop("wf", None)
+        _touch_selection_widget()
 
     # ── Workflow Manager toolbar ───────────────────────────────────────────
     with st.expander("Workflow Manager", expanded=True):
@@ -247,13 +334,16 @@ def _render_app() -> None:
                 d = next(d for d in draft if d["id"] == sid)
                 return f"{sid} · {d['op'] or '—'}" + (f" [{d['stage']}]" if d["stage"] else "")
 
-            st.segmented_control(
+            option_ids = {d["id"] for d in draft}
+            selected_now = st.segmented_control(
                 "Current steps",
                 options=[d["id"] for d in draft],
                 format_func=_label,
                 selection_mode="multi",
-                key="selected_steps",
+                default=[sid for sid in st.session_state.selected_steps if sid in option_ids],
+                key=f"selected_steps_widget_{st.session_state.selected_steps_nonce}",
             )
+            st.session_state.selected_steps = selected_now or []
             with st.container(horizontal=True, vertical_alignment="top"):
                 st.button(":material/add_circle_outline: Add", on_click=_add_step)
                 st.button(":material/remove_circle_outline: Remove", on_click=_remove_selected,
@@ -304,13 +394,12 @@ def _render_app() -> None:
 
     # ── Step Manager: cards in draft order; same-stage cards share a group ─
     specs: dict[str, StepSpec] = {}
-    run_requests: list[tuple[str, str]] = []   # ("step", id) | ("stage", stage)
+    run_requests: list[tuple[str, str]] = []   # ("step"|"stage"|"from", id)
 
     def _render_card(d: dict[str, Any]) -> None:
         sid = d["id"]
         prior = [s["id"] for s in draft if s["id"] != sid and s["id"] in specs]
-        with st.container(border=True, key=f"card_{sid}"):
-            st.markdown(f"**{sid}**")
+        with st.container(key=f"card_{sid}"), st.expander(f"Step {sid}", expanded=True, key=f"step_{sid}"):
             d["op"] = st.selectbox(
                 "operation", tool_ids,
                 index=tool_ids.index(d["op"]) if d["op"] in tool_ids else None,
@@ -320,43 +409,96 @@ def _render_app() -> None:
             if not d["op"]:
                 return
             op = REGISTRY.get_operation(d["op"])
-            arguments = render_tool_form(st, op, key=f"form_{sid}", available_steps=prior)
+
+            def _reset_step(sid: str = sid) -> None:
+                if sid in wf:
+                    del wf[sid]
+
+            exec_col, view_col = st.columns(2)
+            with exec_col:
+                with st.container(horizontal=True, gap="xxsmall", horizontal_alignment="left"):
+                    if st.button(":material/play_arrow:", key=f"run_{sid}", help="Run this step"):
+                        run_requests.append(("step", sid))
+                    st.button(":material/refresh:", key=f"reset_{sid}", help="Clear this step's output",
+                              on_click=_reset_step, disabled=sid not in wf)
+                    if st.button(":material/fast_forward:", key=f"ff_{sid}", help="Run this step and every step after it"):
+                        run_requests.append(("from", sid))
+            with view_col:
+                # segmented control: which of the two panels below start expanded.
+                # Seed the key once in session_state instead of passing `default=`
+                # on every call — some widgets re-apply `default` on reruns that
+                # weren't triggered by that widget, silently undoing the user's
+                # last selection.
+                st.session_state.setdefault(f"view_{sid}", [":material/function:", ":material/dataset:"])
+                with st.container(horizontal=True, horizontal_alignment="right"):
+                    view = st.segmented_control(
+                        "Step view", label_visibility="collapsed",
+                        options=[":material/function:", ":material/dataset:"],
+                        selection_mode="multi", key=f"view_{sid}",
+                    )
+
+            # The segmented control fully mounts/unmounts these two panels
+            # (not just collapse) — when a panel is unmounted, the Function
+            # panel's inputs aren't rendered, so we reuse the last collected
+            # arguments rather than losing the step's spec.
+            args_cache_key = f"cached_args_{sid}"
+            if ":material/function:" in view:
+                with st.expander(":material/function: Function", expanded=True):
+                    arguments = render_tool_form(st, op, key=f"form_{sid}", available_steps=prior)
+                st.session_state[args_cache_key] = arguments
+            else:
+                arguments = st.session_state.get(args_cache_key, {})
             specs[sid] = StepSpec(step_id=sid, name=d["op"], stage=d["stage"], arguments=arguments)
 
-            with st.container(horizontal=True, gap="xxsmall"):
-                if st.button(":material/play_arrow:", key=f"run_{sid}"):
-                    run_requests.append(("step", sid))
-                st.write("")
+            if ":material/dataset:" in view:
+                with st.expander(":material/dataset: Output", expanded=True):
+                    rec = wf[sid] if sid in wf else None
+                    if rec is None or rec.status is StepStatus.PENDING:
+                        st.caption("staged — not yet run")
+                        st.json(arguments, expanded=False)
+                    elif rec.status is StepStatus.RUNNING:
+                        st.info("running…")
+                    elif rec.status is StepStatus.COMPLETED:
+                        st.success("done")
+                        render_tool_result(st, op, rec.output, key=f"result_{sid}")
+                    elif rec.status is StepStatus.FAILED:
+                        st.error(rec.error or "failed")
 
-            if sid in wf:
-                rec = wf[sid]
-                if rec.status is StepStatus.COMPLETED:
-                    st.success("done")
-                    render_tool_result(st, op, rec.output, key=f"result_{sid}")
-                elif rec.status is StepStatus.FAILED:
-                    st.error(rec.error or "failed")
-                elif rec.status is StepStatus.RUNNING:
-                    st.info("running…")
+    def _author_hidden(d: dict[str, Any]) -> None:
+        """Keep an unselected step's spec authored into `wf` without rendering it."""
+        sid = d["id"]
+        if not d["op"]:
+            return
+        arguments = st.session_state.get(f"cached_args_{sid}", {})
+        specs[sid] = StepSpec(step_id=sid, name=d["op"], stage=d["stage"], arguments=arguments)
 
     with st.expander("Step Manager", expanded=True):
+        selected = set(_selected())
+        if not selected:
+            st.info("Select one or more steps above to view them here.")
         with st.container(horizontal=True, wrap=False, gap="small", key=_CARDS_KEY):
             rendered: set[str] = set()
             for d in draft:
                 if d["id"] in rendered:
                     continue
                 if d["stage"] is None:
-                    _render_card(d)
+                    (_render_card if d["id"] in selected else _author_hidden)(d)
                     rendered.add(d["id"])
                     continue
                 stage = d["stage"]
                 members = [m for m in draft if m["stage"] == stage]
-                with st.container(border=True):
-                    st.caption(f"🗂 {stage}")
-                    if st.button(":material/play_arrow: Run stage", key=f"run_stage_{stage}"):
-                        run_requests.append(("stage", stage))
-                    with st.container(horizontal=True, wrap=False, gap="small"):
-                        for member in members:
-                            _render_card(member)
+                visible_members = [m for m in members if m["id"] in selected]
+                for member in members:
+                    if member["id"] not in selected:
+                        _author_hidden(member)
+                if visible_members:
+                    with st.container(border=True):
+                        st.caption(f"🗂 {stage}")
+                        if st.button(":material/play_arrow: Run stage", key=f"run_stage_{stage}"):
+                            run_requests.append(("stage", stage))
+                        with st.container(horizontal=True, wrap=False, gap="small"):
+                            for member in visible_members:
+                                _render_card(member)
                 rendered.update(m["id"] for m in members)
 
     # ── Author the draft into the workflow (structure only, cheap) ───────
@@ -377,12 +519,19 @@ def _render_app() -> None:
         ran = True
     for kind, target in run_requests:
         try:
-            wf.run_stage(target) if kind == "stage" else wf.run_step(target)
+            if kind == "stage":
+                wf.run_stage(target)
+            elif kind == "from":
+                order = [s.step_id for s in wf.steps]
+                for sid in order[order.index(target):]:
+                    wf.run_step(sid)      # stop the chain at the first failure
+            else:
+                wf.run_step(target)
         except Exception:
             pass
         ran = True
     if ran:
-        st.rerun()
+        _rerun()
 
 
 # ─────────────────────────────────────────────────────────────────────────
