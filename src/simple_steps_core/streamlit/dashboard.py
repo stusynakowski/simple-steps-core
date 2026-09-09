@@ -457,6 +457,9 @@ def _render_app() -> None:
                 st.button(":material/call_split: Ungroup selected", on_click=_ungroup_selected,
                            disabled=not _selected())
 
+            with st.popover(":material/smart_toy: assisstent"):
+                st.write("placeholder for assistant functionality")
+
         st.divider()
         with st.container(horizontal=True, gap="xxsmall"):
             run_all = st.button(":material/play_arrow: Run all", disabled=not draft)
