@@ -36,6 +36,11 @@ from simple_steps_core.operations.registry import REGISTRY, Operation
 
 _ENV_TOOLS = "SIMPLE_STEPS_TOOLS"
 
+# The Step Manager row scrolls horizontally instead of wrapping/shrinking its
+# cards — keyed so the CSS below can target it (see `_render_app`).
+_CARDS_KEY = "step_cards_row"
+_CARD_WIDTH = 260
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Form rendering — the generic default renderer (takes `st` so it is testable)
@@ -147,7 +152,7 @@ def _render_app() -> None:
     tool_ids = [d.operation_id for d in definitions]
 
     st.set_page_config(page_title=config.get("title", "simple-steps"), layout="wide")
-    st.title(config.get("title", "simple-steps dashboard"))
+    #st.title(config.get("title", "simple-steps dashboard"))
 
     # One Workflow for the whole session — the same object you'd build in Python:
     #   wf["step1"] = make_list(n=5); wf["step2"] = scale(x="step1"); wf.run()
@@ -161,9 +166,6 @@ def _render_app() -> None:
         st.session_state.wf = wf
     wf: Workflow = st.session_state.wf
 
-    st.session_state.setdefault("steps", [])          # [{"id": "step1", "op": "make_list"}]
-    steps = st.session_state.steps
-
     # ── Sidebar: the tools available in the registry ─────────────────────
     with st.sidebar:
         with st.expander("Tools"):
@@ -175,92 +177,211 @@ def _render_app() -> None:
             if resources:
                 st.caption("Resources: " + ", ".join(resources))
 
-    # ── Top bar: add a step, run the whole workflow, or clear it ──────────
-    add, run, clear = st.columns(3)
-    
-    if add.button("➕ Add step", use_container_width=True):
-        steps.append({"id": f"step{len(steps) + 1}", "op": None})
-        st.rerun()
-    run_all = run.button("▶ Run all", use_container_width=True, disabled=not steps)
-    if clear.button("🗑 Clear", use_container_width=True):
-        st.session_state.steps = []
-        st.session_state.pop("wf", None)
-        st.rerun()
+    # ── Draft steps: lightweight UI state, authored into `wf` each rerun ──
+    # `draft` mirrors the Python script one line at a time: {"id", "op",
+    # "stage"}. Only structural edits (add/remove/group/ungroup/swap) are
+    # true widget callbacks — they touch this small list, not the engine, so
+    # they're free. Running a step needs its freshly-collected form
+    # arguments, which only exist once the form has rendered, so runs are
+    # requested during the render pass and executed once at the end (still
+    # only on an explicit button press — nothing runs on every rerun).
+    st.session_state.setdefault("draft", [])           # [{"id", "op", "stage"}]
+    st.session_state.setdefault("step_seq", 0)
+    st.session_state.setdefault("stage_seq", 0)
+    draft: list[dict[str, Any]] = st.session_state.draft
 
-    if not steps:
+    def _selected() -> list[str]:
+        return list(st.session_state.get("selected_steps") or [])
+
+    def _add_step() -> None:
+        st.session_state.step_seq += 1
+        sid = f"step{st.session_state.step_seq}"
+        draft.append({"id": sid, "op": None, "stage": None})
+        # newly added step is selected right away, ready to edit in the viewer
+        st.session_state.selected_steps = [*_selected(), sid]
+
+    def _remove_selected() -> None:
+        selected = set(_selected())
+        st.session_state.draft = [d for d in draft if d["id"] not in selected]
+        for sid in selected:
+            if sid in wf:
+                del wf[sid]
+        st.session_state.selected_steps = []
+
+    def _swap_selected() -> None:
+        selected = _selected()
+        if len(selected) != 2:
+            return
+        i = next(i for i, d in enumerate(draft) if d["id"] == selected[0])
+        j = next(i for i, d in enumerate(draft) if d["id"] == selected[1])
+        draft[i], draft[j] = draft[j], draft[i]
+
+    def _group_selected() -> None:
+        selected = set(_selected())
+        if len(selected) < 2:
+            return
+        st.session_state.stage_seq += 1
+        stage = f"Stage {st.session_state.stage_seq}"
+        for d in draft:
+            if d["id"] in selected:
+                d["stage"] = stage
+        st.session_state.selected_steps = []
+
+    def _ungroup_selected() -> None:
+        selected = set(_selected())
+        for d in draft:
+            if d["id"] in selected:
+                d["stage"] = None
+        st.session_state.selected_steps = []
+
+    def _clear_all() -> None:
+        st.session_state.draft = []
+        st.session_state.selected_steps = []
+        st.session_state.pop("wf", None)
+
+    # ── Workflow Manager toolbar ───────────────────────────────────────────
+    with st.expander("Workflow Manager", expanded=True):
+        select_col, manage_col = st.columns([5, 1])
+        with select_col:
+            def _label(sid: str) -> str:
+                d = next(d for d in draft if d["id"] == sid)
+                return f"{sid} · {d['op'] or '—'}" + (f" [{d['stage']}]" if d["stage"] else "")
+
+            st.segmented_control(
+                "Current steps",
+                options=[d["id"] for d in draft],
+                format_func=_label,
+                selection_mode="multi",
+                key="selected_steps",
+            )
+            with st.container(horizontal=True, vertical_alignment="top"):
+                st.button(":material/add_circle_outline: Add", on_click=_add_step)
+                st.button(":material/remove_circle_outline: Remove", on_click=_remove_selected,
+                          disabled=not _selected())
+                st.button(":material/swap_horiz: Swap", on_click=_swap_selected,
+                          disabled=len(_selected()) != 2)
+        with manage_col:
+            with st.popover("Group into stages"):
+                st.button(":material/merge_type: Group selected", on_click=_group_selected,
+                           disabled=len(_selected()) < 2)
+                st.button(":material/call_split: Ungroup selected", on_click=_ungroup_selected,
+                           disabled=not _selected())
+
+        st.divider()
+        with st.container(horizontal=True, gap="xxsmall"):
+            run_all = st.button(":material/play_arrow: Run all", disabled=not draft)
+            with st.popover(":material/refresh: Reset", disabled=not draft):
+                st.warning("This removes every step and clears all results. This can't be undone.")
+                st.button(":material/warning: Yes, clear everything", on_click=_clear_all)
+
+    if not draft:
         st.info("Add a step to begin.")
         return
 
-    # ── Kanban board: each step is a card, placed in a lane by its status ─
-    # A card mirrors a line of the Python script; a step may reference the
-    # output of any earlier step by its id. Outputs live on the workflow's
-    # Step records, which are themselves held in st.session_state["wf"].
+    # Force the horizontal row to scroll instead of wrap/shrink its cards.
+    st.markdown(
+        f"""
+        <style>
+        div.st-key-{_CARDS_KEY} {{
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding-bottom: 0.5rem;
+        }}
+        div.st-key-{_CARDS_KEY} > div {{
+            flex-wrap: nowrap !important;
+            min-width: max-content;
+        }}
+        div.st-key-{_CARDS_KEY} > div > div {{
+            flex-shrink: 0 !important;
+        }}
+        div[class*="st-key-card_"] {{
+            min-width: {_CARD_WIDTH}px;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ── Step Manager: cards in draft order; same-stage cards share a group ─
     specs: dict[str, StepSpec] = {}
-    run_one: str | None = None
+    run_requests: list[tuple[str, str]] = []   # ("step", id) | ("stage", stage)
 
-    def _card(step: dict, i: int) -> None:
-        nonlocal run_one
-        sid = step["id"]
-        prior = [s["id"] for s in steps[:i] if s["op"]]
-        top = st.columns([4, 1])
-        top[0].markdown(f"**{sid}**")
-        if top[1].button("🗑", key=f"rm_{sid}", help="Remove step"):
-            steps.pop(i)
-            st.rerun()
-        step["op"] = st.selectbox(
-            "operation", tool_ids,
-            index=tool_ids.index(step["op"]) if step["op"] in tool_ids else None,
-            placeholder="choose an operation…",
-            key=f"op_{sid}", label_visibility="collapsed",
-        )
-        if not step["op"]:
-            return
-        op = REGISTRY.get_operation(step["op"])
-        arguments = render_tool_form(st, op, key=f"form_{sid}", available_steps=prior)
-        specs[sid] = StepSpec(step_id=sid, name=step["op"], arguments=arguments)
-        if st.button("▶ Run", key=f"run_{sid}", use_container_width=True):
-            run_one = sid
-        if sid in wf:
-            rec = wf[sid]
-            if rec.status is StepStatus.COMPLETED:
-                st.success("output")
-                render_tool_result(st, op, rec.output, key=f"result_{sid}")
-            elif rec.status is StepStatus.FAILED:
-                st.error(rec.error or "failed")
+    def _render_card(d: dict[str, Any]) -> None:
+        sid = d["id"]
+        prior = [s["id"] for s in draft if s["id"] != sid and s["id"] in specs]
+        with st.container(border=True, key=f"card_{sid}"):
+            st.markdown(f"**{sid}**")
+            d["op"] = st.selectbox(
+                "operation", tool_ids,
+                index=tool_ids.index(d["op"]) if d["op"] in tool_ids else None,
+                placeholder="choose an operation…",
+                key=f"op_{sid}", label_visibility="collapsed",
+            )
+            if not d["op"]:
+                return
+            op = REGISTRY.get_operation(d["op"])
+            arguments = render_tool_form(st, op, key=f"form_{sid}", available_steps=prior)
+            specs[sid] = StepSpec(step_id=sid, name=d["op"], stage=d["stage"], arguments=arguments)
 
-    lanes = {"todo": "🟡 To run", "done": "🟢 Done", "failed": "🔴 Failed"}
-    board: dict[str, list[tuple[int, dict]]] = {key: [] for key in lanes}
-    for i, step in enumerate(steps):
-        rec = wf[step["id"]] if step["id"] in wf else None
-        if rec and rec.status is StepStatus.COMPLETED:
-            board["done"].append((i, step))
-        elif rec and rec.status is StepStatus.FAILED:
-            board["failed"].append((i, step))
-        else:
-            board["todo"].append((i, step))
+            with st.container(horizontal=True, gap="xxsmall"):
+                if st.button(":material/play_arrow:", key=f"run_{sid}"):
+                    run_requests.append(("step", sid))
+                st.write("")
 
-    for col, (key, title) in zip(st.columns(len(lanes)), lanes.items()):
-        with col:
-            st.markdown(f"### {title}")
-            for i, step in board[key]:
+            if sid in wf:
+                rec = wf[sid]
+                if rec.status is StepStatus.COMPLETED:
+                    st.success("done")
+                    render_tool_result(st, op, rec.output, key=f"result_{sid}")
+                elif rec.status is StepStatus.FAILED:
+                    st.error(rec.error or "failed")
+                elif rec.status is StepStatus.RUNNING:
+                    st.info("running…")
+
+    with st.expander("Step Manager", expanded=True):
+        with st.container(horizontal=True, wrap=False, gap="small", key=_CARDS_KEY):
+            rendered: set[str] = set()
+            for d in draft:
+                if d["id"] in rendered:
+                    continue
+                if d["stage"] is None:
+                    _render_card(d)
+                    rendered.add(d["id"])
+                    continue
+                stage = d["stage"]
+                members = [m for m in draft if m["stage"] == stage]
                 with st.container(border=True):
-                    _card(step, i)
+                    st.caption(f"🗂 {stage}")
+                    if st.button(":material/play_arrow: Run stage", key=f"run_stage_{stage}"):
+                        run_requests.append(("stage", stage))
+                    with st.container(horizontal=True, wrap=False, gap="small"):
+                        for member in members:
+                            _render_card(member)
+                rendered.update(m["id"] for m in members)
 
-    # ── Author the steps into the workflow, then run — via its own methods ─
-    def _author() -> None:
-        for rec in list(wf.steps):
-            if rec.step_id not in specs:
-                del wf[rec.step_id]
-        for sid, spec in specs.items():
-            if sid not in wf or wf[sid].spec != spec:
-                wf[sid] = spec
+    # ── Author the draft into the workflow (structure only, cheap) ───────
+    for step_id in list(wf._steps):
+        if step_id not in specs:
+            del wf[step_id]
+    for sid, spec in specs.items():
+        if sid not in wf or wf[sid].spec != spec:
+            wf[sid] = spec
 
-    if run_one or run_all:
-        _author()
+    # ── Execute only what was explicitly requested this run ──────────────
+    ran = False
+    if run_all:
         try:
-            wf.run() if run_all else wf.run_step(run_one)
+            wf.run_by_stages()
         except Exception:
             pass          # the failure is recorded on the step's record
+        ran = True
+    for kind, target in run_requests:
+        try:
+            wf.run_stage(target) if kind == "stage" else wf.run_step(target)
+        except Exception:
+            pass
+        ran = True
+    if ran:
         st.rerun()
 
 
