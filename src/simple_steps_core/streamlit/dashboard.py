@@ -241,6 +241,16 @@ def _render_app() -> None:
     st.set_page_config(page_title=config.get("title", "simple-steps"), layout="wide")
     #st.title(config.get("title", "simple-steps dashboard"))
 
+    try:
+        from right_sidebar import right_sidebar
+    except ImportError:
+        right_sidebar = None
+
+    if right_sidebar is not None:
+        with right_sidebar(key="assistant_sidebar", icon=":material/smart_toy:", initial_collapsed=True):
+            st.caption("Assistant")
+            # empty for now
+
     def _register_resources(target: Workflow) -> None:
         for name, provider in resources.items():
             if callable(provider):
@@ -456,9 +466,6 @@ def _render_app() -> None:
                            disabled=len(_selected()) < 2)
                 st.button(":material/call_split: Ungroup selected", on_click=_ungroup_selected,
                            disabled=not _selected())
-
-            with st.popover(":material/smart_toy: assisstent"):
-                st.write("placeholder for assistant functionality")
 
         st.divider()
         with st.container(horizontal=True, gap="xxsmall"):
