@@ -114,6 +114,37 @@ def render_tool_form(
     return args
 
 
+def _render_literal_arg(st, operation: Operation, param, *, key: str, default: Any) -> Any:
+    """Render one by-hand value widget for a data param (no reference picker).
+
+    Used by the Step Manager's "Operation" tab, where reference binding has
+    already been split out into its own "Inputs" tab.
+    """
+    definition = operation.definition
+    props = definition.input_schema.get("properties", {})
+    rules = getattr(definition.guardrails, "arguments", {}) if definition.guardrails else {}
+    prop = props.get(param.name, {})
+    rule = rules.get(param.name)
+    seed = default if default is not None else param.default
+    enum = prop.get("enum") or (rule.enum if rule and rule.enum else None)
+    jtype = prop.get("type")
+
+    if enum is not None:
+        index = enum.index(seed) if seed in enum else 0
+        return st.selectbox(param.name, enum, index=index, key=key)
+    if jtype == "boolean":
+        return st.checkbox(param.name, value=bool(seed), key=key)
+    if jtype in ("integer", "number"):
+        kwargs: dict[str, Any] = {}
+        if rule and rule.minimum is not None:
+            kwargs["min_value"] = rule.minimum
+        if rule and rule.maximum is not None:
+            kwargs["max_value"] = rule.maximum
+        value = st.number_input(param.name, value=seed if isinstance(seed, (int, float)) else 0, key=key, **kwargs)
+        return int(value) if jtype == "integer" else float(value)
+    return st.text_input(param.name, value="" if seed is None else str(seed), key=key)
+
+
 def render_tool_result(st, operation: Operation, result: Any, *, key: str) -> None:
     """Render a completed output with the custom result view or a generic fallback."""
     renderer = operation.ui.result("streamlit")
@@ -123,13 +154,69 @@ def render_tool_result(st, operation: Operation, result: Any, *, key: str) -> No
     st.write(result.value)
 
 
+def _default_orchestration() -> dict[str, Any]:
+    return {"mode": "single", "over": None, "item_arg": None, "concurrency": 1,
+            "on_error": None, "retries": 0, "initial": None}
+
+
+def _default_execution() -> dict[str, Any]:
+    return {"mode": "sync", "run": "manual", "timeout": None, "retries": 0, "cache": False}
+
+
+def _staging_dataframe(d: dict[str, Any], arguments: dict[str, Any]):
+    """A one-row preview of what a not-yet-run step will do (op + orchestration)."""
+    import pandas as pd
+
+    orch = d.get("orchestration") or _default_orchestration()
+    row = {
+        "step": d["id"],
+        "operation": d["op"] or "—",
+        "stage": d["stage"] or "—",
+        "mode": orch["mode"],
+        "arguments": ", ".join(f"{k}={v!r}" for k, v in arguments.items()) or "—",
+    }
+    if orch["mode"] != "single":
+        row["over"] = orch["over"] or "—"
+        row["item_arg"] = orch["item_arg"] or "(auto)"
+        row["concurrency"] = orch["concurrency"]
+        row["on_error"] = orch["on_error"] or "(default)"
+    return pd.DataFrame([row])
+
+
+def _to_dataframe(value: Any):
+    """Best-effort tabular view of a completed step's output.
+
+    Orchestrator results (``MapResult``) become one row per item (index,
+    status, value, error); dataframes pass through; lists/dicts/scalars are
+    coerced into a small table.
+    """
+    import pandas as pd
+
+    from simple_steps_core.domain.models import MapResult
+
+    if isinstance(value, MapResult):
+        return pd.DataFrame([
+            {"index": o.index, "status": o.status.value, "value": o.value, "error": o.error}
+            for o in value.outcomes
+        ])
+    if hasattr(value, "columns") and hasattr(value, "iloc"):
+        return value  # already dataframe-like
+    if isinstance(value, list):
+        if value and all(isinstance(v, dict) for v in value):
+            return pd.DataFrame(value)
+        return pd.DataFrame({"value": value})
+    if isinstance(value, dict):
+        return pd.DataFrame([value])
+    return pd.DataFrame({"value": [value]})
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # The Streamlit app (imports streamlit lazily; runs under `streamlit run`)
 # ─────────────────────────────────────────────────────────────────────────
 def _render_app() -> None:
     import streamlit as st
 
-    from simple_steps_core.domain.models import StepSpec, StepStatus
+    from simple_steps_core.domain.models import ExecutionConfig, OrchestrationConfig, StepSpec, StepStatus
     from simple_steps_core.execution.engine import CoreEngine
     from simple_steps_core.execution.workflow import Workflow
 
@@ -190,13 +277,23 @@ def _render_app() -> None:
 
     def _draft_from_workflow(target: Workflow) -> list[dict[str, Any]]:
         """Rebuild the lightweight `draft` list from a workflow's own steps."""
+        step_ids = {s.step_id for s in target.steps}
         rebuilt = []
         for step in target.steps:
             spec = step.spec
+            sources: dict[str, str] = {}
+            if spec is not None:
+                for name, value in spec.arguments.items():
+                    if isinstance(value, str) and value in step_ids and value != step.step_id:
+                        sources[name] = value
+                st.session_state[f"cached_args_{step.step_id}"] = dict(spec.arguments)
             rebuilt.append({
                 "id": step.step_id,
                 "op": spec.name if spec is not None else step.call.operation_id,
                 "stage": spec.stage if spec is not None else None,
+                "sources": sources,
+                "orchestration": spec.orchestration.model_dump() if spec is not None else _default_orchestration(),
+                "execution": spec.execution.model_dump() if spec is not None else _default_execution(),
             })
         return rebuilt
 
@@ -278,7 +375,10 @@ def _render_app() -> None:
     def _add_step() -> None:
         st.session_state.step_seq += 1
         sid = f"step{st.session_state.step_seq}"
-        draft.append({"id": sid, "op": None, "stage": None})
+        draft.append({
+            "id": sid, "op": None, "stage": None,
+            "sources": {}, "orchestration": _default_orchestration(), "execution": _default_execution(),
+        })
         # newly added step is selected right away, ready to edit in the viewer
         st.session_state.selected_steps = [*_selected(), sid]
         _touch_selection_widget()
@@ -399,21 +499,16 @@ def _render_app() -> None:
     def _render_card(d: dict[str, Any]) -> None:
         sid = d["id"]
         prior = [s["id"] for s in draft if s["id"] != sid and s["id"] in specs]
+        d.setdefault("sources", {})
+        d.setdefault("orchestration", _default_orchestration())
+        d.setdefault("execution", _default_execution())
+        args_cache_key = f"cached_args_{sid}"
+
+        def _reset_step(sid: str = sid) -> None:
+            if sid in wf:
+                del wf[sid]
+
         with st.container(key=f"card_{sid}"), st.expander(f"Step {sid}", expanded=True, key=f"step_{sid}"):
-            d["op"] = st.selectbox(
-                "operation", tool_ids,
-                index=tool_ids.index(d["op"]) if d["op"] in tool_ids else None,
-                placeholder="choose an operation…",
-                key=f"op_{sid}", label_visibility="collapsed",
-            )
-            if not d["op"]:
-                return
-            op = REGISTRY.get_operation(d["op"])
-
-            def _reset_step(sid: str = sid) -> None:
-                if sid in wf:
-                    del wf[sid]
-
             exec_col, view_col = st.columns(2)
             with exec_col:
                 with st.container(horizontal=True, gap="xxsmall", horizontal_alignment="left"):
@@ -440,37 +535,190 @@ def _render_app() -> None:
             # The segmented control fully mounts/unmounts these two panels
             # (not just collapse) — when a panel is unmounted, the Function
             # panel's inputs aren't rendered, so we reuse the last collected
-            # arguments rather than losing the step's spec.
-            args_cache_key = f"cached_args_{sid}"
+            # arguments/config rather than losing the step's spec.
             if ":material/function:" in view:
                 with st.expander(":material/function: Function", expanded=True):
-                    arguments = render_tool_form(st, op, key=f"form_{sid}", available_steps=prior)
-                st.session_state[args_cache_key] = arguments
+                    arguments, op = _render_function_tabs(d, prior)
+                if op is not None:
+                    st.session_state[args_cache_key] = arguments
             else:
                 arguments = st.session_state.get(args_cache_key, {})
-            specs[sid] = StepSpec(step_id=sid, name=d["op"], stage=d["stage"], arguments=arguments)
+                op = REGISTRY.get_operation(d["op"]) if d["op"] else None
+
+            if d["op"]:
+                orch, execu = d["orchestration"], d["execution"]
+                specs[sid] = StepSpec(
+                    step_id=sid, name=d["op"], stage=d["stage"], arguments=arguments,
+                    orchestration=OrchestrationConfig(
+                        mode=orch["mode"], over=orch["over"], item_arg=orch["item_arg"],
+                        concurrency=int(orch["concurrency"]), on_error=orch["on_error"],
+                        retries=int(orch["retries"]), initial=orch["initial"],
+                    ),
+                    execution=ExecutionConfig(
+                        mode=execu["mode"], run=execu["run"], timeout=execu["timeout"],
+                        retries=int(execu["retries"]), cache=execu["cache"],
+                    ),
+                )
 
             if ":material/dataset:" in view:
                 with st.expander(":material/dataset: Output", expanded=True):
                     rec = wf[sid] if sid in wf else None
                     if rec is None or rec.status is StepStatus.PENDING:
                         st.caption("staged — not yet run")
-                        st.json(arguments, expanded=False)
+                        st.dataframe(_staging_dataframe(d, arguments), width="stretch", hide_index=True)
                     elif rec.status is StepStatus.RUNNING:
                         st.info("running…")
                     elif rec.status is StepStatus.COMPLETED:
                         st.success("done")
-                        render_tool_result(st, op, rec.output, key=f"result_{sid}")
+                        custom_result = op.ui.result("streamlit") if op is not None else None
+                        if custom_result is not None:
+                            render_tool_result(st, op, rec.output, key=f"result_{sid}")
+                        else:
+                            st.dataframe(_to_dataframe(rec.output.value), width="stretch")
                     elif rec.status is StepStatus.FAILED:
                         st.error(rec.error or "failed")
+
+    def _render_function_tabs(d: dict[str, Any], prior: list[str]) -> tuple[dict[str, Any], Operation | None]:
+        """The Function panel's three tabs: Operation, Inputs, Exec.
+
+        Returns the merged ``arguments`` dict (by-hand values + reference
+        tokens) and the selected Operation (or None until one is chosen).
+        """
+        sid = d["id"]
+        op_tab, inputs_tab, exec_tab = st.tabs(["Operation", "Inputs", "Exec"])
+
+        with op_tab:
+            d["op"] = st.selectbox(
+                "operation", tool_ids,
+                index=tool_ids.index(d["op"]) if d["op"] in tool_ids else None,
+                placeholder="choose an operation…",
+                key=f"op_{sid}",
+            )
+        if not d["op"]:
+            with inputs_tab:
+                st.caption("Choose an operation first.")
+            with exec_tab:
+                st.caption("Choose an operation first.")
+            return {}, None
+
+        op = REGISTRY.get_operation(d["op"])
+        definition = op.definition
+        data_params = [p.name for p in definition.params if p.kind == "data"]
+        custom_renderer = op.ui.input("streamlit")
+        cached = st.session_state.get(f"cached_args_{sid}", {})
+
+        with op_tab:
+            if custom_renderer is not None:
+                # The tool owns its whole form; no by-hand/reference split.
+                arguments = custom_renderer(st, key=f"form_{sid}", defaults=cached)
+            else:
+                arguments = {}
+                for name in data_params:
+                    source = d["sources"].get(name, "(value)")
+                    if source != "(value)":
+                        st.text_input(name, value=f"← {source}", disabled=True,
+                                       key=f"opview_{sid}_{name}", help="Bound in the Inputs tab")
+                        continue
+                    param = next(p for p in definition.params if p.name == name)
+                    arguments[name] = _render_literal_arg(
+                        st, op, param, key=f"form_{sid}_{name}", default=cached.get(name),
+                    )
+
+        with inputs_tab:
+            if custom_renderer is not None:
+                st.caption("This tool renders its own form, so argument references aren't available here.")
+            elif not prior:
+                st.caption("No earlier steps to reference yet.")
+            else:
+                st.caption("Bind an argument to an earlier step's output instead of a literal value.")
+                for name in data_params:
+                    current = d["sources"].get(name, "(value)")
+                    options = ["(value)", *prior]
+                    chosen = st.selectbox(
+                        name, options, index=options.index(current) if current in options else 0,
+                        key=f"src_{sid}_{name}",
+                    )
+                    if chosen == "(value)":
+                        d["sources"].pop(name, None)
+                    else:
+                        d["sources"][name] = chosen
+                        arguments[name] = chosen
+
+            st.divider()
+            st.caption("Orchestration — run this tool once, or fan it out over a collection.")
+            modes = ["single", "map", "filter", "expand", "collapse"]
+            orch = d["orchestration"]
+            orch["mode"] = st.selectbox("mode", modes, index=modes.index(orch["mode"]), key=f"orch_mode_{sid}")
+            if orch["mode"] != "single":
+                over_options = ["(none)", *prior]
+                current_over = orch["over"] if orch["over"] in over_options else "(none)"
+                over = st.selectbox("over — the collection to fan out across", over_options,
+                                      index=over_options.index(current_over), key=f"orch_over_{sid}")
+                orch["over"] = None if over == "(none)" else over
+
+                item_options = ["(auto)", *data_params]
+                current_item = orch["item_arg"] if orch["item_arg"] in item_options else "(auto)"
+                item_arg = st.selectbox("item argument — which param each item binds to", item_options,
+                                          index=item_options.index(current_item), key=f"orch_item_{sid}")
+                orch["item_arg"] = None if item_arg == "(auto)" else item_arg
+
+                orch["concurrency"] = st.number_input("concurrency", min_value=1, step=1,
+                                                        value=int(orch["concurrency"]), key=f"orch_conc_{sid}")
+                error_options = ["(default)", "collect", "fail_fast", "skip"]
+                current_err = orch["on_error"] or "(default)"
+                on_error = st.selectbox("on_error", error_options, index=error_options.index(current_err),
+                                          key=f"orch_err_{sid}")
+                orch["on_error"] = None if on_error == "(default)" else on_error
+                orch["retries"] = st.number_input("retries", min_value=0, step=1,
+                                                    value=int(orch["retries"]), key=f"orch_retries_{sid}")
+                if orch["mode"] == "collapse":
+                    orch["initial"] = st.text_input(
+                        "initial — seed value for the accumulator",
+                        value="" if orch["initial"] is None else str(orch["initial"]),
+                        key=f"orch_initial_{sid}",
+                    )
+
+        with exec_tab:
+            st.caption("How this step is invoked.")
+            execu = d["execution"]
+            exec_modes = ["sync", "async"]
+            execu["mode"] = st.selectbox("mode", exec_modes, index=exec_modes.index(execu["mode"]), key=f"exec_mode_{sid}")
+            run_modes = ["manual", "auto"]
+            execu["run"] = st.selectbox("run", run_modes, index=run_modes.index(execu["run"]), key=f"exec_run_{sid}",
+                                          help="'manual' waits for the Run button; 'auto' is a hint for orchestrated runners.")
+            has_timeout = st.checkbox("set a timeout", value=execu["timeout"] is not None, key=f"exec_timeout_on_{sid}")
+            execu["timeout"] = (
+                st.number_input("timeout (seconds)", min_value=0.0, value=float(execu["timeout"] or 30.0),
+                                  key=f"exec_timeout_{sid}")
+                if has_timeout else None
+            )
+            execu["retries"] = st.number_input("retries", min_value=0, step=1,
+                                                 value=int(execu["retries"]), key=f"exec_retries_{sid}")
+            execu["cache"] = st.checkbox("cache result", value=execu["cache"], key=f"exec_cache_{sid}")
+
+        return arguments, op
 
     def _author_hidden(d: dict[str, Any]) -> None:
         """Keep an unselected step's spec authored into `wf` without rendering it."""
         sid = d["id"]
         if not d["op"]:
             return
+        d.setdefault("orchestration", _default_orchestration())
+        d.setdefault("execution", _default_execution())
         arguments = st.session_state.get(f"cached_args_{sid}", {})
-        specs[sid] = StepSpec(step_id=sid, name=d["op"], stage=d["stage"], arguments=arguments)
+        orch, execu = d["orchestration"], d["execution"]
+        specs[sid] = StepSpec(
+            step_id=sid, name=d["op"], stage=d["stage"], arguments=arguments,
+            orchestration=OrchestrationConfig(
+                mode=orch["mode"], over=orch["over"], item_arg=orch["item_arg"],
+                concurrency=int(orch["concurrency"]), on_error=orch["on_error"],
+                retries=int(orch["retries"]), initial=orch["initial"],
+            ),
+            execution=ExecutionConfig(
+                mode=execu["mode"], run=execu["run"], timeout=execu["timeout"],
+                retries=int(execu["retries"]), cache=execu["cache"],
+            ),
+        )
 
     with st.expander("Step Manager", expanded=True):
         selected = set(_selected())
