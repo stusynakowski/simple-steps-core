@@ -4,9 +4,9 @@ A runnable tools file for the optional **Streamlit dashboard** — a local UI fo
 building and running workflows from the tools you register.
 
 The dashboard itself lives in the package at
-`simple_steps_core.streamlit.dashboard` and is exposed as the
-`simple-steps-core-dashboard` console script. You only write a tools file; this
-folder ships one: [example_tools_and_resources.py](example_tools_and_resources.py).
+`simple_steps_core.streamlit.dashboard` and is exposed as the `Dashboard` class.
+You write a tools file that imports `Dashboard` and calls `Dashboard().run()` at
+the bottom; this folder ships one: [example_tools_and_resources.py](example_tools_and_resources.py).
 
 ## Run it
 
@@ -14,7 +14,7 @@ From the repository root:
 
 ```bash
 python -m pip install -e ".[dashboard]"
-simple-steps-core-dashboard streamlit_example/example_tools_and_resources.py
+python streamlit_example/example_tools_and_resources.py
 ```
 
 That opens the dashboard in your browser. Add steps from the tool palette, wire
@@ -41,10 +41,10 @@ Two optional module-level settings are read by the dashboard:
 
 ## Write your own
 
-Copy the example, edit the tools, and point the command at your file:
+Copy the example, edit the tools, and run your file directly:
 
 ```bash
-simple-steps-core-dashboard path/to/your_tools.py
+python path/to/your_tools.py
 ```
 
 The dashboard reads each tool's `ui.get("streamlit")` view when present and

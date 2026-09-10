@@ -3,13 +3,15 @@
 Run it::
 
     python -m pip install -e ".[dashboard]"
-    simple-steps-core-dashboard streamlit_example/example_tools_and_resources.py
+    python streamlit_example/example_tools_and_resources.py
 
 You only edit this file. Each tool can optionally provide a Streamlit view via
-``ui={"streamlit": fn}``; tools without one get an auto-generated form.
+``ui={"streamlit": fn}``; tools without one get an auto-generated form. The
+``Dashboard().run()`` call at the bottom launches the UI.
 """
 
 from simple_steps_core import ArgGuardrail, Guardrails, Resource, register_tool
+from simple_steps_core.streamlit import Dashboard
 
 
 # ── A tool with a custom Streamlit UI ────────────────────────────────────
@@ -84,3 +86,7 @@ class _NameService:
 # Optional dashboard config and injected resources.
 CONFIG = {"title": "My Tools Dashboard"}
 RESOURCES = {"names": _NameService}   # factory (callable) or instance
+
+
+if __name__ == "__main__":
+    Dashboard().run()

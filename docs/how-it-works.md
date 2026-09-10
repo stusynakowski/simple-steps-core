@@ -46,8 +46,7 @@ simple_steps_core/                    ← import only from the package root
 │
 ├─ serving.py              OPTIONAL HTTP LAYER  (needs the `api` extra)
 │  ├─ build_app(registry, engine)   → FastAPI: GET /tools · POST /call · POST /run
-│  ├─ load_tools_module(path)       import a user script (runs its decorators)
-│  └─ main()                        console script `simple-steps-core-server`
+│  └─ Server().run()                serve tools from your own script (python myscript.py)
 │
 ├─ execution/              HOW things run + WHERE data lives
 │  ├─ workflow.py   Workflow           ordered steps; run()/arun()/run_step();

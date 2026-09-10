@@ -1,13 +1,12 @@
-"""example_server.py — declare tools, then serve them with one command.
+"""example_server.py — declare tools, then serve them by running this file.
 
 Run it::
 
     python -m pip install -e ".[api]"
-    simple-steps-core-server example_server.py
+    python example_server.py
 
-This file only declares tools (and an optional CONFIG). The
-``simple-steps-core-server`` command imports it, adds the built-in orchestrators
-(map/filter/expand/collapse), and serves:
+This file declares tools (and an optional CONFIG), then ``Server().run()`` adds
+the built-in orchestrators (map/filter/expand/collapse) and serves:
 
     GET  /tools   — the palette (id, description, JSON Schema)
     POST /call    — run one tool: {"operation_id": "add", "arguments": {...}}
@@ -15,6 +14,7 @@ This file only declares tools (and an optional CONFIG). The
 """
 
 from simple_steps_core import register_tool
+from simple_steps_core.serving import Server
 
 
 @register_tool("add", description="Add two numbers.")
@@ -43,4 +43,8 @@ CONFIG = {
 
 # Optional runtime resources injected into tools that declare `Resource()`:
 # RESOURCES = {"db": lambda: connect_db()}
+
+
+if __name__ == "__main__":
+    Server().run()
 

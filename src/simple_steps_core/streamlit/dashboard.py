@@ -3,11 +3,22 @@ Streamlit dashboard
 ===================
 
 An optional, generic UI for building and running workflows from a tools file —
-the Streamlit counterpart of ``simple-steps-core-server``. Users write one file
-that registers tools (and optional ``CONFIG`` / ``RESOURCES``), then run::
+the Streamlit counterpart of the FastAPI ``Server``. Users write one file that
+registers tools (and optional ``CONFIG`` / ``RESOURCES``), import ``Dashboard``,
+and call it at the bottom::
 
-    pip install "simple-steps-core[dashboard]"
-    simple-steps-core-dashboard mytools.py
+    from simple_steps_core import register_tool
+    from simple_steps_core.streamlit import Dashboard
+
+    @register_tool("add")
+    def add(a: int, b: int) -> int:
+        return a + b
+
+    if __name__ == "__main__":
+        Dashboard().run()
+
+then run it with ``python mytools.py`` (needs ``pip install
+"simple-steps-core[dashboard]"``).
 
 The **tool contract** (``params`` / ``input_schema`` / ``guardrails``) is the
 generic UI schema. Each tool carries a ``ToolUI`` (``operation.ui``) holding
@@ -23,7 +34,6 @@ Streamlit is imported lazily so importing this module never requires it.
 
 from __future__ import annotations
 
-import argparse
 import os
 import sys
 from typing import Any
@@ -213,28 +223,13 @@ def _to_dataframe(value: Any):
 # ─────────────────────────────────────────────────────────────────────────
 # The Streamlit app (imports streamlit lazily; runs under `streamlit run`)
 # ─────────────────────────────────────────────────────────────────────────
-def _render_app() -> None:
+def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
     import streamlit as st
 
     from simple_steps_core.domain.models import ExecutionConfig, OrchestrationConfig, StepSpec, StepStatus
     from simple_steps_core.execution.engine import CoreEngine
     from simple_steps_core.execution.workflow import Workflow
 
-    @st.cache_resource
-    def _load(path: str):
-        module = load_tools_module(path)
-        if not REGISTRY.has("map"):
-            register_orchestrators(REGISTRY)
-        config = dict(getattr(module, "CONFIG", {}) or {})
-        resources = dict(getattr(module, "RESOURCES", {}) or {})
-        return module, config, resources
-
-    tools_path = os.environ.get(_ENV_TOOLS) or (sys.argv[1] if len(sys.argv) > 1 else None)
-    if not tools_path:
-        st.error("No tools file given. Run: simple-steps-core-dashboard mytools.py")
-        return
-
-    _module, config, resources = _load(tools_path)
     definitions = REGISTRY.list_definitions()
     tool_ids = [d.operation_id for d in definitions]
 
@@ -793,18 +788,19 @@ def _render_app() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Console-script entry point
+# Importable entry point
 # ─────────────────────────────────────────────────────────────────────────
-def main(argv: list[str] | None = None) -> None:
-    """``simple-steps-core-dashboard SCRIPT`` — launch the Streamlit dashboard."""
-    parser = argparse.ArgumentParser(
-        prog="simple-steps-core-dashboard",
-        description="Launch a Streamlit dashboard for the tools declared in a Python script.",
-    )
-    parser.add_argument("script", help="Path to a Python script that declares tools.")
-    parser.add_argument("--port", type=int, default=None)
-    args = parser.parse_args(argv)
+def _under_streamlit_runtime() -> bool:
+    """True when this process is already running under ``streamlit run``."""
+    try:
+        from streamlit.runtime import Runtime
+    except Exception:
+        return False
+    return Runtime.exists()
 
+
+def _launch_streamlit(script_path: str, *, port: int | None = None) -> None:
+    """Relaunch ``script_path``'s tools under ``streamlit run`` (this module)."""
     try:
         from streamlit.web import cli as stcli  # noqa: F401
     except ImportError as exc:  # pragma: no cover - optional extra
@@ -815,12 +811,78 @@ def main(argv: list[str] | None = None) -> None:
 
     import subprocess
 
-    env = {**os.environ, _ENV_TOOLS: os.path.abspath(args.script)}
+    env = {**os.environ, _ENV_TOOLS: os.path.abspath(script_path)}
     cmd = ["streamlit", "run", os.path.abspath(__file__)]
-    if args.port:
-        cmd += ["--server.port", str(args.port)]
+    if port:
+        cmd += ["--server.port", str(port)]
     raise SystemExit(subprocess.call(cmd, env=env))
 
 
+def _render_from_env() -> None:
+    """Streamlit entry: load the tools file named in the environment, then render."""
+    import streamlit as st
+
+    @st.cache_resource
+    def _load(path: str):
+        module = load_tools_module(path)
+        if not REGISTRY.has("map"):
+            register_orchestrators(REGISTRY)
+        config = dict(getattr(module, "CONFIG", {}) or {})
+        resources = dict(getattr(module, "RESOURCES", {}) or {})
+        return config, resources
+
+    tools_path = os.environ.get(_ENV_TOOLS) or (sys.argv[1] if len(sys.argv) > 1 else None)
+    if not tools_path:
+        st.error("No tools file given. Call Dashboard().run() from your tools script.")
+        return
+
+    config, resources = _load(tools_path)
+    _render_app(config, resources)
+
+
+class Dashboard:
+    """Run the generic workflow dashboard for the tools in your own script.
+
+    Put this at the bottom of the same script that registers your tools::
+
+        from simple_steps_core import register_tool
+        from simple_steps_core.streamlit import Dashboard
+
+        @register_tool("add")
+        def add(a: int, b: int) -> int:
+            return a + b
+
+        CONFIG = {"title": "My Tools"}   # optional
+        RESOURCES = {}                    # optional
+
+        if __name__ == "__main__":
+            Dashboard().run()
+
+    Then start it with ``python myscript.py``. Pass ``port=`` to override the
+    port from ``CONFIG``.
+    """
+
+    def __init__(self, *, port: int | None = None) -> None:
+        self._port = port
+
+    def run(self) -> None:
+        caller = sys._getframe(1).f_globals
+
+        if _under_streamlit_runtime():
+            # `streamlit run myscript.py` — tools are already registered above.
+            if not REGISTRY.has("map"):
+                register_orchestrators(REGISTRY)
+            config = dict(caller.get("CONFIG", {}) or {})
+            resources = dict(caller.get("RESOURCES", {}) or {})
+            _render_app(config, resources)
+            return
+
+        script = caller.get("__file__")
+        if not script:
+            raise SystemExit("Dashboard().run() must be called from a script file.")
+        config = dict(caller.get("CONFIG", {}) or {})
+        _launch_streamlit(script, port=self._port or config.get("port"))
+
+
 if __name__ == "__main__":
-    _render_app()
+    _render_from_env()

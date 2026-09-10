@@ -7,6 +7,7 @@ Turn a plain Python script that just *declares tools* into a running HTTP API.
 A user writes a script like::
 
     from simple_steps_core import register_tool
+    from simple_steps_core.serving import Server
 
     @register_tool("add")
     def add(a: int, b: int) -> int:
@@ -14,19 +15,20 @@ A user writes a script like::
 
     CONFIG = {"title": "My Tools", "port": 8000}   # optional
 
-and runs it with the console script::
+    if __name__ == "__main__":
+        Server().run()
 
-    simple-steps-core-server myscript.py
-
-The CLI imports the script (which registers its tools on ``REGISTRY``), adds the
-built-in orchestrators, and serves three endpoints: ``GET /tools``, ``POST
-/call``, and ``POST /run``. FastAPI/uvicorn are optional — install the ``api``
-extra (``pip install "simple-steps-core[api]"``).
+and runs it with ``python myscript.py``. Importing this file registers its tools
+on ``REGISTRY``; ``Server().run()`` adds the built-in orchestrators and serves
+three endpoints: ``GET /tools``, ``POST /call``, and ``POST /run``.
+FastAPI/uvicorn are optional — install the ``api`` extra (``pip install
+"simple-steps-core[api]"``).
 """
 
 from __future__ import annotations
 
-import argparse
+import sys
+import types
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -34,7 +36,6 @@ from pydantic import BaseModel, Field
 from .domain.models import StepSpec, ToolCall
 from .execution.engine import CoreEngine
 from .execution.workflow import Workflow
-from .loader import load_tools_module
 from .operations.orchestrations import register_orchestrators
 from .operations.registry import REGISTRY, OperationRegistry
 from .operations.validation import ValidationError, validate_tool_call
@@ -162,29 +163,49 @@ def app_from_module(module, *, registry: OperationRegistry = REGISTRY) -> tuple[
     return app, config
 
 
-def main(argv: list[str] | None = None) -> None:
-    """Console-script entry point: ``simple-steps-core-server SCRIPT``."""
-    parser = argparse.ArgumentParser(
-        prog="simple-steps-core-server",
-        description="Serve the tools declared in a Python script as an HTTP API.",
-    )
-    parser.add_argument("script", help="Path to a Python script that declares tools.")
-    parser.add_argument("--host", default=None, help="Bind host (default 127.0.0.1).")
-    parser.add_argument("--port", type=int, default=None, help="Bind port (default 8000).")
-    args = parser.parse_args(argv)
+class Server:
+    """Serve the tools registered in your own script as an HTTP API.
 
-    module = load_tools_module(args.script)
-    app, config = app_from_module(module)
+    Put this at the bottom of the same script that registers your tools::
 
-    host = args.host or config.get("host", "127.0.0.1")
-    port = args.port or config.get("port", 8000)
+        from simple_steps_core import register_tool
+        from simple_steps_core.serving import Server
 
-    try:
-        import uvicorn
-    except ImportError as exc:  # pragma: no cover - depends on optional extra
-        raise SystemExit(
-            "The server needs FastAPI + uvicorn. Install them with:\n"
-            '    pip install "simple-steps-core[api]"'
-        ) from exc
+        @register_tool("add")
+        def add(a: int, b: int) -> int:
+            return a + b
 
-    uvicorn.run(app, host=host, port=port)
+        CONFIG = {"title": "My Tools", "port": 8000}   # optional
+        RESOURCES = {}                                  # optional
+
+        if __name__ == "__main__":
+            Server().run()
+
+    Then start it with ``python myscript.py``. Pass ``host=`` / ``port=`` to
+    override the values from ``CONFIG``.
+    """
+
+    def __init__(self, *, host: str | None = None, port: int | None = None) -> None:
+        self._host = host
+        self._port = port
+
+    def run(self) -> None:
+        caller = sys._getframe(1).f_globals
+        module = types.SimpleNamespace(
+            CONFIG=dict(caller.get("CONFIG", {}) or {}),
+            RESOURCES=dict(caller.get("RESOURCES", {}) or {}),
+        )
+        app, config = app_from_module(module)
+
+        host = self._host or config.get("host", "127.0.0.1")
+        port = self._port or config.get("port", 8000)
+
+        try:
+            import uvicorn
+        except ImportError as exc:  # pragma: no cover - depends on optional extra
+            raise SystemExit(
+                "The server needs FastAPI + uvicorn. Install them with:\n"
+                '    pip install "simple-steps-core[api]"'
+            ) from exc
+
+        uvicorn.run(app, host=host, port=port)

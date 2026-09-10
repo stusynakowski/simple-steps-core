@@ -3,6 +3,6 @@
 Import stays cheap: Streamlit itself is only imported when the dashboard runs.
 """
 
-from .dashboard import main, render_tool_form
+from .dashboard import Dashboard, render_tool_form
 
-__all__ = ["main", "render_tool_form"]
+__all__ = ["Dashboard", "render_tool_form"]

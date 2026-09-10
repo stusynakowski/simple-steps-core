@@ -108,39 +108,51 @@ uvicorn examples.api_server.app:app --reload   # http://127.0.0.1:8000/docs
 
 ## One-command tool server
 
-Write a script that only declares tools, then serve it with the bundled command
-— no server boilerplate:
+Write a script that declares tools and runs the server from the same file —
+no server boilerplate:
 
 ```python
 # mytools.py
 from simple_steps_core import register_tool
+from simple_steps_core.serving import Server
 
 @register_tool("add", description="Add two numbers.")
 def add(a: int, b: int) -> int:
     return a + b
 
 CONFIG = {"title": "My Tools", "port": 8000}   # optional
+
+if __name__ == "__main__":
+    Server().run()
 ```
 
 ```bash
 python -m pip install -e ".[api]"
-simple-steps-core-server mytools.py            # http://127.0.0.1:8000/docs
+python mytools.py                              # http://127.0.0.1:8000/docs
 ```
 
-The command imports your script, adds the built-in orchestrators, and serves
-`GET /tools`, `POST /call` (run one tool), and `POST /run` (run a workflow of
-steps). A runnable script is in [example_server.py](example_server.py). Optional
-script settings: `CONFIG` (`title`/`host`/`port`/`orchestrators`/`freeze`) and
+`Server().run()` adds the built-in orchestrators and serves `GET /tools`,
+`POST /call` (run one tool), and `POST /run` (run a workflow of steps). A
+runnable script is in [example_server.py](example_server.py). Optional script
+settings: `CONFIG` (`title`/`host`/`port`/`orchestrators`/`freeze`) and
 `RESOURCES` (name → factory) for tools that declare `Resource()` parameters.
 
 ## Streamlit dashboard (optional UI)
 
 The same tools file can also drive a local **Streamlit** dashboard for building
-and running workflows — a UI counterpart to the server:
+and running workflows — a UI counterpart to the server. Import `Dashboard` and
+call it at the bottom of your script:
+
+```python
+from simple_steps_core.streamlit import Dashboard
+
+if __name__ == "__main__":
+    Dashboard().run()
+```
 
 ```bash
 python -m pip install -e ".[dashboard]"
-simple-steps-core-dashboard mytools.py
+python mytools.py
 ```
 
 The tool **contract** is the generic UI schema, rendered many independent ways.
