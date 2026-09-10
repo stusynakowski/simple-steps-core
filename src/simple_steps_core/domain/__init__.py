@@ -1,7 +1,7 @@
-from .models import OperationDefinition, OperationParam, ToolCall
+from .models import ToolDefinition, ToolParam, ToolCall
 
 __all__ = [
-    "OperationDefinition",
-    "OperationParam",
+    "ToolDefinition",
+    "ToolParam",
     "ToolCall",
 ]

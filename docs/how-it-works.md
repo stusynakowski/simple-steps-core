@@ -5,7 +5,10 @@ is, why it exists, and how the pieces fit together to turn a plain Python
 function into an orchestratable, session-aware, serializable tool.
 
 > For task-oriented backend wiring, see the [Integration Guide](integration.md).
-> For the forward-looking design (MCP/LangGraph adapters, structured `StepSpec`,
+> For the canonical top-down object model (`App` → `Session` → `Workflow` →
+> `Step` = `Operation` + `Data`) and the execution model, see
+> [object-model.md](object-model.md) and [execution-model.md](execution-model.md).
+> For the forward-looking design (MCP/LangGraph adapters, structured `Operation`,
 > agent planner), see [specs/011](../specs/011-tool-orchestration-and-agent-workflows.md).
 > This page documents **what is built now**.
 
@@ -42,7 +45,7 @@ simple_steps_core/                    ← import only from the package root
 │
 ├─ api/                    STABLE PUBLIC SURFACE
 │  ├─ public.py            re-exports every name below (the only import point)
-│  └─ decorators.py        register_operation (alias)
+│  └─ decorators.py        register_tool   the decorator
 │
 ├─ serving.py              OPTIONAL HTTP LAYER  (needs the `api` extra)
 │  ├─ build_app(registry, engine)   → FastAPI: GET /tools · POST /call · POST /run
@@ -50,7 +53,7 @@ simple_steps_core/                    ← import only from the package root
 │
 ├─ execution/              HOW things run + WHERE data lives
 │  ├─ workflow.py   Workflow           ordered steps; run()/arun()/run_step();
-│  │                                   author via  wf[id] = ToolCall | StepSpec
+│  │                                   author via  wf[id] = ToolCall | Operation
 │  ├─ engine.py     CoreEngine          validate → resolve → inject → run → store
 │  │               ExecutionHandle      handed to orchestrators for per-item sub-calls
 │  ├─ resolver.py   ReferenceResolver   turns "step1.field" into the real value
@@ -63,9 +66,9 @@ simple_steps_core/                    ← import only from the package root
 │  └─ session_manager.py SessionManager · make_session_id   per-user isolation
 │
 ├─ operations/             WHAT a tool is; introspection; checking
-│  ├─ registry.py   Operation           dual-mode: op(**kw)→ToolCall / op.run(**kw)
-│  │               OperationRegistry    name→op; list_definitions(); freeze()
-│  │               register_operation   the decorator
+│  ├─ registry.py   Tool                dual-mode: op(**kw)→ToolCall / op.run(**kw)
+│  │               ToolRegistry    name→op; list_definitions(); freeze()
+│  │               register_tool   the decorator
 │  ├─ schema.py     build_input_schema / build_output_schema   (JSON Schema)
 │  ├─ dependencies.py  Resource()       marks an injected resource parameter
 │  ├─ validation.py    validate_tool_call   do the args satisfy the contract?
@@ -73,10 +76,10 @@ simple_steps_core/                    ← import only from the package root
 │
 ├─ domain/                 PURE shapes + grammar  (depends on NOTHING above)
 │  ├─ models.py     ToolCall            {operation_id, arguments}      ← the call
-│  │               StepSpec            {name, arguments, orchestration, execution}
-│  │               OrchestrationConfig · ExecutionConfig
+│  │               Operation            {name, arguments, orchestration, execution}
+│  │               OrchestrationConfig · StepExecutionConfig
 │  │               Step · StepOutput · StepResult · Shape · Cell · StepError
-│  │               OperationDefinition · OperationParam           ← the contract
+│  │               ToolDefinition · ToolParam           ← the contract
 │  │               MapResult · ItemOutcome                 ← orchestrator results
 │  └─ references.py is_reference / split_reference    grammar: token starts with `step`
 │
@@ -100,11 +103,11 @@ from simple_steps_core import (
 )
 ```
 
-**Terminology:** *tool* and *operation* are the same thing — `register_tool` /
-`register_operation`, `ToolRegistry` / `OperationRegistry`, `ToolDefinition` /
-`OperationDefinition`, `ToolParam` / `OperationParam` are interchangeable
-aliases; **`tool` is the preferred name**. The serialized field stays
-`operation_id` (also readable as `.tool_id`).
+**Terminology:** a **Tool** is the registered capability (`register_tool`,
+`ToolRegistry`, `ToolDefinition`, `ToolParam`). An **Operation** is a Tool
+*equipped* to run as a step (arguments + orchestration + execution; formerly
+`StepSpec`). The serialized field on a call stays `operation_id` (also readable
+as `.tool_id`).
 
 ### What crosses each boundary
 
@@ -113,8 +116,8 @@ an internal detail:
 
 | Crossing | Object | Direction |
 | --- | --- | --- |
-| author → engine | `ToolCall` (or `StepSpec`, compiled to one) | a call to run |
-| registry → UI / agent | `OperationDefinition` (+ `input_schema`) | the tool contract |
+| author → engine | `ToolCall` (or `Operation`, compiled to one) | a call to run |
+| registry → UI / agent | `ToolDefinition` (+ `input_schema`) | the tool contract |
 | inside `ToolCall.arguments` | reference token `"step1.field"` | wiring, resolved at run time |
 | engine → session | `ref` string + `DataEntry` | where an output went |
 | session → disk/DB | `SessionSnapshot` | persistence |
@@ -137,7 +140,7 @@ Workflow.run_step("step2")
          └─ back on the Step: status=COMPLETED, output.ref/value set
 ```
 
-A `StepSpec` adds one step in front of this: `StepSpec.to_tool_call()` compiles
+An `Operation` adds one step in front of this: `Operation.to_tool_call()` compiles
 it to the `ToolCall` above (a `single` step → a direct call; `map`/`filter`/
 `expand`/`collapse` → a call to that orchestrator with the step's tool as `op`).
 
@@ -185,7 +188,7 @@ meet.
 
 ```mermaid
 flowchart TB
-    subgraph Step["STEP — StepSpec (one invocation)"]
+    subgraph Step["STEP — Operation (one invocation)"]
         SID["step_id"]
         NM["name (which tool to run)"]
         AR["arguments (data: literal or $ref)"]
@@ -288,7 +291,7 @@ def make_list(n: int) -> list[int]:
     return list(range(n))
 ```
 
-The decorator returns an `Operation` wrapper (not the raw function) that works in
+The decorator returns a `Tool` wrapper (not the raw function) that works in
 **two modes**:
 
 ```python
@@ -320,9 +323,9 @@ Every parameter is classified at registration time into one of two **kinds**:
 Mark a resource by giving the parameter a `Resource()` default:
 
 ```python
-from simple_steps_core import register_operation, Resource
+from simple_steps_core import register_tool, Resource
 
-@register_operation("load_orders")
+@register_tool("load_orders")
 def load_orders(region: str, db: Database = Resource()) -> list[dict]:
     return db.query("SELECT * FROM orders WHERE region = ?", region)
 ```
@@ -337,17 +340,17 @@ the parameter name.
 
 ---
 
-## 5. The contract: OperationDefinition + JSON Schema
+## 5. The contract: ToolDefinition + JSON Schema
 
-Registering a function introspects its signature into an `OperationDefinition` —
-the operation's public, JSON-serializable contract:
+Registering a function introspects its signature into a `ToolDefinition` —
+the tool's public, JSON-serializable contract:
 
 ```python
 d = REGISTRY.get_definition("load_orders")
 d.operation_id   # "load_orders"
 d.description     # first paragraph of the docstring (or the given description)
-d.params          # [OperationParam(name="region", kind="data", required=True, ...),
-                  #  OperationParam(name="db", kind="resource", required=True, ...)]
+d.params          # [ToolParam(name="region", kind="data", required=True, ...),
+                  #  ToolParam(name="db", kind="resource", required=True, ...)]
 d.input_schema    # JSON Schema for the DATA params only
 d.output_schema   # JSON Schema derived from the return annotation
 d.dependencies    # ["db"]  — the resource params
@@ -371,7 +374,7 @@ function-calling tool — one signature, one schema, no hand-maintained duplicat
 
 ### UI and guardrails
 
-Each `OperationDefinition` also carries two optional, serializable fields:
+Each `ToolDefinition` also carries two optional, serializable fields:
 
 - **`ui`** — a [prefab-ui](https://prefab.prefect.io) protocol declaration. A
   legacy declaration is one input document (`{"view": ..., "state": ...}`).
@@ -472,19 +475,19 @@ is still knowable and checked in two ways:
 
 ## 8. The Registry — the palette
 
-The `OperationRegistry` holds every registered operation and lets you discover
+The `ToolRegistry` holds every registered operation and lets you discover
 them. There is a global singleton `REGISTRY`, or you can make an isolated one:
 
 ```python
-from simple_steps_core import OperationRegistry, register_orchestrators
+from simple_steps_core import ToolRegistry, register_orchestrators
 
-registry = OperationRegistry()
+registry = ToolRegistry()
 registry.register("make_list", make_list, description="Create [0..n-1]")
 register_orchestrators(registry)   # add map/filter/expand/collapse
 registry.freeze()                  # read-only for the process lifetime
 ```
 
-- `list_definitions()` → the whole palette (`list[OperationDefinition]`) — this
+- `list_definitions()` → the whole palette (`list[ToolDefinition]`) — this
   is what a frontend enumerates to render forms or nodes.
 - `get_definition` / `get_operation` / `get_callable` / `has` — lookups.
 - `freeze()` makes the registry read-only so concurrent reads are safe without
@@ -632,18 +635,18 @@ A **DAG** is derivable by scanning each step's `call.arguments` for reference
 tokens (`is_reference` + `split_reference`) — that's how the example server's
 `/dag` endpoint builds graph edges.
 
-### StepSpec — declaring orchestration when you define the step
+### Operation — declaring orchestration when you define the step
 
-Instead of assigning a raw `ToolCall`, you can assign a `StepSpec`: it names the
+Instead of assigning a raw `ToolCall`, you can assign an `Operation`: it names the
 tool and declares **inline** how to orchestrate and execute it. The workflow
 compiles it to the executable `ToolCall` and keeps the spec on the step for
 tracing.
 
 ```python
-from simple_steps_core import StepSpec, OrchestrationConfig
+from simple_steps_core import Operation, OrchestrationConfig
 
-wf.add(StepSpec(step_id="step_nums", name="make_list", arguments={"n": 4}))
-wf.add(StepSpec(                       # run `square` over each item of step_nums
+wf.add(Operation(step_id="step_nums", name="make_list", arguments={"n": 4}))
+wf.add(Operation(                       # run `square` over each item of step_nums
     step_id="step_squared",
     name="square",
     orchestration=OrchestrationConfig(mode="map", over="step_nums", concurrency=4),
@@ -655,8 +658,8 @@ wf["step_squared"].spec.orchestration.mode   # "map"  (intent retained)
 - `OrchestrationConfig` — `mode` (`single`/`map`/`filter`/`expand`/`collapse`),
   `over` (collection reference), `item_arg`, `concurrency`, `on_error`,
   `retries`, `initial` (for `collapse`).
-- `ExecutionConfig` — `mode` (`sync`/`async`), `run` (`auto`/`manual`),
-  `timeout`, `retries`, `cache`.
+- `StepExecutionConfig` — `run` (`auto`/`manual`), `timeout`, `retries`,
+  `cache`. (`mode` sync/async is derived from the tool, not configured.)
 
 A `single` step compiles to a direct call; the orchestrated modes compile to the
 matching orchestrator with this step's tool as the per-item `op`. An orchestrated
@@ -670,9 +673,9 @@ A step may declare a `stage` (an int or string). Stages let you run the workflow
 in groups — e.g. run stage 0, inspect, then run stage 1 — instead of all at once.
 
 ```python
-wf.add(StepSpec(step_id="step_load",  name="load",    stage=0))
-wf.add(StepSpec(step_id="step_clean", name="clean",   stage=0, arguments={"data": "step_load"}))
-wf.add(StepSpec(step_id="step_report",name="report",  stage=1, arguments={"data": "step_clean"}))
+wf.add(Operation(step_id="step_load",  name="load",    stage=0))
+wf.add(Operation(step_id="step_clean", name="clean",   stage=0, arguments={"data": "step_load"}))
+wf.add(Operation(step_id="step_report",name="report",  stage=1, arguments={"data": "step_clean"}))
 
 wf.stages()            # [0, 1]  (first-appearance order)
 wf.run_stage(0)        # runs step_load + step_clean only
@@ -783,11 +786,11 @@ Everything above, together — a resource, data args, a reference, and a `map`:
 
 ```python
 from simple_steps_core import (
-    OperationRegistry, CoreEngine, Workflow, ToolCall,
-    Resource, register_operation, register_orchestrators,
+    ToolRegistry, CoreEngine, Workflow, ToolCall,
+    Resource, register_tool, register_orchestrators,
 )
 
-registry = OperationRegistry()
+registry = ToolRegistry()
 
 def load_orders(region: str, db=Resource()) -> list[dict]:   # data + resource
     return db.fetch(region)
@@ -825,7 +828,7 @@ print(totals.ok, totals.failed_count)
 
 The pieces above are exactly what MCP tools and LLM function-calling need:
 
-- `OperationDefinition.input_schema` is MCP-/OpenAI-native JSON Schema.
+- `ToolDefinition.input_schema` is MCP-/OpenAI-native JSON Schema.
 - `dependencies` (resources) are automatically hidden from that schema.
 - A `ToolCall` is one call; a `Workflow` is an ordered list of calls with
   references — richer than a flat MCP `tools/call` batch.
@@ -834,7 +837,7 @@ The pieces above are exactly what MCP tools and LLM function-calling need:
 
 - **Adapters** to export tools to an MCP server / import remote MCP tools, and
   to LangGraph / OpenAI.
-- An **agent planner** that proposes a whole `list[StepSpec]` for a user to
+- An **agent planner** that proposes a whole `list[Operation]` for a user to
   trace, edit, and run.
 - Pluggable **checkpointers** and a cross-session long-term store.
 
@@ -844,12 +847,12 @@ The pieces above are exactly what MCP tools and LLM function-calling need:
 
 | Concept | Module | Key names |
 | --- | --- | --- |
-| Decorator / registry | `operations/registry.py` | `register_operation`, `OperationRegistry`, `REGISTRY`, `Operation` |
+| Decorator / registry | `operations/registry.py` | `register_tool`, `ToolRegistry`, `REGISTRY`, `Tool` |
 | Resource marker | `operations/dependencies.py` | `Resource` |
 | JSON Schema | `operations/schema.py` | `build_input_schema`, `build_output_schema` |
 | Validation | `operations/validation.py` | `validate_tool_call`, `ValidationError` |
 | Orchestrators | `operations/orchestrations.py` | `register_orchestrators` |
-| Models | `domain/models.py` | `ToolCall`, `Step`, `OperationDefinition`, `OperationParam`, `MapResult` |
+| Models | `domain/models.py` | `ToolCall`, `Step`, `ToolDefinition`, `ToolParam`, `MapResult` |
 | References | `domain/references.py` | `is_reference`, `split_reference` |
 | Engine | `execution/engine.py` | `CoreEngine`, `ExecutionHandle` |
 | Session | `execution/context.py` | `SessionContext` |

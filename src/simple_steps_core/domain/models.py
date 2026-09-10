@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 # ─────────────────────────────────────────────────────────────────────────
 # Operation description (the "shape" of a registered tool)
 # ─────────────────────────────────────────────────────────────────────────
-class OperationParam(BaseModel):
+class ToolParam(BaseModel):
     """One parameter of an operation, derived from its function signature."""
 
     name: str
@@ -67,7 +67,7 @@ class Guardrails(BaseModel):
     model_config = {"frozen": True}
 
 
-class OperationDefinition(BaseModel):
+class ToolDefinition(BaseModel):
     """A registered operation's public contract (id + params + docs)."""
 
     operation_id: str
@@ -82,7 +82,7 @@ class OperationDefinition(BaseModel):
         "raw_output",
         "orchestrator",
     ] = "raw_output"
-    params: list[OperationParam] = Field(default_factory=list)
+    params: list[ToolParam] = Field(default_factory=list)
     input_schema: dict[str, Any] = Field(default_factory=dict)   # JSON Schema (data params)
     output_schema: dict[str, Any] | None = None                  # JSON Schema (return type)
     dependencies: list[str] = Field(default_factory=list)        # resource param names
@@ -94,6 +94,23 @@ class OperationDefinition(BaseModel):
     def tool_id(self) -> str:
         """Preferred alias for :attr:`operation_id` (a definition names a tool)."""
         return self.operation_id
+
+    def __repr__(self) -> str:
+        return f"<ToolDefinition {self.operation_id!r} · {len(self.params)} param(s)>"
+
+    def info(self):
+        """A tabular view of the tool's contract (params + docs)."""
+        from ..inspect import SummaryTable
+
+        table = SummaryTable(
+            f"Tool · {self.operation_id}",
+            caption=self.description,
+            columns=["param", "type", "required", "default", "kind"],
+        )
+        for p in self.params:
+            table.add_row(p.name, p.type_name, p.required,
+                          "" if p.default is None else p.default, p.kind)
+        return table
 
 # ─────────────────────────────────────────────────────────────────────────
 # ToolCall (a durable, serialized invocation of one operation)
@@ -150,6 +167,15 @@ class StepOutput(BaseModel):
     ref: str | None = None          # session-store key for the full data
     value: Any = None               # inline value for small results (optional)
     kind: str | None = None         # "dataframe", "raw", "list", etc.
+    started_at: float | None = None  # epoch seconds when the step began
+    ended_at: float | None = None    # epoch seconds when the step finished
+
+    @property
+    def duration(self) -> float | None:
+        """Wall-clock seconds the step took, if it has run."""
+        if self.started_at is None or self.ended_at is None:
+            return None
+        return self.ended_at - self.started_at
 
 
 class Shape(BaseModel):
@@ -214,14 +240,46 @@ class OrchestrationConfig(BaseModel):
     model_config = {"frozen": True}
 
 
-class ExecutionConfig(BaseModel):
-    """How a step is invoked (orthogonal to orchestration)."""
+class StepExecutionConfig(BaseModel):
+    """How **one tool call** is invoked (orthogonal to orchestration).
 
-    mode: Literal["sync", "async"] = "sync"
-    run: Literal["auto", "manual"] = "manual"   # user controls execution by default
+    Isolated to the step scope: it never inherits from or overrides the stage
+    or workflow configs (see docs/object-model.md). ``mode`` (sync/async) is
+    derived from the tool, not set here.
+    """
+
+    run: Literal["auto", "manual"] = "manual"   # gate this step
     timeout: float | None = None
     retries: int = 0
     cache: bool = False
+
+    model_config = {"frozen": True}
+
+
+class StageExecutionConfig(BaseModel):
+    """How a **stage's steps** run together (phase-level coordination).
+
+    Isolated to the stage scope. ``steps='parallel'`` is only valid when the
+    stage's steps do not reference one another.
+    """
+
+    steps: Literal["sequential", "parallel"] = "sequential"
+    concurrency: int = 1
+    on_step_error: Literal["stop", "continue"] = "stop"
+    run: Literal["auto", "manual"] = "manual"   # gate this phase
+
+    model_config = {"frozen": True}
+
+
+class WorkflowExecutionConfig(BaseModel):
+    """How a **workflow's stages** run (top-level coordination).
+
+    Isolated to the workflow scope.
+    """
+
+    stages: Literal["sequential"] = "sequential"
+    on_stage_error: Literal["stop", "continue"] = "stop"
+    run: Literal["auto", "manual"] = "manual"   # gate the whole workflow
 
     model_config = {"frozen": True}
 
@@ -230,7 +288,7 @@ class ExecutionConfig(BaseModel):
 _ORCH_DEFAULT_ON_ERROR = {"map": "collect", "expand": "collect", "filter": "skip"}
 
 
-class StepSpec(BaseModel):
+class Operation(BaseModel):
     """A structured step: a tool to run plus how to orchestrate and execute it.
 
     Orchestration is declared **when the step is defined**: the step names the
@@ -244,9 +302,20 @@ class StepSpec(BaseModel):
     stage: int | str | None = None               # optional group for staged execution
     arguments: dict[str, Any] = Field(default_factory=dict)
     orchestration: OrchestrationConfig = Field(default_factory=OrchestrationConfig)
-    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
+    execution: StepExecutionConfig = Field(default_factory=StepExecutionConfig)
 
     model_config = {"frozen": True}
+
+    @property
+    def tool(self) -> str:
+        """The id of the Tool this operation runs (alias of :attr:`name`)."""
+        return self.name
+
+    def __repr__(self) -> str:
+        mode = self.orchestration.mode
+        breadth = "" if mode == "single" else f" {mode}(over={self.orchestration.over!r})"
+        stage = "" if self.stage is None else f" stage={self.stage!r}"
+        return f"<Operation {self.step_id!r} tool={self.name!r}{breadth}{stage}>"
 
     def to_tool_call(self) -> ToolCall:
         """Compile this spec into the executable ToolCall.
@@ -289,11 +358,14 @@ class Step(BaseModel):
 
     step_id: str
     call: ToolCall                  # the structured operation invocation
-    spec: StepSpec | None = None    # structured authoring intent (if built from a StepSpec)
+    spec: Operation | None = None    # structured authoring intent (if built from a Operation)
     status: StepStatus = StepStatus.PENDING
     output: StepOutput = Field(default_factory=StepOutput)
     error: str | None = None
-
+    def __repr__(self) -> str:
+        dur = self.output.duration
+        tail = "" if dur is None else f" {dur:.3f}s"
+        return f"<Step {self.step_id!r} {self.status.value} tool={self.call.operation_id!r}{tail}>"
 
 # ─────────────────────────────────────────────────────────────────────────
 # Orchestrator outcomes (iterative / partial-failure results)
@@ -348,3 +420,7 @@ class MapResult(BaseModel):
     @property
     def failed_count(self) -> int:
         return sum(1 for o in self.outcomes if o.status is StepStatus.FAILED)
+
+    def __repr__(self) -> str:
+        return (f"<MapResult {self.ok_count} ok, {self.failed_count} failed "
+                f"of {len(self.outcomes)}>")

@@ -1,7 +1,7 @@
 """Agent planning for the simple-steps app.
 
 The agent's job is to turn a natural-language goal (plus the current workflow)
-into a **validated list of StepSpec** the user can review, edit, and run. This
+into a **validated list of Operation** the user can review, edit, and run. This
 module defines:
 
 - ``Planner`` — the protocol the backend depends on.
@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from simple_steps_core import (
-    StepSpec,
+    Operation,
     ToolRegistry,
     ValidationError,
     validate_tool_call,
@@ -29,10 +29,10 @@ from simple_steps_core import (
 class Planner(Protocol):
     """Proposes/modifies a list of steps for a goal and current workflow."""
 
-    def propose(self, goal: str, current: list[StepSpec]) -> list[StepSpec]: ...
+    def propose(self, goal: str, current: list[Operation]) -> list[Operation]: ...
 
 
-def validate_step(spec: StepSpec, registry: ToolRegistry) -> None:
+def validate_step(spec: Operation, registry: ToolRegistry) -> None:
     """Raise ValidationError/ValueError if *spec* is not runnable as-is."""
     if not registry.has(spec.name):
         raise ValidationError(f"Unknown operation: {spec.name!r}")
@@ -40,10 +40,10 @@ def validate_step(spec: StepSpec, registry: ToolRegistry) -> None:
 
 
 def validate_steps(
-    steps: list[StepSpec], registry: ToolRegistry
-) -> tuple[list[StepSpec], list[dict]]:
+    steps: list[Operation], registry: ToolRegistry
+) -> tuple[list[Operation], list[dict]]:
     """Split *steps* into (valid, invalid). Invalid items carry a reason."""
-    valid: list[StepSpec] = []
+    valid: list[Operation] = []
     invalid: list[dict] = []
     for spec in steps:
         try:
@@ -61,9 +61,9 @@ def validate_steps(
 # them. Configure an LLM (e.g. OPENAI_API_KEY) to use it.
 # ─────────────────────────────────────────────────────────────────────────
 def build_langgraph_planner(registry: ToolRegistry, *, model: str = "openai:gpt-4o-mini") -> Planner:
-    """Build an LLM planner that emits a validated ``list[StepSpec]``.
+    """Build an LLM planner that emits a validated ``list[Operation]``.
 
-    Uses structured output (the LLM must return objects matching ``StepSpec``),
+    Uses structured output (the LLM must return objects matching ``Operation``),
     grounded on the operation palette + JSON Schemas. Wrap this as a LangGraph
     node in your app if you want memory / multi-turn planning.
     """
@@ -71,14 +71,14 @@ def build_langgraph_planner(registry: ToolRegistry, *, model: str = "openai:gpt-
     from pydantic import BaseModel, Field
 
     class Proposal(BaseModel):
-        steps: list[StepSpec] = Field(default_factory=list)
+        steps: list[Operation] = Field(default_factory=list)
         notes: str = ""
 
     palette = _palette_prompt(registry)
     llm = init_chat_model(model).with_structured_output(Proposal)
 
     class _LangGraphPlanner:
-        def propose(self, goal: str, current: list[StepSpec]) -> list[StepSpec]:
+        def propose(self, goal: str, current: list[Operation]) -> list[Operation]:
             messages = [
                 {"role": "system", "content": _SYSTEM_PROMPT + "\n\n" + palette},
                 {"role": "user", "content": _user_prompt(goal, current)},
@@ -111,7 +111,7 @@ def _palette_prompt(registry: ToolRegistry) -> str:
     return "\n".join(lines)
 
 
-def _user_prompt(goal: str, current: list[StepSpec]) -> str:
+def _user_prompt(goal: str, current: list[Operation]) -> str:
     if current:
         existing = ", ".join(s.step_id for s in current)
         return f"Current steps: {existing}\nGoal: {goal}\nReturn the full updated step list."

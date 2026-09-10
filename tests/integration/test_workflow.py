@@ -5,11 +5,11 @@ import pytest
 from simple_steps_core.execution.engine import CoreEngine
 from simple_steps_core.execution.workflow import Workflow
 from simple_steps_core.domain.models import StepStatus
-from simple_steps_core.operations.registry import OperationRegistry
+from simple_steps_core.operations.registry import ToolRegistry
 
 
 def _engine():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def make_list(n: int):
         return list(range(n))

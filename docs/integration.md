@@ -19,7 +19,7 @@ the single stable entrypoint:
 
 ```python
 from simple_steps_core import (
-    CoreEngine, OperationRegistry, Workflow,
+    CoreEngine, ToolRegistry, Workflow,
     register_orchestrators, make_session_id, SessionManager,
     SessionSnapshot, CodecRegistry, ToolCall, MapResult,
 )
@@ -63,9 +63,9 @@ registry is read-only, which makes concurrent reads safe across requests
 without locks.
 
 ```python
-from simple_steps_core import OperationRegistry, register_orchestrators
+from simple_steps_core import ToolRegistry, register_orchestrators
 
-registry = OperationRegistry()
+registry = ToolRegistry()
 
 def load_csv(filepath: str) -> list[dict]:
     ...
@@ -91,9 +91,9 @@ Group related operations in a module and load it on boot:
 
 ```python
 # my_app/ops/csv_ops.py
-from simple_steps_core import register_operation
+from simple_steps_core import register_tool
 
-@register_operation("load_csv", description="Load a CSV file")
+@register_tool("load_csv", description="Load a CSV file")
 def load_csv(filepath: str) -> list[dict]:
     ...
 ```
@@ -314,7 +314,7 @@ of giving each run its own `SessionContext`.
 
 | Component | Sharing rule |
 | --- | --- |
-| `OperationRegistry` | One per process; `freeze()` after startup; read-only thereafter. |
+| `ToolRegistry` | One per process; `freeze()` after startup; read-only thereafter. |
 | `CoreEngine` | Stateless; safe to share (takes context as an argument). |
 | `SessionContext` | One per run; never shared. |
 | `SessionManager` | One per process; in-memory (single process — see below). |

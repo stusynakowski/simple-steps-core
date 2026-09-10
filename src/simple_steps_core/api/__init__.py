@@ -1,2 +1,2 @@
-from .decorators import register_operation
+from .decorators import register_tool
 from .public import *

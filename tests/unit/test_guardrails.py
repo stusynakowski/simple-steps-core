@@ -5,7 +5,7 @@ import pytest
 from simple_steps_core import (
     ArgGuardrail,
     Guardrails,
-    OperationRegistry,
+    ToolRegistry,
     ToolCall,
     ValidationError,
     validate_tool_call,
@@ -13,7 +13,7 @@ from simple_steps_core import (
 
 
 def _registry():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def grade(score: int, kind: str = "A") -> str:
         return f"{kind}:{score}"
@@ -71,7 +71,7 @@ def test_guardrail_skips_reference_tokens():
 
 
 def test_no_guardrails_is_a_noop():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def add(a: int, b: int) -> int:
         return a + b
@@ -82,9 +82,9 @@ def test_no_guardrails_is_a_noop():
 
 def test_guardrail_enforced_on_resolved_reference_at_runtime():
     """A reference skips validation but its resolved value is guarded at run time."""
-    from simple_steps_core import CoreEngine, StepSpec, Workflow
+    from simple_steps_core import CoreEngine, Operation, Workflow
 
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def make_list(n: int) -> list[int]:
         return list(range(n))
@@ -98,8 +98,8 @@ def test_guardrail_enforced_on_resolved_reference_at_runtime():
     ))
 
     wf = Workflow(CoreEngine(registry), session_id="rt")
-    wf.add(StepSpec(step_id="step_nums", name="make_list", arguments={"n": 5}))   # length 5
-    wf.add(StepSpec(step_id="step_sum", name="total", arguments={"data": "step_nums"}))
+    wf.add(Operation(step_id="step_nums", name="make_list", arguments={"n": 5}))   # length 5
+    wf.add(Operation(step_id="step_sum", name="total", arguments={"data": "step_nums"}))
 
     with pytest.raises(Exception):   # the resolved list violates max_length=3
         wf.run()

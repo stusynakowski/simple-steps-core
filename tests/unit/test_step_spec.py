@@ -1,14 +1,14 @@
-"""Tests for the structured StepSpec (inline orchestration) and its compilation."""
+"""Tests for the structured Operation (inline orchestration) and its compilation."""
 
 import pytest
 
 from simple_steps_core import (
     CoreEngine,
-    ExecutionConfig,
+    StepExecutionConfig,
     MapResult,
-    OperationRegistry,
+    ToolRegistry,
     OrchestrationConfig,
-    StepSpec,
+    Operation,
     StepStatus,
     ToolCall,
     Workflow,
@@ -17,7 +17,7 @@ from simple_steps_core import (
 
 
 def _engine():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def make_list(n: int) -> list[int]:
         return list(range(n))
@@ -36,12 +36,12 @@ def _engine():
 
 
 def test_single_spec_compiles_to_direct_call():
-    spec = StepSpec(step_id="s1", name="make_list", arguments={"n": 3})
+    spec = Operation(step_id="s1", name="make_list", arguments={"n": 3})
     assert spec.to_tool_call() == ToolCall(operation_id="make_list", arguments={"n": 3})
 
 
 def test_map_spec_compiles_to_orchestrator_call():
-    spec = StepSpec(
+    spec = Operation(
         step_id="s2",
         name="double",
         orchestration=OrchestrationConfig(mode="map", over="s1", concurrency=4),
@@ -58,7 +58,7 @@ def test_map_spec_compiles_to_orchestrator_call():
 
 
 def test_collapse_spec_passes_initial_only():
-    spec = StepSpec(
+    spec = Operation(
         step_id="s3",
         name="add",
         orchestration=OrchestrationConfig(mode="collapse", over="s2", initial=0),
@@ -70,16 +70,16 @@ def test_collapse_spec_passes_initial_only():
 
 def test_over_required_for_orchestrated_modes():
     with pytest.raises(ValueError):
-        StepSpec(step_id="s", name="double", orchestration=OrchestrationConfig(mode="map")).to_tool_call()
+        Operation(step_id="s", name="double", orchestration=OrchestrationConfig(mode="map")).to_tool_call()
 
 
 def test_over_forbidden_for_single_mode():
     with pytest.raises(ValueError):
-        StepSpec(step_id="s", name="double", orchestration=OrchestrationConfig(over="s1")).to_tool_call()
+        Operation(step_id="s", name="double", orchestration=OrchestrationConfig(over="s1")).to_tool_call()
 
 
 def test_shared_args_compile_into_orchestrator_call():
-    spec = StepSpec(
+    spec = Operation(
         step_id="s",
         name="scale",
         arguments={"factor": 2},
@@ -95,9 +95,9 @@ def test_workflow_runs_step_specs_with_inline_map():
     engine = _engine()
     wf = Workflow(engine, session_id="spec")
 
-    wf.add(StepSpec(step_id="step_nums", name="make_list", arguments={"n": 4}))
+    wf.add(Operation(step_id="step_nums", name="make_list", arguments={"n": 4}))
     wf.add(
-        StepSpec(
+        Operation(
             step_id="step_doubled",
             name="double",
             orchestration=OrchestrationConfig(mode="map", over="step_nums"),
@@ -113,17 +113,17 @@ def test_workflow_runs_step_specs_with_inline_map():
 
 
 def test_execution_config_defaults_to_manual():
-    spec = StepSpec(step_id="s", name="double")
-    assert spec.execution == ExecutionConfig(mode="sync", run="manual")
+    spec = Operation(step_id="s", name="double")
+    assert spec.execution == StepExecutionConfig(run="manual")
 
 
 def test_run_stage_runs_only_that_stage():
     engine = _engine()
     wf = Workflow(engine, session_id="stages")
-    wf.add(StepSpec(step_id="step_a", name="make_list", arguments={"n": 3}, stage=0))
-    wf.add(StepSpec(step_id="step_b", name="double",
+    wf.add(Operation(step_id="step_a", name="make_list", arguments={"n": 3}, stage=0))
+    wf.add(Operation(step_id="step_b", name="double",
                     orchestration=OrchestrationConfig(mode="map", over="step_a"), stage=0))
-    wf.add(StepSpec(step_id="step_c", name="make_list", arguments={"n": 2}, stage=1))
+    wf.add(Operation(step_id="step_c", name="make_list", arguments={"n": 2}, stage=1))
 
     assert wf.stages() == [0, 1]
     assert [s.step_id for s in wf.steps_in_stage(0)] == ["step_a", "step_b"]
@@ -140,15 +140,15 @@ def test_run_stage_runs_only_that_stage():
 def test_run_by_stages_runs_everything_in_stage_order():
     engine = _engine()
     wf = Workflow(engine, session_id="stages2")
-    wf.add(StepSpec(step_id="step_a", name="make_list", arguments={"n": 4}, stage=0))
-    wf.add(StepSpec(step_id="step_b", name="double",
+    wf.add(Operation(step_id="step_a", name="make_list", arguments={"n": 4}, stage=0))
+    wf.add(Operation(step_id="step_b", name="double",
                     orchestration=OrchestrationConfig(mode="map", over="step_a"), stage=1))
     wf.run_by_stages()
     assert wf["step_b"].output.value.ok == [0, 2, 4, 6]
 
 
 def test_map_shared_args_flow_to_each_item():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def make_list(n: int) -> list[int]:
         return list(range(n))
@@ -161,8 +161,8 @@ def test_map_shared_args_flow_to_each_item():
     register_orchestrators(registry)
 
     wf = Workflow(CoreEngine(registry), session_id="shared")
-    wf.add(StepSpec(step_id="step_nums", name="make_list", arguments={"n": 4}))
-    wf.add(StepSpec(step_id="step_scaled", name="scale",
+    wf.add(Operation(step_id="step_nums", name="make_list", arguments={"n": 4}))
+    wf.add(Operation(step_id="step_scaled", name="scale",
                     orchestration=OrchestrationConfig(mode="map", over="step_nums"),
                     arguments={"factor": 10}))
     wf.run()

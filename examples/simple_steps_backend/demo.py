@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from simple_steps_core import (
     CoreEngine,
-    StepSpec,
+    Operation,
     ToolRegistry,
     register_orchestrators,
 )
@@ -54,10 +54,10 @@ class StubPlanner:
     is runnable and testable out of the box. Replace with an LLM planner.
     """
 
-    def propose(self, goal: str, current: list[StepSpec]) -> list[StepSpec]:
+    def propose(self, goal: str, current: list[Operation]) -> list[Operation]:
         return [
-            StepSpec(step_id="step_nums", name="make_list", arguments={"n": 5}),
-            StepSpec(
+            Operation(step_id="step_nums", name="make_list", arguments={"n": 5}),
+            Operation(
                 step_id="step_sq", name="square",
                 orchestration={"mode": "map", "over": "step_nums"},
             ),

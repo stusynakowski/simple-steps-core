@@ -3,12 +3,12 @@
 import pytest
 
 from simple_steps_core.domain.models import ToolCall
-from simple_steps_core.operations.registry import OperationRegistry
+from simple_steps_core.operations.registry import ToolRegistry
 from simple_steps_core.operations.validation import ValidationError, validate_tool_call
 
 
 def _registry():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def load_csv(filepath: str, limit: int = 100):
         return [filepath, limit]

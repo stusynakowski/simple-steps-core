@@ -1,11 +1,11 @@
 """Tests for the dual-mode Operation wrapper and decorator."""
 
 from simple_steps_core.domain.models import ToolCall
-from simple_steps_core.operations.registry import OperationRegistry, register_operation
+from simple_steps_core.operations.registry import ToolRegistry, register_tool
 
 
 def test_register_returns_dual_mode_operation():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def add(a: int, b: int = 1):
         return a + b
@@ -23,7 +23,7 @@ def test_register_returns_dual_mode_operation():
 
 
 def test_decorator_returns_operation_wrapper():
-    @register_operation(operation_id="greet")
+    @register_tool(operation_id="greet")
     def greet(name: str):
         return f"hi {name}"
 

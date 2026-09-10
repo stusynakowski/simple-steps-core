@@ -11,28 +11,31 @@ sub-packages directly.
 from ..domain.models import (
     ArgGuardrail,
     Cell,
-    ExecutionConfig,
+    StepExecutionConfig,
+    StageExecutionConfig,
+    WorkflowExecutionConfig,
     Guardrails,
     ItemOutcome,
     MapResult,
-    OperationDefinition,
-    OperationParam,
+    ToolDefinition,
+    ToolParam,
     OrchestrationConfig,
     Shape,
     Step,
     StepError,
     StepOutput,
     StepResult,
-    StepSpec,
+    Operation,
     StepStatus,
     ToolCall,
 )
+from ..app import App, AppConfig, Session
 from ..domain.references import is_reference, split_reference
 from ..execution.context import SessionContext
 from ..execution.data_store import DataEntry, DataStore
 from ..execution.engine import CoreEngine, ExecutionHandle
 from ..execution.resolver import ReferenceResolver
-from ..execution.resources import ResourceContainer, ResourceMissingError
+from ..execution.resources import ResourceCheck, ResourceContainer, ResourceMissingError
 from ..execution.session_io import (
     DEFAULT_CODECS,
     CodecRegistry,
@@ -43,15 +46,16 @@ from ..execution.session_io import (
     StoreBackend,
 )
 from ..execution.session_manager import SessionManager, make_session_id
-from ..execution.workflow import Workflow
+from ..execution.workflow import Stage, Workflow
+from ..inspect import SummaryTable
 from ..operations.dependencies import Resource
 from ..operations.orchestrations import register_orchestrators
 from ..operations.registry import (
     REGISTRY,
-    Operation,
-    OperationRegistry,
+    Tool,
+    ToolRegistry,
     RegistryFrozenError,
-    register_operation,
+    register_tool,
 )
 from ..operations.ui import ToolUI, ToolUIView, build_default_ui
 from ..operations.validation import (
@@ -60,14 +64,6 @@ from ..operations.validation import (
     validate_tool_call,
 )
 
-# Tool-first aliases — `tool` is the preferred term; the Operation* names remain
-# synonyms so existing code keeps working.
-Tool = Operation
-ToolRegistry = OperationRegistry
-ToolDefinition = OperationDefinition
-ToolParam = OperationParam
-register_tool = register_operation
-
 __all__ = [
     # domain
     "ArgGuardrail",
@@ -75,34 +71,31 @@ __all__ = [
     "Guardrails",
     "ItemOutcome",
     "MapResult",
-    "OperationDefinition",
-    "OperationParam",
+    "ToolDefinition",
+    "ToolParam",
     "Shape",
     "Step",
     "StepError",
     "StepOutput",
     "StepResult",
     "StepStatus",
-    "StepSpec",
+    "Operation",
     "OrchestrationConfig",
-    "ExecutionConfig",
+    "StepExecutionConfig",
+    "StageExecutionConfig",
+    "WorkflowExecutionConfig",
     "ToolCall",
-    "Tool",
-    "ToolDefinition",
-    "ToolParam",
-    "ToolRegistry",
-    "register_tool",
     "build_default_ui",
     "ToolUI",
     "ToolUIView",
     "is_reference",
     "split_reference",
     # operations
-    "Operation",
-    "OperationRegistry",
+    "Tool",
+    "ToolRegistry",
     "RegistryFrozenError",
     "REGISTRY",
-    "register_operation",
+    "register_tool",
     "register_orchestrators",
     "ValidationError",
     "validate_tool_call",
@@ -115,9 +108,16 @@ __all__ = [
     "SessionManager",
     "make_session_id",
     "Workflow",
+    "Stage",
+    # app facade
+    "App",
+    "AppConfig",
+    "Session",
+    "SummaryTable",
     # resources
     "Resource",
     "ResourceContainer",
+    "ResourceCheck",
     "ResourceMissingError",
     "DataEntry",
     "DataStore",

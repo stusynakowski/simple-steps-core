@@ -1,7 +1,7 @@
 from simple_steps_core import (
     Cell,
     CoreEngine,
-    OperationRegistry,
+    ToolRegistry,
     SessionContext,
     Shape,
     StepResult,
@@ -19,7 +19,7 @@ def test_contract_symbols_and_tool_call():
 
 
 def test_operation_definition_includes_category_and_type():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def load() -> list[int]:
         return [1, 2]
@@ -32,7 +32,7 @@ def test_operation_definition_includes_category_and_type():
 
 
 def test_execute_step_returns_reference_only_result_and_shape():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def make_rows():
         return [{"name": "a", "score": 1}, {"name": "b", "score": 2}]
@@ -63,7 +63,7 @@ def test_execute_step_returns_reference_only_result_and_shape():
 
 
 def test_execute_step_captures_operation_failure_as_step_error():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def boom():
         raise RuntimeError("kaboom")

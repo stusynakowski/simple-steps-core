@@ -6,7 +6,7 @@ from simple_steps_core import (
     CodecRegistry,
     CoreEngine,
     MapResult,
-    OperationRegistry,
+    ToolRegistry,
     SessionSnapshot,
     SnapshotError,
     ToolCall,
@@ -16,7 +16,7 @@ from simple_steps_core import (
 
 
 def _registry():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def make_list(n: int) -> list[int]:
         return list(range(n))

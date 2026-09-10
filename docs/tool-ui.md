@@ -93,6 +93,6 @@ full_view = operation.ui.full("prefab")
 
 `operation.ui.get(target)` and `operation.ui.prefab` remain compatibility APIs.
 They return the input view for composed declarations and the full view for full
-declarations. `OperationDefinition.ui` preserves a legacy input-only document,
+declarations. `ToolDefinition.ui` preserves a legacy input-only document,
 but serializes new declarations as `{"input": ..., "result": ...}` or
 `{"full": ...}` for frontend discovery.

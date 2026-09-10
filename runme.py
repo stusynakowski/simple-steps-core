@@ -11,11 +11,11 @@ This script exercises a stable happy path:
 5) run an operation through the engine directly.
 """
 
-from simple_steps_core import CoreEngine, OperationRegistry, StepStatus, ToolCall, Workflow
+from simple_steps_core import CoreEngine, ToolRegistry, StepStatus, ToolCall, Workflow
 
 
 def main() -> int:
-	registry = OperationRegistry()
+	registry = ToolRegistry()
 
 	def make_list(n: int) -> list[int]:
 		return list(range(n))

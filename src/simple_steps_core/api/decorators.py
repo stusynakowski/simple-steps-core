@@ -1,3 +1,3 @@
-from ..operations.registry import REGISTRY, register_operation
+from ..operations.registry import REGISTRY, register_tool
 
-__all__ = ["register_operation", "REGISTRY"]
+__all__ = ["register_tool", "REGISTRY"]

@@ -11,7 +11,7 @@ import pytest
 from simple_steps_core import (
     CoreEngine,
     MapResult,
-    OperationRegistry,
+    ToolRegistry,
     ToolCall,
     Workflow,
     register_orchestrators,
@@ -19,7 +19,7 @@ from simple_steps_core import (
 
 
 def _registry():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def make_list(n: int) -> list[int]:
         return list(range(n))

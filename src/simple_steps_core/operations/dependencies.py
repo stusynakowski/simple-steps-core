@@ -10,7 +10,7 @@ sees (or supplies) it.
 
 Mark a resource parameter by giving it a :func:`Resource` default::
 
-    @register_operation("load_orders")
+    @register_tool("load_orders")
     def load_orders(region: str, db: Database = Resource()) -> DataFrame:
         ...
 

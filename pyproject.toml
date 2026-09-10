@@ -25,6 +25,7 @@ classifiers = [
 # Pydantic is the one core runtime dependency: it powers model validation,
 # serialization (save/load of workflows), and argument schema generation.
 dependencies = [
+  "notebook>=7.6.0",
   "pydantic>=2.6",
 ]
 

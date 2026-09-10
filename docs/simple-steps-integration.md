@@ -22,7 +22,7 @@ flowchart LR
         API["/operations · /workflows · /agent/propose"]
         CORE["simple-steps-core:\nregistry · engine · session"]
     end
-    UI -->|StepSpec JSON| API
+    UI -->|Operation JSON| API
     AG -->|goal + palette| API
     API --> CORE
     CORE -->|palette + results| API
@@ -32,9 +32,9 @@ flowchart LR
 - **simple-steps-core** owns the tools, execution, and session data.
 - The **backend** is a thin FastAPI layer that translates HTTP ⇄ core calls and
   persists workflows.
-- The **frontend** renders tool forms from JSON Schema, builds `StepSpec`s, runs
+- The **frontend** renders tool forms from JSON Schema, builds `Operation`s, runs
   them, and traces results.
-- The **agent** turns a natural-language goal into a validated `StepSpec[]` the
+- The **agent** turns a natural-language goal into a validated `Operation[]` the
   user reviews and runs — it never executes anything itself.
 
 Division of responsibility:
@@ -60,10 +60,10 @@ Register operations **once at startup**, add the built-in orchestrators, and
 freeze the registry (read-only ⇒ safe concurrent reads):
 
 ```python
-from simple_steps_core import OperationRegistry, CoreEngine, register_orchestrators
+from simple_steps_core import ToolRegistry, CoreEngine, register_orchestrators
 
-registry = OperationRegistry()
-# @register_operation on REGISTRY, or registry.register(...) — your tools here
+registry = ToolRegistry()
+# @register_tool on REGISTRY, or registry.register(...) — your tools here
 register_orchestrators(registry)     # map / filter / expand / collapse
 registry.freeze()
 engine = CoreEngine(registry)
@@ -76,7 +76,7 @@ engine = CoreEngine(registry)
 Three shapes cross the boundary. TypeScript definitions are in
 [types.ts](../examples/simple_steps_backend/types.ts).
 
-### 3.1 OperationDefinition (the palette)
+### 3.1 ToolDefinition (the palette)
 
 What `GET /operations` returns per tool — drives UI forms and agent grounding:
 
@@ -105,7 +105,7 @@ What `GET /operations` returns per tool — drives UI forms and agent grounding:
 - `params[].kind` is `"data"` (user/agent supplies) or `"resource"` (injected;
   never shown to the user). `dependencies` lists the resource names.
 
-### 3.2 StepSpec (a step)
+### 3.2 Operation (a step)
 
 What the UI/agent produces per step. Orchestration is declared **inline**:
 
@@ -154,14 +154,14 @@ Implemented in [app.py](../examples/simple_steps_backend/app.py):
 
 | Method & path | Purpose |
 | --- | --- |
-| `GET /operations` | Tool palette (`OperationDefinition[]`). |
-| `POST /workflows` | Create from `{workflow_id, steps: StepSpec[]}` (validates each step). |
+| `GET /operations` | Tool palette (`ToolDefinition[]`). |
+| `POST /workflows` | Create from `{workflow_id, steps: Operation[]}` (validates each step). |
 | `GET /workflows/{id}` | Status + per-step results. |
 | `POST /workflows/{id}/run` | Run all steps (async), persist, return trace. `?confirm=true` required when a tool has `guardrails.requires_confirmation`. |
 | `POST /workflows/{id}/steps/{sid}/run` | Run a single step. |
 | `POST /workflows/{id}/stages/{stage}/run` | Run all steps in one stage. |
 | `GET /workflows/{id}/dag` | `{nodes, edges}` from references + `orchestration.over`. |
-| `POST /agent/propose` | Agent proposes/edits a validated `StepSpec[]`. |
+| `POST /agent/propose` | Agent proposes/edits a validated `Operation[]`. |
 
 Persistence: each workflow is stored as **one session snapshot**
 (`Workflow.export_session_json()`), which captures step structure *and* computed
@@ -177,7 +177,7 @@ Per-user isolation uses `SessionManager` (a per-session `asyncio.Lock`); build a
 ## 5. The agent (LangGraph)
 
 The agent's contract is deliberately narrow: **goal + current steps → validated
-`StepSpec[]`**. It proposes; the user disposes.
+`Operation[]`**. It proposes; the user disposes.
 
 ```mermaid
 sequenceDiagram
@@ -188,7 +188,7 @@ sequenceDiagram
     U->>FE: "load EMEA orders and total by category"
     FE->>BE: POST /agent/propose {goal, workflow}
     BE->>AG: propose(goal, current)  (grounded on the palette + schemas)
-    AG-->>BE: candidate StepSpec[]
+    AG-->>BE: candidate Operation[]
     BE->>BE: validate each step vs registry
     BE-->>FE: {steps: valid[], invalid: [{step_id, reason}]}
     FE->>U: show proposed steps to edit + run
@@ -196,7 +196,7 @@ sequenceDiagram
 
 Key points:
 
-- The agent is grounded on the **palette** (`OperationDefinition` +
+- The agent is grounded on the **palette** (`ToolDefinition` +
   `input_schema`) — it can only pick real tools and real arguments.
 - Every proposed step is **validated server-side** (`validate_step`) before it
   reaches the UI; invalid steps are flagged, not executed.
@@ -212,9 +212,9 @@ app = create_app(registry, engine, planner=planner)
 ```
 
 `build_langgraph_planner` uses structured output (the LLM must return objects
-matching `StepSpec`) grounded on the palette. To add memory or multi-turn
+matching `Operation`) grounded on the palette. To add memory or multi-turn
 planning, wrap `planner.propose` as a node in a LangGraph `StateGraph` whose
-state carries the goal, the palette, and the working `StepSpec[]`. Map the
+state carries the goal, the palette, and the working `Operation[]`. Map the
 graph's `thread_id` to your `workflow_id`; keep large tool outputs in the core
 `SessionContext` (the agent reasons over step ids + schemas, not payloads).
 
@@ -286,4 +286,4 @@ pattern.
 - Auth, multi-tenant storage, and the React UI.
 - The LLM itself and any conversation memory (wrap the `Planner` in LangGraph).
 - Cross-session long-term memory (saved workflows across users) — persist your
-  own `StepSpec[]` / snapshots keyed by user.
+  own `Operation[]` / snapshots keyed by user.

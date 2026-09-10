@@ -4,7 +4,7 @@ from typing import Literal
 
 import pytest
 
-from simple_steps_core import OperationRegistry, ToolUIView, build_default_ui
+from simple_steps_core import ToolRegistry, ToolUIView, build_default_ui
 
 
 def test_default_ui_is_prefab_protocol():
@@ -46,7 +46,7 @@ def test_boolean_becomes_switch():
 
 
 def test_registration_auto_builds_ui_and_override_wins():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def choose(color: Literal["red", "green"]) -> str:
         return color
@@ -88,7 +88,7 @@ def test_guardrails_shape_the_default_ui():
 
 
 def test_unified_ui_holds_multiple_targets():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def pick(region: str) -> str:
         return region
@@ -107,7 +107,7 @@ def test_unified_ui_holds_multiple_targets():
 
 
 def test_composed_ui_exposes_input_and_result_and_serializes_both():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
     input_ui = {"view": {"type": "Input"}, "state": {}}
     result_ui = {"view": {"type": "Plot"}, "state": {}}
 
@@ -130,7 +130,7 @@ def test_composed_ui_exposes_input_and_result_and_serializes_both():
 
 def test_full_ui_is_exclusive_and_is_the_legacy_primary_view():
     full_ui = {"view": {"type": "PlotBuilder"}, "state": {}}
-    registry = OperationRegistry()
+    registry = ToolRegistry()
     registry.register("plot", lambda x: x, ui={"prefab": {"full": full_ui}})
 
     operation = registry.get_operation("plot")

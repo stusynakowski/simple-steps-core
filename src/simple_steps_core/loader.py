@@ -3,7 +3,7 @@ Loader
 ======
 
 Import a user's *tools file* — a plain Python script that declares tools with
-``@register_tool`` / ``@register_operation`` (plus optional ``CONFIG`` /
+``@register_tool`` / ``@register_tool`` (plus optional ``CONFIG`` /
 ``RESOURCES``). Running the module executes those decorators, registering the
 tools on the shared ``REGISTRY``.
 
@@ -21,7 +21,7 @@ from pathlib import Path
 
 
 def load_tools_module(path: str | Path):
-    """Import a user script by path, running its ``@register_operation`` calls."""
+    """Import a user script by path, running its ``@register_tool`` calls."""
     path = Path(path).resolve()
     if not path.exists():
         raise FileNotFoundError(f"No such script: {path}")

@@ -4,7 +4,7 @@
 simple-steps-core to a React frontend and a (LangGraph) agent:
 
     GET  /operations                       — tool palette (id, params, JSON Schema)
-    POST /workflows                        — create from a list of StepSpec
+    POST /workflows                        — create from a list of Operation
     GET  /workflows/{id}                   — status + per-step results
     POST /workflows/{id}/run               — run all steps (async)
     POST /workflows/{id}/steps/{sid}/run   — run one step
@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from simple_steps_core import (
     CoreEngine,
     SessionManager,
-    StepSpec,
+    Operation,
     ToolRegistry,
     ValidationError,
     Workflow,
@@ -42,7 +42,7 @@ from .store import WorkflowRecord, WorkflowStore
 # ── request / response models (module scope for FastAPI) ─────────────────
 class CreateWorkflowIn(BaseModel):
     workflow_id: str = Field(..., examples=["wf-001"])
-    steps: list[StepSpec]
+    steps: list[Operation]
 
 
 class StepView(BaseModel):
@@ -64,11 +64,11 @@ class WorkflowOut(BaseModel):
 
 class ProposeIn(BaseModel):
     goal: str = Field(..., examples=["load EMEA orders and total them by category"])
-    workflow: list[StepSpec] = Field(default_factory=list)
+    workflow: list[Operation] = Field(default_factory=list)
 
 
 class ProposeOut(BaseModel):
-    steps: list[StepSpec]
+    steps: list[Operation]
     invalid: list[dict] = Field(default_factory=list)
 
 
@@ -95,7 +95,7 @@ def _step_view(step) -> StepView:
     )
 
 
-def _step_refs(spec: StepSpec) -> list[str]:
+def _step_refs(spec: Operation) -> list[str]:
     refs = [v for v in spec.arguments.values() if is_reference(v)]
     if spec.orchestration.over and is_reference(spec.orchestration.over):
         refs.append(spec.orchestration.over)
@@ -133,7 +133,7 @@ def create_app(
         allow_headers=["*"],
     )
 
-    def _build(workflow_id: str, steps: list[StepSpec]) -> Workflow:
+    def _build(workflow_id: str, steps: list[Operation]) -> Workflow:
         wf = Workflow(engine, session_id=workflow_id)
         for spec in steps:
             wf.add(spec)

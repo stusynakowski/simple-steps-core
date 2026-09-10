@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 
-from simple_steps_core import CoreEngine, OperationRegistry, register_orchestrators
+from simple_steps_core import CoreEngine, ToolRegistry, register_orchestrators
 
 
 def make_list(n: int) -> list[int]:
@@ -39,13 +39,13 @@ async def slow_square(x: int) -> int:
     return x * x
 
 
-def build_registry() -> OperationRegistry:
+def build_registry() -> ToolRegistry:
     """Register demo operations + built-in orchestrators, then freeze.
 
     Freezing after startup makes the registry read-only, which keeps concurrent
     request handling safe without locks.
     """
-    registry = OperationRegistry()
+    registry = ToolRegistry()
     registry.register("make_list", make_list, description="Create [0..n-1]")
     registry.register("total", total, description="Sum a list of ints")
     registry.register("double", double, description="Multiply an int by 2")

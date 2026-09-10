@@ -10,7 +10,7 @@ the built-in orchestrators (map/filter/expand/collapse) and serves:
 
     GET  /tools   — the palette (id, description, JSON Schema)
     POST /call    — run one tool: {"operation_id": "add", "arguments": {...}}
-    POST /run     — run a workflow: {"steps": [ ...StepSpec... ]}
+    POST /run     — run a workflow: {"steps": [ ...Operation... ]}
 """
 
 from simple_steps_core import register_tool

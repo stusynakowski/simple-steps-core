@@ -34,7 +34,7 @@ import uuid
 from typing import Any
 
 from ..domain.models import Shape, StepError, StepResult, ToolCall
-from ..operations.registry import OperationRegistry
+from ..operations.registry import ToolRegistry
 from ..operations.validation import enforce_arg_guardrails, validate_tool_call
 from .context import SessionContext
 from .resolver import ReferenceResolver
@@ -65,7 +65,7 @@ class ExecutionHandle:
 
 
 class CoreEngine:
-    def __init__(self, registry: OperationRegistry):
+    def __init__(self, registry: ToolRegistry):
         self.registry = registry
 
     # ── async core ───────────────────────────────────────────────────────

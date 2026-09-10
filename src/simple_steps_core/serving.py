@@ -33,11 +33,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .domain.models import StepSpec, ToolCall
+from .domain.models import Operation, ToolCall
 from .execution.engine import CoreEngine
 from .execution.workflow import Workflow
 from .operations.orchestrations import register_orchestrators
-from .operations.registry import REGISTRY, OperationRegistry
+from .operations.registry import REGISTRY, ToolRegistry
 from .operations.validation import ValidationError, validate_tool_call
 
 
@@ -48,7 +48,7 @@ class CallIn(BaseModel):
 
 
 class RunIn(BaseModel):
-    steps: list[StepSpec]
+    steps: list[Operation]
 
 
 def _jsonable(value: Any) -> Any:
@@ -72,7 +72,7 @@ def _step_out(step) -> dict:
 
 
 def build_app(
-    registry: OperationRegistry,
+    registry: ToolRegistry,
     engine: CoreEngine,
     *,
     title: str = "simple-steps-core server",
@@ -144,7 +144,7 @@ def build_app(
     return app
 
 
-def app_from_module(module, *, registry: OperationRegistry = REGISTRY) -> tuple[Any, dict]:
+def app_from_module(module, *, registry: ToolRegistry = REGISTRY) -> tuple[Any, dict]:
     """Build the app + resolved server config from a loaded tools module."""
     config: dict[str, Any] = dict(getattr(module, "CONFIG", {}) or {})
     resources: dict[str, Any] = dict(getattr(module, "RESOURCES", {}) or {})

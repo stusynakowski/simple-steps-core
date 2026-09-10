@@ -4,7 +4,7 @@ These exercise ``render_tool_form`` with a fake ``st`` so no Streamlit install
 or browser is needed.
 """
 
-from simple_steps_core import OperationRegistry, StepOutput
+from simple_steps_core import ToolRegistry, StepOutput
 from simple_steps_core.streamlit.dashboard import render_tool_form, render_tool_result
 
 
@@ -31,7 +31,7 @@ class FakeSt:
 
 
 def _registry():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def scale(x: int, factor: int = 2) -> int:
         return x * factor
@@ -57,7 +57,7 @@ def test_custom_streamlit_ui_is_used_when_provided():
 
 
 def test_ui_map_keeps_both_prefab_and_streamlit_targets():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def pick(region: str) -> str:
         return region
@@ -88,7 +88,7 @@ def test_reference_picker_wires_an_argument_to_a_step():
 
 
 def test_custom_streamlit_result_ui_is_used_when_provided():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
     rendered = {}
 
     def render_result(st, *, key, result):

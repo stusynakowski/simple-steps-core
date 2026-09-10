@@ -4,7 +4,7 @@
 
 - ``GET  /tools``  — the palette (each tool's id, description, and JSON Schema).
 - ``POST /call``   — run one tool immediately: ``{operation_id, arguments}``.
-- ``POST /run``    — run a workflow of :class:`StepSpec` steps, wiring outputs
+- ``POST /run``    — run a workflow of :class:`Operation` steps, wiring outputs
                      between steps and orchestrating (map/filter/...) inline.
 
 The session (data store, references) is created and managed per request, so the
@@ -20,8 +20,8 @@ from pydantic import BaseModel, Field
 
 from simple_steps_core import (
     CoreEngine,
-    OperationRegistry,
-    StepSpec,
+    ToolRegistry,
+    Operation,
     ToolCall,
     ValidationError,
     Workflow,
@@ -36,7 +36,7 @@ class CallIn(BaseModel):
 
 
 class RunIn(BaseModel):
-    steps: list[StepSpec]
+    steps: list[Operation]
 
 
 def _jsonable(value: Any) -> Any:
@@ -51,7 +51,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def build_app(
-    registry: OperationRegistry,
+    registry: ToolRegistry,
     engine: CoreEngine,
     *,
     title: str = "simple_steps server",
@@ -86,7 +86,7 @@ def build_app(
         wf = Workflow(engine, session_id=make_session_id("server", "wf", "run"))
         for spec in body.steps:
             try:
-                wf.add(spec)  # compiles the StepSpec (validates orchestration)
+                wf.add(spec)  # compiles the Operation (validates orchestration)
             except (ValueError, TypeError) as exc:
                 raise HTTPException(
                     status_code=422, detail=f"Invalid step {spec.step_id!r}: {exc}"

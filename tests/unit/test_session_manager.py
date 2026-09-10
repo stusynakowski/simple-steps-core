@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from simple_steps_core import (
-    OperationRegistry,
+    ToolRegistry,
     RegistryFrozenError,
     SessionManager,
     make_session_id,
@@ -13,7 +13,7 @@ from simple_steps_core import (
 
 
 def test_freeze_blocks_further_registration():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def op(x: int) -> int:
         return x

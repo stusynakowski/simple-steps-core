@@ -20,14 +20,14 @@ from pydantic import BaseModel, ConfigDict, create_model
 
 from ..domain.models import ToolCall
 from ..domain.references import is_reference, split_reference
-from .registry import OperationRegistry
+from .registry import ToolRegistry
 
 
 class ValidationError(Exception):
     """Raised when a ToolCall does not satisfy its operation's contract."""
 
 
-def build_arg_model(registry: OperationRegistry, operation_id: str) -> type[BaseModel]:
+def build_arg_model(registry: ToolRegistry, operation_id: str) -> type[BaseModel]:
     """
     Build a Pydantic model describing the arguments of one operation.
 
@@ -56,7 +56,7 @@ def build_arg_model(registry: OperationRegistry, operation_id: str) -> type[Base
     )
 
 
-def validate_tool_call(call: ToolCall, registry: OperationRegistry) -> None:
+def validate_tool_call(call: ToolCall, registry: ToolRegistry) -> None:
     """
     Validate *call* against the registry.
 
@@ -208,7 +208,7 @@ def _referenced_output_schema(output_schema: dict | None, field: str | None) -> 
     return None
 
 
-def check_reference_types(workflow, registry: OperationRegistry) -> list[dict]:
+def check_reference_types(workflow, registry: ToolRegistry) -> list[dict]:
     """Best-effort static check of a workflow's step-output references.
 
     Returns a list of issues ``{step_id, argument, reason}``; empty means no

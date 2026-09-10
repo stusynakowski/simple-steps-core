@@ -1,8 +1,8 @@
-from simple_steps_core.operations.registry import OperationRegistry
+from simple_steps_core.operations.registry import ToolRegistry
 
 
 def test_registry_registers_callable_and_definition():
-    registry = OperationRegistry()
+    registry = ToolRegistry()
 
     def add(a: int, b: int = 1):
         return a + b

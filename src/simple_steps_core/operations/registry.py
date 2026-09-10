@@ -5,7 +5,7 @@ Operation registry
 An *operation* is a stable, human-authored Python function — the real unit of
 work (load a CSV, filter rows, call an LLM). This module:
 
-  * builds an :class:`OperationDefinition` from a function's signature so the
+  * builds an :class:`ToolDefinition` from a function's signature so the
     rest of the system can introspect it, and
   * wraps each registered function in a dual-mode :class:`Operation` so it can
     either be **deferred** (build a ``ToolCall`` for a workflow) or **run**
@@ -23,7 +23,7 @@ import inspect
 from collections.abc import Callable
 from typing import Any, Literal
 
-from ..domain.models import Guardrails, OperationDefinition, OperationParam, ToolCall
+from ..domain.models import Guardrails, ToolDefinition, ToolParam, ToolCall
 from .dependencies import ResourceMarker
 from .schema import build_input_schema, build_output_schema
 from .ui import ToolUI, build_default_ui
@@ -47,7 +47,7 @@ class RegistryFrozenError(RuntimeError):
     """Raised when registering into a registry that has been frozen."""
 
 
-class Operation:
+class Tool:
     """
     A registered function in two modes.
 
@@ -66,7 +66,7 @@ class Operation:
         self,
         operation_id: str,
         fn: Callable,
-        definition: OperationDefinition,
+        definition: ToolDefinition,
         *,
         is_async: bool = False,
         is_orchestrator: bool = False,
@@ -85,6 +85,11 @@ class Operation:
         """Preferred alias for :attr:`operation_id`."""
         return self.operation_id
 
+    def __repr__(self) -> str:
+        kind = ("orchestrator" if self.is_orchestrator
+                else "async" if self.is_async else "tool")
+        return f"<Tool {self.operation_id!r} {kind} · {len(self.definition.params)} param(s)>"
+
     def __call__(self, **kwargs: Any) -> ToolCall:
         """Deferred mode: build a serializable ToolCall (no execution)."""
         return ToolCall(operation_id=self.operation_id, arguments=dict(kwargs))
@@ -94,14 +99,14 @@ class Operation:
         return self.fn(**kwargs)
 
 
-def _params_from_signature(fn: Callable, *, skip: int = 0) -> list[OperationParam]:
-    """Introspect *fn* into a list of OperationParam, skipping leading params.
+def _params_from_signature(fn: Callable, *, skip: int = 0) -> list[ToolParam]:
+    """Introspect *fn* into a list of ToolParam, skipping leading params.
 
     ``skip`` drops the first N positional parameters from the public contract.
     Orchestrators use this to hide the injected execution ``handle`` argument.
     """
     signature = inspect.signature(fn)
-    params: list[OperationParam] = []
+    params: list[ToolParam] = []
     for index, (name, parameter) in enumerate(signature.parameters.items()):
         if index < skip:
             continue
@@ -114,7 +119,7 @@ def _params_from_signature(fn: Callable, *, skip: int = 0) -> list[OperationPara
         if isinstance(parameter.default, ResourceMarker):
             # Resource params are injected at run time: required, no literal default.
             params.append(
-                OperationParam(
+                ToolParam(
                     name=name,
                     type_name=type_name,
                     required=True,
@@ -127,7 +132,7 @@ def _params_from_signature(fn: Callable, *, skip: int = 0) -> list[OperationPara
         required = parameter.default is inspect._empty
         default = None if required else parameter.default
         params.append(
-            OperationParam(
+            ToolParam(
                 name=name,
                 type_name=type_name,
                 required=required,
@@ -138,11 +143,11 @@ def _params_from_signature(fn: Callable, *, skip: int = 0) -> list[OperationPara
     return params
 
 
-class OperationRegistry:
+class ToolRegistry:
     def __init__(self) -> None:
-        self._definitions: dict[str, OperationDefinition] = {}
+        self._definitions: dict[str, ToolDefinition] = {}
         self._callables: dict[str, Callable] = {}
-        self._operations: dict[str, Operation] = {}
+        self._operations: dict[str, Tool] = {}
         self._frozen: bool = False
 
     def _guard_mutable(self) -> None:
@@ -162,7 +167,7 @@ class OperationRegistry:
         type: Literal["source", "dataframe", "raw_output"] = "raw_output",
         ui: Any = None,
         guardrails: Guardrails | None = None,
-    ) -> Operation:
+    ) -> Tool:
         """Introspect *fn*, store its definition, and return an Operation wrapper."""
         self._guard_mutable()
         params = _params_from_signature(fn)
@@ -173,7 +178,7 @@ class OperationRegistry:
             operation_id, input_schema, description=resolved_description, guardrails=guardrails
         )
         tool_ui = ToolUI(views)
-        definition = OperationDefinition(
+        definition = ToolDefinition(
             operation_id=operation_id,
             description=resolved_description,
             category=category,
@@ -185,7 +190,7 @@ class OperationRegistry:
             ui=tool_ui.definition_for("prefab"),
             guardrails=guardrails,
         )
-        operation = Operation(
+        operation = Tool(
             operation_id,
             fn,
             definition,
@@ -206,11 +211,11 @@ class OperationRegistry:
         category: str = "orchestration",
         ui: Any = None,
         guardrails: Guardrails | None = None,
-    ) -> Operation:
+    ) -> Tool:
         """Register a higher-order operation that receives an execution handle.
 
         The first positional parameter (the injected ``handle``) is hidden from
-        the public :class:`OperationDefinition`, so validation and frontend
+        the public :class:`ToolDefinition`, so validation and frontend
         discovery only see the user-facing arguments (``over``, ``op``, ...).
         """
         self._guard_mutable()
@@ -221,7 +226,7 @@ class OperationRegistry:
             operation_id, input_schema, description=description, guardrails=guardrails
         )
         tool_ui = ToolUI(views)
-        definition = OperationDefinition(
+        definition = ToolDefinition(
             operation_id=operation_id,
             description=description,
             category=category,
@@ -233,7 +238,7 @@ class OperationRegistry:
             ui=tool_ui.definition_for("prefab"),
             guardrails=guardrails,
         )
-        operation = Operation(
+        operation = Tool(
             operation_id,
             fn,
             definition,
@@ -259,10 +264,10 @@ class OperationRegistry:
     def frozen(self) -> bool:
         return self._frozen
 
-    def list_definitions(self) -> list[OperationDefinition]:
+    def list_definitions(self) -> list[ToolDefinition]:
         return list(self._definitions.values())
 
-    def get_definition(self, operation_id: str) -> OperationDefinition:
+    def get_definition(self, operation_id: str) -> ToolDefinition:
         if operation_id not in self._definitions:
             raise KeyError(f"Unknown operation: {operation_id}")
         return self._definitions[operation_id]
@@ -272,7 +277,7 @@ class OperationRegistry:
             raise KeyError(f"Unknown operation: {operation_id}")
         return self._callables[operation_id]
 
-    def get_operation(self, operation_id: str) -> Operation:
+    def get_operation(self, operation_id: str) -> Tool:
         if operation_id not in self._operations:
             raise KeyError(f"Unknown operation: {operation_id}")
         return self._operations[operation_id]
@@ -290,10 +295,10 @@ class OperationRegistry:
         return operation_id in self._definitions
 
 
-REGISTRY = OperationRegistry()
+REGISTRY = ToolRegistry()
 
 
-def register_operation(
+def register_tool(
     operation_id: str | None = None,
     description: str = "",
     *,
@@ -314,7 +319,7 @@ def register_operation(
     exclusive ``full`` view. The prefab input auto-builds when omitted.
     """
 
-    def decorator(fn: Callable) -> Operation:
+    def decorator(fn: Callable) -> Tool:
         resolved_id = operation_id or fn.__name__
         return REGISTRY.register(
             resolved_id,

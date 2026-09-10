@@ -42,7 +42,7 @@ from typing import Any
 # (no parent package), so relative imports would fail.
 from simple_steps_core.loader import load_tools_module
 from simple_steps_core.operations.orchestrations import register_orchestrators
-from simple_steps_core.operations.registry import REGISTRY, Operation
+from simple_steps_core.operations.registry import REGISTRY, Tool
 
 _ENV_TOOLS = "SIMPLE_STEPS_TOOLS"
 
@@ -57,7 +57,7 @@ _CARD_WIDTH = 260
 # ─────────────────────────────────────────────────────────────────────────
 def render_tool_form(
     st,
-    operation: Operation,
+    operation: Tool,
     *,
     key: str,
     defaults: dict[str, Any] | None = None,
@@ -124,7 +124,7 @@ def render_tool_form(
     return args
 
 
-def _render_literal_arg(st, operation: Operation, param, *, key: str, default: Any) -> Any:
+def _render_literal_arg(st, operation: Tool, param, *, key: str, default: Any) -> Any:
     """Render one by-hand value widget for a data param (no reference picker).
 
     Used by the Step Manager's "Operation" tab, where reference binding has
@@ -155,7 +155,7 @@ def _render_literal_arg(st, operation: Operation, param, *, key: str, default: A
     return st.text_input(param.name, value="" if seed is None else str(seed), key=key)
 
 
-def render_tool_result(st, operation: Operation, result: Any, *, key: str) -> None:
+def render_tool_result(st, operation: Tool, result: Any, *, key: str) -> None:
     """Render a completed output with the custom result view or a generic fallback."""
     renderer = operation.ui.result("streamlit")
     if renderer is not None:
@@ -226,7 +226,7 @@ def _to_dataframe(value: Any):
 def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
     import streamlit as st
 
-    from simple_steps_core.domain.models import ExecutionConfig, OrchestrationConfig, StepSpec, StepStatus
+    from simple_steps_core.domain.models import StepExecutionConfig, OrchestrationConfig, Operation, StepStatus
     from simple_steps_core.execution.engine import CoreEngine
     from simple_steps_core.execution.workflow import Workflow
 
@@ -317,8 +317,8 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
     def _sample_workflow_json() -> str:
         """A small make_list -> scale chain, already run, used as a demo/test fixture."""
         sample = Workflow(CoreEngine(REGISTRY), session_id="sample")
-        sample["step1"] = StepSpec(step_id="step1", name="make_list", arguments={"n": 5})
-        sample["step2"] = StepSpec(step_id="step2", name="scale", arguments={"x": "step1", "factor": 3})
+        sample["step1"] = Operation(step_id="step1", name="make_list", arguments={"n": 5})
+        sample["step2"] = Operation(step_id="step2", name="scale", arguments={"x": "step1", "factor": 3})
         sample.run()
         return sample.export_session_json()
 
@@ -498,7 +498,7 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
     )
 
     # ── Step Manager: cards in draft order; same-stage cards share a group ─
-    specs: dict[str, StepSpec] = {}
+    specs: dict[str, Operation] = {}
     run_requests: list[tuple[str, str]] = []   # ("step"|"stage"|"from", id)
 
     def _render_card(d: dict[str, Any]) -> None:
@@ -552,15 +552,15 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
 
             if d["op"]:
                 orch, execu = d["orchestration"], d["execution"]
-                specs[sid] = StepSpec(
+                specs[sid] = Operation(
                     step_id=sid, name=d["op"], stage=d["stage"], arguments=arguments,
                     orchestration=OrchestrationConfig(
                         mode=orch["mode"], over=orch["over"], item_arg=orch["item_arg"],
                         concurrency=int(orch["concurrency"]), on_error=orch["on_error"],
                         retries=int(orch["retries"]), initial=orch["initial"],
                     ),
-                    execution=ExecutionConfig(
-                        mode=execu["mode"], run=execu["run"], timeout=execu["timeout"],
+                    execution=StepExecutionConfig(
+                        run=execu["run"], timeout=execu["timeout"],
                         retries=int(execu["retries"]), cache=execu["cache"],
                     ),
                 )
@@ -583,7 +583,7 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                     elif rec.status is StepStatus.FAILED:
                         st.error(rec.error or "failed")
 
-    def _render_function_tabs(d: dict[str, Any], prior: list[str]) -> tuple[dict[str, Any], Operation | None]:
+    def _render_function_tabs(d: dict[str, Any], prior: list[str]) -> tuple[dict[str, Any], Tool | None]:
         """The Function panel's three tabs: Operation, Inputs, Exec.
 
         Returns the merged ``arguments`` dict (by-hand values + reference
@@ -712,15 +712,15 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
         d.setdefault("execution", _default_execution())
         arguments = st.session_state.get(f"cached_args_{sid}", {})
         orch, execu = d["orchestration"], d["execution"]
-        specs[sid] = StepSpec(
+        specs[sid] = Operation(
             step_id=sid, name=d["op"], stage=d["stage"], arguments=arguments,
             orchestration=OrchestrationConfig(
                 mode=orch["mode"], over=orch["over"], item_arg=orch["item_arg"],
                 concurrency=int(orch["concurrency"]), on_error=orch["on_error"],
                 retries=int(orch["retries"]), initial=orch["initial"],
             ),
-            execution=ExecutionConfig(
-                mode=execu["mode"], run=execu["run"], timeout=execu["timeout"],
+            execution=StepExecutionConfig(
+                run=execu["run"], timeout=execu["timeout"],
                 retries=int(execu["retries"]), cache=execu["cache"],
             ),
         )
