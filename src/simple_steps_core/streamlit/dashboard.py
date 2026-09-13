@@ -52,6 +52,8 @@ _CARDS_KEY = "step_cards_row"
 _CARD_WIDTH = 260
 
 
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Form rendering — the generic default renderer (takes `st` so it is testable)
 # ─────────────────────────────────────────────────────────────────────────
@@ -236,15 +238,26 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
     st.set_page_config(page_title=config.get("title", "simple-steps"), layout="wide")
     #st.title(config.get("title", "simple-steps dashboard"))
 
-    try:
-        from right_sidebar import right_sidebar
-    except ImportError:
-        right_sidebar = None
 
-    if right_sidebar is not None:
-        with right_sidebar(key="assistant_sidebar", icon=":material/smart_toy:", initial_collapsed=True):
-            st.caption("Assistant")
-            # empty for now
+    st.markdown(
+    """
+    <style>
+    /* Target the expander header */
+    [data-testid="stExpander"] details summary {
+        padding-top: 0.20rem !important;
+        padding-bottom: 0.20rem !important;
+        min-height: unset !important;
+    }
+    /* Target the text inside the header */
+    [data-testid="stExpander"] details summary p {
+        font-size: 14px !important; /* Optional: shrink text slightly */
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
 
     def _register_resources(target: Workflow) -> None:
         for name, provider in resources.items():
@@ -449,18 +462,21 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                 key=f"selected_steps_widget_{st.session_state.selected_steps_nonce}",
             )
             st.session_state.selected_steps = selected_now or []
-            with st.container(horizontal=True, vertical_alignment="top"):
+            with st.container(horizontal=True, vertical_alignment="top",gap="xxsmall"):
                 st.button(":material/add_circle_outline: Add", on_click=_add_step)
                 st.button(":material/remove_circle_outline: Remove", on_click=_remove_selected,
                           disabled=not _selected())
                 st.button(":material/swap_horiz: Swap", on_click=_swap_selected,
                           disabled=len(_selected()) != 2)
         with manage_col:
-            with st.popover("Group into stages"):
-                st.button(":material/merge_type: Group selected", on_click=_group_selected,
-                           disabled=len(_selected()) < 2)
-                st.button(":material/call_split: Ungroup selected", on_click=_ungroup_selected,
-                           disabled=not _selected())
+            with st.container(horizontal=True, vertical_alignment="top"):
+                with st.popover("Group into stages"):
+                    st.button(":material/merge_type: Group selected", on_click=_group_selected,
+                            disabled=len(_selected()) < 2)
+                    st.button(":material/call_split: Ungroup selected", on_click=_ungroup_selected,
+                            disabled=not _selected())
+                with st.popover(":material/smart_toy: Assistant"):
+                    st.caption("Assistant placeholder")
 
         st.divider()
         with st.container(horizontal=True, gap="xxsmall"):
@@ -501,7 +517,15 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
     specs: dict[str, Operation] = {}
     run_requests: list[tuple[str, str]] = []   # ("step"|"stage"|"from", id)
 
+
+    # this should be a fragment 
+
     def _render_card(d: dict[str, Any]) -> None:
+
+        # need view controls here
+        st.session_state.setdefault(f"step_view_controller_{d['id']}", [":material/step:",":material/function:", ":material/dataset:"])
+
+
         sid = d["id"]
         prior = [s["id"] for s in draft if s["id"] != sid and s["id"] in specs]
         d.setdefault("sources", {})
@@ -513,42 +537,95 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
             if sid in wf:
                 del wf[sid]
 
-        with st.container(key=f"card_{sid}"), st.expander(f"Step {sid}", expanded=True, key=f"step_{sid}"):
-            exec_col, view_col = st.columns(2)
-            with exec_col:
-                with st.container(horizontal=True, gap="xxsmall", horizontal_alignment="left"):
-                    if st.button(":material/play_arrow:", key=f"run_{sid}", help="Run this step"):
-                        run_requests.append(("step", sid))
-                    st.button(":material/refresh:", key=f"reset_{sid}", help="Clear this step's output",
-                              on_click=_reset_step, disabled=sid not in wf)
-                    if st.button(":material/fast_forward:", key=f"ff_{sid}", help="Run this step and every step after it"):
-                        run_requests.append(("from", sid))
-            with view_col:
-                # segmented control: which of the two panels below start expanded.
-                # Seed the key once in session_state instead of passing `default=`
-                # on every call — some widgets re-apply `default` on reruns that
-                # weren't triggered by that widget, silently undoing the user's
-                # last selection.
-                st.session_state.setdefault(f"view_{sid}", [":material/function:", ":material/dataset:"])
-                with st.container(horizontal=True, horizontal_alignment="right"):
-                    view = st.segmented_control(
-                        "Step view", label_visibility="collapsed",
-                        options=[":material/function:", ":material/dataset:"],
-                        selection_mode="multi", key=f"view_{sid}",
-                    )
+        # step control_header # container
+        
+        with st.container(key=f"step_{sid}_card", gap="xxsmall"):
+
+            # steop contoller
+            if ":material/step:" in st.session_state[f"step_view_controller_{sid}"]:
+                with st.expander(f"Step Controls", expanded=True,type="compact"):
+                    
+                    #st.session_state.setdefault(f"step_view_controller_{sid}", [":material/step:",":material/function:", ":material/dataset:"])
+                    #with step_contol_container:
+                        #with st.container(horizontal=True, gap="xxsmall", horizontal_alignment="left"):
+
+                    
+                    with st.container(horizontal=True, gap="xxsmall"):
+                        #st.write(f"{sid}")
+                        #with st.container(horizontal=True, gap="xxsmall",width="content",):
+                        if st.button(":material/play_arrow:", key=f"run_{sid}", help="Run this step",type="primary"):
+                            run_requests.append(("step", sid))
+                        st.button(":material/refresh:", key=f"reset_{sid}", help="Clear this step's output",
+                                    on_click=_reset_step, disabled=sid not in wf,type="secondary")
+                        #if st.button(":material/fast_forward:", key=f"ff_{sid}", help="Run this step and every step after it",type="secondary"):
+                        #    run_requests.append(("from", sid))
+
+                        st.space("")
+                        #   st.header(f"{sid}")
+                        #exec_col,view_col = st.columns(2)
+                        #with st.container(horizontal=True, gap="xxsmall",width="content",horizontal_alignment="right",vertical_alignment="top"):
+                        with st.popover(":material/visibility:",type="secondary"):
+                            #visibility
+                            st.segmented_control(
+                            label=f"{sid}",
+                            selection_mode="multi",
+                            options=[":material/step:", ":material/function:",":material/dataset:",":material/analytics:", ":material/smart_toy:",":material/settings:"],
+                            key=f"step_view_controller_{sid}",
+                            default=st.session_state.get(f"step_view_controller_{sid}", [":material/step:",":material/function:", ":material/dataset:"]),
+                            help="Select Step components to see for this step",
+                            label_visibility="collapsed"
+                            )
+                    # make on change component here
+
+
+
+                            
+
+                    st.markdown("___")
+                
+
+            if ":material/function:" in st.session_state[f"step_view_controller_{sid}"]:
+                #with st.expander(":material/function: Operation"):
+                with st.expander(":material/function: Operation",type="compact"):
+                    step_op_tab, step_agent_tab, step_settings_tab = st.tabs(["Tool", "Input", "Settings"])
+                #with st.expander(":material/function: Operation"):
+                    with step_op_tab:
+                        arguments, op = _render_function_tabs(d, prior)
+
+
+                    #if ":material/settings:" in selected_step_controls:
+                    #with st.expander(":material/settings: Settings"):
+                    with step_settings_tab:
+                        st.markdown("This panel allows you to configure the settings for this step.")
+                    st.markdown("___")
+
+            else:
+                arguments = st.session_state.get(args_cache_key, {})
+                op = REGISTRY.get_operation(d["op"]) if d["op"] else None
+
+
+
+
+
+            if ":material/tune:" in st.session_state[f"step_view_controller_{sid}"]:
+                with st.expander(":material/tune: Advanced Settings"):  #else st.container():
+                    st.markdown("This panel allows you to configure additional settings for this step.")
+
+
+            #if ":material/smart_toy:" in selected_step_controls:
+            #    with st.expander(":material/smart_toy: Agent "):
+            #        st.markdown("This panel shows the orchestration and execution details for this step.")
+
+
 
             # The segmented control fully mounts/unmounts these two panels
             # (not just collapse) — when a panel is unmounted, the Function
             # panel's inputs aren't rendered, so we reuse the last collected
             # arguments/config rather than losing the step's spec.
-            if ":material/function:" in view:
-                with st.expander(":material/function: Function", expanded=True):
-                    arguments, op = _render_function_tabs(d, prior)
-                if op is not None:
-                    st.session_state[args_cache_key] = arguments
-            else:
-                arguments = st.session_state.get(args_cache_key, {})
-                op = REGISTRY.get_operation(d["op"]) if d["op"] else None
+            #if ":material/function:" in view:
+
+
+
 
             if d["op"]:
                 orch, execu = d["orchestration"], d["execution"]
@@ -564,24 +641,28 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                         retries=int(execu["retries"]), cache=execu["cache"],
                     ),
                 )
+                
 
-            if ":material/dataset:" in view:
-                with st.expander(":material/dataset: Output", expanded=True):
-                    rec = wf[sid] if sid in wf else None
-                    if rec is None or rec.status is StepStatus.PENDING:
-                        st.caption("staged — not yet run")
-                        st.dataframe(_staging_dataframe(d, arguments), width="stretch", hide_index=True)
-                    elif rec.status is StepStatus.RUNNING:
-                        st.info("running…")
-                    elif rec.status is StepStatus.COMPLETED:
-                        st.success("done")
-                        custom_result = op.ui.result("streamlit") if op is not None else None
-                        if custom_result is not None:
-                            render_tool_result(st, op, rec.output, key=f"result_{sid}")
-                        else:
-                            st.dataframe(_to_dataframe(rec.output.value), width="stretch")
-                    elif rec.status is StepStatus.FAILED:
-                        st.error(rec.error or "failed")
+            if ":material/dataset:" in st.session_state[f"step_view_controller_{sid}"]:
+                with st.expander(":material/dataset: Output", expanded=True,type="compact"):
+                    step_data_output_tab,step_output_analysis_tab = st.tabs([":material/dataset: Output", ":material/dataset: Analysis"])
+                    with step_data_output_tab:
+                    #with st.expander(":material/dataset: Output", expanded=True):
+                        rec = wf[sid] if sid in wf else None
+                        if rec is None or rec.status is StepStatus.PENDING:
+                            #st.caption("staged — not yet run")
+                            st.dataframe(_staging_dataframe(d, arguments), width="stretch", hide_index=True)
+                        elif rec.status is StepStatus.RUNNING:
+                            st.info("running…")
+                        elif rec.status is StepStatus.COMPLETED:
+                            st.success("done")
+                            custom_result = op.ui.result("streamlit") if op is not None else None
+                            if custom_result is not None:
+                                render_tool_result(st, op, rec.output, key=f"result_{sid}")
+                            else:
+                                st.dataframe(_to_dataframe(rec.output.value), width="stretch")
+                        elif rec.status is StepStatus.FAILED:
+                            st.error(rec.error or "failed")
 
     def _render_function_tabs(d: dict[str, Any], prior: list[str]) -> tuple[dict[str, Any], Tool | None]:
         """The Function panel's three tabs: Operation, Inputs, Exec.
@@ -590,20 +671,22 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
         tokens) and the selected Operation (or None until one is chosen).
         """
         sid = d["id"]
-        op_tab, inputs_tab, exec_tab = st.tabs(["Operation", "Inputs", "Exec"])
+        #op_tab, inputs_tab, exec_tab = st.tabs(["Tool", "Inputs/Orchestration", "Run Settings"])
 
-        with op_tab:
-            d["op"] = st.selectbox(
-                "operation", tool_ids,
-                index=tool_ids.index(d["op"]) if d["op"] in tool_ids else None,
-                placeholder="choose an operation…",
-                key=f"op_{sid}",
-            )
+        #with st.expander("Tool Selection",expanded=True):
+        d["op"] = st.selectbox(
+            "operation", tool_ids,
+            index=tool_ids.index(d["op"]) if d["op"] in tool_ids else None,
+            placeholder="choose an operation…",
+            key=f"op_{sid}",
+        )
+            
+        
         if not d["op"]:
-            with inputs_tab:
-                st.caption("Choose an operation first.")
-            with exec_tab:
-                st.caption("Choose an operation first.")
+            #with inputs_tab:
+            st.caption("Choose a tool first.")
+            #with exec_tab:
+            #    st.caption("Choose an operation first.")
             return {}, None
 
         op = REGISTRY.get_operation(d["op"])
@@ -612,78 +695,87 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
         custom_renderer = op.ui.input("streamlit")
         cached = st.session_state.get(f"cached_args_{sid}", {})
 
-        with op_tab:
-            if custom_renderer is not None:
-                # The tool owns its whole form; no by-hand/reference split.
-                arguments = custom_renderer(st, key=f"form_{sid}", defaults=cached)
-            else:
+        #with op_tab:
+        if custom_renderer is not None:
+            # The tool owns its whole form; no by-hand/reference split.
+            arguments = custom_renderer(st, key=f"form_{sid}", defaults=cached)
+        else:
+            with st.expander("Inputs"):
                 arguments = {}
                 for name in data_params:
-                    source = d["sources"].get(name, "(value)")
-                    if source != "(value)":
-                        st.text_input(name, value=f"← {source}", disabled=True,
-                                       key=f"opview_{sid}_{name}", help="Bound in the Inputs tab")
-                        continue
-                    param = next(p for p in definition.params if p.name == name)
-                    arguments[name] = _render_literal_arg(
-                        st, op, param, key=f"form_{sid}_{name}", default=cached.get(name),
-                    )
+                    # if resources (select resources)
 
-        with inputs_tab:
-            if custom_renderer is not None:
-                st.caption("This tool renders its own form, so argument references aren't available here.")
-            elif not prior:
-                st.caption("No earlier steps to reference yet.")
-            else:
-                st.caption("Bind an argument to an earlier step's output instead of a literal value.")
-                for name in data_params:
-                    current = d["sources"].get(name, "(value)")
-                    options = ["(value)", *prior]
-                    chosen = st.selectbox(
-                        name, options, index=options.index(current) if current in options else 0,
-                        key=f"src_{sid}_{name}",
-                    )
-                    if chosen == "(value)":
-                        d["sources"].pop(name, None)
-                    else:
-                        d["sources"][name] = chosen
-                        arguments[name] = chosen
+                        source = d["sources"].get(name, "(value)")
+                        if source != "(value)":
+                            st.text_input(name, value=f"← {source}", disabled=True,
+                                        key=f"opview_{sid}_{name}", help="Bound in the Inputs tab")
+                            continue
+                        param = next(p for p in definition.params if p.name == name)
 
-            st.divider()
-            st.caption("Orchestration — run this tool once, or fan it out over a collection.")
-            modes = ["single", "map", "filter", "expand", "collapse"]
-            orch = d["orchestration"]
-            orch["mode"] = st.selectbox("mode", modes, index=modes.index(orch["mode"]), key=f"orch_mode_{sid}")
-            if orch["mode"] != "single":
-                over_options = ["(none)", *prior]
-                current_over = orch["over"] if orch["over"] in over_options else "(none)"
-                over = st.selectbox("over — the collection to fan out across", over_options,
-                                      index=over_options.index(current_over), key=f"orch_over_{sid}")
-                orch["over"] = None if over == "(none)" else over
+                        # render resource arg
 
-                item_options = ["(auto)", *data_params]
-                current_item = orch["item_arg"] if orch["item_arg"] in item_options else "(auto)"
-                item_arg = st.selectbox("item argument — which param each item binds to", item_options,
-                                          index=item_options.index(current_item), key=f"orch_item_{sid}")
-                orch["item_arg"] = None if item_arg == "(auto)" else item_arg
+        
+                        arguments[name] = _render_literal_arg(
+                            st, op, param, key=f"form_{sid}_{name}", default=cached.get(name),
+                        )
+                
 
-                orch["concurrency"] = st.number_input("concurrency", min_value=1, step=1,
-                                                        value=int(orch["concurrency"]), key=f"orch_conc_{sid}")
-                error_options = ["(default)", "collect", "fail_fast", "skip"]
-                current_err = orch["on_error"] or "(default)"
-                on_error = st.selectbox("on_error", error_options, index=error_options.index(current_err),
-                                          key=f"orch_err_{sid}")
-                orch["on_error"] = None if on_error == "(default)" else on_error
-                orch["retries"] = st.number_input("retries", min_value=0, step=1,
-                                                    value=int(orch["retries"]), key=f"orch_retries_{sid}")
-                if orch["mode"] == "collapse":
-                    orch["initial"] = st.text_input(
-                        "initial — seed value for the accumulator",
-                        value="" if orch["initial"] is None else str(orch["initial"]),
-                        key=f"orch_initial_{sid}",
-                    )
+        #with inputs_tab:
+        if custom_renderer is not None:
+            
+            st.caption("This tool renders its own form, so argument references aren't available here.")
+        elif not prior:
+            st.caption("No earlier steps to reference yet.")
+        else:
+            st.caption("Bind an argument to an earlier step's output instead of a literal value.")
+            for name in data_params:
+                current = d["sources"].get(name, "(value)")
+                options = ["(value)", *prior]
+                chosen = st.selectbox(
+                    name, options, index=options.index(current) if current in options else 0,
+                    key=f"src_{sid}_{name}",
+                )
+                if chosen == "(value)":
+                    d["sources"].pop(name, None)
+                else:
+                    d["sources"][name] = chosen
+                    arguments[name] = chosen
+            # orchestration
+            with st.expander("Orchestration Settings"):
+                st.caption("Orchestration — run this tool once, or fan it out over a collection.")
+                modes = ["single", "map", "filter", "expand", "collapse"]
+                orch = d["orchestration"]
+                orch["mode"] = st.selectbox("mode", modes, index=modes.index(orch["mode"]), key=f"orch_mode_{sid}")
+                if orch["mode"] != "single":
+                    over_options = ["(none)", *prior]
+                    current_over = orch["over"] if orch["over"] in over_options else "(none)"
+                    over = st.selectbox("over — the collection to fan out across", over_options,
+                                        index=over_options.index(current_over), key=f"orch_over_{sid}")
+                    orch["over"] = None if over == "(none)" else over
 
-        with exec_tab:
+                    item_options = ["(auto)", *data_params]
+                    current_item = orch["item_arg"] if orch["item_arg"] in item_options else "(auto)"
+                    item_arg = st.selectbox("item argument — which param each item binds to", item_options,
+                                            index=item_options.index(current_item), key=f"orch_item_{sid}")
+                    orch["item_arg"] = None if item_arg == "(auto)" else item_arg
+
+                    orch["concurrency"] = st.number_input("concurrency", min_value=1, step=1,
+                                                            value=int(orch["concurrency"]), key=f"orch_conc_{sid}")
+                    error_options = ["(default)", "collect", "fail_fast", "skip"]
+                    current_err = orch["on_error"] or "(default)"
+                    on_error = st.selectbox("on_error", error_options, index=error_options.index(current_err),
+                                            key=f"orch_err_{sid}")
+                    orch["on_error"] = None if on_error == "(default)" else on_error
+                    orch["retries"] = st.number_input("retries", min_value=0, step=1,
+                                                        value=int(orch["retries"]), key=f"orch_retries_{sid}")
+                    if orch["mode"] == "collapse":
+                        orch["initial"] = st.text_input(
+                            "initial — seed value for the accumulator",
+                            value="" if orch["initial"] is None else str(orch["initial"]),
+                            key=f"orch_initial_{sid}",
+                        )
+
+        with st.expander("Runtime Settings"):
             st.caption("How this step is invoked.")
             execu = d["execution"]
             exec_modes = ["sync", "async"]
@@ -725,34 +817,53 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
             ),
         )
 
-    with st.expander("Step Manager", expanded=True):
-        selected = set(_selected())
-        if not selected:
-            st.info("Select one or more steps above to view them here.")
-        with st.container(horizontal=True, wrap=False, gap="small", key=_CARDS_KEY):
-            rendered: set[str] = set()
-            for d in draft:
-                if d["id"] in rendered:
-                    continue
-                if d["stage"] is None:
-                    (_render_card if d["id"] in selected else _author_hidden)(d)
-                    rendered.add(d["id"])
-                    continue
-                stage = d["stage"]
-                members = [m for m in draft if m["stage"] == stage]
-                visible_members = [m for m in members if m["id"] in selected]
-                for member in members:
-                    if member["id"] not in selected:
-                        _author_hidden(member)
-                if visible_members:
-                    with st.container(border=True):
-                        st.caption(f"🗂 {stage}")
-                        if st.button(":material/play_arrow: Run stage", key=f"run_stage_{stage}"):
-                            run_requests.append(("stage", stage))
-                        with st.container(horizontal=True, wrap=False, gap="small"):
-                            for member in visible_members:
+    #with st.expander("Step Manager", expanded=True):
+    selected = set(_selected())
+    if not selected:
+        st.info("Select one or more steps above to view them here.")
+
+    st.markdown(
+        f"""
+        <style>
+        .st-key-{_CARDS_KEY} {{
+            background-color: black;
+            padding: 20px;
+            border-radius: 12px;
+            color: white;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+    with st.container(horizontal=True, wrap=False, gap="xxsmall", key=_CARDS_KEY):
+        rendered: set[str] = set()
+        for d in draft:
+            if d["id"] in rendered:
+                continue
+            if d["stage"] is None:
+                #with st.expander("Step 1: Input Data", type="step", expanded=True):
+                    stage = d["stage"]
+                    members = [m for m in draft if m["stage"] == stage]
+                    visible_members = [m for m in members if m["id"] in selected]
+                    for member in members:
+                        if member["id"] not in selected:
+                            _author_hidden(member)
+                            
+            if visible_members:
+                #with st.container():
+                    #st.caption(f"🗂 {stage}")
+                    #if st.button(":material/play_arrow: Run stage", key=f"run_stage_{stage}"):
+                    #    run_requests.append(("stage", stage))
+                    
+                    
+                        for member in visible_members:
+                            #with st.container(wrap=False, gap="xxsmall", border=True):
+                            with st.expander(f"{member['id']}", expanded=True):
+                            #st.write(f"{member['id']}")
                                 _render_card(member)
-                rendered.update(m["id"] for m in members)
+            rendered.update(m["id"] for m in members)
 
     # ── Author the draft into the workflow (structure only, cheap) ───────
     for step_id in list(wf._steps):
