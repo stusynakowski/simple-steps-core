@@ -543,38 +543,44 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
 
             # steop contoller
             if ":material/step:" in st.session_state[f"step_view_controller_{sid}"]:
-                with st.expander(f"Step Controls", expanded=True,type="compact"):
+                with st.expander(f":material/step: Step Controls", expanded=True,type="compact"):
                     
                     #st.session_state.setdefault(f"step_view_controller_{sid}", [":material/step:",":material/function:", ":material/dataset:"])
                     #with step_contol_container:
                         #with st.container(horizontal=True, gap="xxsmall", horizontal_alignment="left"):
 
                     
-                    with st.container(horizontal=True, gap="xxsmall"):
+                    with st.container(horizontal=True, gap="xxsmall",key=f"step_{sid}_controller"):
                         #st.write(f"{sid}")
-                        #with st.container(horizontal=True, gap="xxsmall",width="content",):
-                        if st.button(":material/play_arrow:", key=f"run_{sid}", help="Run this step",type="primary"):
-                            run_requests.append(("step", sid))
-                        st.button(":material/refresh:", key=f"reset_{sid}", help="Clear this step's output",
-                                    on_click=_reset_step, disabled=sid not in wf,type="secondary")
+                        with st.container(horizontal=True, gap="xxsmall",width="content",horizontal_alignment="left"):
+                            if st.button(":material/play_arrow:", key=f"run_{sid}", help="Run this step",type="primary"):
+                                run_requests.append(("step", sid))
+                            st.button(":material/refresh:", key=f"reset_{sid}", help="Clear this step's output",
+                                        on_click=_reset_step, disabled=sid not in wf,type="secondary")
                         #if st.button(":material/fast_forward:", key=f"ff_{sid}", help="Run this step and every step after it",type="secondary"):
                         #    run_requests.append(("from", sid))
+                        with st.container(horizontal=True, gap="xxsmall",key=f"step_{sid}_header_controls",horizontal_alignment="center"):
+                            st.space("stretch")
+                            
 
-                        st.space("")
+                        
                         #   st.header(f"{sid}")
                         #exec_col,view_col = st.columns(2)
-                        #with st.container(horizontal=True, gap="xxsmall",width="content",horizontal_alignment="right",vertical_alignment="top"):
-                        with st.popover(":material/visibility:",type="secondary"):
+                        with st.container(horizontal=True, gap="xxsmall",width="content",horizontal_alignment="right",key=f"step_{sid}_view_controls"):
+                            
+                            with st.popover(":material/visibility:",type="secondary"):
                             #visibility
-                            st.segmented_control(
-                            label=f"{sid}",
-                            selection_mode="multi",
-                            options=[":material/step:", ":material/function:",":material/dataset:",":material/analytics:", ":material/smart_toy:",":material/settings:"],
-                            key=f"step_view_controller_{sid}",
-                            default=st.session_state.get(f"step_view_controller_{sid}", [":material/step:",":material/function:", ":material/dataset:"]),
-                            help="Select Step components to see for this step",
-                            label_visibility="collapsed"
-                            )
+                                st.header("View Selection")
+                                st.segmented_control(
+                                label=f"{sid}",
+                                selection_mode="multi",
+                                options=[":material/step:", ":material/function:",":material/dataset:",":material/analytics:", ":material/smart_toy:",":material/settings:"],
+                                key=f"step_view_controller_{sid}",
+                                default=st.session_state.get(f"step_view_controller_{sid}", [":material/step:",":material/function:", ":material/dataset:"]),
+                                help="Select Step components to see for this step",
+                                label_visibility="collapsed"
+                                )
+                            
                     # make on change component here
 
 
@@ -587,15 +593,17 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
             if ":material/function:" in st.session_state[f"step_view_controller_{sid}"]:
                 #with st.expander(":material/function: Operation"):
                 with st.expander(":material/function: Operation",type="compact"):
-                    step_op_tab, step_agent_tab, step_settings_tab = st.tabs(["Tool", "Input", "Settings"])
+                    step_op_tab, step_input_tab, step_runtime_settings_tab = st.tabs([":material/construction: Tool", ":material/input: Input", ":material/settings: run settings"])
                 #with st.expander(":material/function: Operation"):
                     with step_op_tab:
                         arguments, op = _render_function_tabs(d, prior)
 
+                    with step_input_tab:
+                        st.markdown("This panel allows you to configure the input for this step.")
 
                     #if ":material/settings:" in selected_step_controls:
                     #with st.expander(":material/settings: Settings"):
-                    with step_settings_tab:
+                    with step_runtime_settings_tab:
                         st.markdown("This panel allows you to configure the settings for this step.")
                     st.markdown("___")
 
@@ -644,8 +652,8 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                 
 
             if ":material/dataset:" in st.session_state[f"step_view_controller_{sid}"]:
-                with st.expander(":material/dataset: Output", expanded=True,type="compact"):
-                    step_data_output_tab,step_output_analysis_tab = st.tabs([":material/dataset: Output", ":material/dataset: Analysis"])
+                with st.expander(":material/output: Result", expanded=True,type="compact"):
+                    step_data_output_tab,step_output_analysis_tab = st.tabs([":material/dataset: data", ":material/analytics: Analysis"])
                     with step_data_output_tab:
                     #with st.expander(":material/dataset: Output", expanded=True):
                         rec = wf[sid] if sid in wf else None
@@ -663,6 +671,8 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                                 st.dataframe(_to_dataframe(rec.output.value), width="stretch")
                         elif rec.status is StepStatus.FAILED:
                             st.error(rec.error or "failed")
+                    with step_output_analysis_tab:
+                        st.markdown("This panel allows you to analyze the output of this step.")
 
     def _render_function_tabs(d: dict[str, Any], prior: list[str]) -> tuple[dict[str, Any], Tool | None]:
         """The Function panel's three tabs: Operation, Inputs, Exec.
