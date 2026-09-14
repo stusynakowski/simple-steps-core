@@ -593,19 +593,30 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
             if ":material/function:" in st.session_state[f"step_view_controller_{sid}"]:
                 #with st.expander(":material/function: Operation"):
                 with st.expander(":material/function: Operation",type="compact"):
-                    step_op_tab, step_input_tab, step_runtime_settings_tab = st.tabs([":material/construction: Tool", ":material/input: Input", ":material/settings: run settings"])
+                    d["op"] = st.selectbox(
+                        ":material/construction: Tool ", tool_ids,
+                        index=tool_ids.index(d["op"]) if d["op"] in tool_ids else None,
+                        placeholder="choose an operation…",
+                        key=f"op_{sid}",)
+                    arguments, op = _render_function_tabs(d, prior)
+                    st.markdown("___")
+                #step_op_tab, step_input_tab, step_runtime_settings_tab = st.tabs([":material/construction: Tool", ":material/input: Input", ":material/settings: run settings"])
                 #with st.expander(":material/function: Operation"):
-                    with step_op_tab:
-                        arguments, op = _render_function_tabs(d, prior)
 
-                    with step_input_tab:
-                        st.markdown("This panel allows you to configure the input for this step.")
+
+                    #with step_op_tab:
+
+                        
+
+                    #with step_input_tab:
+                        
+                        #st.markdown("This panel allows you to configure the input for this step.")
 
                     #if ":material/settings:" in selected_step_controls:
                     #with st.expander(":material/settings: Settings"):
-                    with step_runtime_settings_tab:
-                        st.markdown("This panel allows you to configure the settings for this step.")
-                    st.markdown("___")
+                    #with step_runtime_settings_tab:
+                    #    st.markdown("This panel allows you to configure the settings for this step.")
+                    
 
             else:
                 arguments = st.session_state.get(args_cache_key, {})
@@ -684,12 +695,7 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
         #op_tab, inputs_tab, exec_tab = st.tabs(["Tool", "Inputs/Orchestration", "Run Settings"])
 
         #with st.expander("Tool Selection",expanded=True):
-        d["op"] = st.selectbox(
-            "operation", tool_ids,
-            index=tool_ids.index(d["op"]) if d["op"] in tool_ids else None,
-            placeholder="choose an operation…",
-            key=f"op_{sid}",
-        )
+
             
         
         if not d["op"]:
@@ -698,7 +704,7 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
             #with exec_tab:
             #    st.caption("Choose an operation first.")
             return {}, None
-
+        step_input_tab, step_runtime_settings_tab = st.tabs([":material/input: Input", ":material/settings: Runtime settings"])
         op = REGISTRY.get_operation(d["op"])
         definition = op.definition
         data_params = [p.name for p in definition.params if p.kind == "data"]
@@ -710,7 +716,8 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
             # The tool owns its whole form; no by-hand/reference split.
             arguments = custom_renderer(st, key=f"form_{sid}", defaults=cached)
         else:
-            with st.expander("Inputs"):
+            
+            with step_input_tab:
                 arguments = {}
                 for name in data_params:
                     # if resources (select resources)
@@ -751,7 +758,7 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                     d["sources"][name] = chosen
                     arguments[name] = chosen
             # orchestration
-            with st.expander("Orchestration Settings"):
+            with st.expander("Orchestration Settings",type="compact"):
                 st.caption("Orchestration — run this tool once, or fan it out over a collection.")
                 modes = ["single", "map", "filter", "expand", "collapse"]
                 orch = d["orchestration"]
@@ -785,7 +792,7 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                             key=f"orch_initial_{sid}",
                         )
 
-        with st.expander("Runtime Settings"):
+        with step_runtime_settings_tab:
             st.caption("How this step is invoked.")
             execu = d["execution"]
             exec_modes = ["sync", "async"]
