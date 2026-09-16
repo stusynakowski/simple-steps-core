@@ -4,12 +4,17 @@
 # clean up output-representation
 
 # representation
+    # h
 
 
 # resource managment
+    # form representation
+    # class
+    # creation
 
 
-# agent component
+
+# agent component 
 
 
 # modularity of forms
