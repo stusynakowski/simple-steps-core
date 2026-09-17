@@ -20,22 +20,39 @@ and call it at the bottom::
 then run it with ``python mytools.py`` (needs ``pip install
 "simple-steps-core[dashboard]"``).
 
-The **tool contract** (``params`` / ``input_schema`` / ``guardrails``) is the
-generic UI schema. Each tool carries a ``ToolUI`` (``operation.ui``) holding
-per-surface views keyed by target, all rendering from that one contract:
+The **tool contract** is the generic UI schema, and this module renders every
+widget from it — nothing here hard-codes a tool:
 
-  * ``operation.ui.prefab`` — a prefab-ui protocol (for a React frontend), and
-  * ``operation.ui.get("streamlit")`` — a Python callable ``render(st, key,
-    defaults) -> args dict`` used here. When a tool has no Streamlit view, this
-    module auto-builds a Streamlit form from the contract.
+  * ``definition.params`` — name, ``kind`` (``data`` is asked for, ``resource``
+    is injected by the runtime), ``required`` and the signature default;
+  * ``definition.input_schema`` — the JSON-Schema type that picks the widget;
+  * ``definition.guardrails`` — ``arguments[name]`` bounds/enums/lengths that
+    constrain it, plus ``destructive`` / ``requires_confirmation`` flags.
+
+Each tool also carries a ``ToolUI`` (``operation.ui``) of per-surface views
+keyed by target, each with two lifecycle phases:
+
+  * ``operation.ui.prefab`` — a prefab-ui protocol (for a React frontend);
+  * ``operation.ui.input("streamlit")`` — ``render(st, *, key, defaults) ->
+    args dict``. Absent, a form is auto-built from the contract above;
+  * ``operation.ui.result("streamlit")`` — ``render(st, *, key, result) ->
+    None``, where ``result`` is the ``StepOutput`` (``result.value`` plus the
+    timing fields). Absent, the value is shown as a table or scalar.
+
+A tool that supplies its own ``input`` view owns its whole form, so the Step
+Manager cannot offer reference binding ("use an earlier step's output") for it;
+tools using the auto-form get that picker per argument.
 
 Streamlit is imported lazily so importing this module never requires it.
 """
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import sys
+from datetime import datetime
 from typing import Any
 
 # Absolute imports: `streamlit run` executes this file as a top-level script
@@ -54,6 +71,197 @@ _CARD_WIDTH = 260
 
 
 
+def coerce_value(value: Any, jtype: str | None):
+    """Convert selectbox/custom input to the schema's expected type."""
+
+    if value is None:
+        return None
+
+    if jtype == "integer":
+        return int(value)
+
+    if jtype == "number":
+        return float(value)
+
+    if jtype == "boolean":
+        if isinstance(value, bool):
+            return value
+
+        lookup = {
+            "true": True,
+            "false": False,
+        }
+
+        key = str(value).strip().lower()
+
+        if key not in lookup:
+            raise ValueError("Must be true or false.")
+
+        return lookup[key]
+
+    if jtype in ("array", "object"):
+        if isinstance(value, (list, dict)):
+            return value
+        try:
+            parsed = json.loads(str(value))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"must be valid JSON ({exc.msg})") from exc
+        expected = list if jtype == "array" else dict
+        if not isinstance(parsed, expected):
+            raise ValueError(f"must be a JSON {'array' if jtype == 'array' else 'object'}")
+        return parsed
+
+    # string or unspecified type
+    return str(value)
+
+
+def build_help(param, prop: dict, rule=None) -> str | None:
+    """One-line help string for a param, assembled from the tool contract."""
+    parts: list[str] = []
+
+    type_name = prop.get("type") or (param.type_name if param.type_name != "Any" else None)
+    if type_name:
+        parts.append(f"`{type_name}`")
+    parts.append("required" if param.required else "optional")
+
+    if rule is not None:
+        if rule.minimum is not None:
+            parts.append(f"min {rule.minimum:g}")
+        if rule.maximum is not None:
+            parts.append(f"max {rule.maximum:g}")
+        if rule.min_length is not None:
+            parts.append(f"min length {rule.min_length}")
+        if rule.max_length is not None:
+            parts.append(f"max length {rule.max_length}")
+        if rule.pattern:
+            parts.append(f"pattern `{rule.pattern}`")
+        if rule.note:
+            parts.append(rule.note)
+
+    return " · ".join(parts) if parts else None
+
+
+def check_rule(value: Any, rule) -> None:
+    """Raise ValueError when *value* violates an ArgGuardrail. Mirrors core validation."""
+    if rule is None or value is None:
+        return
+
+    if rule.enum is not None and value not in rule.enum:
+        raise ValueError(f"must be one of {rule.enum}")
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if rule.minimum is not None and value < rule.minimum:
+            raise ValueError(f"must be ≥ {rule.minimum:g}")
+        if rule.maximum is not None and value > rule.maximum:
+            raise ValueError(f"must be ≤ {rule.maximum:g}")
+
+    if isinstance(value, str):
+        if rule.min_length is not None and len(value) < rule.min_length:
+            raise ValueError(f"must be at least {rule.min_length} characters")
+        if rule.max_length is not None and len(value) > rule.max_length:
+            raise ValueError(f"must be at most {rule.max_length} characters")
+        if rule.pattern and re.search(rule.pattern, value) is None:
+            raise ValueError(f"must match pattern {rule.pattern}")
+
+
+def render_resource_params(st, params) -> None:
+    """Show a tool's injected resource params — supplied by the runtime, not the user."""
+    names = [p.name for p in params if p.kind == "resource"]
+    if names:
+        st.caption(
+            ":material/database: injected resource"
+            f"{'s' if len(names) > 1 else ''}: " + ", ".join(f"`{n}`" for n in names)
+        )
+
+
+def render_literal_arg(st, definition, param, *, key: str, default: Any = None) -> Any:
+    """Render one widget for a data param, driven entirely by the tool contract.
+
+    Widget choice comes from the param's JSON-Schema type; bounds, enums and
+    lengths come from the tool's ``guardrails.arguments`` entry. Returns the
+    coerced value, or ``None`` when the field is left empty / is invalid.
+    """
+    props = definition.input_schema.get("properties", {})
+    rules = getattr(definition.guardrails, "arguments", {}) or {}
+    prop = props.get(param.name, {})
+    rule = rules.get(param.name)
+
+    jtype = prop.get("type")
+    enum = prop.get("enum") or (rule.enum if rule is not None and rule.enum else None)
+    help_text = build_help(param, prop, rule)
+    label = param.name
+    wkey = f"{key}_{param.name}"
+
+    # Seed: the step's cached value, then the signature default, then the schema default.
+    seed = default
+    if seed is None:
+        seed = param.default
+    if seed is None:
+        seed = prop.get("default")
+
+    if enum is not None:
+        options = list(enum)
+        return st.selectbox(
+            label, options,
+            index=options.index(seed) if seed in options else None,
+            key=wkey, help=help_text, placeholder="choose a value…",
+        )
+
+    if jtype == "boolean":
+        return st.checkbox(label, value=bool(seed), key=wkey, help=help_text)
+
+    if jtype in ("integer", "number"):
+        is_int = jtype == "integer"
+        cast = int if is_int else float
+        bounds: dict[str, Any] = {}
+        if rule is not None and rule.minimum is not None:
+            bounds["min_value"] = cast(rule.minimum)
+        if rule is not None and rule.maximum is not None:
+            bounds["max_value"] = cast(rule.maximum)
+        if isinstance(seed, (int, float)) and not isinstance(seed, bool):
+            base = cast(seed)
+        else:
+            base = bounds.get("min_value", cast(0))
+        value = st.number_input(
+            label, value=base, step=cast(1) if is_int else 0.1,
+            key=wkey, help=help_text, **bounds,
+        )
+        return cast(value)
+
+    if jtype in ("array", "object"):
+        placeholder = "[1, 2, 3]" if jtype == "array" else '{"key": "value"}'
+        text = st.text_area(
+            label,
+            value="" if seed is None else json.dumps(seed),
+            key=wkey, height=68, placeholder=placeholder,
+            help=f"{help_text} · JSON" if help_text else "JSON",
+        )
+        if not text.strip():
+            return None
+        try:
+            value = coerce_value(text, jtype)
+            check_rule(value, rule)
+            return value
+        except ValueError as exc:
+            st.error(f"**{label}**: {exc}")
+            return None
+
+    # string, or an unannotated param
+    text = st.text_input(
+        label, value="" if seed is None else str(seed), key=wkey, help=help_text,
+        max_chars=rule.max_length if rule is not None and rule.max_length else None,
+    )
+    if text == "":
+        return None
+    try:
+        value = coerce_value(text, jtype)
+        check_rule(value, rule)
+        return value
+    except ValueError as exc:
+        st.error(f"**{label}**: {exc}")
+        return None
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Form rendering — the generic default renderer (takes `st` so it is testable)
 # ─────────────────────────────────────────────────────────────────────────
@@ -67,7 +275,7 @@ def render_tool_form(
 ) -> dict[str, Any]:
     """Render a tool's argument form and return the collected arguments.
 
-    Uses the tool's own ``ui.get("streamlit")`` view when present; otherwise
+    Uses the tool's own ``ui.input("streamlit")`` view when present; otherwise
     builds a default form from the tool contract. Each data argument also offers
     a "use the output of an earlier step" reference picker.
     """
@@ -76,94 +284,94 @@ def render_tool_form(
 
     renderer = operation.ui.input("streamlit")
     if renderer is not None:
-        return renderer(st, key=key, defaults=defaults)
+        return renderer(st, key=key, defaults=defaults) or {}
 
     definition = operation.definition
-    props = definition.input_schema.get("properties", {})
-    rules = getattr(definition.guardrails, "arguments", {}) if definition.guardrails else {}
+    render_resource_params(st, definition.params)
     args: dict[str, Any] = {}
 
     for param in definition.params:
         if param.kind != "data":
             continue  # resources are injected, never user-supplied
-        name = param.name
-        prop = props.get(name, {})
-        rule = rules.get(name)
 
         # Reference vs literal: pick "(value)" or an earlier step's output.
         if available_steps:
             source = st.selectbox(
-                f"{name} — source",
+                f"{param.name} — source",
                 ["(value)", *available_steps],
-                key=f"{key}_{name}_src",
+                key=f"{key}_{param.name}_src",
             )
             if source != "(value)":
-                args[name] = source  # a step-id reference
+                args[param.name] = source  # a step-id reference
                 continue
 
-        default = defaults.get(name, param.default)
-        enum = prop.get("enum") or (rule.enum if rule and rule.enum else None)
-        jtype = prop.get("type")
-
-        if enum is not None:
-            index = enum.index(default) if default in enum else 0
-            args[name] = st.selectbox(name, enum, index=index, key=f"{key}_{name}")
-        elif jtype == "boolean":
-            args[name] = st.checkbox(name, value=bool(default), key=f"{key}_{name}")
-        elif jtype in ("integer", "number"):
-            kwargs: dict[str, Any] = {}
-            if rule and rule.minimum is not None:
-                kwargs["min_value"] = rule.minimum
-            if rule and rule.maximum is not None:
-                kwargs["max_value"] = rule.maximum
-            seed = default if isinstance(default, (int, float)) else 0
-            value = st.number_input(name, value=seed, key=f"{key}_{name}", **kwargs)
-            args[name] = int(value) if jtype == "integer" else float(value)
-        else:
-            text = st.text_input(name, value="" if default is None else str(default), key=f"{key}_{name}")
-            args[name] = text
+        value = render_literal_arg(
+            st, definition, param, key=key, default=defaults.get(param.name),
+        )
+        # Leaving an optional field empty means "use the tool's own default",
+        # so don't pass None and override it.
+        if value is None and not param.required:
+            continue
+        args[param.name] = value
 
     return args
 
 
-def _render_literal_arg(st, operation: Tool, param, *, key: str, default: Any) -> Any:
-    """Render one by-hand value widget for a data param (no reference picker).
-
-    Used by the Step Manager's "Operation" tab, where reference binding has
-    already been split out into its own "Inputs" tab.
-    """
-    definition = operation.definition
-    props = definition.input_schema.get("properties", {})
-    rules = getattr(definition.guardrails, "arguments", {}) if definition.guardrails else {}
-    prop = props.get(param.name, {})
-    rule = rules.get(param.name)
-    seed = default if default is not None else param.default
-    enum = prop.get("enum") or (rule.enum if rule and rule.enum else None)
-    jtype = prop.get("type")
-
-    if enum is not None:
-        index = enum.index(seed) if seed in enum else 0
-        return st.selectbox(param.name, enum, index=index, key=key)
-    if jtype == "boolean":
-        return st.checkbox(param.name, value=bool(seed), key=key)
-    if jtype in ("integer", "number"):
-        kwargs: dict[str, Any] = {}
-        if rule and rule.minimum is not None:
-            kwargs["min_value"] = rule.minimum
-        if rule and rule.maximum is not None:
-            kwargs["max_value"] = rule.maximum
-        value = st.number_input(param.name, value=seed if isinstance(seed, (int, float)) else 0, key=key, **kwargs)
-        return int(value) if jtype == "integer" else float(value)
-    return st.text_input(param.name, value="" if seed is None else str(seed), key=key)
-
-
 def render_tool_result(st, operation: Tool, result: Any, *, key: str) -> None:
-    """Render a completed output with the custom result view or a generic fallback."""
-    renderer = operation.ui.result("streamlit")
+    """Render a completed ``StepOutput`` with the tool's result view, or a fallback.
+
+    A tool's own view (``ui.result("streamlit")``) receives the ``StepOutput``
+    as ``result``, so it can read both ``result.value`` and the timing fields.
+    The fallback renders the value as a table when it is tabular, and with the
+    type-appropriate Streamlit widget otherwise.
+    """
+    renderer = operation.ui.result("streamlit") if operation is not None else None
     if renderer is not None:
         renderer(st, key=key, result=result)
         return
-    st.write(result.value)
+
+    value = result.value
+
+    if value is None:
+        st.caption("no output")
+        return
+    if isinstance(value, bool) or isinstance(value, (int, float, str)):
+        st.write(value)
+        return
+    st.dataframe(_to_dataframe(value), width="stretch")
+
+
+def _clock(ts: Any) -> str:
+    """Format an epoch timestamp as a readable wall-clock time."""
+    if ts is None:
+        return "—"
+    try:
+        return datetime.fromtimestamp(float(ts)).strftime("%H:%M:%S.%f")[:-3]
+    except (TypeError, ValueError, OSError):
+        return str(ts)
+
+
+def render_output_status(st, output) -> None:
+    """The timing/shape side of a completed ``StepOutput`` — the Status tab."""
+    import pandas as pd
+
+    value = output.value
+    rows = [
+        ("kind", output.kind or "—"),
+        ("ref", output.ref or "—"),
+        ("python type", type(value).__name__),
+        ("duration", f"{output.duration:.3f}s" if output.duration is not None else "—"),
+        ("started", _clock(output.started_at)),
+        ("ended", _clock(output.ended_at)),
+    ]
+    if isinstance(value, (list, tuple, dict, str)):
+        rows.append(("length", str(len(value))))
+
+    # Every cell is a string: a mixed-type column has no Arrow type to convert to.
+    st.dataframe(
+        pd.DataFrame([{"field": f, "value": str(v)} for f, v in rows]),
+        width="stretch", hide_index=True,
+    )
 
 
 def _default_orchestration() -> dict[str, Any]:
@@ -543,7 +751,7 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
 
             # steop contoller
             if ":material/step:" in st.session_state[f"step_view_controller_{sid}"]:
-                with st.expander(f":material/step: Step Controls", expanded=True,type="compact"):
+                with st.expander(":material/step: Step Controls", expanded=True,type="compact"):
                     
                     #st.session_state.setdefault(f"step_view_controller_{sid}", [":material/step:",":material/function:", ":material/dataset:"])
                     #with step_contol_container:
@@ -576,7 +784,8 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                                 selection_mode="multi",
                                 options=[":material/step:", ":material/function:",":material/dataset:",":material/analytics:", ":material/smart_toy:",":material/settings:"],
                                 key=f"step_view_controller_{sid}",
-                                default=st.session_state.get(f"step_view_controller_{sid}", [":material/step:",":material/function:", ":material/dataset:"]),
+                                # seeded by the setdefault above; passing `default=`
+                                # as well is what Streamlit warns about
                                 help="Select Step components to see for this step",
                                 label_visibility="collapsed"
                                 )
@@ -664,7 +873,7 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
 
             if ":material/dataset:" in st.session_state[f"step_view_controller_{sid}"]:
                 with st.expander(":material/output: Result", expanded=True,type="compact"):
-                    step_data_output_tab,step_output_analysis_tab = st.tabs([":material/dataset: data", ":material/analytics: Analysis"])
+                    step_data_output_tab,step_output_analysis_tab = st.tabs([":material/dataset: Value", ":material/analytics: Status"])
                     with step_data_output_tab:
                     #with st.expander(":material/dataset: Output", expanded=True):
                         rec = wf[sid] if sid in wf else None
@@ -675,116 +884,141 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                             st.info("running…")
                         elif rec.status is StepStatus.COMPLETED:
                             st.success("done")
-                            custom_result = op.ui.result("streamlit") if op is not None else None
-                            if custom_result is not None:
-                                render_tool_result(st, op, rec.output, key=f"result_{sid}")
-                            else:
-                                st.dataframe(_to_dataframe(rec.output.value), width="stretch")
+                            render_tool_result(st, op, rec.output, key=f"result_{sid}")
                         elif rec.status is StepStatus.FAILED:
                             st.error(rec.error or "failed")
                     with step_output_analysis_tab:
-                        st.markdown("This panel allows you to analyze the output of this step.")
+                        rec = wf[sid] if sid in wf else None
+                        if rec is None or rec.output is None or rec.status is not StepStatus.COMPLETED:
+                            st.caption("Run this step to see its output status.")
+                        else:
+                            render_output_status(st, rec.output)
 
     def _render_function_tabs(d: dict[str, Any], prior: list[str]) -> tuple[dict[str, Any], Tool | None]:
-        """The Function panel's three tabs: Operation, Inputs, Exec.
+        """The Function panel's tabs: Input (arguments + orchestration) and Runtime.
 
         Returns the merged ``arguments`` dict (by-hand values + reference
         tokens) and the selected Operation (or None until one is chosen).
         """
         sid = d["id"]
-        #op_tab, inputs_tab, exec_tab = st.tabs(["Tool", "Inputs/Orchestration", "Run Settings"])
 
-        #with st.expander("Tool Selection",expanded=True):
-
-            
-        
         if not d["op"]:
-            #with inputs_tab:
             st.caption("Choose a tool first.")
-            #with exec_tab:
-            #    st.caption("Choose an operation first.")
             return {}, None
-        step_input_tab, step_runtime_settings_tab = st.tabs([":material/input: Input", ":material/settings: Runtime settings"])
+
+        step_input_tab, step_runtime_settings_tab = st.tabs(
+            [":material/input: Input", ":material/settings: Runtime settings"]
+        )
         op = REGISTRY.get_operation(d["op"])
         definition = op.definition
-        data_params = [p.name for p in definition.params if p.kind == "data"]
+        data_params = [p for p in definition.params if p.kind == "data"]
+        param_names = [p.name for p in data_params]
         custom_renderer = op.ui.input("streamlit")
         cached = st.session_state.get(f"cached_args_{sid}", {})
+        arguments: dict[str, Any] = {}
 
-        #with op_tab:
-        if custom_renderer is not None:
-            # The tool owns its whole form; no by-hand/reference split.
-            arguments = custom_renderer(st, key=f"form_{sid}", defaults=cached)
-        else:
-            
-            with step_input_tab:
-                arguments = {}
-                for name in data_params:
-                    # if resources (select resources)
+        with step_input_tab:
+            if definition.description:
+                st.caption(definition.description)
 
-                        source = d["sources"].get(name, "(value)")
-                        if source != "(value)":
-                            st.text_input(name, value=f"← {source}", disabled=True,
-                                        key=f"opview_{sid}_{name}", help="Bound in the Inputs tab")
-                            continue
-                        param = next(p for p in definition.params if p.name == name)
-
-                        # render resource arg
-
-        
-                        arguments[name] = _render_literal_arg(
-                            st, op, param, key=f"form_{sid}_{name}", default=cached.get(name),
-                        )
-                
-
-        #with inputs_tab:
-        if custom_renderer is not None:
-            
-            st.caption("This tool renders its own form, so argument references aren't available here.")
-        elif not prior:
-            st.caption("No earlier steps to reference yet.")
-        else:
-            st.caption("Bind an argument to an earlier step's output instead of a literal value.")
-            for name in data_params:
-                current = d["sources"].get(name, "(value)")
-                options = ["(value)", *prior]
-                chosen = st.selectbox(
-                    name, options, index=options.index(current) if current in options else 0,
-                    key=f"src_{sid}_{name}",
+            guard = definition.guardrails
+            if guard is not None and (guard.destructive or guard.requires_confirmation):
+                flags = []
+                if guard.destructive:
+                    flags.append("destructive")
+                if guard.requires_confirmation:
+                    flags.append("needs confirmation")
+                st.warning(
+                    f":material/warning: {' · '.join(flags)}"
+                    + (f" — {guard.usage}" if guard.usage else "")
                 )
-                if chosen == "(value)":
-                    d["sources"].pop(name, None)
-                else:
-                    d["sources"][name] = chosen
-                    arguments[name] = chosen
-            # orchestration
-            with st.expander("Orchestration Settings",type="compact"):
+
+            # Resource params are injected by the runtime; show them, don't ask.
+            render_resource_params(st, definition.params)
+
+            if custom_renderer is not None:
+                # The tool owns its whole form; no by-hand/reference split.
+                arguments = custom_renderer(st, key=f"form_{sid}", defaults=cached) or {}
+                if prior:
+                    st.caption(
+                        "This tool renders its own form, so argument references "
+                        "aren't available here."
+                    )
+            elif not data_params:
+                st.caption("This tool takes no arguments.")
+            else:
+                for param in data_params:
+                    name = param.name
+                    current = d["sources"].get(name, "(value)")
+
+                    # Bind to an earlier step's output, or supply a literal.
+                    if prior:
+                        options = ["(value)", *prior]
+                        chosen = st.selectbox(
+                            f"{name} — source", options,
+                            index=options.index(current) if current in options else 0,
+                            key=f"src_{sid}_{name}",
+                            help="Use a literal value, or the output of an earlier step.",
+                        )
+                    else:
+                        chosen = "(value)"
+
+                    if chosen == "(value)":
+                        d["sources"].pop(name, None)
+                        value = render_literal_arg(
+                            st, definition, param,
+                            key=f"form_{sid}", default=cached.get(name),
+                        )
+                        # An empty optional field means "use the tool's default".
+                        if value is None and not param.required:
+                            continue
+                        arguments[name] = value
+                    else:
+                        d["sources"][name] = chosen
+                        arguments[name] = chosen  # a step-id reference
+
+            # Orchestration applies to every tool, referenced or not.
+            with st.expander("Orchestration Settings", type="compact"):
                 st.caption("Orchestration — run this tool once, or fan it out over a collection.")
                 modes = ["single", "map", "filter", "expand", "collapse"]
                 orch = d["orchestration"]
-                orch["mode"] = st.selectbox("mode", modes, index=modes.index(orch["mode"]), key=f"orch_mode_{sid}")
+                orch["mode"] = st.selectbox(
+                    "mode", modes, index=modes.index(orch["mode"]), key=f"orch_mode_{sid}",
+                )
                 if orch["mode"] != "single":
+                    if not prior:
+                        st.caption("Add an earlier step to fan out over.")
                     over_options = ["(none)", *prior]
                     current_over = orch["over"] if orch["over"] in over_options else "(none)"
-                    over = st.selectbox("over — the collection to fan out across", over_options,
-                                        index=over_options.index(current_over), key=f"orch_over_{sid}")
+                    over = st.selectbox(
+                        "over — the collection to fan out across", over_options,
+                        index=over_options.index(current_over), key=f"orch_over_{sid}",
+                    )
                     orch["over"] = None if over == "(none)" else over
 
-                    item_options = ["(auto)", *data_params]
+                    item_options = ["(auto)", *param_names]
                     current_item = orch["item_arg"] if orch["item_arg"] in item_options else "(auto)"
-                    item_arg = st.selectbox("item argument — which param each item binds to", item_options,
-                                            index=item_options.index(current_item), key=f"orch_item_{sid}")
+                    item_arg = st.selectbox(
+                        "item argument — which param each item binds to", item_options,
+                        index=item_options.index(current_item), key=f"orch_item_{sid}",
+                    )
                     orch["item_arg"] = None if item_arg == "(auto)" else item_arg
 
-                    orch["concurrency"] = st.number_input("concurrency", min_value=1, step=1,
-                                                            value=int(orch["concurrency"]), key=f"orch_conc_{sid}")
+                    orch["concurrency"] = st.number_input(
+                        "concurrency", min_value=1, step=1,
+                        value=int(orch["concurrency"]), key=f"orch_conc_{sid}",
+                    )
                     error_options = ["(default)", "collect", "fail_fast", "skip"]
                     current_err = orch["on_error"] or "(default)"
-                    on_error = st.selectbox("on_error", error_options, index=error_options.index(current_err),
-                                            key=f"orch_err_{sid}")
+                    on_error = st.selectbox(
+                        "on_error", error_options,
+                        index=error_options.index(current_err), key=f"orch_err_{sid}",
+                    )
                     orch["on_error"] = None if on_error == "(default)" else on_error
-                    orch["retries"] = st.number_input("retries", min_value=0, step=1,
-                                                        value=int(orch["retries"]), key=f"orch_retries_{sid}")
+                    orch["retries"] = st.number_input(
+                        "retries", min_value=0, step=1,
+                        value=int(orch["retries"]), key=f"orch_retries_{sid}",
+                    )
                     if orch["mode"] == "collapse":
                         orch["initial"] = st.text_input(
                             "initial — seed value for the accumulator",
@@ -810,7 +1044,10 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                                                  value=int(execu["retries"]), key=f"exec_retries_{sid}")
             execu["cache"] = st.checkbox("cache result", value=execu["cache"], key=f"exec_cache_{sid}")
 
+        # Remember what the user typed so an unmounted panel can re-author the spec.
+        st.session_state[f"cached_args_{sid}"] = dict(arguments)
         return arguments, op
+
 
     def _author_hidden(d: dict[str, Any]) -> None:
         """Keep an unselected step's spec authored into `wf` without rendering it."""
@@ -886,9 +1123,19 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
     for step_id in list(wf._steps):
         if step_id not in specs:
             del wf[step_id]
+
+    # A half-authored step is normal while editing (e.g. mode="map" chosen
+    # before `over`). The library validates on assignment, so keep the step out
+    # of the workflow and surface its own message rather than crashing the page.
+    incomplete: dict[str, str] = {}
     for sid, spec in specs.items():
         if sid not in wf or wf[sid].spec != spec:
-            wf[sid] = spec
+            try:
+                wf[sid] = spec
+            except (ValueError, TypeError) as exc:
+                incomplete[sid] = str(exc)
+    for sid, message in incomplete.items():
+        st.warning(f":material/warning: **{sid}** isn't runnable yet — {message}")
 
     # ── Execute only what was explicitly requested this run ──────────────
     ran = False

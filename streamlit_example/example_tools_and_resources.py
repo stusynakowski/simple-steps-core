@@ -5,9 +5,19 @@ Run it::
     python -m pip install -e ".[dashboard]"
     python streamlit_example/example_tools_and_resources.py
 
-You only edit this file. Each tool can optionally provide a Streamlit view via
-``ui={"streamlit": fn}``; tools without one get an auto-generated form. The
+You only edit this file. Each tool can optionally provide Streamlit views via
+``ui={"streamlit": ...}``; tools without one get a form auto-generated from the
+tool contract (signature + ``input_schema`` + ``guardrails``). The
 ``Dashboard().run()`` call at the bottom launches the UI.
+
+A tool's ``ui`` entry is either a single callable (the **input** view) or a dict
+of lifecycle phases::
+
+    ui={"streamlit": {"input": render_form, "result": render_result}}
+
+  * ``input(st, *, key, defaults) -> dict``  — draw widgets, return arguments.
+  * ``result(st, *, key, result)``           — draw a completed step's output;
+    ``result`` is the ``StepOutput`` (``result.value`` plus timing fields).
 """
 
 from simple_steps_core import ArgGuardrail, Guardrails, Resource, register_tool
@@ -70,6 +80,54 @@ def pick_region(region: str) -> str:
 ))
 def charge(amount: int) -> str:
     return f"charged ${amount}"
+
+
+# ── A tool with both lifecycle views: a form AND a result view ────────────
+# The library requires a composed UI to define an ``input`` view, so a tool that
+# wants a custom ``result`` view supplies both. Note the trade-off: a tool that
+# renders its own form owns it completely, so the Step Manager can't offer the
+# "bind this argument to an earlier step's output" picker for it. Leave ``ui``
+# off (like ``summarize`` below) to keep the auto-form and that picker.
+def _total_input_ui(st, *, key, defaults):
+    text = st.text_input(
+        "Numbers (comma-separated)",
+        value=", ".join(str(v) for v in defaults.get("rows", [1, 2, 3])),
+        key=f"{key}_rows",
+    )
+    rows = [int(part) for part in text.replace(",", " ").split() if part.strip("-").isdigit()]
+    return {"rows": rows}
+
+
+def _total_result_ui(st, *, key, result):
+    """render(st, key, result) -> None. `result` is the step's StepOutput."""
+    value = result.value
+    left, right = st.columns(2)
+    left.metric("count", value["count"])
+    right.metric("total", value["total"])
+    st.caption(f"computed in {result.duration:.3f}s")
+
+
+@register_tool("total", description="Count and total a hand-typed list.", ui={
+    "streamlit": {"input": _total_input_ui, "result": _total_result_ui},
+})
+def total(rows: list[int]) -> dict:
+    return {"count": len(rows), "total": sum(rows)}
+
+
+# ── An auto-form tool taking a list ───────────────────────────────────────
+# `rows: list[int]` gets a JSON text area from the auto-form, and in the Step
+# Manager it can instead be bound to an earlier step's output.
+@register_tool("summarize", description="Count and total a list of numbers.")
+def summarize(rows: list[int]) -> dict:
+    return {"count": len(rows), "total": sum(rows)}
+
+
+# ── A tool whose enum guardrail drives the widget ─────────────────────────
+@register_tool("set_mode", description="Pick a run mode.", guardrails=Guardrails(
+    arguments={"mode": ArgGuardrail(enum=["fast", "balanced", "thorough"])},
+))
+def set_mode(mode: str = "balanced") -> str:
+    return mode
 
 
 # ── A tool that uses an injected resource ─────────────────────────────────
