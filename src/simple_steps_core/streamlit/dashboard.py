@@ -68,6 +68,12 @@ _ENV_TOOLS = "SIMPLE_STEPS_TOOLS"
 _CARDS_KEY = "step_cards_row"
 _CARD_WIDTH = 260
 
+# JSON-Schema scalar types -> the Python names a user recognises.
+_SCALAR_TYPES = {
+    "integer": "int", "number": "float", "string": "str",
+    "boolean": "bool", "null": "None",
+}
+
 
 
 
@@ -381,6 +387,41 @@ def _default_orchestration() -> dict[str, Any]:
 
 def _default_execution() -> dict[str, Any]:
     return {"mode": "sync", "run": "manual", "timeout": None, "retries": 0, "cache": False}
+
+
+def output_type_name(definition) -> str:
+    """The tool's declared return type, read off its ``output_schema``."""
+    schema = (definition.output_schema or {}).get("properties", {}).get("result", {})
+    jtype = schema.get("type")
+
+    if jtype == "array":
+        item = (schema.get("items") or {}).get("type")
+        return f"list[{_SCALAR_TYPES.get(item, item)}]" if item else "list"
+    if jtype == "object":
+        return "dict"
+    return _SCALAR_TYPES.get(jtype, jtype or "Any")
+
+
+def staged_output_type(d: dict[str, Any], definition) -> str:
+    """What a staged step will produce — a fan-out wraps the tool's type in a MapResult."""
+    if definition is None:
+        return "?"
+    inner = output_type_name(definition)
+    orch = d.get("orchestration") or _default_orchestration()
+    if orch["mode"] != "single":
+        return f"MapResult[{inner}]"
+    return inner
+
+
+def is_fanned_out(d: dict[str, Any]) -> bool:
+    """True when the step has a real orchestration component (not a single call)."""
+    orch = d.get("orchestration") or _default_orchestration()
+    return orch["mode"] != "single"
+
+
+def returns_dataframe(definition) -> bool:
+    """True when the tool declares a dataframe return (the library's own signal)."""
+    return definition is not None and definition.type == "dataframe"
 
 
 def _staging_dataframe(d: dict[str, Any], arguments: dict[str, Any]):
@@ -878,8 +919,18 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                     #with st.expander(":material/dataset: Output", expanded=True):
                         rec = wf[sid] if sid in wf else None
                         if rec is None or rec.status is StepStatus.PENDING:
-                            #st.caption("staged — not yet run")
-                            st.dataframe(_staging_dataframe(d, arguments), width="stretch", hide_index=True)
+                            definition = op.definition if op is not None else None
+                            # The staging table only earns its space when there is
+                            # something tabular to preview: a fan-out's per-item
+                            # plan, or a tool that returns a dataframe. Otherwise
+                            # a staged step is just a type waiting to be filled.
+                            if is_fanned_out(d) or returns_dataframe(definition):
+                                st.dataframe(
+                                    _staging_dataframe(d, arguments),
+                                    width="stretch", hide_index=True,
+                                )
+                            else:
+                                st.text(f"(staged) output {sid}: {staged_output_type(d, definition)}")
                         elif rec.status is StepStatus.RUNNING:
                             st.info("running…")
                         elif rec.status is StepStatus.COMPLETED:
