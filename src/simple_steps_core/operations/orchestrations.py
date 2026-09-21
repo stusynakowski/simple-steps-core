@@ -37,6 +37,12 @@ from ..domain.models import ItemOutcome, MapResult, StepStatus
 
 OnError = Literal["collect", "fail_fast", "skip"]
 
+#: The per-item operation used when a fan-out only needs to reshape data.
+#: ``map``/``filter``/``expand`` default to it, so ``map(over="step1")`` is a
+#: complete call. ``collapse`` cannot: a reduce needs a two-argument combiner,
+#: and identity takes one.
+IDENTITY = "identity"
+
 
 def _infer_item_arg(handle, op: str) -> str | None:
     """Pick which parameter of *op* receives each item.
@@ -109,7 +115,7 @@ async def map_op(
     handle,
     *,
     over: Iterable[Any],
-    op: str,
+    op: str = IDENTITY,
     arg: str | None = None,
     args: dict | None = None,
     concurrency: int = 8,
@@ -140,7 +146,7 @@ async def filter_op(
     handle,
     *,
     over: Iterable[Any],
-    op: str,
+    op: str = IDENTITY,
     arg: str | None = None,
     args: dict | None = None,
     concurrency: int = 8,
@@ -174,7 +180,7 @@ async def expand_op(
     handle,
     *,
     over: Iterable[Any],
-    op: str,
+    op: str = IDENTITY,
     arg: str | None = None,
     args: dict | None = None,
     concurrency: int = 8,
@@ -182,6 +188,9 @@ async def expand_op(
     retries: int = 0,
 ) -> list[Any]:
     """Flat-map: each item yields an iterable from *op*; results are flattened.
+
+    *op* defaults to ``identity``, so ``expand(over="step1")`` flattens one
+    level — a cell holding lists becomes one row per inner element.
 
     Successful per-item iterables are concatenated in original item order.
     Failures are skipped (``collect``/``skip``) or abort (``fail_fast``). ``args``
@@ -219,6 +228,9 @@ async def collapse_op(
 ) -> Any:
     """Reduce *over* to a single value with a two-argument *op*.
 
+    Unlike the other modes *op* has no default: a reduce needs a combiner, and
+    ``identity`` takes one argument rather than two.
+
     *op*'s first parameter receives the accumulator, its second the next item.
     When *initial* is ``None`` the first item seeds the accumulator. Runs
     sequentially because each step depends on the previous accumulator. ``args``
@@ -248,6 +260,25 @@ async def collapse_op(
     return accumulator
 
 
+def identity(value: Any) -> Any:
+    """Return *value* unchanged.
+
+    The per-item ``op`` for reshaping data without transforming it, so a step
+    can change the *shape* of a collection with no bespoke tool:
+
+    ``expand`` + identity
+        flattens one level — a cell holding a list of lists becomes one row per
+        inner element.
+    ``map`` + identity
+        one cell per item, with per-item status, from a single collection cell.
+    ``filter`` + identity
+        keeps the items that are already truthy.
+
+    ``collapse`` needs a two-argument reducer, so identity does not apply there.
+    """
+    return value
+
+
 def register_orchestrators(registry) -> None:
     """Register the built-in orchestrators onto *registry*.
 
@@ -258,3 +289,7 @@ def register_orchestrators(registry) -> None:
     registry.register_orchestrator("filter", filter_op, description="Keep items where op is truthy")
     registry.register_orchestrator("expand", expand_op, description="Flat-map op over items")
     registry.register_orchestrator("collapse", collapse_op, description="Reduce items via op")
+    # A plain tool, not an orchestrator: it takes no handle and is what the
+    # orchestrators above call per item when you only want to reshape.
+    registry.register("identity", identity, description="Pass each item through unchanged",
+                      category="orchestration")

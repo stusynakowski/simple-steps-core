@@ -9,13 +9,20 @@ The tools below are built to be chained into a single flow that exercises every
 orchestration mode in turn:
 
     step1  load_batches            single    -> list[list[float]]   one cell
-    step2  unpack_batch    expand  over=step1 -> list[float]        one cell per reading
+    step2  identity        expand  over=step1 -> list[float]        one cell per reading
     step3  above_cutoff    filter  over=step2 -> list[float]        the readings that pass
     step4  accumulate_stats collapse over=step3 -> dict             one cell of statistics
 
-Wire it in the dashboard by choosing the tool, then setting **mode** and **over**
-under Orchestration Settings. `tests/unit/test_example_pipeline.py` runs exactly
-this chain, so the example stays honest.
+``identity`` is built in (registered alongside the orchestrators): it passes each
+item through unchanged, so a fan-out can reshape data with no bespoke tool.
+``expand`` + ``identity`` flattens one level. ``unpack_batch`` below does the same
+thing explicitly, and is kept to show that a fan-out's per-item ``op`` can be any
+tool you write.
+
+Wire it in the dashboard by choosing the tool, then saying where its data comes
+**from** and how to **apply** it (`once`, `map`, `filter`, `expand`, `reduce`).
+`tests/unit/test_example_pipeline.py` and `test_dashboard_pipeline.py` run this
+chain at both levels, so the example stays honest.
 
 You only edit this file. Each tool can optionally provide Streamlit views via
 ``ui={"streamlit": ...}``; tools without one get a form auto-generated from the

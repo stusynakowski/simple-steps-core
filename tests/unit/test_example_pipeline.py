@@ -115,3 +115,16 @@ def test_pipeline_shape_is_visible_before_running(example):
                              REGISTRY.get_definition("accumulate_stats")).iloc[0]
     assert collapsed["type"] == "dict"         # collapse yields the accumulator
     assert collapsed["shape"] == "1 cell"
+
+
+def test_identity_replaces_the_custom_expand_tool(example):
+    """`expand` + built-in `identity` reshapes with no bespoke tool."""
+    wf = _pipeline(example)
+    wf["step2"] = Operation(step_id="step2", name="identity",
+                            orchestration=OrchestrationConfig(mode="expand", over="step1"))
+    wf.run()
+
+    batches = wf["step1"].output.value
+    readings = wf["step2"].output.value
+    assert readings == [value for batch in batches for value in batch]
+    assert wf["step4"].output.value["count"] == len(wf["step3"].output.value)

@@ -214,6 +214,12 @@ Modes: `single` (default), `map`, `filter`, `expand` (flat-map), `collapse`
   aborts, `"skip"` drops.
 - Orchestrators are registered by `register_orchestrators(registry)` — `App`,
   `Server`, and `Dashboard` all do this for you at startup.
+- That call also registers **`identity`** (a plain tool, `identity(value) -> value`)
+  for reshaping without transforming, and it is the **default `op`** for
+  `map`/`filter`/`expand` — so `=expand(over=step1)` is a complete call that
+  flattens one level, `=map(over=step1)` gives one cell per item, and
+  `=filter(over=step1)` keeps truthy items. `collapse` has no default: a reduce
+  needs a 2-argument combiner, and identity takes one.
 
 ### Running
 

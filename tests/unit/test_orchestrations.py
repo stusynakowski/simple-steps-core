@@ -11,6 +11,8 @@ import pytest
 from simple_steps_core import (
     CoreEngine,
     MapResult,
+    Operation,
+    OrchestrationConfig,
     ToolRegistry,
     ToolCall,
     Workflow,
@@ -146,3 +148,103 @@ def test_arun_executes_orchestrators():
 
     asyncio.run(wf.arun())
     assert wf["step_mapped"].output.value.ok == [0, 2, 4, 6]
+
+
+# ── identity: reshape without transforming ───────────────────────────────
+def _reshape_registry():
+    registry = ToolRegistry()
+    register_orchestrators(registry)
+
+    def nested(n: int) -> list[list[int]]:
+        return [[i, i + 1] for i in range(n)]
+
+    def mixed() -> list:
+        return [1, 0, 2, None, 3]
+
+    registry.register("nested", nested)
+    registry.register("mixed", mixed)
+    return registry
+
+
+def test_identity_is_registered_with_the_orchestrators():
+    registry = _reshape_registry()
+    assert registry.has("identity")
+    params = registry.get_definition("identity").params
+    assert [p.name for p in params] == ["value"]
+
+
+def test_expand_with_identity_flattens_one_level():
+    """The common reshape: a cell of lists becomes one row per inner element."""
+    registry = _reshape_registry()
+    wf = Workflow(CoreEngine(registry), session_id="r")
+    wf["step1"] = Operation(step_id="step1", name="nested", arguments={"n": 3})
+    wf["step2"] = Operation(step_id="step2", name="identity",
+                            orchestration=OrchestrationConfig(mode="expand", over="step1"))
+    wf.run()
+    assert wf["step1"].output.value == [[0, 1], [1, 2], [2, 3]]
+    assert wf["step2"].output.value == [0, 1, 1, 2, 2, 3]
+
+
+def test_map_with_identity_gives_one_cell_per_item():
+    registry = _reshape_registry()
+    wf = Workflow(CoreEngine(registry), session_id="r")
+    wf["step1"] = Operation(step_id="step1", name="nested", arguments={"n": 2})
+    wf["step2"] = Operation(step_id="step2", name="identity",
+                            orchestration=OrchestrationConfig(mode="map", over="step1"))
+    wf.run()
+    result = wf["step2"].output.value
+    assert [o.value for o in result.outcomes] == [[0, 1], [1, 2]]
+    assert result.failed == []
+
+
+def test_filter_with_identity_keeps_truthy_items():
+    registry = _reshape_registry()
+    wf = Workflow(CoreEngine(registry), session_id="r")
+    wf["step1"] = Operation(step_id="step1", name="mixed")
+    wf["step2"] = Operation(step_id="step2", name="identity",
+                            orchestration=OrchestrationConfig(mode="filter", over="step1"))
+    wf.run()
+    assert wf["step2"].output.value == [1, 2, 3]
+
+
+# ── identity is the default per-item op ──────────────────────────────────
+def test_fan_out_modes_default_their_op_to_identity():
+    """`map`/`filter`/`expand` are complete calls with only `over`."""
+    registry = _reshape_registry()
+    for name in ("map", "filter", "expand"):
+        param = next(p for p in registry.get_definition(name).params if p.name == "op")
+        assert param.required is False
+        assert param.default == "identity"
+
+
+def test_collapse_still_requires_an_op():
+    """A reduce needs a two-argument combiner; identity takes one."""
+    registry = _reshape_registry()
+    param = next(p for p in registry.get_definition("collapse").params if p.name == "op")
+    assert param.required is True
+
+    wf = Workflow(CoreEngine(registry), session_id="c")
+    wf["step1"] = ToolCall(operation_id="nested", arguments={"n": 2})
+    wf["step2"] = ToolCall(operation_id="collapse", arguments={"over": "step1"})
+    with pytest.raises(Exception, match="op"):
+        wf.run()
+
+
+def test_expand_with_no_op_flattens():
+    registry = _reshape_registry()
+    wf = Workflow(CoreEngine(registry), session_id="d")
+    wf["step1"] = ToolCall(operation_id="nested", arguments={"n": 3})
+    wf["step2"] = ToolCall(operation_id="expand", arguments={"over": "step1"})
+    wf.run()
+    assert wf["step2"].output.value == [0, 1, 1, 2, 2, 3]
+
+
+def test_map_and_filter_with_no_op():
+    registry = _reshape_registry()
+    wf = Workflow(CoreEngine(registry), session_id="e")
+    wf["step1"] = ToolCall(operation_id="mixed", arguments={})
+    wf["step2"] = ToolCall(operation_id="map", arguments={"over": "step1"})
+    wf["step3"] = ToolCall(operation_id="filter", arguments={"over": "step1"})
+    wf.run()
+    assert [o.value for o in wf["step2"].output.value.outcomes] == [1, 0, 2, None, 3]
+    assert wf["step3"].output.value == [1, 2, 3]
