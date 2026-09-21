@@ -19,9 +19,10 @@ callback, so no panel touches ``st.session_state``.
 from __future__ import annotations
 
 from .draft import DraftStep, DraftWorkflow
+from .inference import Binding, effective_output, infer_binding
 from .step_card import (
     STEP_VIEWS,
-    render_arguments,
+    render_inputs,
     render_operation_panel,
     render_result_panel,
     render_staged,
@@ -40,9 +41,10 @@ from .toolbar import (
 __all__ = [
     # state
     "DraftStep", "DraftWorkflow",
+    "Binding", "effective_output", "infer_binding",
     # step card
     "render_step_card", "render_step_controls", "render_operation_panel",
-    "render_arguments", "render_result_panel", "render_staged",
+    "render_inputs", "render_result_panel", "render_staged",
     "STEP_VIEWS",
     # toolbar / sidebar
     "render_workflow_toolbar", "render_run_controls", "render_tool_palette",

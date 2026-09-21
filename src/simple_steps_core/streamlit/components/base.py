@@ -29,7 +29,8 @@ from typing import Any
 
 from simple_steps_core import SummaryTable
 
-__all__ = ["summary", "summary_frame", "caption_list", "empty"]
+__all__ = ["summary", "summary_frame", "caption_list", "empty",
+           "format_reference", "reference_options"]
 
 
 def summary_frame(table: SummaryTable):
@@ -83,3 +84,30 @@ def empty(st, message: str) -> None:
 def _scalar(value: Any) -> bool:
     """True for values Streamlit can print directly rather than tabulate."""
     return value is None or isinstance(value, (bool, int, float, str))
+
+
+# ── references, shown the way a shell shows a variable ───────────────────
+def format_reference(token: object) -> str:
+    """Render a step reference as ``${step1}``.
+
+    A reference is a *variable*, not a literal, and the shell's ``${...}`` is the
+    most widely recognised way to say so. An accessor rides along inside the
+    braces (``${step2.ok}``) because it is part of the same reference. Anything
+    that is not a reference — a sentinel like ``(a value)``, or a typed literal —
+    is returned unchanged, so this is safe as a selectbox ``format_func``.
+    """
+    if not isinstance(token, str) or not token:
+        return "" if token is None else str(token)
+    if not token.lower().startswith("step"):
+        return token
+    return "${" + token + "}"
+
+
+def reference_options(step_ids: list[str], *, sentinel: str | None = None) -> list[str]:
+    """Earlier steps in workflow order, with an optional leading sentinel.
+
+    Order is preserved rather than sorted: a workflow reads top to bottom, and
+    ``step10`` sorting before ``step2`` would be actively misleading.
+    """
+    options = list(step_ids)
+    return [sentinel, *options] if sentinel is not None else options

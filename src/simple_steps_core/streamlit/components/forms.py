@@ -23,6 +23,7 @@ from .tools import render_resource_params
 
 __all__ = [
     "render_arg_combo",
+    "tool_settings_popover",
     "render_tool_form",
     "render_literal_arg",
     "coerce_value",
@@ -331,3 +332,24 @@ def render_arg_combo(st, definition, param, *, key: str, default: Any = None,
     except (ValueError, TypeError) as exc:
         st.error(f"**{param.name}**: {exc}")
         return None, None
+
+
+def tool_settings_popover(st, definition, params, *, key: str,
+                          current: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The parameters that have defaults, folded into one popover.
+
+    A parameter with a default is a knob, not an input: the tool already works
+    without it. Keeping them off the card leaves only the step's real inputs
+    visible, and each widget opens seeded with the signature's own default.
+    """
+    current = current or {}
+    collected: dict[str, Any] = {}
+    with st.popover(":material/tune:", help="Tool settings"):
+        st.caption(f"`{definition.operation_id}` settings")
+        for param in params:
+            value = render_literal_arg(st, definition, param, key=key,
+                                       default=current.get(param.name))
+            # Leaving one empty means "use the tool's own default".
+            if value is not None:
+                collected[param.name] = value
+    return collected

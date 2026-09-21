@@ -15,20 +15,24 @@ from typing import Any
 from simple_steps_core import StepStatus, Tool
 
 from ..components import (
-    edit_data_input,
     execution_popover,
+    format_reference,
     orchestration_popover,
     render_guardrails,
     render_literal_arg,
     render_output,
     render_output_status,
     render_resource_params,
+    reference_options,
     render_staged_output,
+    tool_settings_popover,
 )
+from ..components.configs import NO_SOURCE
 from .draft import DraftStep
+from .inference import describe, infer_binding
 
 __all__ = ["render_step_card", "render_operation_panel", "render_result_panel",
-           "render_staged", "render_arguments",
+           "render_staged", "render_inputs",
            "render_step_controls", "STEP_VIEWS"]
 
 #: The view toggles a card offers, in display order.
@@ -38,7 +42,7 @@ STEP_VIEWS = [":material/step:", ":material/function:", ":material/dataset:"]
 def render_step_card(st, draft: DraftStep, *, key: str, registry,
                      tool_ids: list[str], prior: list[str],
                      step=None, views: list[str] | None = None,
-                     on_run=None, on_reset=None) -> DraftStep:
+                     drafts=None, on_run=None, on_reset=None) -> DraftStep:
     """Draw one step's whole card and return the (mutated) draft row.
 
     The tool is resolved **after** the selectbox, from the registry — resolving
@@ -77,7 +81,9 @@ def render_step_card(st, draft: DraftStep, *, key: str, registry,
 
                 tool = _resolve(registry, draft.op)
                 if draft.op:
-                    render_operation_panel(st, draft, key=key, tool=tool, prior=prior)
+                    render_operation_panel(st, draft, key=key, tool=tool,
+                                           prior=prior, drafts=drafts,
+                                           registry=registry)
                 else:
                     st.caption("Choose a tool first.")
         else:
@@ -117,14 +123,16 @@ def render_step_controls(st, draft: DraftStep, *, key: str, on_run=None,
 
 
 def render_operation_panel(st, draft: DraftStep, *, key: str, tool: Tool | None,
-                           prior: list[str]) -> None:
-    """The Operation pane, kept deliberately small.
+                           prior: list[str], drafts=None, registry=None) -> None:
+    """The Operation pane.
 
-    Visible: the tool, where its data comes from, how it is applied, and the
-    literal arguments that actually need a value. Everything else — item
-    binding, accumulator seed, timeouts, retries, concurrency — lives behind two
-    small popovers, because a step card is only ~260px wide and those knobs are
-    rarely touched.
+    Positional parameters — the ones with no default — are the step's real
+    inputs, so they are asked for directly. Everything with a default is a knob,
+    and knobs live in the Tool settings popover already filled in.
+
+    Choosing an earlier step for the first positional parameter also *configures
+    the orchestration*: the declared types decide whether the column is passed
+    whole or the tool is applied across it (see :mod:`.inference`).
     """
     if tool is None:
         st.caption("Unknown tool.")
@@ -132,80 +140,167 @@ def render_operation_panel(st, draft: DraftStep, *, key: str, tool: Tool | None,
 
     definition = tool.definition
     data_params = [p for p in definition.params if p.kind == "data"]
-    param_names = [p.name for p in data_params]
+    positional = [p for p in data_params if p.required]
+    settings = [p for p in data_params if not p.required]
 
     if definition.guardrails is not None:
         render_guardrails(st, definition.guardrails, key=f"guard_{draft.id}")
     render_resource_params(st, definition.params)
 
-    # ── one routing decision, asked the same way in every mode ───────────
-    mode, source = edit_data_input(
-        st, draft.orchestration.mode, draft.data_source(data_params),
-        key=f"data_{draft.id}", prior_steps=prior, takes_data=bool(data_params),
-    )
-    draft.orchestration = draft.orchestration.model_copy(update={"mode": mode})
-    draft.set_data_source(source, data_params)
+    custom = tool.ui.input("streamlit")
 
-    main_arg_col,additional_arg_col=st.columns([2,1])
+    # Inputs on the left, the settings popovers on the right.
+    inputs_col, settings_col = st.columns([3, 1], vertical_alignment="top")
 
-    # ── only the arguments that still need a value ───────────────────────
-    with main_arg_col:
-        render_arguments(st, draft, key=key, definition=definition,
-                        data_params=data_params, prior=prior, tool=tool)
+    with inputs_col:
+        if custom is not None:
+            # A tool that draws its own form still needs somewhere to say which
+            # step it reads, or a fan-out could never be given its collection.
+            if positional or draft.is_fanned_out:
+                route_primary(st, draft, key=key, definition=definition,
+                              param=positional[0] if positional else None,
+                              prior=prior, drafts=drafts, registry=registry,
+                              literal=False)
+            draft.arguments = custom(st, key=f"form_{draft.id}",
+                                     defaults=dict(draft.arguments)) or {}
+        else:
+            render_inputs(st, draft, key=key, definition=definition,
+                          positional=positional, prior=prior, drafts=drafts,
+                          registry=registry)
 
-    # ── the rest, one click away ─────────────────────────────────────────
-    #with st.container(horizontal=True, gap="xxsmall", width="content"):
-    with additional_arg_col:
-
-        with st.popover("Tool Settings :material/settings:", help="Tool-specific settings"):
-            st.caption("Tool-specific settings go here. default literal arguments")
-
-        #if draft.is_fanned_out:
-        draft.orchestration = orchestration_popover(
+    with settings_col:
+        if settings and custom is None:
+            chosen = tool_settings_popover(st, definition, settings,
+                                           key=f"form_{draft.id}",
+                                           current=draft.arguments)
+            draft.arguments = {**draft.arguments, **chosen}
+        draft.orchestration, draft.mode_locked = orchestration_popover(
             st, draft.orchestration, key=f"orch_{draft.id}",
-                param_names=param_names, inferred=draft.primary_param(data_params),
-            )
+            param_names=[p.name for p in data_params],
+            inferred=draft.primary_param(data_params),
+            locked=draft.mode_locked,
+        )
         draft.execution = execution_popover(
             st, draft.execution, key=f"exec_{draft.id}",
             fanned_out=draft.is_fanned_out,
         )
 
+    # The popover is drawn after the inputs, so a mode chosen there arrives too
+    # late for the routing above. Re-route the same source now that the mode is
+    # final, or the step would be briefly invalid (a fan-out with no `over`).
+    primary = draft.primary_param(data_params)
+    if primary:
+        reference = draft.sources.get(primary) or draft.orchestration.over
+        if reference:
+            draft.set_data_source(reference, data_params)
 
-def render_arguments(st, draft: DraftStep, *, key: str, definition, data_params,
-                     prior: list[str], tool: Tool) -> None:
-    """Literal widgets for the arguments the data row did not already route.
 
-    The parameter that receives the step's data is never shown here — it is
-    either bound by the routing row above or supplied per item by the
-    orchestrator. Typed widgets are kept as-is: a number stays a number input.
+def render_inputs(st, draft: DraftStep, *, key: str, definition, positional,
+                  prior: list[str], drafts=None, registry=None) -> None:
+    """The positional parameters: an earlier step, or a value typed in.
+
+    The **first** positional parameter carries the step's data, so binding it to
+    an earlier step also sets the orchestration. Any further positional
+    parameters are plain references or literals — a fan-out has only one
+    collection to iterate.
     """
-    custom = tool.ui.input("streamlit")
-    if custom is not None:
-        draft.arguments = custom(st, key=f"form_{draft.id}",
-                                 defaults=dict(draft.arguments)) or {}
+    if not positional:
         return
-
-    if not data_params:
-        return
-
-    routed = draft.primary_param(data_params) if (
-        draft.is_fanned_out or draft.data_source(data_params)
-    ) else None
 
     literals: dict[str, Any] = {}
-    for param in data_params:
-        if param.name == routed:
-            continue
-        value = render_literal_arg(st, definition, param, key=f"form_{draft.id}",
-                                   default=draft.arguments.get(param.name))
-        # An empty optional field means "use the tool's own default".
-        if value is None and not param.required:
-            continue
-        literals[param.name] = value
+    sources: dict[str, str] = {}
 
-    draft.arguments = literals
-    # Keep only the binding the routing row owns.
-    draft.sources = {k: v for k, v in draft.sources.items() if k == routed}
+    for index, param in enumerate(positional):
+        if index == 0:
+            bound, value = route_primary(
+                st, draft, key=key, definition=definition, param=param,
+                prior=prior, drafts=drafts, registry=registry,
+            )
+            if bound is not None:
+                sources[param.name] = bound
+            elif value is not None:
+                literals[param.name] = value
+            continue
+
+        name = param.name
+        options = reference_options(prior, sentinel=NO_SOURCE)
+        current = draft.sources.get(name)
+        chosen = st.selectbox(
+            name, options,
+            index=options.index(current) if current in options else 0,
+            key=f"src_{draft.id}_{name}", format_func=format_reference,
+            help="Read an earlier step, or choose a value to type one in.",
+        )
+        if chosen == NO_SOURCE:
+            value = render_literal_arg(st, definition, param, key=f"form_{draft.id}",
+                                       default=draft.arguments.get(name))
+            if value is not None:
+                literals[name] = value
+        else:
+            sources[name] = chosen
+
+    draft.arguments = {**{k: v for k, v in draft.arguments.items()
+                          if k not in {p.name for p in positional}}, **literals}
+    draft.sources = sources
+
+
+def route_primary(st, draft: DraftStep, *, key: str, definition, param,
+                  prior: list[str], drafts=None, registry=None,
+                  literal: bool = True) -> tuple[str | None, Any]:
+    """Ask which step feeds this one, and configure orchestration from the answer.
+
+    Returns ``(reference, literal_value)`` — at most one is set. Comparing the
+    upstream's declared output with *param*'s declared type is what decides
+    between passing a column whole and applying the tool across it.
+    """
+    name = param.name if param is not None else "data"
+    options = reference_options(prior, sentinel=NO_SOURCE)
+    current = (draft.sources.get(name)
+               or (draft.orchestration.over or "").split(".", 1)[0] or None)
+    chosen = st.selectbox(
+        name, options,
+        index=options.index(current) if current in options else 0,
+        key=f"src_{draft.id}_{name}", format_func=format_reference,
+        help="Read an earlier step, or choose a value to type one in.",
+    )
+
+    if chosen == NO_SOURCE:
+        if not draft.mode_locked:
+            draft.orchestration = draft.orchestration.model_copy(
+                update={"mode": "single", "over": None})
+        if literal and param is not None:
+            return None, render_literal_arg(st, definition, param,
+                                            key=f"form_{draft.id}",
+                                            default=draft.arguments.get(name))
+        return None, None
+
+    props = definition.input_schema.get("properties", {})
+    binding = infer_binding(chosen, _upstream(drafts, chosen), props.get(name, {}),
+                            registry, drafts,
+                            target_definition=definition) if registry else None
+    reference = binding.reference if binding else chosen
+    mode = draft.orchestration.mode if draft.mode_locked else (
+        binding.mode if binding else "single")
+
+    if mode == "single":
+        draft.orchestration = draft.orchestration.model_copy(
+            update={"mode": "single", "over": None})
+        if binding is not None and not draft.mode_locked:
+            st.caption(f":material/auto_awesome: {describe(binding)}")
+        return reference, None
+
+    draft.orchestration = draft.orchestration.model_copy(
+        update={"mode": mode, "over": reference})
+    if binding is not None and not draft.mode_locked:
+        st.caption(f":material/auto_awesome: {describe(binding)}")
+    return None, None
+
+
+def _upstream(drafts, step_id: str):
+    """The draft a reference points at, ignoring any accessor suffix."""
+    if drafts is None:
+        return None
+    return drafts.get(step_id.split(".", 1)[0])
 
 
 def render_result_panel(st, draft: DraftStep, *, key: str, tool: Tool | None,

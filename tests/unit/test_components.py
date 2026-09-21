@@ -367,3 +367,27 @@ def test_staged_output_wraps_fanned_out_type_and_names_its_shape():
     row = st.payloads("dataframe")[0].iloc[0]
     assert row["type"] == "MapResult[int]"
     assert "one cell per item of step1" == row["shape"]
+
+
+# ── references shown as shell variables ──────────────────────────────────
+def test_format_reference_wraps_step_tokens():
+    assert C.format_reference("step1") == "${step1}"
+    assert C.format_reference("step10") == "${step10}"
+
+
+def test_format_reference_keeps_the_accessor_inside_the_braces():
+    """`.ok` is part of the reference, not something tacked on after it."""
+    assert C.format_reference("step2.ok") == "${step2.ok}"
+
+
+def test_format_reference_leaves_non_references_alone():
+    """Safe as a selectbox format_func, which sees sentinels and literals too."""
+    assert C.format_reference("(a value)") == "(a value)"
+    assert C.format_reference(20.0) == "20.0"
+    assert C.format_reference(None) == ""
+
+
+def test_reference_options_preserve_workflow_order():
+    """step10 sorting before step2 would misrepresent the workflow."""
+    assert C.reference_options(["step1", "step2", "step10"]) == ["step1", "step2", "step10"]
+    assert C.reference_options(["step1"], sentinel="(a value)") == ["(a value)", "step1"]

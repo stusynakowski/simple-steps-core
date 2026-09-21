@@ -44,23 +44,27 @@ def app():
     return at
 
 
-def _wire(app, step_id, tool, *, source=None, verb=None):
-    """Choose a tool, then say where its data comes from and how to apply it."""
+def _wire(app, step_id, tool, *, param=None, source=None, mode=None):
+    """Choose a tool and which step it reads. Orchestration is inferred."""
     _add_step(app)
     _widget(app, f"op_{step_id}").set_value(tool).run()
     if source is not None:
-        _widget(app, f"data_{step_id}_source").set_value(source).run()
-    if verb is not None:
-        _widget(app, f"data_{step_id}_verb").set_value(verb).run()
+        _widget(app, f"src_{step_id}_{param}").set_value(source).run()
+    if mode is not None:
+        _widget(app, f"orch_{step_id}_mode").set_value(mode).run()
 
 
 @pytest.fixture
 def pipeline(app):
-    """The full chain: load -> expand -> filter -> reduce."""
+    """load -> expand -> filter -> summarize, configured by type inference.
+
+    Only `step2` names a mode: `identity` declares ``value: Any``, so nothing can
+    be inferred from its types. Every other mode below is worked out.
+    """
     _wire(app, "step1", "load_batches")
-    _wire(app, "step2", "unpack_batch", source="step1", verb="expand")
-    _wire(app, "step3", "above_cutoff", source="step2", verb="filter")
-    _wire(app, "step4", "accumulate_stats", source="step3", verb="reduce")
+    _wire(app, "step2", "identity", param="value", source="step1", mode="expand")
+    _wire(app, "step3", "above_cutoff", param="value", source="step2")
+    _wire(app, "step4", "summarize", param="rows", source="step3")
     _assert_clean(app, "pipeline built")
     return app
 
@@ -77,50 +81,51 @@ def test_choosing_a_tool_shows_that_tool_s_arguments_immediately(app):
         _widget(app, "form_step1_cutoff")
 
 
-def test_verbs_are_single_words(app):
-    """The card is ~260px wide; a verb has to fit in a selectbox that narrow."""
+def test_orchestration_is_inferred_from_the_declared_types(pipeline):
+    """Picking a tool and a source is enough; the modes follow from the types."""
+    drafts = pipeline.session_state["drafts"]
+    assert drafts.get("step3").orchestration.mode == "filter"   # bool per element
+    assert drafts.get("step3").orchestration.over == "step2"
+    assert drafts.get("step4").orchestration.mode == "single"   # wants the column
+    assert drafts.get("step4").sources == {"rows": "step3"}
+
+
+def test_a_predicate_infers_filter_and_a_transform_infers_map(app):
+    """Both read one element; the return type separates them."""
     _wire(app, "step1", "load_batches")
-    _wire(app, "step2", "unpack_batch", source="step1")
-    assert _widget(app, "data_step2_verb").options == [
-        "once", "map", "filter", "expand", "reduce"
-    ]
+    _wire(app, "step2", "identity", param="value", source="step1", mode="expand")
+
+    _wire(app, "step3", "above_cutoff", param="value", source="step2")   # -> bool
+    assert app.session_state["drafts"].get("step3").orchestration.mode == "filter"
 
 
-def test_a_source_step_shows_no_routing_controls(app):
-    """Nothing to read from and nothing to iterate, so neither field appears."""
+def test_collecting_a_fan_out_reads_through_ok(app):
+    """A MapResult is not a list, so a column-taking tool needs `.ok`."""
     _wire(app, "step1", "load_batches")
-    for absent in ("data_step1_source", "data_step1_verb"):
-        with pytest.raises(KeyError):
-            _widget(app, absent)
+    _wire(app, "step2", "identity", param="value", source="step1", mode="map")
+    _wire(app, "step3", "summarize", param="rows", source="step2")
 
-
-def test_only_unrouted_arguments_get_a_widget(app):
-    """The parameter carrying the data is never also asked for as an argument."""
-    _wire(app, "step1", "load_batches")
-    _wire(app, "step2", "above_cutoff", source="step1", verb="filter")
-
-    form_keys = {w.key for group in (app.selectbox, app.number_input, app.text_input)
-                 for w in group if w.key and w.key.startswith("form_step2")}
-    assert form_keys == {"form_step2_cutoff"}      # `value` is supplied per item
-    assert _widget(app, "form_step2_cutoff").value == 20.0   # a real number input
-
-
-def test_routing_is_one_pair_of_controls_in_every_mode(app):
-    """The same two fields answer 'which step feeds this', whatever the mode."""
-    _wire(app, "step1", "load_batches")
-    _wire(app, "step2", "above_cutoff", source="step1")        # 'once'
-
-    draft = app.session_state["drafts"].get("step2")
+    draft = app.session_state["drafts"].get("step3")
     assert draft.orchestration.mode == "single"
-    assert draft.sources == {"value": "step1"}
-    assert draft.orchestration.over is None
+    assert draft.sources == {"rows": "step2.ok"}
 
-    _widget(app, "data_step2_verb").set_value("filter").run()
+
+def test_a_hand_picked_mode_is_not_overwritten(app):
+    """`auto` infers; anything else sticks."""
+    _wire(app, "step1", "load_batches")
+    _wire(app, "step2", "above_cutoff", param="value", source="step1", mode="map")
+
     draft = app.session_state["drafts"].get("step2")
-    assert draft.orchestration.mode == "filter"
-    assert draft.orchestration.over == "step1"     # recorded as `over` now
-    assert draft.sources == {}                     # orchestrator supplies it
-    assert _widget(app, "data_step2_source").value == "step1"   # field did not move
+    assert draft.mode_locked is True
+    assert draft.orchestration.mode == "map"        # not the inferred 'filter'
+
+
+def test_defaulted_arguments_are_not_on_the_card(pipeline):
+    """`cutoff` has a default, so it lives in the Tool settings popover."""
+    on_card = {w.key for group in (pipeline.selectbox, pipeline.number_input)
+               for w in group if w.key and w.key.startswith("src_step3")}
+    assert on_card == {"src_step3_value"}          # only the positional input
+    assert _widget(pipeline, "form_step3_cutoff").value == 20.0   # in the popover
 
 
 def test_staged_cells_announce_type_and_shape(pipeline):
@@ -130,8 +135,8 @@ def test_staged_cells_announce_type_and_shape(pipeline):
     by_step = {row["output"]: row for row in staged}
 
     assert by_step["step1"]["type"] == "list[list[float]]"
-    assert by_step["step2"]["type"] == "list[float]"
     assert by_step["step2"]["shape"] == "one cell per item produced from step1"
+    assert by_step["step3"]["shape"] == "the items of step2 that pass"
     assert by_step["step4"]["type"] == "dict"
 
 
@@ -150,19 +155,8 @@ def test_running_the_pipeline_produces_each_stage(pipeline):
 
     assert len(readings) == sum(len(b) for b in batches)   # expand flattened
     assert set(kept) <= set(readings)                      # filter kept a subset
-    assert stats["count"] == len(kept)                     # collapse reduced them
-    assert stats["minimum"] == min(kept)
-    assert stats["maximum"] == max(kept)
-
-
-def test_details_live_behind_popovers(pipeline):
-    """Item binding and conduct are one click away, not on the card."""
-    # they exist (inside popovers) but no source-picker indirection remains
-    assert _widget(pipeline, "orch_step3_item").value == "(auto)"
-    assert _widget(pipeline, "exec_step3_conc").value == 1
-    for gone in ("src_step3_value", "src_step3_cutoff", "src_step2_batch"):
-        with pytest.raises(KeyError):
-            _widget(pipeline, gone)
+    assert stats["count"] == len(kept)                     # summarize saw them all
+    assert stats["total"] == pytest.approx(sum(kept))
 
 
 def test_loading_the_sample_keeps_every_step_completed(app):
@@ -218,3 +212,19 @@ def test_each_stage_can_be_run_on_its_own(pipeline):
     workflow = pipeline.session_state["wf"]
     assert {s.status.value for s in workflow.steps} == {"completed"}
     assert workflow["step4"].output.value["count"] == len(workflow["step3"].output.value)
+
+
+def test_sources_are_shown_as_shell_style_references(app):
+    """A step reference is a variable, so it reads as ${step1}."""
+    _wire(app, "step1", "load_batches")
+    _wire(app, "step2", "above_cutoff")
+
+    picker = _widget(app, "src_step2_value")
+    assert picker.options == ["(a value)", "${step1}"]
+
+
+def test_the_three_settings_popovers_are_all_present(pipeline):
+    """Tool settings, orchestration and execution sit together beside the inputs."""
+    assert _widget(pipeline, "form_step3_cutoff") is not None   # tool settings
+    assert _widget(pipeline, "orch_step3_mode") is not None     # orchestration
+    assert _widget(pipeline, "exec_step3_run") is not None      # execution

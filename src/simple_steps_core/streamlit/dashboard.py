@@ -295,6 +295,7 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                     tool_ids=tool_ids,
                     prior=drafts.prior_to(draft.id),
                     workflow=wf,
+                    drafts=drafts,
                 )
 
     # ── author the draft into the workflow ───────────────────────────────
@@ -323,7 +324,7 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
         _rerun()
 
 
-def _step_fragment(st, draft, *, tool_ids, prior, workflow) -> None:
+def _step_fragment(st, draft, *, tool_ids, prior, workflow, drafts) -> None:
     """One step's card, isolated as a fragment.
 
     Editing a card — picking a tool, typing an argument, changing orchestration —
@@ -342,7 +343,7 @@ def _step_fragment(st, draft, *, tool_ids, prior, workflow) -> None:
             st, draft, key=f"card_{draft.id}", registry=REGISTRY,
             tool_ids=tool_ids, prior=prior,
             step=workflow[draft.id] if draft.id in workflow else None,
-            views=views,
+            views=views, drafts=drafts,
             on_run=lambda d: _request_run(st, d),
             on_reset=_reset_step,
         )

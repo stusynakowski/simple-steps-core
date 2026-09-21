@@ -42,6 +42,9 @@ class DraftStep:
     execution: StepExecutionConfig = field(default_factory=StepExecutionConfig)
     #: literal argument values the user typed
     arguments: dict[str, Any] = field(default_factory=dict)
+    #: True once the user picks a mode by hand, which stops inference
+    #: from overwriting it on the next rerun.
+    mode_locked: bool = False
 
     @property
     def is_fanned_out(self) -> bool:
@@ -125,6 +128,9 @@ class DraftStep:
             id=step.step_id, op=spec.name, stage=spec.stage, sources=sources,
             orchestration=spec.orchestration, execution=spec.execution,
             arguments=literals,
+            # A mode that came from a saved workflow is a deliberate choice.
+            # Re-inferring it would silently rewrite the spec and reset the step.
+            mode_locked=True,
         )
 
 

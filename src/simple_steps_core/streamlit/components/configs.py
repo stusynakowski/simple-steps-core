@@ -58,6 +58,7 @@ VERB_MODES = {verb: mode for mode, verb in MODE_VERBS.items()}
 VERBS = [MODE_VERBS[m] for m in MODES]
 
 NO_SOURCE = "(a value)"
+AUTO = "auto"
 
 
 def is_fanned_out(orchestration: OrchestrationConfig) -> bool:
@@ -111,34 +112,54 @@ def execution_popover(st, config: StepExecutionConfig, *, key: str,
 
 
 def orchestration_popover(st, config: OrchestrationConfig, *, key: str,
-                          param_names: list[str], inferred: str | None = None) -> OrchestrationConfig:
-    """The orchestration details the compact row leaves out: item binding, seed."""
-    with st.popover("Orchestration Details :material/account_tree:", help="Orchestration Details"):
-        if config.mode == "single":
-            st.caption("Runs once — nothing to orchestrate.")
-            return config
+                          param_names: list[str], inferred: str | None = None,
+                          locked: bool = False) -> tuple[OrchestrationConfig, bool]:
+    """Override the inferred orchestration, and the details it leaves out.
 
-        st.caption(f"`{config.mode}` over `{config.over or '—'}`")
-        options = ["(auto)", *param_names]
-        current = config.item_arg or "(auto)"
+    Mode defaults to ``auto``: the card works it out from the declared types.
+    Choosing anything else locks it, so inference stops overwriting the choice.
+    Returns ``(config, locked)``.
+    """
+    options = [AUTO, *(MODE_VERBS[m] for m in MODES)]
+    current = MODE_VERBS.get(config.mode, MODE_VERBS["single"]) if locked else AUTO
+
+    with st.popover(":material/account_tree:", help="Orchestration"):
+        st.caption(f"Currently `{config.mode}`"
+                   + (f" over `{config.over}`" if config.over else ""))
         chosen = st.selectbox(
-            "item argument", options,
-            index=options.index(current) if current in options else 0,
-            key=f"{key}_item",
-            help=f"Which parameter each item binds to. Auto picks `{inferred or '—'}`.",
+            "apply", options, index=options.index(current) if current in options else 0,
+            key=f"{key}_mode",
+            help="auto: decide from the declared types · once: pass it whole · "
+                 "map: per element · filter: keep matches · expand: each element "
+                 "becomes a row · reduce: fold to one value",
         )
-        initial = config.initial
-        if config.mode == "collapse":
+        now_locked = chosen != AUTO
+        mode = VERB_MODES[chosen] if now_locked else config.mode
+
+        item_arg, initial = config.item_arg, config.initial
+        if mode != "single":
+            item_options = ["(auto)", *param_names]
+            current_item = item_arg or "(auto)"
+            picked = st.selectbox(
+                "item argument", item_options,
+                index=item_options.index(current_item)
+                if current_item in item_options else 0,
+                key=f"{key}_item",
+                help=f"Which parameter each item binds to. Auto picks `{inferred or '—'}`.",
+            )
+            item_arg = None if picked == "(auto)" else picked
+
+        if mode == "collapse":
             text = st.text_input(
                 "initial", value="" if initial is None else str(initial),
                 key=f"{key}_initial",
                 help="Seed for the accumulator. Empty means the first item seeds it.",
             )
             initial = text or None
-        return config.model_copy(update={
-            "item_arg": None if chosen == "(auto)" else chosen,
-            "initial": initial,
-        })
+
+    return config.model_copy(update={
+        "mode": mode, "item_arg": item_arg, "initial": initial,
+    }), now_locked
 
 
 # ── shape ────────────────────────────────────────────────────────────────

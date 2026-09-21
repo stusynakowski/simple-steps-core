@@ -77,7 +77,14 @@ from simple_steps_core import (
     WorkflowExecutionConfig,
 )
 
-from .base import caption_list, empty, summary, summary_frame
+from .base import (
+    caption_list,
+    empty,
+    format_reference,
+    reference_options,
+    summary,
+    summary_frame,
+)
 from .configs import (
     MODE_VERBS,
     VERB_MODES,
@@ -94,6 +101,7 @@ from .configs import (
 )
 from .forms import (
     build_help,
+    tool_settings_popover,
     render_arg_combo,
     check_rule,
     coerce_value,
@@ -162,12 +170,14 @@ __all__ = [
     "render", "COMPONENTS",
     # base
     "summary", "summary_frame", "caption_list", "empty",
+    "format_reference", "reference_options",
     # tools
     "render_tool", "render_tool_definition", "render_param", "render_guardrails",
     "render_arg_guardrail", "render_resource_params", "render_registry",
     "describe_arg_guardrail",
     # forms
     "render_tool_form", "render_literal_arg", "render_arg_combo",
+    "tool_settings_popover",
     "coerce_value", "check_rule", "build_help",
     "edit_data_input", "execution_popover", "orchestration_popover",
     "MODE_VERBS", "VERB_MODES",
