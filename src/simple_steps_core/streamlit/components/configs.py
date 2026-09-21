@@ -106,14 +106,14 @@ def edit_data_input(st, mode: str, source: str | None, *, key: str,
 def execution_popover(st, config: StepExecutionConfig, *, key: str,
                       fanned_out: bool = False) -> StepExecutionConfig:
     """Conduct, folded into a small popover — rarely touched, never in the way."""
-    with st.popover(":material/settings:", help="Execution settings"):
+    with st.popover("Runtime Settings :material/play_arrow:", help="Execution settings"):
         return edit_step_execution(st, config, key=key, fanned_out=fanned_out)
 
 
 def orchestration_popover(st, config: OrchestrationConfig, *, key: str,
                           param_names: list[str], inferred: str | None = None) -> OrchestrationConfig:
     """The orchestration details the compact row leaves out: item binding, seed."""
-    with st.popover(":material/account_tree:", help="Orchestration details"):
+    with st.popover("Orchestration Details :material/account_tree:", help="Orchestration Details"):
         if config.mode == "single":
             st.caption("Runs once — nothing to orchestrate.")
             return config

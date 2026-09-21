@@ -53,17 +53,28 @@ def render_step_card(st, draft: DraftStep, *, key: str, registry,
     tool = _resolve(registry, draft.op)
 
     with st.container(key=f"step_{draft.id}_card", gap="xxsmall"):
-        if ":material/step:" in views:
-            render_step_controls(st, draft, key=key, on_run=on_run, on_reset=on_reset,
-                                 can_reset=step is not None)
-
-        if ":material/function:" in views:
-            with st.expander(":material/function: Operation", type="compact"):
+        #run_step_col,operation_selection_col = st.columns(2)
+        # bottom alignment puts the unlabelled buttons on the selectbox's input
+        # line rather than level with its label.
+        #st.write(views)
+        with st.container(horizontal=True, horizontal_alignment="left",
+                          vertical_alignment="bottom", gap="xxsmall",
+                          key=f"step_{draft.id}_controls_and_tool"):
+            if ":material/step:" in views:
+                #with run_step_col:
+                render_step_controls(st, draft, key=key, on_run=on_run, on_reset=on_reset,
+                                        can_reset=step is not None)
+                #with operation_selection_col:
+            if ":material/function:" in views:
                 draft.op = st.selectbox(
-                    ":material/construction: Tool ", tool_ids,
+                    ":material/construction: Tool Selection", tool_ids,
                     index=tool_ids.index(draft.op) if draft.op in tool_ids else None,
                     placeholder="choose an operation…", key=f"op_{draft.id}",
                 )
+
+        if ":material/function:" in views:
+            with st.expander(":material/input: :material/function:  Inputs", type="compact",expanded=True):
+
                 tool = _resolve(registry, draft.op)
                 if draft.op:
                     render_operation_panel(st, draft, key=key, tool=tool, prior=prior)
@@ -89,17 +100,20 @@ def _resolve(registry, op: str | None) -> Tool | None:
 def render_step_controls(st, draft: DraftStep, *, key: str, on_run=None,
                          on_reset=None, can_reset: bool = False) -> None:
     """Run / clear controls. Behavior is entirely caller-supplied."""
-    with st.expander(":material/step: Step Controls", expanded=True, type="compact"):
-        with st.container(horizontal=True, gap="xxsmall", key=f"step_{draft.id}_controller"):
-            if on_run is not None and st.button(
-                ":material/play_arrow:", key=f"run_{draft.id}",
-                help="Run this step", type="primary",
-            ):
-                on_run(draft)
-            if on_reset is not None:
-                st.button(":material/refresh:", key=f"reset_{draft.id}",
-                          help="Clear this step's output", disabled=not can_reset,
-                          type="secondary", on_click=on_reset, args=(draft,))
+    #with st.expander(":material/step: Step Controls", expanded=True, type="compact"):
+    # width="content" matters: st.container defaults to "stretch", which would
+    # fill the row and push whatever sits beside it to the far edge.
+    with st.container(horizontal=True, gap="xxsmall", width="content",
+                      key=f"step_{draft.id}_controller"):
+        if on_run is not None and st.button(
+            ":material/play_arrow:", key=f"run_{draft.id}",
+            help="Run this step", type="primary",
+        ):
+            on_run(draft)
+        if on_reset is not None:
+            st.button(":material/refresh:", key=f"reset_{draft.id}",
+                        help="Clear this step's output", disabled=not can_reset,
+                        type="secondary", on_click=on_reset, args=(draft,))
 
 
 def render_operation_panel(st, draft: DraftStep, *, key: str, tool: Tool | None,
@@ -132,21 +146,29 @@ def render_operation_panel(st, draft: DraftStep, *, key: str, tool: Tool | None,
     draft.orchestration = draft.orchestration.model_copy(update={"mode": mode})
     draft.set_data_source(source, data_params)
 
+    main_arg_col,additional_arg_col=st.columns([2,1])
+
     # ── only the arguments that still need a value ───────────────────────
-    render_arguments(st, draft, key=key, definition=definition,
-                     data_params=data_params, prior=prior, tool=tool)
+    with main_arg_col:
+        render_arguments(st, draft, key=key, definition=definition,
+                        data_params=data_params, prior=prior, tool=tool)
 
     # ── the rest, one click away ─────────────────────────────────────────
-    with st.container(horizontal=True, gap="xxsmall", width="content"):
+    #with st.container(horizontal=True, gap="xxsmall", width="content"):
+    with additional_arg_col:
+
+        with st.popover("Tool Settings :material/settings:", help="Tool-specific settings"):
+            st.caption("Tool-specific settings go here. default literal arguments")
+
+        #if draft.is_fanned_out:
+        draft.orchestration = orchestration_popover(
+            st, draft.orchestration, key=f"orch_{draft.id}",
+                param_names=param_names, inferred=draft.primary_param(data_params),
+            )
         draft.execution = execution_popover(
             st, draft.execution, key=f"exec_{draft.id}",
             fanned_out=draft.is_fanned_out,
         )
-        if draft.is_fanned_out:
-            draft.orchestration = orchestration_popover(
-                st, draft.orchestration, key=f"orch_{draft.id}",
-                param_names=param_names, inferred=draft.primary_param(data_params),
-            )
 
 
 def render_arguments(st, draft: DraftStep, *, key: str, definition, data_params,

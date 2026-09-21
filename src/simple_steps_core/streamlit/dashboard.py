@@ -336,7 +336,8 @@ def _step_fragment(st, draft, *, tool_ids, prior, workflow) -> None:
         f"step_view_controller_{draft.id}", list(STEP_VIEWS)
     )
     with st.expander(f"{draft.id}", expanded=True):
-        _view_picker(st, draft.id)
+        #_view_picker(st, draft.id)
+        # ui for view_picker is not clean need to work on later
         render_step_card(
             st, draft, key=f"card_{draft.id}", registry=REGISTRY,
             tool_ids=tool_ids, prior=prior,
