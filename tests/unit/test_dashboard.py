@@ -1,11 +1,15 @@
-"""Tests for the Streamlit dashboard's generic form renderer.
+"""Tests for the generic form and result renderers.
 
-These exercise ``render_tool_form`` with a fake ``st`` so no Streamlit install
-or browser is needed.
+These live in ``simple_steps_core.streamlit.components`` now; the dashboard is
+one caller of them. Exercised with a fake ``st`` so no Streamlit install or
+browser is needed.
 """
 
 from simple_steps_core import ToolRegistry, StepOutput
-from simple_steps_core.streamlit.dashboard import render_tool_form, render_tool_result
+from simple_steps_core.streamlit.components import (
+    render_output as render_tool_result,
+    render_tool_form,
+)
 
 
 class FakeSt:
@@ -28,6 +32,13 @@ class FakeSt:
 
     def write(self, value):
         self.written = value
+
+    def caption(self, *a, **kw):
+        pass
+
+    def dataframe(self, df, **kw):
+        # Shaded output arrives as a pandas Styler.
+        self.frame = getattr(df, "data", df)
 
 
 def _registry():
@@ -104,12 +115,15 @@ def test_custom_streamlit_result_ui_is_used_when_provided():
             }
         },
     )
-    render_tool_result(FakeSt(), operation, StepOutput(value={"points": []}), key="result")
+    render_tool_result(FakeSt(), StepOutput(value={"points": []}), key="result",
+                       operation=operation)
     assert rendered == {"key": "result", "value": {"points": []}}
 
 
-def test_streamlit_result_falls_back_to_write():
+def test_streamlit_result_falls_back_to_a_value_table():
+    """Without a custom result view the value is rendered as shaded cells."""
     registry = _registry()
     st = FakeSt()
-    render_tool_result(st, registry.get_operation("scale"), StepOutput(value=6), key="result")
-    assert st.written == 6
+    render_tool_result(st, StepOutput(value=6), key="result",
+                       operation=registry.get_operation("scale"))
+    assert list(st.frame["value"]) == [6]

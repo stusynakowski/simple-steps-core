@@ -1,9 +1,21 @@
-"""Example tools file for the Streamlit dashboard.
+"""Example tools for the Streamlit dashboard — one coherent pipeline.
 
 Run it::
 
     python -m pip install -e ".[dashboard]"
     python streamlit_example/example_tools_and_resources.py
+
+The tools below are built to be chained into a single flow that exercises every
+orchestration mode in turn:
+
+    step1  load_batches            single    -> list[list[float]]   one cell
+    step2  unpack_batch    expand  over=step1 -> list[float]        one cell per reading
+    step3  above_cutoff    filter  over=step2 -> list[float]        the readings that pass
+    step4  accumulate_stats collapse over=step3 -> dict             one cell of statistics
+
+Wire it in the dashboard by choosing the tool, then setting **mode** and **over**
+under Orchestration Settings. `tests/unit/test_example_pipeline.py` runs exactly
+this chain, so the example stays honest.
 
 You only edit this file. Each tool can optionally provide Streamlit views via
 ``ui={"streamlit": ...}``; tools without one get a form auto-generated from the
@@ -20,130 +32,105 @@ of lifecycle phases::
     ``result`` is the ``StepOutput`` (``result.value`` plus timing fields).
 """
 
+import statistics
+
 from simple_steps_core import ArgGuardrail, Guardrails, Resource, register_tool
 from simple_steps_core.streamlit import Dashboard
 
 
-# ── A tool with a custom Streamlit UI ────────────────────────────────────
-def _make_list_ui(st, *, key, defaults):
+# ── 1. Source: one cell holding a list of batches ─────────────────────────
+# A custom Streamlit input view — the auto-form would work too, but this shows
+# the `ui=` hook. Sliders keep the numbers small enough to read in the grid.
+def _load_batches_ui(st, *, key, defaults):
     """render(st, key, defaults) -> args dict. Draw widgets, return arguments."""
-    n = st.slider("How many numbers?", 1, 20, value=defaults.get("n", 5), key=f"{key}_n")
-    return {"n": n}
+    batches = st.slider("How many batches?", 1, 8,
+                        value=defaults.get("batches", 3), key=f"{key}_batches")
+    per_batch = st.slider("Readings per batch", 1, 10,
+                          value=defaults.get("per_batch", 4), key=f"{key}_per")
+    return {"batches": batches, "per_batch": per_batch}
 
 
-@register_tool("make_list", description="Create the list [0, 1, ..., n-1].", ui={"streamlit": _make_list_ui})
-def make_list(n: int) -> list[int]:
-    return list(range(n))
+@register_tool(
+    "load_batches",
+    description="Load sensor readings, grouped into batches. One cell, nested.",
+    ui={"streamlit": _load_batches_ui},
+)
+def load_batches(batches: int = 3, per_batch: int = 4) -> list[list[float]]:
+    return [
+        [round(10 + batch * 7 + reading * 3.5, 1) for reading in range(per_batch)]
+        for batch in range(batches)
+    ]
 
 
-# ── A tool with an auto-generated form (no Streamlit view) ────────────────
-@register_tool("scale", description="Multiply a number by a factor.")
-def scale(x: int, factor: int = 2) -> int:
-    return x * factor
+# ── 2. expand: one cell per reading ───────────────────────────────────────
+# `expand` flat-maps: each item's returned iterable is concatenated, so a list
+# of batches becomes a flat list of readings.
+@register_tool("unpack_batch", description="Yield each reading in a batch (use with expand).")
+def unpack_batch(batch: list[float]) -> list[float]:
+    return list(batch)
 
 
-# ── A tool that maps *several* render targets in one ``ui=`` ──────────────
-# ``ui`` is a {target: renderer} map. Here we ship both a hand-written prefab
-# view (for a React frontend) and a Streamlit view; each surface picks its own.
-def _pick_region_streamlit(st, *, key, defaults):
-    region = st.selectbox("Region", ["EMEA", "APAC", "AMER"], key=f"{key}_region")
-    return {"region": region}
+# ── 3. filter: keep the readings that pass ────────────────────────────────
+# The item binds to the first required param (`value`); `cutoff` is a constant
+# argument shared across every per-item call.
+@register_tool("above_cutoff", description="Keep readings at or above a cutoff (use with filter).",
+               guardrails=Guardrails(arguments={"cutoff": ArgGuardrail(minimum=0, maximum=100)}))
+def above_cutoff(value: float, cutoff: float = 20.0) -> bool:
+    return value >= cutoff
 
 
-_pick_region_prefab = {
-    "view": {
-        "type": "Card",
-        "children": [
-            {"type": "CardTitle", "content": "Pick region"},
-            {"type": "Combobox", "bind": "region",
-             "children": [{"type": "Option", "value": r} for r in ("EMEA", "APAC", "AMER")]},
-        ],
-    },
-    "state": {"region": "EMEA"},
-}
-
-
-@register_tool("pick_region", description="Choose a sales region.", ui={
-    "prefab": _pick_region_prefab,        # React frontend
-    "streamlit": _pick_region_streamlit,  # this dashboard
-})
-def pick_region(region: str) -> str:
-    return region
-
-
-# ── A tool with guardrails (shape the form + gate the run) ────────────────
-@register_tool("charge", description="Charge an amount.", guardrails=Guardrails(
-    usage="Only after the user confirms.",
-    destructive=True,
-    requires_confirmation=True,
-    arguments={"amount": ArgGuardrail(minimum=1, maximum=1000)},
-))
-def charge(amount: int) -> str:
-    return f"charged ${amount}"
-
-
-# ── A tool with both lifecycle views: a form AND a result view ────────────
-# The library requires a composed UI to define an ``input`` view, so a tool that
-# wants a custom ``result`` view supplies both. Note the trade-off: a tool that
-# renders its own form owns it completely, so the Step Manager can't offer the
-# "bind this argument to an earlier step's output" picker for it. Leave ``ui``
-# off (like ``summarize`` below) to keep the auto-form and that picker.
-def _total_input_ui(st, *, key, defaults):
-    text = st.text_input(
-        "Numbers (comma-separated)",
-        value=", ".join(str(v) for v in defaults.get("rows", [1, 2, 3])),
-        key=f"{key}_rows",
-    )
-    rows = [int(part) for part in text.replace(",", " ").split() if part.strip("-").isdigit()]
-    return {"rows": rows}
-
-
-def _total_result_ui(st, *, key, result):
+# ── 4. collapse: reduce to one cell of statistics ─────────────────────────
+# A 2-argument reducer: the first param is the accumulator, the second the next
+# item. With no `initial`, the first reading seeds the accumulator — so the
+# first call receives a float and every later call a dict.
+def _stats_result_ui(st, *, key, result):
     """render(st, key, result) -> None. `result` is the step's StepOutput."""
     value = result.value
-    left, right = st.columns(2)
-    left.metric("count", value["count"])
-    right.metric("total", value["total"])
-    st.caption(f"computed in {result.duration:.3f}s")
+    if not isinstance(value, dict):
+        st.write(value)
+        return
+    cols = st.columns(4)
+    for col, field in zip(cols, ("count", "mean", "minimum", "maximum")):
+        col.metric(field, value.get(field, "—"))
 
 
-@register_tool("total", description="Count and total a hand-typed list.", ui={
-    "streamlit": {"input": _total_input_ui, "result": _total_result_ui},
-})
-def total(rows: list[int]) -> dict:
-    return {"count": len(rows), "total": sum(rows)}
+@register_tool(
+    "accumulate_stats",
+    description="Reduce readings to count/mean/min/max (use with collapse).",
+    ui={"streamlit": {"input": lambda st, *, key, defaults: {}, "result": _stats_result_ui}},
+)
+def accumulate_stats(running: object, value: float) -> dict:
+    seen = running["_seen"] if isinstance(running, dict) else [float(running)]
+    seen = [*seen, float(value)]
+    return {
+        "count": len(seen),
+        "mean": round(statistics.fmean(seen), 2),
+        "minimum": min(seen),
+        "maximum": max(seen),
+        "_seen": seen,
+    }
 
 
-# ── An auto-form tool taking a list ───────────────────────────────────────
-# `rows: list[int]` gets a JSON text area from the auto-form, and in the Step
-# Manager it can instead be bound to an earlier step's output.
+# ── A plain single-call summary, for comparison with the collapse ─────────
 @register_tool("summarize", description="Count and total a list of numbers.")
-def summarize(rows: list[int]) -> dict:
-    return {"count": len(rows), "total": sum(rows)}
-
-
-# ── A tool whose enum guardrail drives the widget ─────────────────────────
-@register_tool("set_mode", description="Pick a run mode.", guardrails=Guardrails(
-    arguments={"mode": ArgGuardrail(enum=["fast", "balanced", "thorough"])},
-))
-def set_mode(mode: str = "balanced") -> str:
-    return mode
+def summarize(rows: list[float]) -> dict:
+    return {"count": len(rows), "total": round(sum(rows), 2)}
 
 
 # ── A tool that uses an injected resource ─────────────────────────────────
-@register_tool("greet", description="Greet using an injected name service.")
-def greet(names=Resource()) -> str:
-    return f"hello, {names.current()}"
+@register_tool("describe_sensor", description="Name the sensor from an injected service.")
+def describe_sensor(sensors=Resource()) -> str:
+    return sensors.current()
 
 
-class _NameService:
+class _SensorService:
     def current(self) -> str:
-        return "world"
+        return "sensor-01"
 
 
 # Optional dashboard config and injected resources.
-CONFIG = {"title": "My Tools Dashboard"}
-RESOURCES = {"names": _NameService}   # factory (callable) or instance
+CONFIG = {"title": "Readings Pipeline"}
+RESOURCES = {"sensors": _SensorService}   # factory (callable) or instance
 
 
 if __name__ == "__main__":
