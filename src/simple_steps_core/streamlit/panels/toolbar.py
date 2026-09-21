@@ -82,7 +82,7 @@ def render_run_controls(st, drafts: DraftWorkflow, *, key: str,
     """
     with st.container(horizontal=True, gap="xxsmall"):
         run_all = st.button(":material/play_arrow: Run all", key=f"{key}_run_all",
-                            disabled=not len(drafts))
+                            disabled=not len(drafts),type="primary")
         if on_clear is not None:
             with st.popover(":material/refresh: Reset", disabled=not len(drafts)):
                 st.warning("This removes every step and clears all results. "

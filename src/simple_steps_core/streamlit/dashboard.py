@@ -272,7 +272,21 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                 with st.popover(":material/smart_toy: Assistant"):
                     st.caption("Assistant placeholder")
 
-        st.divider()
+        #st.divider()
+        st.html(
+            """
+            <style>
+            hr {
+                height: 1px;
+                border: none;
+                background-color: #e0e0e0;
+                margin-top: 0rem;
+                margin-bottom: 0rem;
+            }
+            </style>
+        """
+        )
+        st.divider()  # This will now use the custom thin style
         run_all = render_run_controls(st, drafts, key="run", on_clear=_clear_all)
 
     if not len(drafts):

@@ -155,11 +155,11 @@ with st.expander("Workflow Manager",expanded=True):
                 st.button(":material/merge_type: Group selected", on_click=group_steps)
                 st.button(":material/call_split: Ungroup selected", on_click=ungroup_steps)
 
-    st.divider()
+    #st.divider()
     st.write("Run Workflow")
     with st.container(horizontal=True, gap="xxsmall"):
         
-        st.button(":material/play_arrow:")
+        st.button(":material/play_arrow:",type="primary")
         st.button(":material/refresh:")
         st.button(":material/fast_forward:")
         st.write(" status bar here")

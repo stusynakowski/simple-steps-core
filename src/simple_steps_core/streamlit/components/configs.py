@@ -107,7 +107,7 @@ def edit_data_input(st, mode: str, source: str | None, *, key: str,
 def execution_popover(st, config: StepExecutionConfig, *, key: str,
                       fanned_out: bool = False) -> StepExecutionConfig:
     """Conduct, folded into a small popover — rarely touched, never in the way."""
-    with st.popover("Runtime Settings :material/play_arrow:", help="Execution settings"):
+    with st.popover("Runtime Settings :material/play_arrow:", help="Execution settings: how this step runs, including parallelism, retries, progress reports, error handling"):
         return edit_step_execution(st, config, key=key, fanned_out=fanned_out)
 
 
@@ -123,7 +123,7 @@ def orchestration_popover(st, config: OrchestrationConfig, *, key: str,
     options = [AUTO, *(MODE_VERBS[m] for m in MODES)]
     current = MODE_VERBS.get(config.mode, MODE_VERBS["single"]) if locked else AUTO
 
-    with st.popover(":material/account_tree:", help="Orchestration"):
+    with st.popover("Orchestration :material/account_tree:", help="Step orchestration settings: it decides how you apply tools across your data between steps"):
         st.caption(f"Currently `{config.mode}`"
                    + (f" over `{config.over}`" if config.over else ""))
         chosen = st.selectbox(
