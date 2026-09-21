@@ -381,12 +381,15 @@ def render_output_status(st, output) -> None:
 
 
 def _default_orchestration() -> dict[str, Any]:
-    return {"mode": "single", "over": None, "item_arg": None, "concurrency": 1,
-            "on_error": None, "retries": 0, "initial": None}
+    # Shape only — mirrors OrchestrationConfig.
+    return {"mode": "single", "over": None, "item_arg": None, "initial": None}
 
 
 def _default_execution() -> dict[str, Any]:
-    return {"mode": "sync", "run": "manual", "timeout": None, "retries": 0, "cache": False}
+    # Mirrors StepExecutionConfig's fields exactly. Anything extra here breaks
+    # round-tripping, since a reloaded step is seeded from `model_dump()`.
+    return {"run": "manual", "timeout": None, "retries": 0, "cache": False,
+            "concurrency": 1, "on_item_error": None}
 
 
 def output_type_name(definition) -> str:
@@ -437,10 +440,11 @@ def _staging_dataframe(d: dict[str, Any], arguments: dict[str, Any]):
         "arguments": ", ".join(f"{k}={v!r}" for k, v in arguments.items()) or "—",
     }
     if orch["mode"] != "single":
+        execu = d.get("execution") or _default_execution()
         row["over"] = orch["over"] or "—"
         row["item_arg"] = orch["item_arg"] or "(auto)"
-        row["concurrency"] = orch["concurrency"]
-        row["on_error"] = orch["on_error"] or "(default)"
+        row["concurrency"] = execu["concurrency"]
+        row["on_item_error"] = execu["on_item_error"] or "(default)"
     return pd.DataFrame([row])
 
 
@@ -901,13 +905,14 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                 specs[sid] = Operation(
                     step_id=sid, name=d["op"], stage=d["stage"], arguments=arguments,
                     orchestration=OrchestrationConfig(
-                        mode=orch["mode"], over=orch["over"], item_arg=orch["item_arg"],
-                        concurrency=int(orch["concurrency"]), on_error=orch["on_error"],
-                        retries=int(orch["retries"]), initial=orch["initial"],
+                        mode=orch["mode"], over=orch["over"],
+                        item_arg=orch["item_arg"], initial=orch["initial"],
                     ),
                     execution=StepExecutionConfig(
                         run=execu["run"], timeout=execu["timeout"],
                         retries=int(execu["retries"]), cache=execu["cache"],
+                        concurrency=int(execu["concurrency"]),
+                        on_item_error=execu["on_item_error"],
                     ),
                 )
                 
@@ -1055,20 +1060,9 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                     )
                     orch["item_arg"] = None if item_arg == "(auto)" else item_arg
 
-                    orch["concurrency"] = st.number_input(
-                        "concurrency", min_value=1, step=1,
-                        value=int(orch["concurrency"]), key=f"orch_conc_{sid}",
-                    )
-                    error_options = ["(default)", "collect", "fail_fast", "skip"]
-                    current_err = orch["on_error"] or "(default)"
-                    on_error = st.selectbox(
-                        "on_error", error_options,
-                        index=error_options.index(current_err), key=f"orch_err_{sid}",
-                    )
-                    orch["on_error"] = None if on_error == "(default)" else on_error
-                    orch["retries"] = st.number_input(
-                        "retries", min_value=0, step=1,
-                        value=int(orch["retries"]), key=f"orch_retries_{sid}",
+                    st.caption(
+                        "Concurrency, retries and per-item error policy are "
+                        "**Runtime settings** — this tab only shapes the data."
                     )
                     if orch["mode"] == "collapse":
                         orch["initial"] = st.text_input(
@@ -1080,8 +1074,9 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
         with step_runtime_settings_tab:
             st.caption("How this step is invoked.")
             execu = d["execution"]
-            exec_modes = ["sync", "async"]
-            execu["mode"] = st.selectbox("mode", exec_modes, index=exec_modes.index(execu["mode"]), key=f"exec_mode_{sid}")
+            # sync/async is derived from the tool (``Tool.is_async``), never set
+            # here — show it rather than offering a control that does nothing.
+            st.caption(f":material/bolt: call style: `{'async' if op.is_async else 'sync'}` (from the tool)")
             run_modes = ["manual", "auto"]
             execu["run"] = st.selectbox("run", run_modes, index=run_modes.index(execu["run"]), key=f"exec_run_{sid}",
                                           help="'manual' waits for the Run button; 'auto' is a hint for orchestrated runners.")
@@ -1092,8 +1087,28 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
                 if has_timeout else None
             )
             execu["retries"] = st.number_input("retries", min_value=0, step=1,
-                                                 value=int(execu["retries"]), key=f"exec_retries_{sid}")
+                                                 value=int(execu["retries"]), key=f"exec_retries_{sid}",
+                                                 help="Retries one unit of work — the whole call when "
+                                                      "mode is 'single', one item when fanned out.")
             execu["cache"] = st.checkbox("cache result", value=execu["cache"], key=f"exec_cache_{sid}")
+
+            # Per-item conduct only means something once there is more than one unit.
+            if is_fanned_out(d):
+                st.markdown("___")
+                st.caption(f"Per-item conduct for this `{d['orchestration']['mode']}` step.")
+                execu["concurrency"] = st.number_input(
+                    "concurrency", min_value=1, step=1,
+                    value=int(execu["concurrency"]), key=f"exec_conc_{sid}",
+                    help="How many items run at once.",
+                )
+                error_options = ["(default)", "collect", "fail_fast", "skip"]
+                current_err = execu["on_item_error"] or "(default)"
+                on_item_error = st.selectbox(
+                    "on_item_error", error_options,
+                    index=error_options.index(current_err), key=f"exec_item_err_{sid}",
+                    help="What a single failed item does to the batch.",
+                )
+                execu["on_item_error"] = None if on_item_error == "(default)" else on_item_error
 
         # Remember what the user typed so an unmounted panel can re-author the spec.
         st.session_state[f"cached_args_{sid}"] = dict(arguments)
@@ -1112,13 +1127,14 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
         specs[sid] = Operation(
             step_id=sid, name=d["op"], stage=d["stage"], arguments=arguments,
             orchestration=OrchestrationConfig(
-                mode=orch["mode"], over=orch["over"], item_arg=orch["item_arg"],
-                concurrency=int(orch["concurrency"]), on_error=orch["on_error"],
-                retries=int(orch["retries"]), initial=orch["initial"],
+                mode=orch["mode"], over=orch["over"],
+                item_arg=orch["item_arg"], initial=orch["initial"],
             ),
             execution=StepExecutionConfig(
                 run=execu["run"], timeout=execu["timeout"],
                 retries=int(execu["retries"]), cache=execu["cache"],
+                concurrency=int(execu["concurrency"]),
+                on_item_error=execu["on_item_error"],
             ),
         )
 

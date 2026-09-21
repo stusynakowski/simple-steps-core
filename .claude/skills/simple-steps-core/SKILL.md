@@ -182,16 +182,25 @@ references, and missing resources — run it before executing.
 Declare it on the step, not by calling an orchestrator yourself:
 
 ```python
-from simple_steps_core import Operation, OrchestrationConfig
+from simple_steps_core import Operation, OrchestrationConfig, StepExecutionConfig
 
 wf.add(Operation(
     step_id="step2",
     name="process_item",                       # the per-item tool
     stage=1,
     arguments={"threshold": 0.8},              # constant kwargs shared by every sub-call
-    orchestration=OrchestrationConfig(mode="map", over="step1", concurrency=8, retries=2),
+    orchestration=OrchestrationConfig(mode="map", over="step1"),        # shape
+    execution=StepExecutionConfig(concurrency=8, retries=2),            # conduct
 ))
 ```
+
+**The two configs are isolated by concern and share no fields.**
+`OrchestrationConfig` is shape only — `mode`, `over`, `item_arg`, `initial`.
+Conduct — `concurrency`, `on_item_error`, `retries`, `timeout`, `cache`, `run` —
+lives on `StepExecutionConfig`. Both set `extra="forbid"`, so passing a conduct
+field to the orchestration config raises. `mode` defines the *unit of work*
+(the whole call when `single`, one item when fanned out) and every conduct field
+acts on that unit. See [docs/config-isolation.md](docs/config-isolation.md).
 
 `to_tool_call()` compiles that into `map(over="step1", op="process_item", ...)`.
 Modes: `single` (default), `map`, `filter`, `expand` (flat-map), `collapse`
@@ -201,7 +210,8 @@ Modes: `single` (default), `map`, `filter`, `expand` (flat-map), `collapse`
   you set `item_arg`.
 - `map` returns a `MapResult`; downstream steps consume `step2.ok` (successful
   values) or `step2.failed` (outcomes to re-drive). Per-item failures are
-  isolated by default (`on_error="collect"`); `"fail_fast"` aborts, `"skip"` drops.
+  isolated by default (`execution.on_item_error="collect"`); `"fail_fast"`
+  aborts, `"skip"` drops.
 - Orchestrators are registered by `register_orchestrators(registry)` — `App`,
   `Server`, and `Dashboard` all do this for you at startup.
 
@@ -325,16 +335,12 @@ Streamlit is imported lazily throughout, so importing
 
 ## Known sharp edges in the current tree
 
-- [dashboard.py:210](src/simple_steps_core/streamlit/dashboard.py#L210) —
-  `render_tool_form` hits a bare `return` (returns `None`) when a tool declares a
-  `streamlit` input view, instead of calling the renderer. Custom Streamlit views
-  are effectively dead through that path.
 - `Guardrails.requires_confirmation` / `destructive` / `read_only` are never read
   by the runtime — hosts must enforce them.
 - `Workflow.run_step` records the failure on the step *and* re-raises, so
   `Workflow.run()` aborts the remaining steps; catch per-step if you need
   continue-on-error semantics.
-- `StepExecutionConfig` (`run`, `timeout`, `retries`, `cache`),
-  `StageExecutionConfig`, and `WorkflowExecutionConfig` are declared, serialized,
-  and surfaced in the dashboard, but the runner never reads them. Treat them as
-  authoring intent a host must implement, not as runtime behavior.
+- `StepExecutionConfig.concurrency` / `on_item_error` / `retries` are honored
+  when a step fans out. `retries` on a `single` step, plus `run`, `timeout`,
+  `cache`, `StageExecutionConfig` and `WorkflowExecutionConfig`, are still
+  declared but never read — authoring intent a host must implement.

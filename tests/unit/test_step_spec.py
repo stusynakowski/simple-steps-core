@@ -1,6 +1,7 @@
 """Tests for the structured Operation (inline orchestration) and its compilation."""
 
 import pytest
+from pydantic import ValidationError
 
 from simple_steps_core import (
     CoreEngine,
@@ -41,10 +42,12 @@ def test_single_spec_compiles_to_direct_call():
 
 
 def test_map_spec_compiles_to_orchestrator_call():
+    """Shape comes from orchestration, conduct from execution; both reach the call."""
     spec = Operation(
         step_id="s2",
         name="double",
-        orchestration=OrchestrationConfig(mode="map", over="s1", concurrency=4),
+        orchestration=OrchestrationConfig(mode="map", over="s1"),
+        execution=StepExecutionConfig(concurrency=4, retries=2),
     )
     call = spec.to_tool_call()
     assert call.operation_id == "map"
@@ -52,9 +55,23 @@ def test_map_spec_compiles_to_orchestrator_call():
         "over": "s1",
         "op": "double",
         "concurrency": 4,
-        "on_error": "collect",
-        "retries": 0,
+        "on_error": "collect",     # mode default, since on_item_error is unset
+        "retries": 2,
     }
+
+
+def test_conduct_fields_are_rejected_by_orchestration_config():
+    """The configs are isolated by concern: a moved field fails loudly."""
+    with pytest.raises(ValidationError):
+        OrchestrationConfig(mode="map", over="s1", concurrency=4)
+    with pytest.raises(ValidationError):
+        OrchestrationConfig(mode="map", over="s1", retries=2)
+    with pytest.raises(ValidationError):
+        OrchestrationConfig(mode="map", over="s1", on_error="skip")
+
+
+def test_orchestration_and_execution_share_no_fields():
+    assert not (set(OrchestrationConfig.model_fields) & set(StepExecutionConfig.model_fields))
 
 
 def test_collapse_spec_passes_initial_only():

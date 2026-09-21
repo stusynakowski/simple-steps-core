@@ -223,37 +223,47 @@ class StepResult(BaseModel):
 
 
 class OrchestrationConfig(BaseModel):
-    """How a step applies its tool across inputs (breadth).
+    """**Shape only**: how a step's input data fans out and comes back.
 
     ``single`` runs the tool once. ``map``/``filter``/``expand``/``collapse``
     apply the step's own tool across the collection referenced by ``over``.
+
+    How that work is *conducted* — concurrency, per-item error policy, retries,
+    timeouts — belongs to :class:`StepExecutionConfig`. The two configs are
+    isolated by concern: nothing here describes runtime behavior.
     """
 
     mode: Literal["single", "map", "filter", "expand", "collapse"] = "single"
     over: str | None = None          # step reference to the collection (e.g. "step1")
     item_arg: str | None = None      # tool param each item binds to (default: inferred)
-    concurrency: int = 1
-    on_error: Literal["collect", "fail_fast", "skip"] | None = None
-    retries: int = 0
     initial: Any = None              # seed accumulator for ``collapse``
 
-    model_config = {"frozen": True}
+    # No silent drops: a field that moved scope must fail loudly, not vanish.
+    model_config = {"frozen": True, "extra": "forbid"}
 
 
 class StepExecutionConfig(BaseModel):
-    """How **one tool call** is invoked (orthogonal to orchestration).
+    """**Conduct only**: how a step's unit of work is carried out.
 
     Isolated to the step scope: it never inherits from or overrides the stage
     or workflow configs (see docs/object-model.md). ``mode`` (sync/async) is
     derived from the tool, not set here.
+
+    The unit of work is defined by :class:`OrchestrationConfig.mode` — the whole
+    call when ``single``, one item when fanned out. So ``retries`` means "retry
+    the unit" in both cases, and ``concurrency`` / ``on_item_error`` apply only
+    when there is more than one unit (``map``/``filter``/``expand``).
     """
 
     run: Literal["auto", "manual"] = "manual"   # gate this step
     timeout: float | None = None
     retries: int = 0
     cache: bool = False
+    concurrency: int = 1                        # parallel units; fan-out modes only
+    on_item_error: Literal["collect", "fail_fast", "skip"] | None = None
 
-    model_config = {"frozen": True}
+    # No silent drops: a field that moved scope must fail loudly, not vanish.
+    model_config = {"frozen": True, "extra": "forbid"}
 
 
 class StageExecutionConfig(BaseModel):
@@ -268,7 +278,8 @@ class StageExecutionConfig(BaseModel):
     on_step_error: Literal["stop", "continue"] = "stop"
     run: Literal["auto", "manual"] = "manual"   # gate this phase
 
-    model_config = {"frozen": True}
+    # No silent drops: a field that moved scope must fail loudly, not vanish.
+    model_config = {"frozen": True, "extra": "forbid"}
 
 
 class WorkflowExecutionConfig(BaseModel):
@@ -281,7 +292,8 @@ class WorkflowExecutionConfig(BaseModel):
     on_stage_error: Literal["stop", "continue"] = "stop"
     run: Literal["auto", "manual"] = "manual"   # gate the whole workflow
 
-    model_config = {"frozen": True}
+    # No silent drops: a field that moved scope must fail loudly, not vanish.
+    model_config = {"frozen": True, "extra": "forbid"}
 
 
 # Default per-item failure policy by orchestration mode.
@@ -323,6 +335,10 @@ class Operation(BaseModel):
         ``single`` yields a direct call; the orchestrated modes yield a call to
         the matching orchestrator (``map``/``filter``/``expand``/``collapse``)
         with this step's tool as the per-item ``op``.
+
+        Shape (``mode``/``over``/``item_arg``/``initial``) comes from
+        ``orchestration``; conduct (``concurrency``/``on_item_error``/
+        ``retries``) comes from ``execution``.
         """
         orch = self.orchestration
         if orch.mode == "single":
@@ -347,9 +363,13 @@ class Operation(BaseModel):
             call_args["initial"] = orch.initial
             return ToolCall(operation_id="collapse", arguments=call_args)
 
-        call_args["concurrency"] = orch.concurrency
-        call_args["on_error"] = orch.on_error or _ORCH_DEFAULT_ON_ERROR[orch.mode]
-        call_args["retries"] = orch.retries
+        # Conduct comes from the execution config; shape came from orchestration.
+        # The orchestrators are ordinary tools, so their runtime policy has to
+        # arrive as arguments — this is the one place the two configs meet.
+        execution = self.execution
+        call_args["concurrency"] = execution.concurrency
+        call_args["on_error"] = execution.on_item_error or _ORCH_DEFAULT_ON_ERROR[orch.mode]
+        call_args["retries"] = execution.retries
         return ToolCall(operation_id=orch.mode, arguments=call_args)
 
 

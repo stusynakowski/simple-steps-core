@@ -91,7 +91,7 @@ ui={"streamlit": {"input": render_form, "result": render_result}}
 |---|---|
 | `Workflow` | Ordered steps with a dict-like API, run against one session. |
 | `Operation` | A Tool *equipped* with arguments + orchestration + execution config. |
-| `OrchestrationConfig` | Breadth: `mode`, `over`, `item_arg`, `concurrency`, `on_error`, `retries`, `initial`. |
+| `OrchestrationConfig` | **Shape only**: `mode`, `over`, `item_arg`, `initial`. |
 | `Step` | `Operation + Data` — the spec plus its status/output. |
 | `StepStatus` | `PENDING` / `RUNNING` / `COMPLETED` / `FAILED`. |
 | `StepOutput` | `value`, `kind`, `ref`, `started_at`, `ended_at`, `duration`. |
@@ -134,13 +134,19 @@ plain scripts.
 
 | Name | Scope |
 |---|---|
-| `StepExecutionConfig` | `run`, `timeout`, `retries`, `cache` |
+| `StepExecutionConfig` | `run`, `timeout`, `retries`, `cache`, `concurrency`, `on_item_error` |
 | `StageExecutionConfig` | `steps`, `concurrency`, `on_step_error`, `run` |
 | `WorkflowExecutionConfig` | `stages`, `on_stage_error`, `run` |
 
-They are orthogonal and isolated — no inheritance, no overriding.
-**They are also inert:** nothing in the runtime reads them. See
-[Change 1](#1-execution-configs-are-declared-but-never-honored).
+They are isolated on both axes: **by scope** (no inheritance, no overriding) and
+**by concern** — `OrchestrationConfig` holds shape, `StepExecutionConfig` holds
+conduct, and they share zero fields. All four set `extra="forbid"`, so a field
+passed to the wrong config raises. Full map:
+[config-isolation.md](config-isolation.md).
+
+`concurrency`, `on_item_error` and `retries` are honored for fan-out modes.
+`retries` on a `single` step, plus `run`, `timeout` and `cache`, are still
+inert — see [Change 1](#1-execution-configs-are-declared-but-never-honored).
 
 ---
 
@@ -198,25 +204,32 @@ if __name__ == "__main__":
 Ranked by how much damage each does. Every item below was reproduced against
 the current tree.
 
-## 1. Execution configs are declared but never honored
+## 1. Execution configs are only partly honored
 
-`StepExecutionConfig`, `StageExecutionConfig` and `WorkflowExecutionConfig` are
-exported, documented, serialized, and surfaced in the dashboard's "Runtime
-settings" tab — and no runner reads them.
+*Partly fixed.* `concurrency`, `on_item_error` and `retries` now live on
+`StepExecutionConfig` and are honored whenever a step fans out — the
+orchestrator implements them. What remains inert:
+
+| Field | Status |
+|---|---|
+| `retries` | works fanned out; **ignored when `mode="single"`** |
+| `timeout` | ignored everywhere |
+| `cache` | ignored everywhere |
+| `run` | ignored everywhere |
+| `StageExecutionConfig.*`, `WorkflowExecutionConfig.*` | ignored everywhere |
 
 ```python
 wf["step1"] = Operation(step_id="step1", name="slow", arguments={"x": 1},
                         execution=StepExecutionConfig(retries=3, timeout=0.001))
 wf.run()
-# attempts made: 1   (retries=3 implies 4; timeout never applied)
+# attempts made: 1   (single step: no retry loop in run_step)
 ```
 
-A user who sets `retries=3` has every reason to believe retries happen. This is
-the worst kind of API defect: it fails silently and looks like a feature.
-
-**Options** — (a) implement them in `run_step`/`arun_step`, (b) rename to
-`*AuthoringIntent` and document that hosts must enforce, or (c) drop them from
-`__all__` until implemented. Anything but the current state.
+The stated rule is "`retries` retries the unit of work, and `mode` defines the
+unit." That holds for fan-out modes only until `run_step`/`arun_step` grow a
+retry loop. `timeout` is harder than it looks: sync tools run via
+`asyncio.to_thread`, and a thread cannot be cancelled — `wait_for` would return
+control while the work continued, which is worse than not implementing it.
 
 ## 2. `Server` and `Dashboard` are invisible
 
