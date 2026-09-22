@@ -31,6 +31,10 @@ class ToolParam(BaseModel):
     required: bool = False          # True when the param has no default
     default: Any = None             # default value when not required
     kind: Literal["data", "resource"] = "data"  # resource params are injected
+    # For a resource param: the container key to inject from, which is the
+    # parameter name unless Resource("other_name") overrode it. Lets a tool
+    # call its parameter `fs` while binding to the `file_system` resource.
+    resource_name: str | None = None
 
     model_config = {"frozen": True}
 
@@ -85,7 +89,8 @@ class ToolDefinition(BaseModel):
     params: list[ToolParam] = Field(default_factory=list)
     input_schema: dict[str, Any] = Field(default_factory=dict)   # JSON Schema (data params)
     output_schema: dict[str, Any] | None = None                  # JSON Schema (return type)
-    dependencies: list[str] = Field(default_factory=list)        # resource param names
+    dependencies: list[str] = Field(default_factory=list)        # resource container keys
+    resource: str | None = None                                  # owning resource, if bound
     ui: dict[str, Any] | None = None                             # prefab input, input/result, or full declaration
     guardrails: Guardrails | None = None                         # usage + argument policy
 
@@ -185,6 +190,10 @@ class Shape(BaseModel):
     rows: int
     columns: list[str] = Field(default_factory=list)
     value_type: str | None = None
+    # False when ``rows`` is a floor rather than a count: a lazy Collection
+    # (a paged API, a glob) knows its items only by reading them. Renderers
+    # should show "?" or "n+" instead of claiming an exact size.
+    rows_known: bool = True
 
     model_config = {"frozen": True}
 
@@ -225,15 +234,17 @@ class StepResult(BaseModel):
 class OrchestrationConfig(BaseModel):
     """**Shape only**: how a step's input data fans out and comes back.
 
-    ``single`` runs the tool once. ``map``/``filter``/``expand``/``collapse``
-    apply the step's own tool across the collection referenced by ``over``.
+    ``single`` runs the tool once. ``map``/``filter``/``expand``/``collapse``/
+    ``group`` apply the step's own tool across the collection referenced by
+    ``over``. Under ``group`` the step's tool is the **key function**: each
+    item is passed to it and the result becomes the bucket the item lands in.
 
     How that work is *conducted* — concurrency, per-item error policy, retries,
     timeouts — belongs to :class:`StepExecutionConfig`. The two configs are
     isolated by concern: nothing here describes runtime behavior.
     """
 
-    mode: Literal["single", "map", "filter", "expand", "collapse"] = "single"
+    mode: Literal["single", "map", "filter", "expand", "collapse", "group"] = "single"
     over: str | None = None          # step reference to the collection (e.g. "step1")
     item_arg: str | None = None      # tool param each item binds to (default: inferred)
     initial: Any = None              # seed accumulator for ``collapse``
@@ -297,7 +308,24 @@ class WorkflowExecutionConfig(BaseModel):
 
 
 # Default per-item failure policy by orchestration mode.
-_ORCH_DEFAULT_ON_ERROR = {"map": "collect", "expand": "collect", "filter": "skip"}
+#: The built-in resource that owns the orchestrators. Their tool ids are
+#: ``orchestration-map``, ``orchestration-filter``, ... and the bare names
+#: (``map``, ``filter``, ...) stay registered as aliases, so saved workflows
+#: and existing specs keep resolving.
+ORCHESTRATION_RESOURCE = "orchestration"
+
+
+def orchestrator_id(mode: str) -> str:
+    """The qualified tool id backing an orchestration *mode*."""
+    return f"{ORCHESTRATION_RESOURCE}-{mode}"
+
+
+_ORCH_DEFAULT_ON_ERROR = {
+    "map": "collect",
+    "expand": "collect",
+    "filter": "skip",
+    "group": "skip",
+}
 
 
 class Operation(BaseModel):
@@ -361,7 +389,7 @@ class Operation(BaseModel):
             call_args["args"] = dict(self.arguments)
         if orch.mode == "collapse":
             call_args["initial"] = orch.initial
-            return ToolCall(operation_id="collapse", arguments=call_args)
+            return ToolCall(operation_id=orchestrator_id("collapse"), arguments=call_args)
 
         # Conduct comes from the execution config; shape came from orchestration.
         # The orchestrators are ordinary tools, so their runtime policy has to
@@ -370,7 +398,7 @@ class Operation(BaseModel):
         call_args["concurrency"] = execution.concurrency
         call_args["on_error"] = execution.on_item_error or _ORCH_DEFAULT_ON_ERROR[orch.mode]
         call_args["retries"] = execution.retries
-        return ToolCall(operation_id=orch.mode, arguments=call_args)
+        return ToolCall(operation_id=orchestrator_id(orch.mode), arguments=call_args)
 
 
 class Step(BaseModel):

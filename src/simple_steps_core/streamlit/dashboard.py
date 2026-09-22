@@ -55,6 +55,7 @@ from simple_steps_core.execution.workflow import Workflow
 from simple_steps_core.loader import load_tools_module
 from simple_steps_core.operations.orchestrations import register_orchestrators
 from simple_steps_core.operations.registry import REGISTRY
+from simple_steps_core.operations.resource_spec import install_resources
 from simple_steps_core.streamlit.components import render_resources
 from simple_steps_core.streamlit.panels import (
     STEP_VIEWS,
@@ -136,11 +137,7 @@ def _render_app(config: dict[str, Any], resources: dict[str, Any]) -> None:
     st.markdown(_CARD_CSS, unsafe_allow_html=True)
 
     def _register_resources(target: Workflow) -> None:
-        for name, provider in resources.items():
-            if callable(provider):
-                target.context.resources.register(name, provider)
-            else:
-                target.context.resources.register_value(name, provider)
+        install_resources(target.context.resources, resources)
 
     st.session_state.setdefault("selected_steps", [])
     st.session_state.setdefault("selected_steps_nonce", 0)
@@ -449,7 +446,7 @@ def _render_from_env() -> None:
         if not REGISTRY.has("map"):
             register_orchestrators(REGISTRY)
         config = dict(getattr(module, "CONFIG", {}) or {})
-        resources = dict(getattr(module, "RESOURCES", {}) or {})
+        resources = getattr(module, "RESOURCES", None) or {}
         return config, resources
 
     tools_path = os.environ.get(_ENV_TOOLS) or (sys.argv[1] if len(sys.argv) > 1 else None)
@@ -494,7 +491,7 @@ class Dashboard:
             if not REGISTRY.has("map"):
                 register_orchestrators(REGISTRY)
             config = dict(caller.get("CONFIG", {}) or {})
-            resources = dict(caller.get("RESOURCES", {}) or {})
+            resources = caller.get("RESOURCES", None) or {}
             _render_app(config, resources)
             return
 

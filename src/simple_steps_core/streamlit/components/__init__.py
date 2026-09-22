@@ -44,6 +44,8 @@ from simple_steps_core import (
     AppConfig,
     ArgGuardrail,
     Cell,
+    Collection,
+    MediaAsset,
     DataEntry,
     ItemOutcome,
     ResourceCheck,
@@ -108,6 +110,11 @@ from .forms import (
     render_literal_arg,
     render_tool_form,
 )
+from .media import (
+    render_media_asset,
+    render_media_grid,
+    render_missing_media,
+)
 from .steps import (
     FAILED_FILL,
     OK_FILL,
@@ -120,9 +127,12 @@ from .steps import (
     render_operation,
     render_output,
     render_output_status,
+    render_collection,
+    render_groups,
     render_staged_output,
     render_step,
     render_tool_call,
+    render_value,
     staged_output_type,
     to_dataframe,
 )
@@ -199,6 +209,8 @@ __all__ = [
     "render_status", "render_step_error", "render_step_result", "render_item_outcome",
     "render_shape", "render_cell", "render_data_entry", "render_snapshot",
     "render_app_config", "render_tool_ui", "render_tool_ui_view", "render_tool_registry",
+    "render_media_asset", "render_media_grid", "render_missing_media",
+    "render_value", "render_groups", "render_collection",
 ]
 
 
@@ -218,6 +230,9 @@ COMPONENTS: dict[type, Any] = {
     ToolCall: render_tool_call,
     StepOutput: render_output,
     MapResult: render_map_result,
+    # media and lazy sources
+    MediaAsset: render_media_asset,
+    Collection: render_collection,
     # configs (read-only views; use edit_* to change them)
     OrchestrationConfig: render_orchestration,
     StepExecutionConfig: render_step_execution,

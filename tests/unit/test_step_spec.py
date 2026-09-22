@@ -13,6 +13,7 @@ from simple_steps_core import (
     StepStatus,
     ToolCall,
     Workflow,
+    orchestrator_id,
     register_orchestrators,
 )
 
@@ -50,7 +51,7 @@ def test_map_spec_compiles_to_orchestrator_call():
         execution=StepExecutionConfig(concurrency=4, retries=2),
     )
     call = spec.to_tool_call()
-    assert call.operation_id == "map"
+    assert call.operation_id == orchestrator_id("map")
     assert call.arguments == {
         "over": "s1",
         "op": "double",
@@ -81,7 +82,7 @@ def test_collapse_spec_passes_initial_only():
         orchestration=OrchestrationConfig(mode="collapse", over="s2", initial=0),
     )
     call = spec.to_tool_call()
-    assert call.operation_id == "collapse"
+    assert call.operation_id == orchestrator_id("collapse")
     assert call.arguments == {"over": "s2", "op": "add", "initial": 0}
 
 
@@ -103,7 +104,7 @@ def test_shared_args_compile_into_orchestrator_call():
         orchestration=OrchestrationConfig(mode="map", over="s1"),
     )
     call = spec.to_tool_call()
-    assert call.operation_id == "map"
+    assert call.operation_id == orchestrator_id("map")
     assert call.arguments["op"] == "scale"
     assert call.arguments["args"] == {"factor": 2}   # shared constants passed through
 

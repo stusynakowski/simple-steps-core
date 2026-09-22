@@ -21,6 +21,9 @@ executes calls against a session-scoped payload store.
 | **Workflow** | ordered steps, dict-like API, run against one session | `execution/workflow.py` |
 | **Stage** | a computed groupby view over steps sharing a `stage` tag | `execution/workflow.py` |
 | **Resource** | an injected runtime dependency (db, client, config) — *not* data | `operations/dependencies.py` |
+| **ResourceSpec** | a *standard resource*: the runtime object + the tools bound to it, named `{resource}-{tool}` | `operations/resource_spec.py` |
+| **Collection** | a re-iterable, versioned source read on demand instead of copied into the step | `domain/collections.py` |
+| **MediaAsset** | a handle to one image/video file; bytes live in the media store, steps pass the handle | `domain/media.py` |
 | **SessionContext** | the per-session payload store (`ref -> value`, `step_id -> ref`) | `execution/context.py` |
 
 Import everything from the top-level package (`from simple_steps_core import ...`);
@@ -147,8 +150,157 @@ workflow.missing_resources()             # names required by this workflow but u
 - `App.register_resource(...)` declares a default that each new `Session` gets
   via `container.clone()` — factories and checks are copied so every session
   builds its own instance, but already-built *values* are shared by reference.
-- In a tools file, the `RESOURCES` module-level dict is the ergonomic form:
-  `{"db": connect}` (callable → factory) or `{"cfg": settings}` (instance).
+- In a tools file, the `RESOURCES` module-level name is the ergonomic form:
+  a list of specs `[photos, database]`, or a dict `{"db": connect}` (callable →
+  factory) / `{"cfg": settings}` (instance). `install_resources()` handles all
+  three shapes, and both the dashboard and the HTTP server go through it.
+
+### Standard resources — a resource that ships its own tools
+
+A `ResourceSpec` bundles the runtime object with the tools that use it, so a
+capability arrives in one piece
+([operations/resource_spec.py](src/simple_steps_core/operations/resource_spec.py)):
+
+```python
+from simple_steps_core import Collection, ListCollection, Resource, ResourceSpec
+
+file_system = ResourceSpec(
+    "file_system",
+    factory=lambda: Path("/data"),
+    check=lambda root: root.exists(),
+)
+
+@file_system.tool("list_files")               # id -> "file_system-list_files"
+def list_files(pattern: str, fs = Resource()) -> Collection:
+    ...
+
+app.register_resource(file_system)             # factory + check + every tool
+```
+
+Two rules separate a bound tool from a plain `@register_tool` one:
+
+- **Its id is namespaced** `{resource}-{tool}`. The name says what it can
+  touch, and two resources can each ship a `list` without colliding.
+  `qualify()` / `split_qualified()` are the helpers; the separator is `-`.
+- **It may use its own resource and no other.** An unnamed `Resource()` binds
+  to the owner whatever the parameter is called (`fs`, `client`); naming a
+  *different* resource raises `ResourceBindingError` **at import time**. A tool
+  that genuinely needs two resources is not one resource's tool — register it
+  unbound.
+
+A spec with no factory and no value is **namespace-only**: it groups tools that
+inject nothing. The built-in `orchestration` resource is one of those.
+
+### Sources that are read, not copied
+
+A source tool normally returns a `list`, which the engine stores whole. When the
+items are expensive to read or change underneath the workflow, return a
+`Collection` instead
+([domain/collections.py](src/simple_steps_core/domain/collections.py)) — the
+step then holds a *recipe* plus a `version` stamp, and the items are read on
+demand:
+
+```python
+@dataclass
+class FileListing(Collection):
+    root: str
+    pattern: str
+    version: str = ""                      # cheap stamp: mtime, max id, etag
+
+    def __iter__(self):
+        return (str(p) for p in Path(self.root).glob(self.pattern))
+```
+
+- **`__iter__` must return a fresh iterator every call.** A Collection that is
+  itself a generator is drained by the first `map` and reads as empty
+  afterwards. `check_reiterable(c)` asserts this — put it in a test.
+- `version` must be cheap; it is a stamp, not a content hash.
+  `c.unchanged_since(v)` is how a caller decides whether to re-read.
+- `count()` returns `None` when the length is not known cheaply; the resulting
+  `Shape` carries `rows_known=False`.
+- Snapshots store the class path plus `to_state()` (the dataclass fields by
+  default) — not the items — so exporting a session over 40,000 files stays
+  small. Override `to_state`/`from_state` if the object holds a live handle.
+- Orchestrators consume a Collection exactly like a list.
+
+### DataFrames — what a "row" is
+
+Iterating a DataFrame in Python yields its **column names**. Orchestrators do
+not: `domain/tabular.py` turns a frame into one `dict` per row, so a tool reads
+`row["amount"]` and never imports pandas.
+
+Shape is preserved, so a pipeline stays in DataFrame-land:
+
+| mode | a DataFrame in gives |
+|---|---|
+| `map` | `MapResult` — one outcome per **row** |
+| `filter` | a **DataFrame** of surviving rows (dtypes + index intact, via `iloc`) |
+| `group` | a `Groups` — one stratum per bucket, each holding a frame |
+| `expand` | a **DataFrame** when the produced rows are all dicts, else a list |
+| `collapse` | the accumulator, reduced over rows |
+
+Lists behave exactly as before — none of this changes the non-frame path.
+
+Fanning out over a **string** raises instead of iterating its characters: that
+is almost always a step reference that did not resolve, since the grammar only
+recognizes tokens starting with `step` (`over="s1"` is a literal).
+
+### Groups — the result of `group`
+
+`group` returns a `Groups`, and **iterating it yields `Group` records, not
+keys**. That is what makes a stratified table possible — the per-stratum tool
+needs the label *and* the rows:
+
+```python
+wf.add(Operation(step_id="step3", name="topic_of",
+                 orchestration=OrchestrationConfig(mode="group", over="step2")))
+wf.add(Operation(step_id="step4", name="summarize_stratum",
+                 orchestration=OrchestrationConfig(mode="map", over="step3")))
+
+def summarize_stratum(group) -> dict:            # one output row per stratum
+    return {"topic": group.key, "n": len(group),
+            "total": int(group.rows["words"].sum())}
+```
+
+A plain dict would have iterated its keys, handing each tool a bare label and
+silently losing the rows. Dict-style access survives: `groups["east"]`,
+`.keys()`, `.items()`, `.values()`, `.to_dict()`.
+
+### Images and video
+
+Return a `MediaAsset`, never decoded pixels
+([domain/media.py](src/simple_steps_core/domain/media.py)):
+
+```python
+@photos.tool("thumbnail")
+def thumbnail(image: MediaAsset, size: int = 96, directory = Resource()) -> MediaAsset:
+    picture = image.open()                    # a PIL.Image, decoded lazily
+    picture.thumbnail((size, size))
+    return MediaAsset.from_image(picture, name=f"thumb-{image.name}")
+```
+
+- `from_image` / `from_bytes` **spill to the media store** and return a handle;
+  `from_path` references a file already on disk without copying it.
+- The store is content addressed, so identical bytes are written once and an
+  asset's `version` is its hash. `set_media_store("~/somewhere")` makes it
+  durable — the default is a temp dir the OS may clean.
+- A step holds ~6 short fields per asset, so a `map` over 500 photos costs 500
+  handles, and the snapshot stays kilobytes.
+- Video is whole-clip: `st.video` plays it, `.open()` refuses it with a clear
+  message. Per-frame work would need a decoder dependency (none is installed).
+
+### What the dashboard draws
+
+`render_value` ([streamlit/components/steps.py](src/simple_steps_core/streamlit/components/steps.py))
+dispatches on the value's type:
+
+| value | rendered as |
+|---|---|
+| scalar, list, dict, DataFrame | a shaded table (unchanged) |
+| `MediaAsset` | `st.image` / `st.video`, or a "file not found" warning |
+| list of assets, or a `MapResult` of them | a **contact sheet**, failures listed under it |
+| `Groups` (or a plain `{key: frame}`) | one **tab** per stratum |
+| `Collection` | a window of items (`head`, never a full walk) + count and version |
 
 ---
 
@@ -202,9 +354,12 @@ field to the orchestration config raises. `mode` defines the *unit of work*
 (the whole call when `single`, one item when fanned out) and every conduct field
 acts on that unit. See [docs/config-isolation.md](docs/config-isolation.md).
 
-`to_tool_call()` compiles that into `map(over="step1", op="process_item", ...)`.
+`to_tool_call()` compiles that into
+`orchestration-map(over="step1", op="process_item", ...)`.
 Modes: `single` (default), `map`, `filter`, `expand` (flat-map), `collapse`
-(reduce, needs a 2-arg tool: accumulator, item).
+(reduce, needs a 2-arg tool: accumulator, item), `group` (bucket items by the
+key the tool returns — the inverse of `expand`, and what a per-group reduce
+needs first).
 
 - The item parameter is inferred as the tool's first **required** param unless
   you set `item_arg`.
@@ -212,8 +367,17 @@ Modes: `single` (default), `map`, `filter`, `expand` (flat-map), `collapse`
   values) or `step2.failed` (outcomes to re-drive). Per-item failures are
   isolated by default (`execution.on_item_error="collect"`); `"fail_fast"`
   aborts, `"skip"` drops.
+- The dashboard's apply picker offers `once / map / filter / expand / reduce /
+  group`; the verb→mode map lives in `streamlit/components/configs.py`, and a
+  new mode must be added there or it is unreachable from the UI.
 - Orchestrators are registered by `register_orchestrators(registry)` — `App`,
-  `Server`, and `Dashboard` all do this for you at startup.
+  `Server`, and `Dashboard` all do this for you at startup. It returns the
+  built-in `orchestration` `ResourceSpec` that owns them.
+- **They register under qualified ids** — `orchestration-map`,
+  `orchestration-group` — with the bare names (`map`, `collapse`) kept as
+  registry **aliases**. So `registry.has("map")`, saved workflows, and existing
+  specs all keep resolving, but `list_definitions()` shows only the qualified
+  ids (which is what the dashboard's tool palette lists).
 - That call also registers **`identity`** (a plain tool, `identity(value) -> value`)
   for reshaping without transforming, and it is the **default `op`** for
   `map`/`filter`/`expand` — so `=expand(over=step1)` is a complete call that
@@ -346,6 +510,14 @@ Streamlit is imported lazily throughout, so importing
 - `Workflow.run_step` records the failure on the step *and* re-raises, so
   `Workflow.run()` aborts the remaining steps; catch per-step if you need
   continue-on-error semantics.
+- Video is whole-clip only: there is no frame extraction, and adding it means
+  adding a decoder to the `dashboard` extra.
+- A `MediaAsset` handle can outlive its bytes (temp store cleaned, snapshot
+  moved to another machine). The renderer says so rather than crashing, but
+  nothing re-creates the file.
+- `Collection.version` is exposed but **nothing consumes it automatically**:
+  no step yet skips re-execution because its source is unchanged. Wiring
+  `StepExecutionConfig.cache` to the version stamp is the open follow-up.
 - `StepExecutionConfig.concurrency` / `on_item_error` / `retries` are honored
   when a step fans out. `retries` on a `single` step, plus `run`, `timeout`,
   `cache`, `StageExecutionConfig` and `WorkflowExecutionConfig`, are still

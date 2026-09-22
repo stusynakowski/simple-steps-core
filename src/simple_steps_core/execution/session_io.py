@@ -27,6 +27,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+import dataclasses
+
+from ..domain.collections import Collection
+from ..domain.media import MediaAsset
 from ..domain.models import Cell, Shape, Step, StepOutput
 
 _JSON_SCALARS = (type(None), bool, int, float, str)
@@ -291,8 +295,99 @@ class CodecRegistry:
         raise SnapshotError(f"Unknown payload encoding: {encoding!r}")
 
 
+# ── Collection codec ─────────────────────────────────────────────────────
+# A Collection is stored as its *recipe*, not its items: the class path plus
+# the fields needed to rebuild it. That is the whole point of the type — a
+# snapshot of a step over 40,000 files stays a few hundred bytes, and the
+# items are re-read from the resource on load.
+
+
+def _collection_encode(value: Collection) -> dict[str, Any]:
+    cls = type(value)
+    return {
+        "cls": f"{cls.__module__}:{cls.__qualname__}",
+        "state": value.to_state(),
+    }
+
+
+def _collection_decode(data: dict[str, Any]) -> Collection:
+    cls = _import_symbol(data["cls"])
+    if not (isinstance(cls, type) and issubclass(cls, Collection)):
+        raise SnapshotError(
+            f"{data['cls']!r} is not a Collection subclass; refusing to "
+            "instantiate it from a snapshot."
+        )
+    return cls.from_state(data["state"])
+
+
+def _collection_shape(value: Collection) -> Shape:
+    known = value.count()
+    return Shape(
+        kind="raw",
+        rows=0 if known is None else known,
+        columns=["value"],
+        value_type=type(value).__name__,
+        rows_known=known is not None,
+    )
+
+
+def _collection_view(value: Collection, offset: int = 0, limit: int = 50) -> list[Cell]:
+    # Read only the requested window: previewing a lazy source must not walk it.
+    page = value.head(limit=limit, offset=offset)
+    return [_cell(offset + i, "value", item) for i, item in enumerate(page)]
+
+
+# ── MediaAsset codec ─────────────────────────────────────────────────────
+# An asset is already a handle: its fields ARE the snapshot. The bytes stay in
+# the media store, which is why a step over 500 images snapshots in kilobytes.
+
+
+def _media_encode(value: MediaAsset) -> dict[str, Any]:
+    return dataclasses.asdict(value)
+
+
+def _media_decode(data: dict[str, Any]) -> MediaAsset:
+    return MediaAsset(**data)
+
+
+def _media_shape(value: MediaAsset) -> Shape:
+    columns = ["name", "media_type", "path"]
+    if value.width and value.height:
+        columns += ["width", "height"]
+    return Shape(kind="raw", rows=1, columns=columns, value_type="MediaAsset")
+
+
+def _media_view(value: MediaAsset, offset: int = 0, limit: int = 50) -> list[Cell]:
+    if offset or limit <= 0:
+        return []
+    fields = {
+        "name": value.name,
+        "media_type": value.media_type,
+        "path": value.path,
+    }
+    if value.width and value.height:
+        fields["width"], fields["height"] = value.width, value.height
+    return [_cell(0, column, item) for column, item in fields.items()]
+
+
 # A process-wide default registry. Extend it at startup for custom types.
 DEFAULT_CODECS = CodecRegistry()
+DEFAULT_CODECS.register(
+    "media",
+    MediaAsset,
+    _media_encode,
+    _media_decode,
+    shape=_media_shape,
+    to_view=_media_view,
+)
+DEFAULT_CODECS.register(
+    "collection",
+    Collection,
+    _collection_encode,
+    _collection_decode,
+    shape=_collection_shape,
+    to_view=_collection_view,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────

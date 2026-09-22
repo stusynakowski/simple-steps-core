@@ -38,6 +38,7 @@ from .execution.engine import CoreEngine
 from .execution.workflow import Workflow
 from .operations.orchestrations import register_orchestrators
 from .operations.registry import REGISTRY, ToolRegistry
+from .operations.resource_spec import install_resources
 from .operations.validation import ValidationError, validate_tool_call
 
 
@@ -76,7 +77,7 @@ def build_app(
     engine: CoreEngine,
     *,
     title: str = "simple-steps-core server",
-    resources: dict[str, Any] | None = None,
+    resources: Any = None,
 ):
     """Build a FastAPI app exposing *registry*'s tools.
 
@@ -91,11 +92,7 @@ def build_app(
 
     def _new_workflow(session_id: str) -> Workflow:
         wf = Workflow(engine, session_id=session_id)
-        for name, provider in resources.items():
-            if callable(provider):
-                wf.context.resources.register(name, provider)
-            else:
-                wf.context.resources.register_value(name, provider)
+        install_resources(wf.context.resources, resources)
         return wf
 
     @app.get("/tools")
@@ -147,7 +144,7 @@ def build_app(
 def app_from_module(module, *, registry: ToolRegistry = REGISTRY) -> tuple[Any, dict]:
     """Build the app + resolved server config from a loaded tools module."""
     config: dict[str, Any] = dict(getattr(module, "CONFIG", {}) or {})
-    resources: dict[str, Any] = dict(getattr(module, "RESOURCES", {}) or {})
+    resources: Any = getattr(module, "RESOURCES", None) or {}
 
     if config.get("orchestrators", True) and not registry.has("map"):
         register_orchestrators(registry)
@@ -176,7 +173,8 @@ class Server:
             return a + b
 
         CONFIG = {"title": "My Tools", "port": 8000}   # optional
-        RESOURCES = {}                                  # optional
+        RESOURCES = [my_resource]                       # optional: specs,
+                                                        # or {name: factory}
 
         if __name__ == "__main__":
             Server().run()
@@ -193,7 +191,8 @@ class Server:
         caller = sys._getframe(1).f_globals
         module = types.SimpleNamespace(
             CONFIG=dict(caller.get("CONFIG", {}) or {}),
-            RESOURCES=dict(caller.get("RESOURCES", {}) or {}),
+            # Not coerced to a dict: RESOURCES may be a list of ResourceSpec.
+            RESOURCES=caller.get("RESOURCES", None) or {},
         )
         app, config = app_from_module(module)
 

@@ -248,3 +248,106 @@ def test_map_and_filter_with_no_op():
     wf.run()
     assert [o.value for o in wf["step2"].output.value.outcomes] == [1, 0, 2, None, 3]
     assert wf["step3"].output.value == [1, 2, 3]
+
+
+# ── group ────────────────────────────────────────────────────────────────
+# `group` is the inverse of `expand`: its `op` is a KEY function, and each
+# item lands in the bucket named by the key its op returned.
+def _group_registry():
+    registry = ToolRegistry()
+
+    def words() -> list[str]:
+        return ["apple", "avocado", "blueberry", "cherry", "banana"]
+
+    def first_letter(word: str) -> str:
+        return word[0]
+
+    def unhashable_key(word: str) -> list:
+        return [word]
+
+    def total(acc: int, item: str) -> int:
+        return acc + len(item)
+
+    registry.register("words", words)
+    registry.register("first_letter", first_letter)
+    registry.register("unhashable_key", unhashable_key)
+    registry.register("total", total)
+    register_orchestrators(registry)
+    return registry
+
+
+def test_group_buckets_items_by_the_key_its_op_returns():
+    wf = Workflow(CoreEngine(_group_registry()), session_id="group")
+    wf["step1"] = ToolCall(operation_id="words")
+    wf["step2"] = ToolCall(operation_id="group", arguments={"over": "step1", "op": "first_letter"})
+    wf.run()
+
+    assert wf["step2"].output.value.to_dict() == {
+        "a": ["apple", "avocado"],
+        "b": ["blueberry", "banana"],
+        "c": ["cherry"],
+    }
+
+
+def test_group_keeps_first_appearance_order_for_keys_and_items():
+    wf = Workflow(CoreEngine(_group_registry()), session_id="group-order")
+    wf["step1"] = ToolCall(operation_id="words")
+    wf["step2"] = ToolCall(operation_id="group", arguments={"over": "step1", "op": "first_letter"})
+    wf.run()
+
+    groups = wf["step2"].output.value
+    assert groups.keys() == ["a", "b", "c"]              # keys in first-seen order
+    assert groups["b"] == ["blueberry", "banana"]        # items in original order
+    # Iterating yields records, not keys — that is what makes a per-stratum
+    # fan-out possible.
+    assert [g.key for g in groups] == ["a", "b", "c"]
+    assert [len(g) for g in groups] == [2, 2, 1]
+
+
+def test_group_buckets_the_item_not_the_key():
+    """The bucket holds the original items, so a per-group reduce sees them."""
+    registry = _group_registry()
+    wf = Workflow(CoreEngine(registry), session_id="group-values")
+    wf["step1"] = ToolCall(operation_id="words")
+    wf["step2"] = ToolCall(operation_id="group", arguments={"over": "step1", "op": "first_letter"})
+    wf.run()
+
+    assert all(isinstance(v, list) for v in wf["step2"].output.value.values())
+    assert wf["step2"].output.value["c"] == ["cherry"]
+
+
+def test_group_skips_an_unhashable_key_by_default():
+    wf = Workflow(CoreEngine(_group_registry()), session_id="group-unhashable")
+    wf["step1"] = ToolCall(operation_id="words")
+    wf["step2"] = ToolCall(operation_id="group", arguments={"over": "step1", "op": "unhashable_key"})
+    wf.run()
+
+    assert wf["step2"].output.value.to_dict() == {}
+
+
+def test_group_fail_fast_reports_the_unhashable_key():
+    wf = Workflow(CoreEngine(_group_registry()), session_id="group-strict")
+    wf["step1"] = ToolCall(operation_id="words")
+    wf["step2"] = ToolCall(
+        operation_id="group",
+        arguments={"over": "step1", "op": "unhashable_key", "on_error": "fail_fast"},
+    )
+    with pytest.raises(TypeError, match="unhashable"):
+        wf.run()
+
+
+def test_group_spec_compiles_through_the_orchestration_mode():
+    registry = _group_registry()
+    wf = Workflow(CoreEngine(registry), session_id="group-spec")
+    wf.add(Operation(step_id="step1", name="words"))
+    wf.add(
+        Operation(
+            step_id="step2",
+            name="first_letter",
+            orchestration=OrchestrationConfig(mode="group", over="step1"),
+        )
+    )
+    assert wf["step2"].call.operation_id == "orchestration-group"
+
+    wf.run()
+    assert wf["step2"].output.value["a"] == ["apple", "avocado"]

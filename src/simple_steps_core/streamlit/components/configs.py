@@ -39,7 +39,7 @@ __all__ = [
     "is_fanned_out",
 ]
 
-MODES = ["single", "map", "filter", "expand", "collapse"]
+MODES = ["single", "map", "filter", "expand", "collapse", "group"]
 ITEM_ERROR = ["(default)", "collect", "fail_fast", "skip"]
 
 #: One short word per mode — the vocabulary already used when talking about the
@@ -51,6 +51,7 @@ MODE_VERBS = {
     "filter": "filter",
     "expand": "expand",
     "collapse": "reduce",
+    "group": "group",
 }
 VERB_MODES = {verb: mode for mode, verb in MODE_VERBS.items()}
 
@@ -99,7 +100,8 @@ def edit_data_input(st, mode: str, source: str | None, *, key: str,
     chosen_verb = st.selectbox(
         "apply", verbs, index=verbs.index(current_verb), key=f"{key}_verb",
         help="once: pass it whole · map: per element · filter: keep matches · "
-             "expand: each element becomes a row · reduce: fold to one value",
+             "expand: each element becomes a row · reduce: fold to one value · "
+             "group: bucket by the value it returns",
     )
     return VERB_MODES[chosen_verb], chosen_source
 
@@ -131,7 +133,8 @@ def orchestration_popover(st, config: OrchestrationConfig, *, key: str,
             key=f"{key}_mode",
             help="auto: decide from the declared types · once: pass it whole · "
                  "map: per element · filter: keep matches · expand: each element "
-                 "becomes a row · reduce: fold to one value",
+                 "becomes a row · reduce: fold to one value · group: bucket by "
+                 "the value it returns",
         )
         now_locked = chosen != AUTO
         mode = VERB_MODES[chosen] if now_locked else config.mode

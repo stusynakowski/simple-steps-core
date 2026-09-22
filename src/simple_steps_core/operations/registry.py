@@ -118,6 +118,8 @@ def _params_from_signature(fn: Callable, *, skip: int = 0) -> list[ToolParam]:
         )
         if isinstance(parameter.default, ResourceMarker):
             # Resource params are injected at run time: required, no literal default.
+            # ``Resource("file_system")`` overrides the container key, so a tool
+            # can name its parameter `fs` and still bind to `file_system`.
             params.append(
                 ToolParam(
                     name=name,
@@ -125,6 +127,7 @@ def _params_from_signature(fn: Callable, *, skip: int = 0) -> list[ToolParam]:
                     required=True,
                     default=None,
                     kind="resource",
+                    resource_name=parameter.default.name,
                 )
             )
             continue
@@ -143,11 +146,82 @@ def _params_from_signature(fn: Callable, *, skip: int = 0) -> list[ToolParam]:
     return params
 
 
+#: Separates a resource name from a tool name in a bound tool's id.
+RESOURCE_SEPARATOR = "-"
+
+
+def qualify(resource: str, tool_name: str) -> str:
+    """The id of *tool_name* when bound to *resource* (``file_system-list_files``).
+
+    Already-qualified names pass through, so re-registering is idempotent.
+    """
+    prefix = f"{resource}{RESOURCE_SEPARATOR}"
+    return tool_name if tool_name.startswith(prefix) else f"{prefix}{tool_name}"
+
+
+def split_qualified(tool_id: str) -> tuple[str | None, str]:
+    """Split ``"file_system-list_files"`` into ``("file_system", "list_files")``.
+
+    An unbound id yields ``(None, tool_id)``. Only the first separator splits,
+    so a tool name may itself contain a hyphen.
+    """
+    resource, sep, name = tool_id.partition(RESOURCE_SEPARATOR)
+    return (resource, name) if sep else (None, tool_id)
+
+
+class ResourceBindingError(TypeError):
+    """Raised when a resource-bound tool reaches for a resource it does not own."""
+
+
+def _resource_keys(params: list[ToolParam]) -> list[str]:
+    """The container keys a tool's resource params inject from, in order."""
+    keys: list[str] = []
+    for param in params:
+        if param.kind != "resource":
+            continue
+        key = param.resource_name or param.name
+        if key not in keys:
+            keys.append(key)
+    return keys
+
+
+def _bind_resource_params(
+    params: list[ToolParam], owner: str, tool_id: str
+) -> list[ToolParam]:
+    """Point a bound tool's unqualified resource params at *owner*, and enforce.
+
+    A tool bound to a resource may use **that resource and no other**: an
+    unnamed ``Resource()`` binds to the owner regardless of what the parameter
+    is called, and a ``Resource("something_else")`` is rejected at import time
+    rather than failing at run time on a missing injection.
+    """
+    bound: list[ToolParam] = []
+    for param in params:
+        if param.kind != "resource":
+            bound.append(param)
+            continue
+        # An unnamed Resource() on a bound tool means "my owner", whatever the
+        # parameter happens to be called (`fs`, `client`, `db`).
+        if param.resource_name in (None, owner):
+            bound.append(param.model_copy(update={"resource_name": owner}))
+            continue
+        raise ResourceBindingError(
+            f"Tool {tool_id!r} is bound to resource {owner!r} but its parameter "
+            f"{param.name!r} asks for resource {param.resource_name!r}. A "
+            f"resource-bound tool may only use its own resource; register it "
+            f"with @register_tool instead if it genuinely needs both."
+        )
+    return bound
+
+
 class ToolRegistry:
     def __init__(self) -> None:
         self._definitions: dict[str, ToolDefinition] = {}
         self._callables: dict[str, Callable] = {}
         self._operations: dict[str, Tool] = {}
+        # alias -> canonical tool id. Lets the short orchestrator names ("map")
+        # keep resolving after they moved under the orchestration resource.
+        self._aliases: dict[str, str] = {}
         self._frozen: bool = False
 
     def _guard_mutable(self) -> None:
@@ -167,10 +241,21 @@ class ToolRegistry:
         type: Literal["source", "dataframe", "raw_output"] = "raw_output",
         ui: Any = None,
         guardrails: Guardrails | None = None,
+        resource: str | None = None,
+        aliases: tuple[str, ...] = (),
     ) -> Tool:
-        """Introspect *fn*, store its definition, and return an Operation wrapper."""
+        """Introspect *fn*, store its definition, and return an Operation wrapper.
+
+        ``resource`` binds the tool to a resource: its id is namespaced as
+        ``{resource}-{operation_id}``, and it may inject that resource and no
+        other (see :func:`_bind_resource_params`). ``aliases`` registers extra
+        ids that resolve to this tool.
+        """
         self._guard_mutable()
         params = _params_from_signature(fn)
+        if resource is not None:
+            operation_id = qualify(resource, operation_id)
+            params = _bind_resource_params(params, resource, operation_id)
         input_schema = build_input_schema(fn)
         resolved_description = description or (inspect.getdoc(fn) or "").split("\n\n")[0].strip()
         views = _normalize_ui(ui)
@@ -186,7 +271,8 @@ class ToolRegistry:
             params=params,
             input_schema=input_schema,
             output_schema=build_output_schema(fn),
-            dependencies=[p.name for p in params if p.kind == "resource"],
+            dependencies=_resource_keys(params),
+            resource=resource,
             ui=tool_ui.definition_for("prefab"),
             guardrails=guardrails,
         )
@@ -200,6 +286,8 @@ class ToolRegistry:
         self._definitions[operation_id] = definition
         self._callables[operation_id] = fn
         self._operations[operation_id] = operation
+        for alias in aliases:
+            self.add_alias(alias, operation_id)
         return operation
 
     def register_orchestrator(
@@ -211,6 +299,8 @@ class ToolRegistry:
         category: str = "orchestration",
         ui: Any = None,
         guardrails: Guardrails | None = None,
+        resource: str | None = None,
+        aliases: tuple[str, ...] = (),
     ) -> Tool:
         """Register a higher-order operation that receives an execution handle.
 
@@ -220,6 +310,10 @@ class ToolRegistry:
         """
         self._guard_mutable()
         params = _params_from_signature(fn, skip=1)
+        short_id = operation_id
+        if resource is not None:
+            operation_id = qualify(resource, operation_id)
+            params = _bind_resource_params(params, resource, operation_id)
         input_schema = build_input_schema(fn, skip=1)
         views = _normalize_ui(ui)
         views["prefab"] = views.get("prefab") or build_default_ui(
@@ -230,11 +324,12 @@ class ToolRegistry:
             operation_id=operation_id,
             description=description,
             category=category,
-            type=operation_id if operation_id in {"map", "filter", "expand"} else "orchestrator",
+            type=short_id if short_id in {"map", "filter", "expand"} else "orchestrator",
             params=params,
             input_schema=input_schema,
             output_schema=build_output_schema(fn),
-            dependencies=[p.name for p in params if p.kind == "resource"],
+            dependencies=_resource_keys(params),
+            resource=resource,
             ui=tool_ui.definition_for("prefab"),
             guardrails=guardrails,
         )
@@ -249,7 +344,35 @@ class ToolRegistry:
         self._definitions[operation_id] = definition
         self._callables[operation_id] = fn
         self._operations[operation_id] = operation
+        for alias in aliases:
+            self.add_alias(alias, operation_id)
         return operation
+
+    # ── aliases ──────────────────────────────────────────────────────────
+    def add_alias(self, alias: str, tool_id: str) -> None:
+        """Register *alias* as another id for *tool_id*.
+
+        Used to keep the bare orchestrator names (``map``, ``collapse``)
+        resolving after they moved under the orchestration resource, so saved
+        workflows and existing specs are not invalidated by the rename.
+        """
+        self._guard_mutable()
+        if alias in self._definitions:
+            raise ValueError(
+                f"Cannot alias {alias!r} to {tool_id!r}: a tool is already "
+                f"registered under that id."
+            )
+        self._aliases[alias] = tool_id
+
+    def resolve(self, operation_id: str) -> str:
+        """The canonical tool id for *operation_id* (following one alias hop)."""
+        if operation_id in self._definitions:
+            return operation_id
+        return self._aliases.get(operation_id, operation_id)
+
+    def aliases(self) -> dict[str, str]:
+        """A copy of the alias -> canonical id map."""
+        return dict(self._aliases)
 
     def freeze(self) -> None:
         """Make the registry read-only.
@@ -268,19 +391,26 @@ class ToolRegistry:
         return list(self._definitions.values())
 
     def get_definition(self, operation_id: str) -> ToolDefinition:
-        if operation_id not in self._definitions:
+        resolved = self.resolve(operation_id)
+        if resolved not in self._definitions:
             raise KeyError(f"Unknown operation: {operation_id}")
-        return self._definitions[operation_id]
+        return self._definitions[resolved]
 
     def get_callable(self, operation_id: str) -> Callable:
-        if operation_id not in self._callables:
+        resolved = self.resolve(operation_id)
+        if resolved not in self._callables:
             raise KeyError(f"Unknown operation: {operation_id}")
-        return self._callables[operation_id]
+        return self._callables[resolved]
 
     def get_operation(self, operation_id: str) -> Tool:
-        if operation_id not in self._operations:
+        resolved = self.resolve(operation_id)
+        if resolved not in self._operations:
             raise KeyError(f"Unknown operation: {operation_id}")
-        return self._operations[operation_id]
+        return self._operations[resolved]
+
+    def tools_for(self, resource: str) -> list[ToolDefinition]:
+        """Every tool bound to *resource*, in registration order."""
+        return [d for d in self._definitions.values() if d.resource == resource]
 
     def ui_for(self, operation_id: str, target: str = "prefab") -> Any:
         """Return a tool's UI view for a renderer *target* (``prefab``/``streamlit``/…).
@@ -291,8 +421,8 @@ class ToolRegistry:
         return self.get_operation(operation_id).ui.get(target)
 
     def has(self, operation_id: str) -> bool:
-        """True when an operation with this id is registered."""
-        return operation_id in self._definitions
+        """True when an operation with this id (or alias) is registered."""
+        return self.resolve(operation_id) in self._definitions
 
 
 REGISTRY = ToolRegistry()

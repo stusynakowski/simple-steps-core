@@ -62,7 +62,7 @@ def pipeline(app):
     be inferred from its types. Every other mode below is worked out.
     """
     _wire(app, "step1", "load_batches")
-    _wire(app, "step2", "identity", param="value", source="step1", mode="expand")
+    _wire(app, "step2", "orchestration-identity", param="value", source="step1", mode="expand")
     _wire(app, "step3", "above_cutoff", param="value", source="step2")
     _wire(app, "step4", "summarize", param="rows", source="step3")
     _assert_clean(app, "pipeline built")
@@ -93,7 +93,7 @@ def test_orchestration_is_inferred_from_the_declared_types(pipeline):
 def test_a_predicate_infers_filter_and_a_transform_infers_map(app):
     """Both read one element; the return type separates them."""
     _wire(app, "step1", "load_batches")
-    _wire(app, "step2", "identity", param="value", source="step1", mode="expand")
+    _wire(app, "step2", "orchestration-identity", param="value", source="step1", mode="expand")
 
     _wire(app, "step3", "above_cutoff", param="value", source="step2")   # -> bool
     assert app.session_state["drafts"].get("step3").orchestration.mode == "filter"
@@ -102,7 +102,7 @@ def test_a_predicate_infers_filter_and_a_transform_infers_map(app):
 def test_collecting_a_fan_out_reads_through_ok(app):
     """A MapResult is not a list, so a column-taking tool needs `.ok`."""
     _wire(app, "step1", "load_batches")
-    _wire(app, "step2", "identity", param="value", source="step1", mode="map")
+    _wire(app, "step2", "orchestration-identity", param="value", source="step1", mode="map")
     _wire(app, "step3", "summarize", param="rows", source="step2")
 
     draft = app.session_state["drafts"].get("step3")

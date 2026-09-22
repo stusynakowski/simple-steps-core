@@ -11,6 +11,12 @@ processing where individual items may fail independently:
   * ``filter``   — keep items for which a predicate ``op`` returns truthy.
   * ``expand``   — flat-map: each item yields an iterable that is flattened.
   * ``collapse`` — reduce a collection to a single value via a 2-arg ``op``.
+  * ``group``    — bucket items by the key ``op`` returns for each.
+
+They belong to the built-in ``orchestration`` resource, so their registered
+ids are ``orchestration-map``, ``orchestration-group`` and so on. The bare
+names stay registered as aliases, so ``map`` keeps resolving everywhere it
+already appears.
 
 Each orchestrator is async and receives an :class:`ExecutionHandle` as its
 first argument (injected by the engine, hidden from the public contract). The
@@ -31,9 +37,19 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from ..domain.models import ItemOutcome, MapResult, StepStatus
+from ..domain.models import (
+    ORCHESTRATION_RESOURCE,
+    ItemOutcome,
+    MapResult,
+    StepStatus,
+)
+from ..domain.collections import Group, Groups
+from ..domain.tabular import is_frame, items_of, rows_to_frame, select_positions
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .resource_spec import ResourceSpec
 
 OnError = Literal["collect", "fail_fast", "skip"]
 
@@ -41,7 +57,11 @@ OnError = Literal["collect", "fail_fast", "skip"]
 #: ``map``/``filter``/``expand`` default to it, so ``map(over="step1")`` is a
 #: complete call. ``collapse`` cannot: a reduce needs a two-argument combiner,
 #: and identity takes one.
-IDENTITY = "identity"
+IDENTITY_NAME = "identity"
+
+#: The default per-item ``op``. The bare name stays registered as an alias of
+#: ``orchestration-identity``, so it resolves either way.
+IDENTITY = IDENTITY_NAME
 
 
 def _infer_item_arg(handle, op: str) -> str | None:
@@ -90,7 +110,7 @@ async def _gather_outcomes(
     shared: dict | None = None,
 ) -> list[ItemOutcome]:
     """Run *op* across *over* with bounded concurrency, isolating failures."""
-    items = list(over)
+    items = items_of(over)
     if arg is None:
         arg = _infer_item_arg(handle, op)
     semaphore = asyncio.Semaphore(max(1, int(concurrency)))
@@ -155,11 +175,15 @@ async def filter_op(
 ) -> list[Any]:
     """Keep the items of *over* for which *op* returns a truthy value.
 
+    Shape is preserved: filtering a DataFrame returns a **DataFrame** of the
+    surviving rows (dtypes and index intact), and filtering a list returns a
+    list. Each row of a frame reaches *op* as a plain ``dict``.
+
     Order is preserved. Items whose predicate raises are dropped under the
     default ``on_error="skip"``; use ``"fail_fast"`` to abort instead. ``args``
     supplies constant keyword arguments shared across every item's sub-call.
     """
-    items = list(over)
+    items = items_of(over)
     if arg is None:
         arg = _infer_item_arg(handle, op)
     outcomes = await _gather_outcomes(
@@ -172,8 +196,12 @@ async def filter_op(
         retries=retries,
         shared=args,
     )
-    keep = {o.index for o in outcomes if o.status is StepStatus.COMPLETED and o.value}
-    return [item for index, item in enumerate(items) if index in keep]
+    keep = sorted(
+        o.index for o in outcomes if o.status is StepStatus.COMPLETED and o.value
+    )
+    # A frame in, a frame out: select by position so dtypes and the index
+    # survive, instead of rebuilding rows from dicts.
+    return select_positions(over, keep)
 
 
 async def expand_op(
@@ -215,6 +243,10 @@ async def expand_op(
             flattened.extend(produced)
         else:
             flattened.append(produced)
+    # Expanded rows are new, so they cannot be selected from the original by
+    # position — rebuild a frame only when every row is a dict.
+    if is_frame(over):
+        return rows_to_frame(flattened, over)
     return flattened
 
 
@@ -236,7 +268,7 @@ async def collapse_op(
     sequentially because each step depends on the previous accumulator. ``args``
     supplies constant keyword arguments shared across every reduction call.
     """
-    items = list(over)
+    items = items_of(over)
     definition = handle.get_definition(op)
     params = [p.name for p in definition.params]
     if len(params) < 2:
@@ -260,6 +292,76 @@ async def collapse_op(
     return accumulator
 
 
+async def group_op(
+    handle,
+    *,
+    over: Iterable[Any],
+    op: str = IDENTITY,
+    arg: str | None = None,
+    args: dict | None = None,
+    concurrency: int = 8,
+    on_error: OnError = "skip",
+    retries: int = 0,
+) -> Groups:
+    """Bucket the items of *over* by the key *op* returns for each one.
+
+    *op* is a **key function**, not a transform: each item is passed to it and
+    the returned value becomes the bucket the *original item* lands in. The
+    The result is a :class:`Groups` — strata in first-appearance order, items
+    in their original order within each. Shape is preserved: grouping a
+    DataFrame gives a **DataFrame per stratum**, and each row reaches *op* as a
+    plain ``dict``.
+
+    Fanning out over the result is the point: ``Groups`` iterates
+    :class:`Group` records carrying ``key`` and ``rows``, so a per-stratum tool
+    can write a labelled row and a ``map`` over the strata builds a stratified
+    table. (A plain dict would have iterated its *keys*, handing each tool a
+    bare label and silently losing the rows.)
+
+    This is expand's inverse, and the step that makes a per-group reduce
+    possible: group by customer, then collapse each bucket to a total.
+
+    A key that is not hashable is a common mistake (returning a list or dict),
+    so it is reported as that item's failure rather than aborting the batch.
+    Items whose key function raises are dropped under the default
+    ``on_error="skip"``; use ``"fail_fast"`` to abort instead. ``args`` supplies
+    constant keyword arguments shared across every item's sub-call.
+    """
+    items = items_of(over)
+    if arg is None:
+        arg = _infer_item_arg(handle, op)
+    outcomes = await _gather_outcomes(
+        handle,
+        items,
+        op,
+        arg=arg,
+        concurrency=concurrency,
+        on_error=on_error,
+        retries=retries,
+        shared=args,
+    )
+    positions: dict[Any, list[int]] = {}
+    for outcome in sorted(outcomes, key=lambda o: o.index):
+        if outcome.status is not StepStatus.COMPLETED:
+            continue
+        key = outcome.value
+        try:
+            positions.setdefault(key, [])
+        except TypeError as exc:
+            if on_error == "fail_fast":
+                raise TypeError(
+                    f"group key for item {outcome.index} is unhashable "
+                    f"({type(key).__name__}); {op!r} must return a hashable key"
+                ) from exc
+            continue
+        positions[key].append(outcome.index)
+    # Each bucket keeps the shape of the input: frames in, frames out.
+    return Groups(groups=[
+        Group(key=key, rows=select_positions(over, where))
+        for key, where in positions.items()
+    ])
+
+
 def identity(value: Any) -> Any:
     """Return *value* unchanged.
 
@@ -279,17 +381,55 @@ def identity(value: Any) -> Any:
     return value
 
 
-def register_orchestrators(registry) -> None:
+#: The built-in orchestrators, as ``short name -> (function, description)``.
+#: Each registers as ``orchestration-<name>`` with ``<name>`` kept as an alias.
+ORCHESTRATORS: dict[str, tuple[Any, str]] = {
+    "map": (map_op, "Apply op to each item"),
+    "filter": (filter_op, "Keep items where op is truthy"),
+    "expand": (expand_op, "Flat-map op over items"),
+    "collapse": (collapse_op, "Reduce items via op"),
+    "group": (group_op, "Bucket items by the key op returns"),
+}
+
+
+def orchestration_resource(registry) -> "ResourceSpec":
+    """Build the built-in ``orchestration`` resource against *registry*.
+
+    It is **namespace-only**: its tools take no injected resource, because an
+    orchestrator receives an :class:`ExecutionHandle` from the engine instead.
+    What the resource provides is the namespace — ``orchestration-map``,
+    ``orchestration-group`` — and a single place to ask what orchestration
+    the system can do.
+    """
+    from .resource_spec import ResourceSpec
+
+    spec = ResourceSpec(
+        ORCHESTRATION_RESOURCE,
+        description="Applying a tool across a collection: map, filter, expand, "
+                    "collapse (reduce), group.",
+        registry=registry,
+    )
+    for name, (fn, description) in ORCHESTRATORS.items():
+        spec.orchestrator(name, description=description, aliases=(name,))(fn)
+    # A plain tool, not an orchestrator: it takes no handle and is what the
+    # orchestrators above call per item when you only want to reshape.
+    spec.tool(
+        IDENTITY_NAME,
+        description="Pass each item through unchanged",
+        category="orchestration",
+        aliases=(IDENTITY_NAME,),
+    )(identity)
+    return spec
+
+
+def register_orchestrators(registry) -> "ResourceSpec":
     """Register the built-in orchestrators onto *registry*.
 
     Call this once during startup, alongside your domain operations and before
-    freezing the registry.
+    freezing the registry. Returns the :class:`ResourceSpec` that owns them.
+
+    The tools register under their qualified ids (``orchestration-map``) with
+    the bare names (``map``) kept as aliases, so saved workflows, existing
+    specs, and ``registry.has("map")`` all keep working.
     """
-    registry.register_orchestrator("map", map_op, description="Apply op to each item")
-    registry.register_orchestrator("filter", filter_op, description="Keep items where op is truthy")
-    registry.register_orchestrator("expand", expand_op, description="Flat-map op over items")
-    registry.register_orchestrator("collapse", collapse_op, description="Reduce items via op")
-    # A plain tool, not an orchestrator: it takes no handle and is what the
-    # orchestrators above call per item when you only want to reshape.
-    registry.register("identity", identity, description="Pass each item through unchanged",
-                      category="orchestration")
+    return orchestration_resource(registry)

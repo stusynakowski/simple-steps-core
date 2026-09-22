@@ -26,6 +26,7 @@ from .execution.workflow import Workflow
 from .inspect import SummaryTable
 from .operations.orchestrations import register_orchestrators
 from .operations.registry import REGISTRY, ToolRegistry
+from .operations.resource_spec import ResourceSpec
 
 
 class AppConfig(BaseModel):
@@ -110,21 +111,39 @@ class App:
         self.resources = resources if resources is not None else ResourceContainer()
         self._sessions: dict[str, Session] = {}
 
+        self._specs: list[ResourceSpec] = []
+
         if self.config.orchestrators and not registry.has("map"):
-            register_orchestrators(registry)
+            self._specs.append(register_orchestrators(registry))
         if self.config.freeze and not registry.frozen:
             registry.freeze()
 
     # ── resources (defaults, seeded into every Session) ──────────────────
     def register_resource(
-        self, name: str, factory, *, check=None, value: Any = None
+        self, name: "str | ResourceSpec", factory=None, *, check=None, value: Any = None
     ) -> "App":
-        """Declare a default resource seeded into every new Session."""
+        """Declare a default resource seeded into every new Session.
+
+        Takes either a :class:`ResourceSpec` — the standard-resource form, which
+        brings its own factory, check and bound tools — or the older
+        ``(name, factory)`` pair::
+
+            app.register_resource(file_system)                  # spec
+            app.register_resource("db", lambda: connect(), ...)  # pair
+        """
+        if isinstance(name, ResourceSpec):
+            name.install(self.resources)
+            self._specs.append(name)
+            return self
         if value is not None:
             self.resources.register_value(name, value, check=check)
         else:
             self.resources.register(name, factory, check=check)
         return self
+
+    def resource_specs(self) -> list["ResourceSpec"]:
+        """The standard resources registered on this app."""
+        return list(self._specs)
 
     # ── sessions ─────────────────────────────────────────────────────────
     def session(self, user: str = "default") -> Session:

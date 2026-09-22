@@ -196,11 +196,20 @@ class CoreEngine:
     def _inject_resources(
         self, operation_id: str, arguments: dict[str, Any], context: SessionContext
     ) -> None:
-        """Fill an operation's declared resource params from the session container."""
+        """Fill an operation's declared resource params from the session container.
+
+        A resource param's *container key* is its own name unless the tool said
+        otherwise — ``Resource("file_system")``, or a binding to a resource that
+        owns the tool. So the keyword written into ``arguments`` (the parameter
+        name) and the key looked up in the container can differ.
+        """
         definition = self.registry.get_definition(operation_id)
-        for name in definition.dependencies:
-            if name not in arguments:
-                arguments[name] = context.resources.get(name)
+        for param in definition.params:
+            if param.kind != "resource" or param.name in arguments:
+                continue
+            arguments[param.name] = context.resources.get(
+                param.resource_name or param.name
+            )
 
     async def _call_operation(self, operation_id: str, kwargs: dict[str, Any]) -> Any:
         """Run an operation's callable directly, awaiting/offloading as needed.
