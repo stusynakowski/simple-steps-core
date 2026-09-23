@@ -47,7 +47,7 @@ from ..domain.models import (
     orchestrator_id,
 )
 from ..app import App, AppConfig, Session
-from ..domain.references import is_reference, split_reference
+from ..domain.references import is_reference, parse_reference, split_reference
 from ..execution.context import SessionContext
 from ..execution.data_store import DataEntry, DataStore
 from ..execution.engine import CoreEngine, ExecutionHandle
@@ -112,6 +112,7 @@ __all__ = [
     "ToolUIView",
     "is_reference",
     "split_reference",
+    "parse_reference",
     # operations
     "Tool",
     "ToolRegistry",

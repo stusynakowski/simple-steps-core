@@ -308,6 +308,13 @@ dispatches on the value's type:
 
 ### References — the sharp edge
 
+Full accessor paths resolve: `step1.total`, `step1[0]`, `step1.rows[1].name`,
+and `step1["0"]` for a dict keyed by a digit string. An index that is out of
+range, a field that is missing, or an index into something unindexable **raises**
+naming the token and how far it got — these used to return the un-indexed
+payload, which reads as success.
+
+
 An argument may be a literal or a **reference token** naming an earlier step:
 
 ```python
@@ -328,6 +335,24 @@ literals only (references stand in for any type), `check_reference_types`
 does a best-effort static pass over a whole workflow, and
 `Workflow.validate()` returns a `SummaryTable` of unknown tools, forward/unknown
 references, and missing resources — run it before executing.
+
+### Chaining a fan-out onto a fan-out
+
+`over` may be a previous `map` step directly. Each item keeps its **upstream
+index**, and an item that already failed is *not* re-run — its original error
+passes through as this step's outcome for that index:
+
+```
+step2 = map(over=step1, op="half")    # item 1 fails
+step3 = map(over=step2, op="tenx")    # item 1 still failed, same error, same index
+                                       # items 0, 2, 3 processed normally
+```
+
+So a failure stays pinned to the one item it belongs to along a whole chain,
+and a UI can re-drive just that item. Every other mode (`filter`, `expand`,
+`group`, `collapse`) consumes the **successful values**, since their result
+types cannot carry per-item failure — `step2.ok` is the explicit spelling and
+means the same thing.
 
 ### Orchestration (breadth)
 
@@ -403,6 +428,27 @@ For multi-user serving, give every logical run its own `SessionContext` via
 `manager.lock(session_id)` around mutations.
 
 ---
+
+### Saving: a recipe, or the whole session
+
+Two different things, and mixing them up leaks data:
+
+| you want | call | carries |
+|---|---|---|
+| a definition to share or re-run | `wf.to_json()` / `Workflow.from_json` | step ids, calls, specs — steps come back `pending` |
+| the run itself, data included | `wf.export_session_json()` / `Workflow.import_session_json` | the above **plus** payloads, statuses, timings |
+
+`Step` embeds `output.value` inline, so a naive dump of `wf.steps` ships every
+computed value with the definition. `to_json()` builds from `wf.recipe()`,
+which copies each step back to `pending` with an empty output.
+
+### Validation before a run
+
+`wf.validate()` checks tools exist, references resolve **in order**, and
+required resources are registered. It also flags a **suspicious literal**: a
+string argument that names, or nearly names, a step. Only tokens starting with
+`step` are references, so `"stpe1"` or `"s1"` is passed to the tool as a plain
+string and nothing else would complain.
 
 ## 4. Standing it up
 

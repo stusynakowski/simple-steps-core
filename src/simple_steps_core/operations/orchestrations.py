@@ -64,6 +64,18 @@ IDENTITY_NAME = "identity"
 IDENTITY = IDENTITY_NAME
 
 
+def _source(over: Any) -> Any:
+    """The collection to fan out over.
+
+    A previous ``map`` step hands on a :class:`MapResult`, which is a pydantic
+    model — iterating it directly yields ``("outcomes", [...])`` field tuples,
+    which is a wrong answer with no error. Every mode but ``map`` therefore
+    works on its successful values; ``map`` itself keeps the outcomes so a
+    failure can stay pinned to its own item (see :func:`_gather_outcomes`).
+    """
+    return over.ok if isinstance(over, MapResult) else over
+
+
 def _infer_item_arg(handle, op: str) -> str | None:
     """Pick which parameter of *op* receives each item.
 
@@ -108,14 +120,39 @@ async def _gather_outcomes(
     on_error: OnError,
     retries: int,
     shared: dict | None = None,
+    carry_failures: bool = False,
 ) -> list[ItemOutcome]:
-    """Run *op* across *over* with bounded concurrency, isolating failures."""
-    items = items_of(over)
+    """Run *op* across *over* with bounded concurrency, isolating failures.
+
+    When *over* is a :class:`MapResult` and ``carry_failures`` is set, each
+    item keeps its **upstream index** and an item that already failed is not
+    re-run: its original error is passed straight through as this step's
+    outcome for that index. A failure therefore stays attached to the one item
+    it belongs to, all the way down a chain of fan-outs, and the UI can show
+    which item broke and re-drive just that one.
+    """
+    if isinstance(over, MapResult):
+        work = [
+            (o.index, o.value, o.error if o.status is StepStatus.FAILED else None)
+            for o in over.outcomes
+        ]
+    else:
+        work = [(index, item, None) for index, item in enumerate(items_of(over))]
+
     if arg is None:
         arg = _infer_item_arg(handle, op)
     semaphore = asyncio.Semaphore(max(1, int(concurrency)))
 
-    async def run_one(index: int, item: Any) -> ItemOutcome | None:
+    async def run_one(index: int, item: Any, upstream_error: str | None) -> ItemOutcome | None:
+        if upstream_error is not None:
+            # Already failed upstream: do not call op, and do not pretend it
+            # succeeded. Carry the original error so the item's history is intact.
+            if not carry_failures:
+                return None
+            if on_error == "fail_fast":
+                raise RuntimeError(f"item {index} failed upstream: {upstream_error}")
+            return ItemOutcome(index=index, status=StepStatus.FAILED,
+                               error=upstream_error)
         async with semaphore:
             try:
                 value = await _run_item(handle, op, arg, item, retries, shared)
@@ -127,7 +164,7 @@ async def _gather_outcomes(
                     return None
                 return ItemOutcome(index=index, status=StepStatus.FAILED, error=str(exc))
 
-    results = await asyncio.gather(*(run_one(i, it) for i, it in enumerate(items)))
+    results = await asyncio.gather(*(run_one(i, it, err) for i, it, err in work))
     return [outcome for outcome in results if outcome is not None]
 
 
@@ -144,6 +181,12 @@ async def map_op(
 ) -> MapResult:
     """Apply *op* to each item of *over*, returning per-item outcomes.
 
+    Chaining onto another ``map`` works directly: ``over`` may be the previous
+    step's :class:`MapResult`, in which case each item keeps its upstream index
+    and anything that already failed is **not** re-run — its error passes
+    through as this step's outcome for that item, so a failure stays pinned to
+    the one item it belongs to and can be re-driven on its own.
+
     With ``on_error="collect"`` (default), failures are captured as failed
     outcomes instead of aborting the batch. ``step.ok`` / ``step.failed`` then
     let downstream steps consume successes or re-drive failures. ``args`` supplies
@@ -158,6 +201,7 @@ async def map_op(
         on_error=on_error,
         retries=retries,
         shared=args,
+        carry_failures=True,
     )
     return MapResult(outcomes=outcomes)
 
@@ -183,6 +227,7 @@ async def filter_op(
     default ``on_error="skip"``; use ``"fail_fast"`` to abort instead. ``args``
     supplies constant keyword arguments shared across every item's sub-call.
     """
+    over = _source(over)
     items = items_of(over)
     if arg is None:
         arg = _infer_item_arg(handle, op)
@@ -224,6 +269,7 @@ async def expand_op(
     Failures are skipped (``collect``/``skip``) or abort (``fail_fast``). ``args``
     supplies constant keyword arguments shared across every item's sub-call.
     """
+    over = _source(over)
     outcomes = await _gather_outcomes(
         handle,
         over,
@@ -268,7 +314,7 @@ async def collapse_op(
     sequentially because each step depends on the previous accumulator. ``args``
     supplies constant keyword arguments shared across every reduction call.
     """
-    items = items_of(over)
+    items = items_of(_source(over))
     definition = handle.get_definition(op)
     params = [p.name for p in definition.params]
     if len(params) < 2:
@@ -327,6 +373,7 @@ async def group_op(
     ``on_error="skip"``; use ``"fail_fast"`` to abort instead. ``args`` supplies
     constant keyword arguments shared across every item's sub-call.
     """
+    over = _source(over)
     items = items_of(over)
     if arg is None:
         arg = _infer_item_arg(handle, op)

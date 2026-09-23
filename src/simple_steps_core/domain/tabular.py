@@ -46,6 +46,12 @@ def items_of(over: Any) -> list[Any]:
     """
     if is_frame(over):
         return over.to_dict("records")
+    if hasattr(over, "outcomes") and hasattr(over, "ok"):
+        # A MapResult: a pydantic model whose bare iteration yields field
+        # tuples. Its successful values are what a collection-shaped consumer
+        # means. (``map`` handles the outcomes itself, to keep failures pinned
+        # to their own item.)
+        return list(over.ok)
     if isinstance(over, (str, bytes)):
         # Iterating a string yields characters, so a fan-out over one silently
         # produces one item per letter. That is never what someone meant; it is

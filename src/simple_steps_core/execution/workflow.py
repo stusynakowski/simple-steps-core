@@ -226,22 +226,33 @@ class Workflow:
 
     def validate(self) -> SummaryTable:
         """Dry-run checks (no execution): tools exist, references resolve in
-        order, required resources registered. Empty issues means it's OK."""
+        order, no argument *looks* like a mistyped reference, and required
+        resources are registered. Empty issues means it's OK."""
         from ..domain.references import is_reference, split_reference
 
         table = SummaryTable("Workflow validation", columns=["step", "check", "detail"])
         seen: list[str] = []
+        all_ids = list(self._steps)
         for step in self._steps.values():
             sid = step.step_id
             tool_id = self._tool_of(step)
             if not self.engine.registry.has(tool_id):
                 table.add_row(sid, "\u2717 unknown tool", tool_id)
             for value in step.call.arguments.values():
-                if isinstance(value, str) and is_reference(value):
+                if not isinstance(value, str):
+                    continue
+                if is_reference(value):
                     ref_step, _ = split_reference(value)
                     if ref_step not in seen:
                         table.add_row(sid, "\u2717 bad reference",
                                       f"{value!r} not produced by an earlier step")
+                    continue
+                # Not reference-shaped, so it is a literal — but a literal that
+                # names or nearly names a step is almost always a typo that
+                # lost the "step" prefix, and it fails silently as a string.
+                suspicion = _suspicious_literal(value, all_ids)
+                if suspicion is not None:
+                    table.add_row(sid, "! suspicious literal", suspicion)
             seen.append(sid)
         for name in self.missing_resources():
             table.add_row("-", "\u2717 missing resource", name)
@@ -296,12 +307,39 @@ class Workflow:
                 f"{self._status_counts(self.steps)}>")
 
     # ── persistence ──────────────────────────────────────────────────────
+    def recipe(self) -> list[Step]:
+        """The steps as a runnable *definition*: no results, nothing computed.
+
+        Each step keeps what it needs to run again — its id, its compiled
+        :class:`ToolCall`, and its :class:`Operation` spec (stage,
+        orchestration and execution config) — and is handed back at
+        ``pending`` with an empty output.
+
+        This is the difference between sharing a workflow and sharing its data.
+        ``Step`` embeds ``output.value`` inline, so dumping the live steps ships
+        every computed value with the definition. Use :meth:`export_session`
+        when you *do* want the data to travel.
+        """
+        return [
+            step.model_copy(
+                deep=True,
+                update={"status": StepStatus.PENDING,
+                        "output": StepOutput(),
+                        "error": None},
+            )
+            for step in self.steps
+        ]
+
     def to_json(self) -> str:
-        """Serialize the workflow's steps to JSON (payloads excluded)."""
+        """Serialize the workflow's definition to JSON (no computed values).
+
+        Round-trips through :meth:`from_json`. For structure *and* payloads,
+        use :meth:`export_session_json` / :meth:`import_session_json`.
+        """
         from pydantic import TypeAdapter
 
         adapter = TypeAdapter(list[Step])
-        return adapter.dump_json(self.steps).decode()
+        return adapter.dump_json(self.recipe()).decode()
 
     @classmethod
     def from_json(cls, data: str, engine: CoreEngine, session_id: str = "default") -> "Workflow":
@@ -406,3 +444,27 @@ class Stage:
         steps = self.steps
         return (f"<Stage {self.stage_id!r} \u00b7 {len(steps)} steps \u00b7 "
                 f"{self.workflow._status_counts(steps)}>")
+
+
+def _suspicious_literal(value: str, step_ids: list[str]) -> str | None:
+    """Explain why a plain string argument looks like a mistyped reference.
+
+    Only tokens starting with ``step`` are references (see
+    ``domain/references.py``), so ``"stpe1"`` or ``"s1"`` is passed to the tool
+    as a literal string and nothing complains. That is a silent wrong answer,
+    and the one clue available before running is that the literal resembles a
+    step id. Returns ``None`` for ordinary strings, which most arguments are.
+    """
+    import difflib
+
+    if not value or len(value) > 64 or " " in value:
+        return None                      # prose, a path, a prompt: not a typo
+    head = value.split(".", 1)[0].split("[", 1)[0]
+    if head in step_ids:
+        return (f"{value!r} is a literal string, but a step is named {head!r}. "
+                "References must start with 'step' to resolve.")
+    close = difflib.get_close_matches(head, step_ids, n=1, cutoff=0.8)
+    if close:
+        return (f"{value!r} is a literal string, but closely matches step "
+                f"{close[0]!r}. References must start with 'step' to resolve.")
+    return None
