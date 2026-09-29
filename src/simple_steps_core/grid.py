@@ -27,6 +27,7 @@ import inspect
 import itertools
 import time
 import traceback
+import typing
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Sequence
 
@@ -34,10 +35,11 @@ import pandas as pd
 
 __all__ = [
     "Output", "grid", "rows", "map_", "filter_", "group_", "collapse_",
-    "expand_", "sweep_", "source_", "identity", "BUILTIN_TOOLS",
+    "expand_", "sweep_", "source_", "identity", "BUILTIN_TOOLS", "TOOLS",
     "op", "Modifier", "Operation",
     "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "stage",
-    "ROWS_RULE", "PayloadError", "infer_verb", "predicted_columns",
+    "ROWS_RULE", "DEFAULT_PAYLOAD", "CARRIES_COLUMNS", "PayloadError", "infer_verb",
+    "predicted_columns",
 
     "mod",
     "DECORATORS", "MODIFIERS", "ModifierKind", "SHAPE_VERBS", "is_shape",
@@ -746,7 +748,7 @@ class Operation:
     def from_dict(cls, blob: dict, tools: dict[str, Callable] | None = None
                   ) -> "Operation":
         """Rebuild an Operation from :meth:`to_dict`, re-attaching its function."""
-        table = {**BUILTIN_TOOLS, **(tools or {})}
+        table = {**BUILTIN_TOOLS, **TOOLS, **(tools or {})}
         fn = table.get(blob["tool_id"])
         return cls(
             tool_id=blob["tool_id"],
@@ -798,7 +800,8 @@ class Operation:
             # what lets `total(acc, value)` read as a reducer before anything
             # has run — the build-it-all-at-once case.
             upstream = None if step is None else step.output
-        fn = self.fn or BUILTIN_TOOLS.get(self.tool_id)
+        fn = self.fn or TOOLS.get(self.tool_id) \
+            or BUILTIN_TOOLS.get(self.tool_id)
         kind = ("map" if fn is None
                 else infer_verb(fn, upstream, self.arguments)[0])
         return self._add(kind, over=ref.id)
@@ -819,7 +822,7 @@ class Operation:
                 f"wf[...] = <tool>[mod.map(over=wf[{source.id!r}])]. "
                 "Calling an Operation is for data you already hold."
             )
-        table = {**BUILTIN_TOOLS, **(tools or {})}
+        table = {**BUILTIN_TOOLS, **TOOLS, **(tools or {})}
         if self.fn is not None:
             table.setdefault(self.tool_id, self.fn)
         if self.tool_id not in table:
@@ -945,11 +948,27 @@ class ToolHandle:
         return f"<tool {self.id!r}>"
 
 
+#: Every tool declared with ``@tool``, by id. A server needs this: a workflow
+#: arrives as ids and modifiers, so something has to turn ``"to_fahrenheit"``
+#: back into a function. Import the module that declares your tools and they
+#: are here.
+TOOLS: dict[str, Callable] = {}
+
+
 def tool(fn: Callable | None = None, *, id: str | None = None):
-    """Mark a plain function as a tool. Usable bare or with an id."""
+    """Mark a plain function as a tool. Usable bare or with an id.
+
+    Registers it in :data:`TOOLS` so a workflow loaded from JSON can find it
+    without the caller assembling a name→function map by hand.
+    """
+    def make(f: Callable, tool_id: str | None) -> ToolHandle:
+        handle = ToolHandle(f, tool_id)
+        TOOLS[handle.id] = f
+        return handle
+
     if fn is not None:
-        return ToolHandle(fn)
-    return lambda f: ToolHandle(f, id)
+        return make(fn, None)
+    return lambda f: make(f, id)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1067,7 +1086,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     problems: list[str] = []
 
     # 1. the tool has to exist
-    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool_id)
+    fn = operation.fn or TOOLS.get(operation.tool_id) \
+        or BUILTIN_TOOLS.get(operation.tool_id)
     if fn is None:
         problems.append(f"unknown tool {operation.tool_id!r}")
 
@@ -1163,6 +1183,21 @@ def _missing_columns(operation: Operation, fn: Callable,
     ]
 
 
+#: The payload column each verb writes when ``name=`` is not given. ``None``
+#: means the verb writes no new column at all. Staging reads this so a staged
+#: step predicts the *right* column name — which is what lets a downstream
+#: reducer be recognized before anything has run.
+DEFAULT_PAYLOAD: dict[str, str | None] = {
+    "source": None, "filter": None, "group": "group",
+    "map": PAYLOAD, "collapse": PAYLOAD, "expand": PAYLOAD, "sweep": PAYLOAD,
+}
+
+
+#: Verbs whose output keeps the input's columns (§3's columns column).
+#: ``collapse`` and ``sweep`` do not — they build their rows from scratch.
+CARRIES_COLUMNS: frozenset[str] = frozenset({"map", "filter", "group", "expand"})
+
+
 #: §3's rows column, as data: what each verb does to the input's row count.
 #: This is what staging folds, and it is why a staged claim can be honest —
 #: ``filter`` can promise "at most n", never "n".
@@ -1187,6 +1222,9 @@ def predicted_columns(output: Output) -> set[str]:
     """
     if not output.meta.get("staged"):
         return set(output.data.columns)
+    recorded = output.meta.get("columns")
+    if recorded is not None:
+        return set(recorded)
     payload = output.meta.get("payload")
     return {payload} if payload else set()
 
@@ -1232,8 +1270,12 @@ def infer_verb(fn: Callable, upstream: Any, literals: dict) -> tuple[str, str]:
         return "collapse", (f"{needed[0]!r} is not a column but {needed[1]!r} is, "
                             "so this reads as a reducer")
 
-    if inspect.signature(fn).return_annotation is bool:
+    returns = inspect.signature(fn).return_annotation
+    if returns is bool:
         return "filter", "it returns a bool per row, so keep the rows that pass"
+    if returns in (list, tuple, set) or typing.get_origin(returns) in (list, tuple, set):
+        return "expand", ("it returns many values per row, so unnest them into "
+                          "their own rows")
 
     if n_rows == 1:
         return "map", "the input is a single row"
@@ -1287,14 +1329,33 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     else:                                  # not addressable yet
         index, expected = [], None
 
+    # The column this step is going to write, honouring an explicit `name=`.
+    payload = (PAYLOAD if kind is None
+               else verb.params.get("name", DEFAULT_PAYLOAD.get(kind, PAYLOAD)))
+
+    # The full column set this step will produce, as far as is knowable —
+    # carried-through columns plus whatever it writes. This is what a
+    # downstream step reads to recognize what it is looking at, so predicting
+    # only the payload would lose every column that simply passes through.
+    upstream_columns = (workflow._known_columns(operation)
+                        if workflow is not None else set())
+    columns = set(upstream_columns) if kind in CARRIES_COLUMNS else set()
+    if kind == "sweep":
+        columns |= {k for k in verb.params if k not in ("name", "over", "retries")}
+    if kind == "collapse" and verb.params.get("by"):
+        columns.add(verb.params["by"])
+    if payload:
+        columns.add(payload)
+
     records = [{"status": "staged", "error": None, "attempts": 0, "seconds": 0.0}
                for _ in index]
     return Output(
-        data=pd.DataFrame({PAYLOAD: [None] * len(index)}, index=index),
+        data=pd.DataFrame({payload or PAYLOAD: [None] * len(index)}, index=index),
         ledger=_ledger(records, index),
         meta={"verb": kind, "form": "scalar" if kind is None else "column",
-              "payload": PAYLOAD, "staged": True, "problems": (),
-              "n_in": n_in, "expected": expected, "rows_rule": rule},
+              "payload": payload, "staged": True, "problems": (),
+              "n_in": n_in, "expected": expected, "rows_rule": rule,
+              "columns": sorted(columns)},
     )
 
 
@@ -1400,6 +1461,16 @@ class Workflow:
         return self.steps[step_id]
 
     # ── what a step reads ────────────────────────────────────────────────
+    def _known_columns(self, operation: Operation) -> set[str]:
+        """The columns this operation's input will have, as far as is known."""
+        for modifier in operation.modifiers:
+            over = modifier.params.get("over")
+            if over is None:
+                continue
+            step = self.steps.get(str(over))
+            return set() if step is None else predicted_columns(step.output)
+        return set()
+
     def _known_index(self, operation: Operation) -> Sequence[Any] | None:
         """The input's index, when known — enough to stage, short of running.
 
@@ -1648,7 +1719,7 @@ def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Calla
     ``map(retry(tool))`` — the same object graph ``@map`` over ``@retry`` over
     the function would have produced at definition time.
     """
-    table = {**BUILTIN_TOOLS, **tools}
+    table = {**BUILTIN_TOOLS, **TOOLS, **tools}
     if operation.tool_id not in table:
         raise KeyError(f"unknown tool {operation.tool_id!r}; have {sorted(table)}")
     # The adapter is always innermost: it is what turns a plain function into

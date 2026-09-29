@@ -25,6 +25,7 @@ from simple_steps_core.grid import (
     Step,
     StepRef,
     Workflow,
+    TOOLS,
     compile_operation,
     grid,
     infer_verb,
@@ -346,30 +347,70 @@ def test_inference_works_when_the_whole_chain_is_declared_first(three):
     assert wf.step("sum").output.item() == 120
 
 
-def test_inference_on_a_staged_upstream_sees_only_the_payload(three):
-    """The documented limit: a carried-through column is not predictable yet.
-
-    `total(acc, n)` reduces over the `n` column, but a staged upstream only
-    promises `value`, so the reducer is not recognized until it has run. The
-    verb is visible and replaceable, which is the point of storing it
-    concretely.
-    """
+def test_inference_reads_a_carried_through_column_while_staged(three):
+    """`total(acc, n)` reduces over a column that merely passes through."""
     wf = Workflow()
     wf["raw"] = three
     wf["scored"] = score(wf["raw"])
-    assert total(wf["scored"]).shape_verb.kind == "map"      # staged: missed
+    assert total(wf["scored"]).shape_verb.kind == "collapse"   # staged
     wf.run_all()
-    assert total(wf["scored"]).shape_verb.kind == "collapse"  # ran: recognized
+    assert total(wf["scored"]).shape_verb.kind == "collapse"   # and after
 
 
-def test_predicted_columns_narrow_to_the_payload_while_staged(three):
+def test_staged_prediction_matches_what_actually_appears(three):
+    """The invariant worth protecting: predicting is not guessing."""
     wf = Workflow()
     wf["raw"] = three
     wf["scored"] = score(wf["raw"])
-    assert predicted_columns(wf.step("raw").output) == {"n"}
-    assert predicted_columns(wf.step("scored").output) == {"value"}
+    wf["kept"] = keep[mod.filter()](wf["scored"])
+    wf["sum"] = total[mod.collapse()](wf["kept"])
+    predicted = {sid: predicted_columns(st.output) for sid, st in wf.steps.items()}
     wf.run_all()
-    assert predicted_columns(wf.step("scored").output) == {"n", "value"}
+    for sid, step in wf.steps.items():
+        assert predicted[sid] == set(step.output.data.columns), sid
+
+
+def test_naming_the_payload_column_is_predicted_too(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["scored"] = score[mod.map(name="score")](wf["raw"])
+    assert predicted_columns(wf.step("scored").output) == {"n", "score"}
+    wf.run_all()
+    assert list(wf.step("scored").output.data.columns) == ["n", "score"]
+
+
+def test_filter_carries_columns_through_and_writes_none(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["kept"] = keep[mod.filter()](wf["raw"])
+    assert wf.step("kept").output.meta["payload"] is None
+    assert predicted_columns(wf.step("kept").output) == {"n"}
+
+
+def test_inference_reads_a_list_return_as_expand():
+    @tool
+    def words(note) -> list[str]:
+        return note.split()
+
+    wf = Workflow()
+    wf["notes"] = pd.DataFrame({"note": ["clear sky", "heavy rain today"]})
+    wf["word"] = words(wf["notes"])
+    assert wf.step("word").operation.shape_verb.kind == "expand"
+    wf.run_all()
+    assert wf.step("word").output.values == ["clear", "sky", "heavy", "rain", "today"]
+
+
+def test_an_explicit_verb_overrides_what_would_be_inferred():
+    @tool
+    def words(note) -> list[str]:
+        return note.split()
+
+    wf = Workflow()
+    wf["notes"] = pd.DataFrame({"note": ["clear sky"]})
+    wf["as_lists"] = words[mod.map()](wf["notes"])     # I really want a column of lists
+    assert wf.step("as_lists").operation.shape_verb.kind == "map"
+    wf.run_all()
+    assert wf.step("as_lists").output.values == [["clear", "sky"]]
 
 
 def test_inference_defaults_to_map(three):
@@ -401,9 +442,20 @@ def test_wiring_more_than_one_reference_is_refused(three):
         score(wf["raw"], wf["other"])
 
 
-def test_an_id_only_operation_says_how_to_run_it(three):
+def test_a_declared_tool_resolves_by_id(three):
+    """@tool registers it, so a workflow loaded from JSON needs no tools map."""
+    assert TOOLS["score"] is score.fn
+    assert op("score")[mod.map()](grid(three)).values == [10, 20, 30]
+
+
+def test_an_unknown_tool_says_how_to_supply_it(three):
     with pytest.raises(KeyError, match="names its tool"):
-        op("score")[mod.map()](grid(three))
+        op("never_declared")[mod.map()](grid(three))
+
+
+def test_an_explicit_tool_overrides_the_registry(three):
+    out = op("score")[mod.map()].run(grid(three), tools={"score": lambda n: n})
+    assert out.values == [1, 2, 3]
 
 
 def test_no_orchestration_gives_a_single_value():

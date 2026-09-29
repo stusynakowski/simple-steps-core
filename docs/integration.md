@@ -350,6 +350,12 @@ async def execute_run(workflow_id: str):
 
 ## 11. Suggested HTTP endpoints
 
+> Building a React client? [react-api.md](react-api.md) proposes the contract
+> for the **grid model** — declaring without running, staged cell counts,
+> the modifier stack as a reorderable list, and grids sent as `data` + `ledger`.
+> The endpoints below are for the engine as it is today.
+
+
 | Method & path | Purpose | Core call |
 | --- | --- | --- |
 | `GET /operations` | Palette for the UI | `registry.list_definitions()` |

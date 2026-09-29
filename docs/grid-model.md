@@ -8,6 +8,9 @@ it is arranged. Where they disagree, that one is the intent and this one is the
 present.
 
 Tests: `tests/unit/test_grid.py`, organized by the same three layers as §2 below.
+To write tools against this model, see [writing-tools.md](writing-tools.md);
+for the HTTP contract a React client would consume, see
+[react-api.md](react-api.md).
 
 ---
 
@@ -144,11 +147,15 @@ will write. Inference may use that prediction to *recognize* a pattern, but
 also carries its input's columns through), so rejecting against it would invent
 errors.
 
-The limit is real and worth knowing when you declare a whole chain before
-running any of it: `add_up(acc, value)` is recognized as a reducer because
-`value` is the predicted payload, while `total(acc, n)` — reducing over a
-carried-through column — is not recognized until the upstream has run. It
-becomes a `map`, which you can see and replace.
+Prediction covers the **whole column set**, not just the payload: `map`,
+`filter`, `group` and `expand` carry their input's columns through, so a staged
+step predicts those too, and `mod.map(name="score")` is predicted as `score`
+rather than `value`. A test asserts the prediction equals the columns that
+actually appear, for every step in a chain — predicting is not guessing.
+
+What a staged step cannot predict is anything that depends on values rather than
+structure: the column set of a `source` step you have not supplied yet, or how
+many rows a `filter` will keep.
 
 Two rules make this safe rather than magic:
 
