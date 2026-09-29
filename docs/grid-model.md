@@ -18,15 +18,15 @@ drifts from it is a bug.
 
 | word | means | kind |
 |---|---|---|
-| **Tool** | a plain Python function; the unit of work | `(Row, **literals) -> Any` |
+| **Tool** | a plain Python function declaring the values it needs | `(**values) -> Any` |
 | **ToolHandle** | what `@tool` returns: the function plus an id | object |
-| **Row** | one unit of work, always a `dict` | data |
+| **Row** | one unit of work; its columns bind to a tool's parameters | data |
 | **Modifier** | a descriptor: `kind` + `params` | data |
 | **ModifierKind** | a vocabulary entry: name, class, applier | table entry |
 | **Operation** | `tool_id` + ordered `Modifier`s + bound literals | data |
 | **Output** | `data` + `ledger` + `meta` | data |
 | **Step** | an `Operation` and an `Output`, always both | object |
-| **Workflow** | ordered `Step`s, plus the payloads source steps read | object |
+| **Workflow** | ordered `Step`s — nothing else | object |
 | **Grid** | the DataFrame in `Output.data` | data |
 | **Ledger** | per-unit execution record, beside the grid | data |
 
@@ -50,6 +50,7 @@ place where you leave the world of data and something executes.
 
 ```
 build     Operation × Modifier ──► Operation        closed
+          Operation × StepRef  ──► Operation        closed  (wiring)
 run       Operation × Data     ──► Output           the boundary
 inspect   Output               ──► DataFrame        closed
 ```
@@ -61,17 +62,110 @@ tree, and why any order composes. Every path — `__getitem__`, `bind`,
 **Run** is the single boundary, crossed in `compile_operation`. That is the one
 function where descriptors become behaviour.
 
-### The calling rule
+### Supplying rows is the modifier's job
+
+A tool declares the **values** it needs. It never mentions a row:
 
 ```python
-score({"n": 3})                                   # parens RUN
-score[mod.map(over=step1), mod.retry(times=2)]    # brackets DECORATE
-score.bind(weight=2)[mod.map(over=rows)](rows)    # bind, decorate, run
+@tool
+def score(n, weight=1):        # not  def score(row): return row["n"] * 10
+    return n * 10 * weight
 ```
 
-Parens always mean run — a `@tool` function stays an ordinary callable.
-Brackets always mean decorate and always return data. There is no third rule,
-and no method whose meaning depends on its receiver.
+`map` binds each row's columns to those parameters by name — the same thing the
+engine's `_run_item` does with `kwargs[arg] = item`. The alternative, passing
+the whole row positionally, makes every tool name the row twice (once as a
+parameter, once as a lookup), hard-codes the column name in the body, and makes
+the tool unusable unmapped.
+
+| rule | |
+|---|---|
+| columns bind **by name** | anything the tool does not declare is not passed |
+| `**kwargs` gets the whole row | for the cases that want it — `identity` is the one |
+| bound literals fill the rest | `score.bind(weight=2)` |
+| a **column wins** a collision | the row is the unit of work — the engine's rule |
+| a non-dict input is positional | an unorchestrated step over a bare value |
+
+The payoff is bigger than the tidier signature: because the tool names what it
+needs, **declaration can check the upstream actually has it** (§4).
+
+### The calling rule
+
+> **Brackets decorate. Parens apply — and a reference is an input you do not
+> have yet.**
+
+```python
+score(3)                                    # data in hand      -> runs
+score(wf["raw"])                            # a reference       -> wires a step
+score[mod.map(over=step1)]                  # brackets          -> decorate
+score.bind(weight=2)[mod.map()](wf["raw"])  # bind, decorate, wire
+```
+
+Applying to data runs it; applying to a reference has nothing to run, so it
+builds the step that *will* run. One meaning, two times — not two meanings.
+They cannot be confused, because a `StepRef` is never data.
+
+`.run(...)` is the unambiguous half: it always executes, and refuses a
+reference outright.
+
+**Wiring is part of the build layer**, not an escape from it: it returns an
+`Operation`, so `Operation × StepRef → Operation` is closed like everything
+else there. What it writes is ordinary stored data — these are the same step:
+
+```python
+score[mod.map()](wf["raw"])
+score[mod.map(over=wf["raw"])]
+```
+
+which is why everything reactive still works: `over` is in the Operation, where
+`check`, staging, cycle detection and the light export all read it.
+
+### Inferring the verb
+
+With no shape verb to place, wiring picks one (`infer_verb`) and **stores it
+concretely**:
+
+```python
+wf["scored"] = score(wf["raw"])      # -> map(over='raw') ∘ score
+wf["sum"]    = total(wf["scored"])   # -> collapse(...)   total(acc, value)
+wf["kept"]   = big(wf["scored"])     # -> filter(...)     big(value) -> bool
+```
+
+| signal | verb |
+|---|---|
+| `(acc, x)` — first value matches no column | `collapse` |
+| return annotation is `bool` | `filter` |
+| otherwise | `map` |
+
+**What it can see depends on when you declare.** A step that has run knows its
+columns exactly; a staged one predicts only the name of the payload column it
+will write. Inference may use that prediction to *recognize* a pattern, but
+`check` may not use it to *refuse* one — the prediction is a subset (a `map`
+also carries its input's columns through), so rejecting against it would invent
+errors.
+
+The limit is real and worth knowing when you declare a whole chain before
+running any of it: `add_up(acc, value)` is recognized as a reducer because
+`value` is the predicted payload, while `total(acc, n)` — reducing over a
+carried-through column — is not recognized until the upstream has run. It
+becomes a `map`, which you can see and replace.
+
+Two rules make this safe rather than magic:
+
+**Nothing named `auto` ever reaches the data.** An `auto` modifier would be the
+one whose shape is unknowable before running — no `ROWS_RULE` entry, no staged
+claim, and a light export that could resolve differently on reload, breaking
+the round-trip invariant. What is stored is an ordinary `map`, indistinguishable
+from one you typed, so it shows up in a repr or a dropdown and you replace it by
+writing the verb you wanted.
+
+**It resolves once, at wiring.** An inferred verb is never silently re-inferred,
+so a later change upstream cannot overwrite a choice you made. Same rule as
+§7's push/pull: propagate staleness, never recompute behind the user.
+
+`infer_verb` also returns its reason (*"'acc' is not a column but 'value' is, so
+this reads as a reducer"*), which a UI can show as a caption. The reason is
+derived, so it is recomputed rather than stored.
 
 ---
 
@@ -125,10 +219,25 @@ wf = Workflow()
 wf["raw"]    = pd.DataFrame({"n": [1, 2, 3]})     # a bare value is a source step
 wf["scored"] = score[mod.map(over=wf["raw"])]
 
-wf.step("scored").describe()   # 'map score · 3 cells'   — before running
+wf.step("raw").status          # 'completed' — its data arrived with the declaration
 wf.step("scored").status       # 'staged'
+wf.step("scored").describe()   # 'map score · 3 cells'   — before running
 wf.run_all()                   # now it computes
 ```
+
+### The steps define the inputs
+
+A **source step's data is its output.** It arrived with the declaration, so
+there is nothing to stage and nothing to compute: that step is born
+`completed`, and running it is a no-op.
+
+This is why `vars(workflow) == ["steps"]`. An earlier version kept a parallel
+`Workflow.inputs` map for literals, which was a mistake — it made source data a
+second kind of thing with its own storage, its own branch in every resolver, and
+its own key in the export. A literal was never anything but a step's output.
+Removing it deleted the source branch from `_known_index` and `_input_for`, the
+`step_id` threading through `stage()`, and the `inputs` key from the session
+format.
 
 Four functions carry this:
 
@@ -190,11 +299,25 @@ wf.step("oops").problems[0]
 An invalid Operation stages as **one cell**: it has no shape, because the thing
 that would have given it one is what is broken. `run()` is what refuses.
 
-Caught at declaration today: unknown tool, unknown modifier kind, `over` that
-dangles / self-references / is circular / names an invalid step, `source` with a
-real tool, and bound literals the tool's signature does not accept. **Not** yet
-caught: whether an upstream's output *type* fits its reader — that needs output
-schemas (§11).
+Caught at declaration today:
+
+| check | example |
+|---|---|
+| unknown tool / unknown modifier kind | |
+| `over` dangles, self-references, is circular, or names an invalid step | |
+| `source` applied to a real tool | |
+| a bound literal the signature does not accept | `score.bind(wieght=2)` |
+| **a required value the upstream cannot supply** | `score() needs 'n', which 'raw' does not have (it has count)` |
+
+That last one is the payoff of binding by name — with a `def score(row)`
+convention there is nothing to check against. It runs only against an upstream
+that has **run**, because a staged Output holds placeholder rows rather than
+real columns, so checking one would invent errors. The check therefore sharpens
+as the workflow runs, the same way staging does — and a source step is born
+completed, so the common case is covered from declaration.
+
+**Not** yet caught: whether the upstream's column *types* fit the parameters.
+Columns exist or they do not; matching dtypes to annotations is the next step.
 
 ---
 
@@ -210,9 +333,19 @@ They differ only in payloads.
 This is what keeping modifiers as descriptors buys: a step's definition is a few
 strings, so exporting a workflow is nearly free.
 
-Source payloads live in `Workflow.inputs`, **beside** the Operations, never
-inside them — otherwise a source step would drag its whole table into the light
-export.
+There is **one payload map, not two**: a source step's literal serializes
+through the same path as a computed output, because it *is* one. The light
+export simply omits outputs, which is what keeps a literal out of it.
+
+A light-reloaded source step therefore has no data, and says so rather than
+computing something wrong:
+
+```python
+back = Workflow.from_json(wf.to_json(), tools)
+back.run("raw")
+# ValueError: source step 'raw' has no data. Assign it: wf['raw'] = <...>
+back["raw"] = df        # supply it again, and the workflow runs
+```
 
 Staging is derived, so it is never stored. A light round-trip therefore lands at
 §7's **level 1**: shape known, cardinality not, because cardinality came from
@@ -266,10 +399,10 @@ Stated so they are not rediscovered as surprises.
    argument — the inversion described in §11. The refactor that fixes it also
    deletes `ORCHESTRATORS`, `orchestrator_id`, `Tool.is_orchestrator`, and the
    engine's higher-order branches.
-2. **Two unit conventions.** `grid.py` passes a tool one row *dict*; the engine
-   binds one item to a *named parameter* and passes constants as kwargs. This
-   already bit `identity` once — "return the input unchanged" is a silent no-op
-   under the row convention. The two must be reconciled deliberately.
+2. ~~**Two unit conventions.**~~ **Resolved.** `grid.py` now binds row columns
+   to a tool's named parameters, matching the engine's `_run_item`
+   (`kwargs[arg] = item`). The remaining difference is only breadth: the engine
+   binds *one* item to *one* named parameter, while a grid row can fill several.
 3. **`timeout` is a placeholder.** It records intent; real enforcement needs the
    async engine.
 4. **Column verbs are guarded, not built.** `axis="columns"` raises. See §11.
@@ -279,10 +412,10 @@ Stated so they are not rediscovered as surprises.
 7. **`Output` has no `ref`.** [shape-algebra.md §5](shape-algebra.md) gives
    `Output` a `ref` into the session store, with `data` as the inline copy — the
    two-layer indirection the engine already has via `StepOutput.ref`. The
-   prototype holds payloads inline and keeps source payloads in
-   `Workflow.inputs` instead, which is enough to make both export modes work but
-   is not the target. Adding `ref` is what lets a big grid live outside the
-   model.
+   prototype holds every payload inline on its Step, so two steps reading one
+   grid each hold it, storage cannot be swapped for disk or Redis, and passing a
+   Step passes its data. Both export modes work regardless; `ref` is what would
+   let a large grid live outside the model.
 8. **`Operation.fn` is a prototype convenience.** It carries the callable so a
    decorated tool can run without a registry. In the engine a step stores an id
    and the function lives in `REGISTRY`, so "decorate then pass data" becomes

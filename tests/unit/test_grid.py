@@ -27,6 +27,8 @@ from simple_steps_core.grid import (
     Workflow,
     compile_operation,
     grid,
+    infer_verb,
+    predicted_columns,
     identity,
     is_shape,
     mod,
@@ -36,24 +38,26 @@ from simple_steps_core.grid import (
 )
 
 
+# Tools declare the values they need. Supplying rows is the modifier's job, so
+# none of these mentions a row or digs a column out of one.
 @tool
-def score(row, weight=1):
-    return row["n"] * 10 * weight
-
-
-@tool
-def keep(row):
-    return row["n"] > 1
+def score(n, weight=1):
+    return n * 10 * weight
 
 
 @tool
-def burst(row):
-    return [row["n"]] * row["n"]
+def keep(n):
+    return n > 1
 
 
 @tool
-def total(acc, row):
-    return (acc or 0) + row["n"]
+def burst(n):
+    return [n] * n
+
+
+@tool
+def total(acc, n):
+    return (acc or 0) + n
 
 
 @pytest.fixture
@@ -65,7 +69,41 @@ def three():
 # The calling rule: parens run, brackets decorate
 # ─────────────────────────────────────────────────────────────────────────
 def test_parens_call_the_plain_function():
-    assert score({"n": 3}) == 30
+    assert score(3) == 30, "a tool stays an ordinary function"
+
+
+def test_a_tool_declares_values_not_rows():
+    """The modifier supplies rows; the tool names the columns it wants."""
+    import inspect as _inspect
+
+    assert list(_inspect.signature(score.fn).parameters) == ["n", "weight"]
+
+
+def test_columns_bind_to_parameters_by_name(three):
+    assert score[mod.map()](grid(three)).values == [10, 20, 30]
+
+
+def test_undeclared_columns_are_not_passed():
+    @tool
+    def only_n(n):
+        return n
+
+    frame = pd.DataFrame({"n": [1, 2], "extra": ["a", "b"], "more": [9, 9]})
+    assert only_n[mod.map()](grid(frame)).values == [1, 2]
+
+
+def test_a_tool_can_ask_for_the_whole_row():
+    @tool
+    def widest(**row):
+        return sorted(row)
+
+    frame = pd.DataFrame({"b": [1], "a": [2]})
+    assert widest[mod.map()](grid(frame)).values == [["a", "b"]]
+
+
+def test_a_column_beats_a_bound_literal(three):
+    """The row is the unit of work — the engine's rule in _run_item."""
+    assert score.bind(n=99)[mod.map()](grid(three)).values == [10, 20, 30]
 
 
 def test_brackets_decorate_and_return_data():
@@ -171,10 +209,10 @@ def test_identity_is_a_builtin_tool():
 
 
 def test_identity_returns_the_payload_not_the_row():
-    assert identity({"value": 7}) == 7
-    assert identity({"only": 7}) == 7
-    assert identity({"a": 1, "b": 2}) == {"a": 1, "b": 2}
-    assert identity({"a": 1, "b": 2}, column="b") == 2
+    assert identity(value=7) == 7
+    assert identity(only=7) == 7
+    assert identity(a=1, b=2) == {"a": 1, "b": 2}
+    assert identity(a=1, b=2, column="b") == 2
 
 
 def test_expand_over_identity_flattens():
@@ -202,24 +240,165 @@ def test_source_applies_no_tool():
 # run: Operation x Data -> Output
 # ─────────────────────────────────────────────────────────────────────────
 def test_run_compiles_innermost_first(three):
-    fn = compile_operation(score[mod.map()], {"score": lambda row: row["n"]})
+    fn = compile_operation(score[mod.map()], {"score": lambda n: n})
     assert fn(grid(three)).values == [1, 2, 3]
 
 
 def test_retry_runs_per_item():
     attempts = []
 
-    def flaky(row):
-        attempts.append(row["n"])
-        if attempts.count(row["n"]) < 2:
+    def flaky(n):
+        attempts.append(n)
+        if attempts.count(n) < 2:
             raise RuntimeError("boom")
-        return row["n"]
+        return n
 
     out = op("flaky")[mod.map(), mod.retry(times=3)].run(
         grid(pd.DataFrame({"n": [1, 2]})), tools={"flaky": flaky}
     )
     assert out.values == [1, 2]
     assert attempts.count(1) == 2 and attempts.count(2) == 2
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# wiring: parens applied to a reference build the step
+# ─────────────────────────────────────────────────────────────────────────
+def test_calling_with_a_reference_wires_instead_of_running(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wired = score[mod.map()](wf["raw"])
+    assert isinstance(wired, Operation)
+    assert wired == score[mod.map(over=wf["raw"])], "same stored data either way"
+
+
+def test_run_still_means_run_and_refuses_a_reference(three):
+    wf = Workflow()
+    wf["raw"] = three
+    with pytest.raises(TypeError, match="names a step, it is not data"):
+        score[mod.map()].run(wf["raw"])
+
+
+def test_a_bare_tool_call_on_a_reference_is_the_whole_step(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["scored"] = score(wf["raw"])
+    assert wf.step("scored").operation == score[mod.map(over=wf["raw"])]
+    wf.run_all()
+    assert wf.step("scored").output.values == [10, 20, 30]
+
+
+def test_wiring_keeps_an_explicit_verb(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["kept"] = keep[mod.filter()](wf["raw"])
+    assert wf.step("kept").operation.shape_verb.kind == "filter"
+
+
+def test_literals_survive_wiring(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["doubled"] = score(wf["raw"], weight=2)
+    assert wf.step("doubled").operation.arguments == {"weight": 2}
+    wf.run_all()
+    assert wf.step("doubled").output.values == [20, 40, 60]
+
+
+def test_inference_reads_a_reducer_as_collapse(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["sum"] = total(wf["raw"])          # total(acc, n) — acc is not a column
+    assert wf.step("sum").operation.shape_verb.kind == "collapse"
+    wf.run_all()
+    assert wf.step("sum").output.item() == 6
+
+
+def test_inference_reads_a_bool_return_as_filter(three):
+    @tool
+    def big(n) -> bool:
+        return n > 1
+
+    wf = Workflow()
+    wf["raw"] = three
+    wf["kept"] = big(wf["raw"])
+    assert wf.step("kept").operation.shape_verb.kind == "filter"
+    wf.run_all()
+    assert len(wf.step("kept").output.data) == 2
+
+
+def test_inference_works_when_the_whole_chain_is_declared_first(three):
+    """Build-it-all-at-once: nothing has run, so only payload names are known."""
+    @tool
+    def big(value) -> bool:
+        return value > 15
+
+    @tool
+    def add_up(acc, value):
+        return (acc or 0) + value
+
+    wf = Workflow()
+    wf["raw"] = three
+    wf["scored"] = score(wf["raw"], weight=2)
+    wf["kept"] = big(wf["scored"])          # upstream staged
+    wf["sum"] = add_up(wf["kept"])          # upstream staged, still a reducer
+    assert wf.step("kept").operation.shape_verb.kind == "filter"
+    assert wf.step("sum").operation.shape_verb.kind == "collapse"
+    wf.run_all()
+    assert wf.step("sum").output.item() == 120
+
+
+def test_inference_on_a_staged_upstream_sees_only_the_payload(three):
+    """The documented limit: a carried-through column is not predictable yet.
+
+    `total(acc, n)` reduces over the `n` column, but a staged upstream only
+    promises `value`, so the reducer is not recognized until it has run. The
+    verb is visible and replaceable, which is the point of storing it
+    concretely.
+    """
+    wf = Workflow()
+    wf["raw"] = three
+    wf["scored"] = score(wf["raw"])
+    assert total(wf["scored"]).shape_verb.kind == "map"      # staged: missed
+    wf.run_all()
+    assert total(wf["scored"]).shape_verb.kind == "collapse"  # ran: recognized
+
+
+def test_predicted_columns_narrow_to_the_payload_while_staged(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["scored"] = score(wf["raw"])
+    assert predicted_columns(wf.step("raw").output) == {"n"}
+    assert predicted_columns(wf.step("scored").output) == {"value"}
+    wf.run_all()
+    assert predicted_columns(wf.step("scored").output) == {"n", "value"}
+
+
+def test_inference_defaults_to_map(three):
+    wf = Workflow()
+    wf["raw"] = three
+    assert score(wf["raw"]).shape_verb.kind == "map"
+
+
+def test_an_inferred_verb_is_stored_concretely_not_as_auto(three):
+    """Nothing named 'auto' reaches the data — staging would have nothing to fold."""
+    wf = Workflow()
+    wf["raw"] = three
+    wf["scored"] = score(wf["raw"])
+    blob = wf.to_dict()["steps"][1]["operation"]
+    assert [m["kind"] for m in blob["modifiers"]] == ["map"]
+    assert wf.step("scored").describe() == "map score · 3 cells"
+
+
+def test_infer_verb_explains_itself(three):
+    kind, reason = infer_verb(score.fn, grid(three), {})
+    assert kind == "map" and "columns" in reason
+
+
+def test_wiring_more_than_one_reference_is_refused(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["other"] = three
+    with pytest.raises(TypeError, match="one reference at a time"):
+        score(wf["raw"], wf["other"])
 
 
 def test_an_id_only_operation_says_how_to_run_it(three):
@@ -231,10 +410,18 @@ def test_no_orchestration_gives_a_single_value():
     assert score[()].run({"n": 4}) == 40
 
 
+def test_a_bare_value_is_passed_positionally():
+    @tool
+    def double(x):
+        return x * 2
+
+    assert double[()].run(21) == 42
+
+
 def test_sweep_generates_its_own_grid():
     @tool
-    def cell(row):
-        return f"{row['model']}/{row['window']}"
+    def cell(model, window):
+        return f"{model}/{window}"
 
     out = cell[mod.sweep(model=["a", "b"], window=[7, 30])](None)
     assert out.values == ["a/7", "a/30", "b/7", "b/30"]
@@ -277,14 +464,41 @@ def test_column_axis_is_guarded_not_half_built():
 def test_a_bare_value_declares_a_source_step(three):
     wf = Workflow()
     wf["raw"] = three
-    assert isinstance(wf.step("raw"), Step)
-    assert wf.inputs["raw"] is three, "the payload lives beside the Operation"
+    step = wf.step("raw")
+    assert isinstance(step, Step)
+    assert step.operation.tool_id == "identity"
+    assert step.operation.shape_verb.kind == "source"
+
+
+def test_a_source_step_is_born_completed(three):
+    """Its data arrived with the declaration, so there is nothing to compute."""
+    wf = Workflow()
+    wf["raw"] = three
+    step = wf.step("raw")
+    assert step.status == "completed"
+    assert list(step.output.data["n"]) == [1, 2, 3]
+
+
+def test_a_workflow_is_only_steps(three):
+    """No parallel payload store: a literal is just a step's output."""
+    wf = Workflow()
+    wf["raw"] = three
+    assert not hasattr(wf, "inputs")
+    assert list(vars(wf)) == ["steps"]
+
+
+def test_running_a_source_step_is_a_no_op(three):
+    wf = Workflow()
+    wf["raw"] = three
+    before = wf.step("raw").output
+    assert wf.run("raw").output is before
 
 
 def test_declaring_stages_both_halves(three):
     wf = Workflow()
     wf["raw"] = three
-    step = wf.step("raw")
+    wf["scored"] = score[mod.map(over=wf["raw"])]
+    step = wf.step("scored")
     assert isinstance(step.output, Output)
     assert step.status == "staged"
 
@@ -316,30 +530,35 @@ def test_running_populates_and_is_manual(three):
 
 
 def test_running_against_a_staged_upstream_is_refused(three):
-    wf = Workflow()
-    wf["raw"] = three
-    wf["scored"] = score[mod.map(over=wf["raw"])]
-    with pytest.raises(ValueError, match="which has not run"):
-        wf.run("scored")
-
-
-def test_pending_lists_what_must_run_first(three):
     @tool
-    def again(row):
-        return row["value"] + 1
+    def again(value):
+        return value + 1
 
     wf = Workflow()
     wf["raw"] = three
     wf["b"] = score[mod.map(over=wf["raw"])]
     wf["c"] = again[mod.map(over=wf["b"])]
-    assert wf.pending("c") == ["raw", "b"]
-    assert wf.pending("raw") == []
+    with pytest.raises(ValueError, match="which has not run"):
+        wf.run("c")
+
+
+def test_pending_lists_what_must_run_first(three):
+    @tool
+    def again(value):
+        return value + 1
+
+    wf = Workflow()
+    wf["raw"] = three
+    wf["b"] = score[mod.map(over=wf["raw"])]
+    wf["c"] = again[mod.map(over=wf["b"])]
+    assert wf.pending("c") == ["b"], "raw already holds its data"
+    assert wf.pending("b") == []
 
 
 def test_run_all_orders_the_chain(three):
     @tool
-    def again(row):
-        return row["value"] + 1
+    def again(value):
+        return value + 1
 
     wf = Workflow()
     wf["raw"] = three
@@ -362,8 +581,8 @@ def test_run_all_skips_invalid_steps_without_failing(three):
 
 def test_cardinality_propagates_transitively(three):
     @tool
-    def again(row):
-        return row["value"] + 1
+    def again(value):
+        return value + 1
 
     wf = Workflow()
     wf["a"] = pd.DataFrame({"n": [1, 2, 3, 4]})
@@ -421,6 +640,65 @@ def test_an_invalid_operation_is_a_single_cell(three):
     assert wf.step("oops").output.form == "scalar"
 
 
+def test_a_missing_column_is_caught_at_declaration():
+    """Possible only because the tool names the values it needs."""
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"count": [1, 2, 3]})      # not "n"
+    wf["scored"] = score[mod.map(over=wf["raw"])]
+    step = wf.step("scored")
+    assert not step.valid
+    assert "needs 'n'" in step.problems[0] and "count" in step.problems[0]
+
+
+def test_a_bound_literal_satisfies_a_required_value():
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"count": [1, 2, 3]})
+    wf["scored"] = score.bind(n=5)[mod.map(over=wf["raw"])]
+    assert wf.step("scored").valid
+
+
+def test_an_optional_parameter_is_not_required(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["scored"] = score[mod.map(over=wf["raw"])]   # `weight` has a default
+    assert wf.step("scored").valid
+
+
+def test_a_whole_row_tool_is_never_flagged():
+    @tool
+    def anything(**row):
+        return len(row)
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"whatever": [1]})
+    wf["n"] = anything[mod.map(over=wf["raw"])]
+    assert wf.step("n").valid
+
+
+def test_collapse_does_not_require_its_accumulator_from_the_row(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["sum"] = total[mod.collapse(over=wf["raw"])]   # total(acc, n)
+    assert wf.step("sum").valid
+    wf.run_all()
+    assert wf.step("sum").output.item() == 6
+
+
+def test_a_staged_upstream_is_not_column_checked(three):
+    """A staged Output holds placeholders, so checking it would invent errors."""
+    @tool
+    def again(value):
+        return value + 1
+
+    wf = Workflow()
+    wf["raw"] = three
+    wf["b"] = score[mod.map(over=wf["raw"])]
+    wf["c"] = again[mod.map(over=wf["b"])]            # b has not run yet
+    assert wf.step("c").valid
+    wf.run_all()
+    assert wf.step("c").output.values == [11, 21, 31]
+
+
 def test_a_dangling_reference_is_caught():
     wf = Workflow()
     wf["dangling"] = score[mod.map(over="nope")]
@@ -461,10 +739,11 @@ def test_bad_steps_stay_in_the_workflow_but_cannot_run(three):
         wf.run("oops")
 
 
-def test_declaring_a_non_operation_object_is_a_source_step():
+def test_any_bare_value_becomes_a_source_step():
     wf = Workflow()
     wf["xs"] = [1, 2, 3]
-    assert wf.step("xs").output.meta["expected"] == 3
+    assert wf.step("xs").status == "completed"
+    assert len(wf.step("xs").output.data) == 3
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -509,7 +788,17 @@ def test_full_round_trip_restores_payloads_and_staging(ran):
     assert back.step("raw").describe() == "source identity · 3 cells"
 
 
-def test_staging_is_a_pure_function_of_structure_plus_inputs(three):
+def test_a_light_reloaded_source_step_asks_for_its_data(ran):
+    """The light export carries no payloads, so the source step needs supplying."""
+    back = Workflow.from_json(ran.to_json(), {"score": score.fn})
+    with pytest.raises(ValueError, match="has no data"):
+        back.run("raw")
+    back["raw"] = pd.DataFrame({"n": [1, 2, 3]})
+    back.run_all()
+    assert back.step("scored").output.values == [10, 20, 30]
+
+
+def test_staging_is_a_pure_function_of_the_steps(three):
     """The round-trip invariant: re-declaring from an export re-derives staging."""
     wf = Workflow()
     wf["raw"] = three
@@ -518,7 +807,9 @@ def test_staging_is_a_pure_function_of_structure_plus_inputs(three):
     back = Workflow.from_dict(blob, {"score": score.fn})
     for sid in wf.steps:
         assert back.step(sid).describe() == wf.step(sid).describe()
-        assert back.step(sid).output.meta["expected"] == wf.step(sid).output.meta["expected"]
+        before, after = wf.step(sid).output.meta, back.step(sid).output.meta
+        assert after.get("expected") == before.get("expected")
+        assert after.get("staged") == before.get("staged")
 
 
 def test_loading_runs_the_same_checks_as_declaring():
@@ -547,4 +838,6 @@ def test_an_unexportable_payload_says_so(three):
 
 def test_exports_are_json(ran):
     assert json.loads(ran.to_json())["version"] == 1
-    assert json.loads(ran.to_session_json())["inputs"]["raw"]["kind"] == "frame"
+    full = json.loads(ran.to_session_json())
+    assert "inputs" not in full, "one payload map, not two"
+    assert full["outputs"]["raw"]["data"]["kind"] == "frame"

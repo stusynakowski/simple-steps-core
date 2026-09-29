@@ -37,7 +37,7 @@ __all__ = [
     "expand_", "sweep_", "source_", "identity", "BUILTIN_TOOLS",
     "op", "Modifier", "Operation",
     "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "stage",
-    "ROWS_RULE", "PayloadError",
+    "ROWS_RULE", "PayloadError", "infer_verb", "predicted_columns",
 
     "mod",
     "DECORATORS", "MODIFIERS", "ModifierKind", "SHAPE_VERBS", "is_shape",
@@ -141,7 +141,7 @@ def _ledger(records: list[dict], index: Sequence[Any]) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────────────────
 # identity — the tool that closes the algebra
 # ─────────────────────────────────────────────────────────────────────────
-def identity(row: Any, column: str | None = None) -> Any:
+def identity(**row: Any) -> Any:
     """Return what the previous step produced — the default tool.
 
     Every step is a verb applied to a tool, with no special case for the steps
@@ -168,8 +168,7 @@ def identity(row: Any, column: str | None = None) -> Any:
     ``collapse`` is the exception to all of this: it needs a two-argument
     reducer, so there is nothing for identity to mean there.
     """
-    if not isinstance(row, dict):
-        return row
+    column = row.pop("column", None)
     if column is not None:
         return row[column]
     if PAYLOAD in row:
@@ -487,18 +486,55 @@ def _d_timeout(fn: Callable, *, seconds: float) -> Callable:
     return run
 
 
-def _d_bind(fn: Callable, **literals) -> Callable:
-    """Innermost decoration: the literals bound when the step was wired.
+def _d_apply(fn: Callable, **literals) -> Callable:
+    """Innermost decoration: hand the tool the columns it actually asked for.
 
-    The row stays the single positional unit of work and the constants arrive
-    as keywords — the same split as the engine's ``_run_item``, where the item
-    fills one parameter and ``shared`` fills the rest. So a tool written
-    ``def score(row, threshold=0)`` gets ``threshold`` from
-    ``score(threshold=5)[...]``, and the two channels cannot collide.
+    **Supplying rows is the modifier's job, not the tool's.** A tool declares
+    the values it needs and nothing else::
+
+        @tool
+        def score(n, weight=1):        # not  def score(row): row["n"] * 10
+            return n * 10 * weight
+
+    ``map`` then binds each row's columns to those parameters by name — the
+    same thing the engine's ``_run_item`` does when it sets ``kwargs[arg] =
+    item``. Without this a tool has to name the row twice, once as a parameter
+    and once as a lookup, which makes it unusable unmapped and hard-codes the
+    column name in the body.
+
+    Rules:
+
+    * columns bind to parameters **by name**; anything the tool does not
+      declare is simply not passed;
+    * a tool with ``**kwargs`` receives the whole row, for the cases that
+      genuinely want it (``identity``);
+    * bound literals fill the rest, and a column **wins** a name collision,
+      because the row is the unit of work — the engine's rule;
+    * a non-dict input (an unorchestrated step over a bare value) is passed
+      positionally, since there are no columns to bind.
+
+    ``*leading`` carries ``collapse``'s accumulator, the one verb whose tool
+    takes something before the row.
     """
-    def run(x):
-        return fn(x, **literals)
-    run.__name__ = f"bind({getattr(fn, '__name__', 'fn')})"
+    try:
+        parameters = inspect.signature(fn).parameters
+    except (TypeError, ValueError):                  # builtins have no signature
+        parameters = {}
+    wants_everything = any(p.kind is inspect.Parameter.VAR_KEYWORD
+                           for p in parameters.values())
+    declared = set(parameters)
+
+    def run(*args):
+        *leading, row = args
+        if not isinstance(row, dict):
+            return fn(*leading, row, **literals)
+        merged = {**literals, **row}
+        bound = merged if wants_everything else {
+            k: v for k, v in merged.items() if k in declared
+        }
+        return fn(*leading, **bound)
+
+    run.__name__ = f"apply({getattr(fn, '__name__', 'fn')})"
     return run
 
 
@@ -722,13 +758,50 @@ class Operation:
 
     # ── the other half: hand the decorated tool some data ────────────────
     def __call__(self, source: Any) -> Any:
-        """Apply the decorated tool to actual data — ``score[...](videos)``.
+        """Apply the decorated tool to its input.
 
-        The brackets decorated; this runs. Everything the stack describes is
-        applied here, at call time, exactly as :func:`compile_operation` would
-        — which is what it delegates to.
+        **Parens apply; a reference is an input you do not have yet.** So one
+        rule covers both times:
+
+        * given **data**, this runs — `compile_operation` and away;
+        * given a **StepRef**, there is nothing to run yet, so it *wires*:
+          returns a new Operation that records what this step reads.
+
+        Wiring writes ``over`` into the stack, so the stored data is exactly
+        what the long form produces. These are the same Operation::
+
+            score[mod.map()](wf["raw"])
+            score[mod.map(over=wf["raw"])]
+
+        With no shape verb, wiring infers one (:func:`infer_verb`) and stores
+        it concretely — so ``wf["scored"] = score(wf["raw"])`` is the whole
+        step, and the verb it chose is visible and replaceable.
         """
+        if isinstance(source, StepRef):
+            return self._wire(source)
         return self.run(source)
+
+    def _wire(self, ref: "StepRef") -> "Operation":
+        """Record that this step reads *ref*, inferring a verb if none is set."""
+        verb = self.shape_verb
+        if verb is not None:
+            return Operation(
+                self.tool_id,
+                tuple(Modifier(m.kind, {**m.params, "over": ref.id})
+                      if m is verb else m for m in self.modifiers),
+                self.arguments, self.fn,
+            )
+        upstream = None
+        if ref.workflow is not None:
+            step = ref.workflow.steps.get(ref.id)
+            # A staged upstream still predicts its payload column, which is
+            # what lets `total(acc, value)` read as a reducer before anything
+            # has run — the build-it-all-at-once case.
+            upstream = None if step is None else step.output
+        fn = self.fn or BUILTIN_TOOLS.get(self.tool_id)
+        kind = ("map" if fn is None
+                else infer_verb(fn, upstream, self.arguments)[0])
+        return self._add(kind, over=ref.id)
 
     def run(self, source: Any, tools: dict[str, Callable] | None = None) -> Any:
         """Compile the stack and apply it to *source*.
@@ -738,6 +811,14 @@ class Operation:
         when this Operation names its tool by id (``op("score")``) rather than
         carrying it (``score[...]`` from a ``@tool`` handle).
         """
+        if isinstance(source, StepRef):
+            raise TypeError(
+                f"cannot run against the reference {source.id!r} — a reference "
+                "names a step, it is not data. A step's input is part of its "
+                "definition, so it belongs in the modifier: "
+                f"wf[...] = <tool>[mod.map(over=wf[{source.id!r}])]. "
+                "Calling an Operation is for data you already hold."
+            )
         table = {**BUILTIN_TOOLS, **(tools or {})}
         if self.fn is not None:
             table.setdefault(self.tool_id, self.fn)
@@ -781,6 +862,10 @@ class StepRef:
     """
 
     id: str
+    #: The Workflow this names a step in, so ``score(wf["raw"])`` can inspect
+    #: the upstream. ``compare=False``: a reference is its id, and two refs to
+    #: the same step are equal whether or not either is carrying a workflow.
+    workflow: Any = field(default=None, compare=False, repr=False)
 
     def __str__(self) -> str:
         return self.id
@@ -818,7 +903,21 @@ class ToolHandle:
         self.__name__ = self.id
 
     def __call__(self, *args, **kwargs) -> Any:
-        """Call the underlying function. Parens always mean run."""
+        """Apply the tool to its input — running it, or wiring it into a step.
+
+        ``score(3)`` runs the plain function. ``score(wf["raw"])`` has no data
+        to run on, so it builds the step instead, inferring how to iterate::
+
+            wf["scored"] = score(wf["raw"])      # -> map(over='raw') ∘ score
+
+        The two cannot be confused: a :class:`StepRef` is never data.
+        """
+        if args and isinstance(args[0], StepRef):
+            if len(args) > 1:
+                raise TypeError(
+                    "wire one reference at a time: a step reads one input."
+                )
+            return self._start().bind(**kwargs)(args[0])
         return self.fn(*args, **kwargs)
 
     def bind(self, **literals) -> Operation:
@@ -1014,7 +1113,54 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                         f"{operation.tool_id}() takes no argument {name!r}; "
                         f"it accepts {', '.join(list(parameters)[1:]) or '(none)'}"
                     )
+    # 6. the values the tool requires have to exist as columns upstream.
+    #    This is only possible because a tool declares what it needs by name —
+    #    with a `def score(row)` convention there is nothing to check against.
+    if fn is not None and workflow is not None and not problems:
+        problems.extend(_missing_columns(operation, fn, workflow))
+
     return tuple(problems)
+
+
+def _missing_columns(operation: Operation, fn: Callable,
+                     workflow: "Workflow") -> list[str]:
+    """Required parameters the upstream grid cannot supply.
+
+    Checked only against an upstream that has **run**: a staged Output holds
+    placeholder rows, not real columns, so checking one would invent errors.
+    The check therefore sharpens as the workflow runs, the same way staging
+    does — and a source step is born completed, so the common case is covered
+    from declaration.
+    """
+    verb = operation.shape_verb
+    if verb is None or verb.kind in ("source", "sweep"):
+        return []                       # nothing upstream, or rows it generates
+
+    upstream = workflow._input_for(operation)
+    if upstream is None:
+        return []
+
+    try:
+        parameters = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        return []
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
+        return []                       # takes the whole row; nothing to miss
+    if verb.kind == "collapse":
+        parameters = parameters[1:]     # the verb supplies the accumulator
+
+    available = set(rows(upstream).columns) | set(operation.arguments)
+    missing = [p.name for p in parameters
+               if p.default is inspect.Parameter.empty
+               and p.kind is not inspect.Parameter.VAR_POSITIONAL
+               and p.name not in available]
+    if not missing:
+        return []
+    return [
+        f"{operation.tool_id}() needs {', '.join(repr(m) for m in missing)}, "
+        f"which {verb.params.get('over', 'the input')!r} does not have "
+        f"(it has {', '.join(sorted(available)) or 'no columns'})"
+    ]
 
 
 #: §3's rows column, as data: what each verb does to the input's row count.
@@ -1027,8 +1173,83 @@ ROWS_RULE: dict[str, str] = {
 }
 
 
+def predicted_columns(output: Output) -> set[str]:
+    """The column names a step's output will have, as far as is known.
+
+    A step that has run knows them exactly. A **staged** one knows only the
+    name of the payload column it is going to write — but that single name is
+    often enough to recognize a pattern, which is why inference may use it.
+
+    Validation may **not**: the prediction is a subset (a ``map`` also carries
+    its input's columns through), so rejecting against it would invent errors.
+    Inference uses predicted columns to *recognize*; ``check`` uses real ones
+    to *refuse*.
+    """
+    if not output.meta.get("staged"):
+        return set(output.data.columns)
+    payload = output.meta.get("payload")
+    return {payload} if payload else set()
+
+
+def infer_verb(fn: Callable, upstream: Any, literals: dict) -> tuple[str, str]:
+    """Pick the shape verb a tool most likely wants, and say why.
+
+    This is the "configure the iteration for me" behaviour, and it resolves
+    **at wiring time into a concrete verb** — never into a stored ``auto``
+    modifier. An `auto` that stayed in the data would be the one modifier whose
+    shape is unknowable before running, which is exactly the property staging,
+    serialization and the round-trip invariant all depend on. What gets stored
+    is an ordinary ``map`` or ``collapse``, indistinguishable from one you
+    typed, so the UI shows it selected and you can change it.
+
+    Resolving once also sidesteps the clobbering problem: an inferred verb is
+    never silently re-inferred later, so an edit cannot be overwritten.
+    """
+    columns: set[str] = set()
+    n_rows: int | None = None
+    if isinstance(upstream, Output):
+        columns = predicted_columns(upstream)
+        n_rows = upstream.meta.get("expected") if upstream.meta.get("staged") \
+            else len(upstream.data)
+    elif upstream is not None:
+        frame = rows(upstream)
+        columns, n_rows = set(frame.columns), len(frame)
+
+    try:
+        parameters = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        return "map", "could not read the tool's signature; assuming per row"
+
+    positional = [p for p in parameters
+                  if p.kind in (inspect.Parameter.POSITIONAL_ONLY,
+                                inspect.Parameter.POSITIONAL_OR_KEYWORD)]
+    needed = [p.name for p in positional
+              if p.default is inspect.Parameter.empty
+              and p.name not in literals]
+
+    # (acc, x) where the first value is not a column: that is a reducer.
+    if len(needed) >= 2 and needed[0] not in columns and needed[1] in columns:
+        return "collapse", (f"{needed[0]!r} is not a column but {needed[1]!r} is, "
+                            "so this reads as a reducer")
+
+    if inspect.signature(fn).return_annotation is bool:
+        return "filter", "it returns a bool per row, so keep the rows that pass"
+
+    if n_rows == 1:
+        return "map", "the input is a single row"
+
+    if needed and columns and not set(needed) & columns:
+        return "map", (f"none of {', '.join(map(repr, needed))} is a column yet — "
+                       "check the input")
+
+    if columns:
+        return "map", (f"{', '.join(repr(n) for n in needed) or 'the tool'} "
+                       f"comes from the input's columns, so apply it per row")
+    return "map", "applying it per row"
+
+
 def stage(operation: Operation, workflow: "Workflow | None" = None,
-          problems: tuple[str, ...] = (), step_id: str | None = None) -> Output:
+          problems: tuple[str, ...] = ()) -> Output:
     """The Output a step has before it runs — the slot, with what we know in it.
 
     An **invalid** operation stages as a single cell: it has no shape, because
@@ -1053,8 +1274,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
                   "expected": None, "rows_rule": None},
         )
 
-    known = (workflow._known_index(operation, step_id)
-             if workflow is not None else None)
+    known = workflow._known_index(operation) if workflow is not None else None
     n_in = None if known is None else len(known)
     rule = ROWS_RULE.get(kind)
 
@@ -1147,27 +1367,30 @@ class Workflow:
 
     def __init__(self) -> None:
         self.steps: dict[str, Step] = {}
-        #: Literal data a source step reads, keyed by step id. Kept **beside**
-        #: the Operations, never inside them: that is what lets the light
-        #: export be structure-only while the full export adds payloads.
-        self.inputs: dict[str, Any] = {}
 
     # ── declaring ────────────────────────────────────────────────────────
     def __setitem__(self, step_id: str, operation: Any) -> None:
         if not isinstance(operation, Operation):
-            # A bare value is a source step: store the payload, declare the
-            # Operation that reads it. `wf["raw"] = df` is the common case.
-            self.inputs[step_id] = operation
-            operation = Operation(tool_id="identity", fn=identity)[mod.source()]
+            # A bare value is a source step, and a source step's data **is its
+            # output** — it arrived with the declaration, so there is nothing
+            # to stage and nothing to compute. It is born completed. This is
+            # why a Workflow is only a list of Steps: literals have no separate
+            # home, because they were never anything but a step's output.
+            self.steps[step_id] = Step(
+                step_id,
+                Operation(tool_id="identity", fn=identity)[mod.source()],
+                source_(operation),
+            )
+            return
         problems = check(operation, self, step_id)
         self.steps[step_id] = Step(
-            step_id, operation, stage(operation, self, problems, step_id), problems
+            step_id, operation, stage(operation, self, problems), problems
         )
 
     def __getitem__(self, step_id: str) -> StepRef:
         if step_id not in self.steps:
             raise KeyError(f"no step {step_id!r}; defined so far: {list(self.steps)}")
-        return StepRef(step_id)
+        return StepRef(step_id, self)
 
     def __contains__(self, step_id: str) -> bool:
         return step_id in self.steps
@@ -1177,17 +1400,13 @@ class Workflow:
         return self.steps[step_id]
 
     # ── what a step reads ────────────────────────────────────────────────
-    def _known_index(self, operation: Operation,
-                     step_id: str | None = None) -> Sequence[Any] | None:
+    def _known_index(self, operation: Operation) -> Sequence[Any] | None:
         """The input's index, when known — enough to stage, short of running.
 
-        A source step's payload is known from declaration, and a staged step
-        already carries an index, so cardinality propagates down the chain
-        before anything has executed. That is §7's level 2/3 without a run.
+        A staged step already carries an index when its own input was known, so
+        cardinality propagates down the chain before anything has executed.
+        That is §7's level 2/3 without a run.
         """
-        if any(m.kind == "source" for m in operation.modifiers):
-            payload = self.inputs.get(step_id) if step_id is not None else None
-            return None if payload is None else rows(payload).index
         for modifier in operation.modifiers:
             over = modifier.params.get("over")
             if over is None:
@@ -1199,21 +1418,8 @@ class Workflow:
             return index if len(index) or not step.output.meta.get("staged") else None
         return None
 
-    def _input_for(self, operation: Operation,
-                   step_id: str | None = None) -> Any | None:
-        """What this operation will read, when that is already known.
-
-        A source step reads its stored payload — known from declaration, which
-        is why a source step stages with its cardinality already filled in. Any
-        other step reads an upstream Output, known only once that step has run.
-        """
-        if any(m.kind == "source" for m in operation.modifiers):
-            if step_id is not None:
-                return self.inputs.get(step_id)
-            for sid, step in self.steps.items():
-                if step.operation is operation:
-                    return self.inputs.get(sid)
-            return None
+    def _input_for(self, operation: Operation) -> Any | None:
+        """The upstream Output this operation reads, once that step has run."""
         for modifier in operation.modifiers:
             over = modifier.params.get("over")
             if over is None:
@@ -1252,6 +1458,17 @@ class Workflow:
             raise ValueError(
                 f"step {step_id!r} is invalid and cannot run: {step.problems[0]}"
             )
+        if step.operation.shape_verb and step.operation.shape_verb.kind == "source":
+            # A source step holds its data rather than computing it, so running
+            # one is either a no-op or a mistake — never a computation.
+            if step.output.meta.get("staged"):
+                raise ValueError(
+                    f"source step {step_id!r} has no data. Assign it: "
+                    f"wf[{step_id!r}] = <a frame, list or value>. (A light "
+                    "export carries no payloads, so a reloaded source step "
+                    "needs its data supplied again.)"
+                )
+            return step
         waiting = self.pending(step_id)
         if waiting:
             raise ValueError(
@@ -1259,9 +1476,7 @@ class Workflow:
                 f"Run {' then '.join(repr(w) for w in dict.fromkeys(waiting))} "
                 f"first, or call run_all()."
             )
-        step.output = step.operation.run(
-            self._input_for(step.operation, step_id), tools
-        )
+        step.output = step.operation.run(self._input_for(step.operation), tools)
         self._restage_after(step_id)
         return step
 
@@ -1306,8 +1521,7 @@ class Workflow:
                            for m in other.operation.modifiers):
                     continue
                 before = other.output.meta.get("expected")
-                other.output = stage(other.operation, self, other.problems,
-                                     other.step_id)
+                other.output = stage(other.operation, self, other.problems)
                 if other.output.meta.get("expected") != before:
                     wave.add(other.step_id)
             changed = wave
@@ -1347,9 +1561,13 @@ class Workflow:
         return json.dumps(self.to_dict())
 
     def to_session_dict(self) -> dict:
-        """**Full**: the light export plus the payloads — inputs and outputs."""
+        """**Full**: the light export plus every payload.
+
+        There is one payload map, not two. A source step's literal is simply
+        its own output, so it serializes through the same path as a computed
+        one — the steps define the inputs.
+        """
         blob = self.to_dict()
-        blob["inputs"] = {sid: _encode(value) for sid, value in self.inputs.items()}
         blob["outputs"] = {
             sid: _encode_output(st.output)
             for sid, st in self.steps.items()
@@ -1371,14 +1589,12 @@ class Workflow:
         declaring would have rejected.
         """
         workflow = cls()
-        for sid, encoded in (blob.get("inputs") or {}).items():
-            workflow.inputs[sid] = _decode(encoded)
         for entry in blob["steps"]:
             sid = entry["step_id"]
             operation = Operation.from_dict(entry["operation"], tools)
             problems = check(operation, workflow, sid)
             workflow.steps[sid] = Step(sid, operation,
-                                       stage(operation, workflow, problems, sid),
+                                       stage(operation, workflow, problems),
                                        problems)
         for sid, encoded in (blob.get("outputs") or {}).items():
             if sid in workflow.steps:
@@ -1435,11 +1651,11 @@ def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Calla
     table = {**BUILTIN_TOOLS, **tools}
     if operation.tool_id not in table:
         raise KeyError(f"unknown tool {operation.tool_id!r}; have {sorted(table)}")
-    fn = table[operation.tool_id]
-    if operation.arguments:
-        # Bound literals sit closest to the tool — inside every modifier, so a
-        # retry re-runs the same call and a map passes them to every item.
-        fn = _d_bind(fn, **operation.arguments)
+    # The adapter is always innermost: it is what turns a plain function into
+    # something a verb can drive, and it carries the bound literals inside
+    # every modifier, so a retry re-runs the same call and a map passes them to
+    # every item.
+    fn = _d_apply(table[operation.tool_id], **operation.arguments)
     for modifier in operation.modifiers:               # innermost first
         factory = DECORATORS.get(modifier.kind)
         if factory is None:

@@ -757,6 +757,12 @@ If step 2 feels wrong in practice, we learned it cheaply and nothing is broken.
   ledger**? A step where 3 of 100 rows failed is neither "completed" nor
   "failed" — the rollup rule needs stating.
 - Tool versioning: source hash or manual `version=`?
+- ~~An `auto` modifier that picks the iteration for you.~~ **Settled: it is a
+  resolver, not a modifier.** `score(wf["raw"])` infers the verb at wiring and
+  stores it **concretely**. A stored `auto` would be the only modifier whose
+  shape is unknowable before running — no rows rule, no staged claim, and a
+  light export that could resolve differently on reload. Resolving once also
+  means an inferred verb can never silently overwrite one the user chose.
 - ~~Are shape verbs modifiers of the tool, or is the tool an argument of the
   orchestrator?~~ **Settled: modifiers of the tool.** Today's engine has it
   inverted — `orchestration-map` is the tool that runs and your function is a
@@ -772,11 +778,13 @@ If step 2 feels wrong in practice, we learned it cheaply and nothing is broken.
   indexed by column while `data` is indexed by row — different index *spaces*,
   which makes `view()`'s join produce NaN rather than an error. `axis="columns"`
   currently raises rather than shipping that silently.
-- **Still open: reference *type* checking at declaration.** `check()` validates
-  that `over=` names an existing, valid, non-circular step, but not that its
-  output *fits* the reader. That needs output schemas; `validation.py`
-  (literals) and `inference.effective_output` (references) are both written and
-  both wired only to the run path.
+- ~~**Reference checking at declaration.**~~ **Half settled.** Once a tool
+  declares the values it needs by name rather than taking a row dict, the
+  *columns* an upstream must supply are checkable at declaration with no schema
+  machinery at all — the prototype does this. What remains open is column
+  *types*: matching dtypes to parameter annotations. `validation.py` (literals)
+  and `inference.effective_output` (reference shapes) are both written and both
+  still wired only to the engine's run path.
 - Does `sweep` take parameter lists directly, or a reference to a grid of
   parameter rows? The second composes better; the first reads better.
 - Nested fan-out (a set of tables, then each table's rows): one flat grid with

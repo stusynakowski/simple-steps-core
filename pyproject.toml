@@ -44,6 +44,7 @@ api = [
 ]
 dev = [
   "pytest>=8.0",
+  "pytest-cov>=5.0",
   "ruff>=0.6",
   "build",
   "twine"
@@ -61,3 +62,24 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+# Coverage is opt-in (`pytest --cov`) rather than in addopts, so the ordinary
+# test loop stays fast. See scripts/run_checks.sh for the full gate.
+[tool.coverage.run]
+source = ["src/simple_steps_core"]
+branch = true
+omit = [
+  # Vendored frontend assets and the Streamlit entry points, which need a
+  # running server to exercise and would report 0% and hide real regressions.
+  "*/streamlit/components/*/frontend/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+  "@(abc\\.)?abstractmethod",
+]
