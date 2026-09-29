@@ -1,5 +1,10 @@
 # Integration Guide
 
+> **Status: describes the engine as it is today.** The object model is converging
+> on a single modifier stack — see [object-model.md](object-model.md) for what is
+> changing and [shape-algebra.md](shape-algebra.md) for why. The engine has not
+> moved yet, so everything here remains accurate.
+
 How to embed `simple-steps-core` into a backend service (e.g. behind a React
 API) where end users author and run their own workflows.
 

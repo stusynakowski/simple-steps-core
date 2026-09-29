@@ -1,8 +1,84 @@
 # Orchestration vs Execution — the isolation rule
 
+> **Status: implemented, and being superseded — but the rule survives.**
+> The *split* between shape and conduct is right and is kept. What changes is
+> that it stops being **two config objects** and becomes **two classes of
+> modifier in one ordered stack** on the Operation. Read
+> [§0](#0-what-this-becomes) first if you are working on the new model;
+> everything after it describes the engine as it is today and remains accurate.
+
 **Status: implemented.** `OrchestrationConfig` is shape-only and
 `StepExecutionConfig` owns conduct. The two share **zero fields**, enforced by a
 test (`test_orchestration_and_execution_share_no_fields`).
+
+---
+
+## 0. What this becomes
+
+Both configs dissolve into `Operation.modifiers`, an ordered list, each entry
+tagged with which class it belongs to:
+
+```python
+score[mod.map(over="step1", concurrency=8), mod.retry(times=2)]
+#      └─ cls="shape" ─────────────────────┘  └─ cls="execution" ─┘
+```
+
+| this document's term | becomes |
+|---|---|
+| `OrchestrationConfig` | the **one shape verb** in the stack |
+| `StepExecutionConfig` | the **execution modifiers** in the same stack |
+| `mode="single"` | no shape verb at all |
+| `mode="map"`, `over=` | `mod.map(over=...)` |
+| `retries=`, `concurrency=` | `mod.retry(times=...)`, a param on the shape verb |
+| `extra="forbid"` catching a misplaced field | `mod.<kind>` rejecting an unknown kind at the call site |
+
+### What survives, and why it has to
+
+**The disjointness.** Shape and conduct still share zero fields — the class is
+now a field (`cls`) on the modifier rather than a choice of object. It is
+load-bearing, not bookkeeping:
+
+| class | does to the signature it wraps | staging |
+|---|---|---|
+| `shape` | **lifts** it: `(row → b)` becomes `(source → Output)` | must fold it |
+| `execution` | **preserves** it: `(row → b)` stays `(row → b)` | ignores it |
+
+Because execution modifiers cannot change shape, a step's shape is computable
+from its stack before anything runs. That is what makes staging reactive.
+
+**No cascade, no precedence, no `resolved_config()`.** Unchanged. A modifier is
+local to its step, exactly as a config was.
+
+**The unit-of-work rule**, restated: the unit is what the enclosing shape verb
+makes it. `retry` inside `map` retries an item; `retry` outside `map` retries
+the fan-out.
+
+### What does *not* survive
+
+**"The mode decides the unit for you."** Today's rule — *`retries` means "retry
+the unit", the whole call when `single`, one item when fanned out* — reads as a
+convenience but is really a limitation. It means you cannot say "retry the whole
+fan-out": `retries` is an argument *of* the orchestrator call, so it is
+structurally inside it, and an argument cannot sit outside its own function.
+
+| composition | today |
+|---|---|
+| `map(retry(f))` — retry each item | the only thing sayable |
+| `retry(map(f))` — retry the fan-out | **unsayable** |
+| `map(timeout(f, 60))` — 60s per item | sayable |
+| `timeout(map(f), 60)` — 60s for the step | **unsayable** |
+
+An ordered stack makes the choice explicit instead of implied. The cost is that
+**order becomes significant**, which is a real thing to learn — but it is
+significant either way; today one of the two orders is simply unavailable.
+
+**`test_orchestration_and_execution_share_no_fields` needs a successor.** The
+invariant it protects is worth keeping; the thing it inspects will not exist.
+The replacement asserts that every entry in the modifier vocabulary declares
+exactly one `cls`, and that no shape verb and execution modifier share a
+parameter name.
+
+---
 
 | Config | Owns | In one sentence |
 |---|---|---|

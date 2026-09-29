@@ -1,8 +1,11 @@
 # Shape algebra — the target model
 
-**Status: agreed design, not yet built.** [object-model.md](object-model.md)
-describes what exists today; this describes what we are moving to and why.
-Where they disagree, this document is the intent and that one is the present.
+**Status: agreed design; partly built in the prototype, not in the engine.**
+[object-model.md](object-model.md) describes what the engine holds today and
+marks each object that is changing; [grid-model.md](grid-model.md) describes
+what is built of this design in `grid.py`. Where they disagree, this document is
+the intent, object-model is the engine's present, and grid-model is the
+prototype's present.
 
 The goal in one sentence: **a spreadsheet for expensive, impure, failable
 Python functions.** Excel can recompute on every keystroke because its
@@ -65,8 +68,9 @@ Not "a tool plus two config blobs" — **a tool with an ordered stack of
 higher-order functions applied to it**, declared when you wire the step:
 
 ```python
-wf.add(map_over(retry(timeout("score", 30), times=3),
-                "step2", over="step1", concurrency=8))
+wf["step2"] = score[mod.map(over="step1", concurrency=8),
+                    mod.retry(times=3),
+                    mod.timeout(seconds=30)]
 ```
 
 **Order is semantics, not style.** These are different runs:
@@ -93,11 +97,16 @@ when `single`, one item when fanned out"* — the mode decides for you, and
 Staged shape is the **fold of the shape verbs in stack order** — still pure
 structure, still computable before anything runs.
 
-**At most one shape verb per step.** Nothing in the algebra forbids
-`filter(map(f))`, but a step is the unit the user sees, addresses and re-drives.
-Two shape changes inside one step means an intermediate grid that has no cell
-address and cannot be inspected or re-run. Keep every shape change visible as
-its own column.
+**At most one shape verb per step — proposed, not settled (§11).** Nothing in
+the algebra forbids `filter(map(f))`, but a step is the unit the user sees,
+addresses and re-drives. Two shape changes inside one step means an intermediate
+grid that has no cell address and cannot be inspected or re-run. The argument
+for keeping every shape change visible as its own column is strong.
+
+Against it: the prototype permits several and folds them, and a spreadsheet
+formula `=SUM(FILTER(...))` is the everyday counter-example — nesting inside one
+cell is normal and readable. This gates how `inference.effective_output`
+composes, so it needs deciding rather than assuming.
 
 #### Modifiers are data
 
@@ -115,15 +124,24 @@ Operation(
 )
 ```
 
-**Stored innermost-first — plain nested-call evaluation order.** These are
-ordinary nested function calls made when you wire the step, *not* decorators on
-the tool: `map_over(retry("score", times=2), over="step1")` evaluates `retry`
-first, which returns an `Operation`, and `map_over` then appends to its stack.
+**Stored innermost-first**, which is the order the layers are *applied* — you
+must build the inside before the outside. The bracket list is written the other
+way, outermost first, exactly as stacked `@` lines read:
 
-So the list `[retry, map]` means `retry` sits closest to the tool and runs
-**per item**; `[map, retry]` would wrap the whole fan-out. Nothing attaches to
-the function declaration — that is the point, since the same tool must be
-usable `once` in one step and `map` in another.
+```python
+score[mod.map(over="step1"), mod.retry(times=2)]   # written: map, retry
+#  →  modifiers == [retry, map]                    # stored:  retry, map
+```
+
+So the stored list `[retry, map]` means `retry` sits closest to the tool and
+runs **per item**; `[map, retry]` would wrap the whole fan-out. Both orders are
+named — `modifiers` (stored, what the engine folds) and `layers` (written, what
+a user sees) — so a repr or an editor never shows the reverse of the source that
+produced it.
+
+Nothing attaches to the function declaration. That is the point, and it is why
+brackets are safe where `@` is not: the same tool must be usable bare in one
+step and mapped in another, which a decorator fixed at import cannot do (§6.4).
 
 Keeping the stack as descriptors rather than closures is what keeps staging,
 serialization and UI construction alive (§6). And it is what
@@ -196,6 +214,16 @@ that is the "shape of the output depends on the shape of the input" part:
 | `collapse` | n → 1 (or k with `by=`) | payload + group keys | `summarise` |
 | `group` | n → n | input columns **+ key column** | `group_by` |
 | `sweep` | 1 → n×m | one column **per swept parameter** + payload | `expand_grid` |
+| `source` | value → n | the value's own columns | — |
+
+`source` is the verb a chain starts with. Making it a verb rather than a
+special case is what closes the algebra: **every** step is then (verb, tool,
+arguments), the first one included, and its tool is `identity` (§6.3).
+
+The rows column above is not prose — it is stored as `ROWS_RULE`, and staging
+folds it. That is what lets a staged claim be honest: `map` can promise *n*
+cells, `filter` only *at most n*, `collapse` exactly one, and `expand` cannot
+know (§7).
 
 Naming note: `expand` is tidyr's `unnest` and `sweep` is `crossing`. Only
 `map`, `filter` and `group` match dplyr's names directly. We keep our names.
@@ -306,7 +334,12 @@ These are settled and stay as they are.
 | **`Modifier`** | one entry in an Operation's stack: `kind` + `params`, ordered |
 | **fingerprint** | a ledger column: what makes staleness computable |
 | **graph derivation** | a *function*, not a stored object (§7) |
-| **HOF constructors** | `once(...)`, `map_over(...)`, `sweep_over(...)` — build `Operation`s |
+| **`ModifierKind`** | one entry in the modifier vocabulary: name, class, applier — the single place a kind is declared |
+| **`Step`** | `Operation` + `Output`, both present from declaration (§7) |
+| **`Workflow`** | ordered `Step`s, plus the payloads source steps read |
+| **`check()`** | everything wrong with an Operation that is knowable without running it — returns problems, never raises |
+| **`stage()`** | the `Output` a step has before it runs |
+| **`identity`** | the default tool: what closes the algebra (§6.3) |
 
 ### 4.4 Retired
 
@@ -367,7 +400,7 @@ input's index.** That gives three tiers rather than a binary choice:
 |---|---|
 | `map` / `group` / `sweep` | indexes **coincide** — the invariant holds exactly |
 | `filter` | ledger **⊇** data, same index space — `join` still finds every data row |
-| `expand` / `collapse` | different spaces — data carries a **`source`** column naming its unit |
+| `expand` / `collapse` | different spaces — the ledger carries a **`unit`** column naming its source row |
 
 `filter` is the case that decides it. Four predicates run, two rows survive;
 a unit-of-work ledger still answers *what happened to the other two*:
@@ -379,8 +412,9 @@ a unit-of-work ledger still answers *what happened to the other two*:
 ```
 
 Mirroring output rows instead would buy strict 1:1 everywhere at the cost of
-that record — for the one verb whose job is dropping things. `source` is the
+that record — for the one verb whose job is dropping things. `unit` is the
 general link; for the 1:1 verbs it *is* the index, so it costs nothing there.
+(It is named `unit`, not `source`, because `source` is now a verb.)
 
 `Output` replaces `Data` and `StepOutput`, and absorbs `StepError`. The two-layer indirection survives unchanged:
 `ref` points into `SessionContext.outputs`, and `data` is the inline copy —
@@ -408,6 +442,7 @@ Rule of thumb: *would you ever group or filter your analysis by it?* → data.
 | the produced object | `error` |
 | swept parameters | `attempts` |
 | group keys | `started_at` / `ended_at` |
+| | `unit` (which input row this records) |
 | | `fingerprint` |
 
 ### Referencing
@@ -428,16 +463,16 @@ Tools are plain functions; **orchestration is declared when the step is wired,
 never on the function.** The same tool must be usable `once` in one step and
 `map` in another.
 
-Nested constructor calls give the functional call site — nothing attached to
-the function:
+Decorating the tool at the wiring site gives this, with nothing attached to the
+function:
 
 ```python
-wf.add(map_over(retry("score", times=2), "step2", over="step1", concurrency=8))
+wf["step2"] = score[mod.map(over="step1", concurrency=8), mod.retry(times=2)]
 ```
 
-Each constructor takes a tool id **or an Operation** and returns an `Operation`
-with one more `Modifier` appended — so they compose, and the stack records the
-order you wrote. They return **data, not closures**. This is not negotiable, because three things die with closures:
+Each layer appends one `Modifier` to the stack, so they compose and the stack
+records the order you wrote. They return **data, not closures**. This is not
+negotiable, because four things die with closures:
 
 | | config as data | closure |
 |---|---|---|
@@ -449,30 +484,56 @@ order you wrote. They return **data, not closures**. This is not negotiable, bec
 Reactive staging is the feature we care most about, and it is the one that
 requires the orchestration to be readable before anything executes.
 
-### 6.1 Three surfaces, one Operation
+### 6.1 One surface: parens run, brackets decorate
 
-Nested calls are not the only readable spelling, and the prototype
-(`simple_steps_core/grid.py`) offers three. **All three build the identical
-`Operation` data** — they differ only in how the stack reads on the page:
+The prototype (`simple_steps_core/grid.py`) went through three spellings of the
+modifier stack — method chaining, a vertical `stack(...)` call, and the
+brackets — and **kept only the brackets.** Three ways to write one thing meant
+the verb list was spelled out in nine places; adding `sweep` had to touch most
+of them. One spelling is the point, not a preference.
 
-```python
-score.retry(2).map(over=step1)                       # chained — execution order
-score[mod.map(over=step1), mod.retry(times=2)]       # bracket — decorator order
-stack(mod.map(over=step1), mod.retry(times=2), score)  # vertical — one per line
-```
-
-All three are `map(retry(score))`: **retry runs per item**, and the stored
-stack is `[retry, map]`, innermost-first as §1.1 requires.
-
-The bracket form subscripts the tool with its modifier list, so it reads
-exactly like the stacked `@` lines it mimics — outermost at the top, applied
-bottom-up — and it stays a one-liner at the call site:
+There are exactly two syntaxes, and one rule covers both:
 
 ```python
-wf["scored"] = score[mod.map(over=videos, concurrency=8), mod.retry(times=2)]
+score({"n": 3})                                   # parens RUN — a plain call
+score[mod.map(over=step1), mod.retry(times=2)]    # brackets DECORATE — data
+score.bind(weight=2)[mod.map(over=step1)](rows)   # bind, decorate, run
 ```
 
-### 6.2 Brackets are decoration at run time
+The bracket list reads exactly like the stacked `@` lines it mimics — outermost
+at the top, applied bottom-up — so the example above is `map(retry(score))` and
+**retry runs per item**. The stored stack is `[retry, map]`, innermost-first as
+§1.1 requires.
+
+`bind` exists because literals are not modifiers: they are the arguments fixed
+when the step was wired, applied *innermost* — inside every modifier, so a
+retry re-runs the same call and a map passes them to every item.
+
+Retired, deliberately: `Operation.map()`-style chaining, `stack(...)`, and a
+`Pipeline` class. Also retired is `Output.map(fn)`, which *ran* a verb
+immediately and so gave `.map` two opposite meanings depending on the receiver.
+The eager form is just decorate-then-call: `score[mod.map()](grid(df))`.
+
+### 6.3 `identity`: the tool that closes the algebra
+
+Every step is a verb applied to a tool. Steps that only *reshape* have no tool
+of their own, so they apply a verb to **`identity`** — and then need no special
+case anywhere: `expand` over it flattens a level, `filter` over it keeps what is
+already truthy, `source` over it lifts a literal.
+
+It returns **the payload, not the row.** A tool receives a whole row
+(`{"n": 1, "value": [2, 3]}`), but the reshaping verbs need the *cell* the
+previous step produced. Returning the row would make `filter`+identity keep
+everything (a non-empty dict is truthy) and `expand`+identity flatten nothing (a
+dict is not unpacked) — both silently. So the payload is resolved by
+convention: an explicit `column`, else `value`, else the only column, else the
+whole row. The last case is the honest limit: after `map(name="score")` no
+convention can know, so bind it — `op("identity", column="score")`.
+
+`collapse` is the exception: it needs a two-argument reducer, so identity has
+nothing to mean there.
+
+### 6.4 Brackets are decoration at run time
 
 The right way to read `score[mod.map(...), mod.retry(...)]` is as a **runtime
 decoration of the tool**: it changes what `score` does, before any data is
@@ -555,6 +616,18 @@ stale ──► running ──► …
 
 `stale` is distinct from `staged` because there *is* an old value: the user can
 look at last run's answer while knowing it is out of date.
+
+### An invalid step is a single cell
+
+A step whose Operation cannot work — a mistyped argument, a dangling or
+circular `over`, an upstream that is itself invalid — still **exists**, carrying
+its problems. Reactive editing needs that: you type a wrong argument and see it
+flagged without the workflow rejecting the keystroke. Validity is a property of
+the Step, not a precondition for building one, so `check()` returns problems and
+never raises. `run()` is what refuses.
+
+Such a step stages as **one cell**, status `invalid`: it has no shape, because
+the thing that would have given it one is what is broken.
 
 ### Staging sharpens in three levels
 
@@ -656,10 +729,12 @@ dtype, so there is no vectorization over the values. We are using pandas as a
 
 Not a big-bang refactor. Each step leaves the system working.
 
-1. **This document.** Cheapest place to disagree.
-2. **`sweep`, tidy-native.** It is new, so nothing breaks, and it exercises the
-   entire stack: grid output, params as columns, an object payload column, the
-   renderer, the codec. The honest test of whether this holds up.
+1. ~~**This document.**~~ **Done.** Cheapest place to disagree.
+2. ~~**`sweep`, tidy-native.**~~ **Done in the prototype** (`grid.py`), along
+   with the rest of the verb table, the modifier stack, `Step`/`Workflow`,
+   declaration-time staging and validation, and both export modes. Nothing in
+   the engine has moved yet — that is step 3 onward. See
+   [grid-model.md](grid-model.md) for what exists and how it is arranged.
 3. **`map` → mutate**, with `MapResult` coexisting during migration.
 4. **`group` / `collapse`** to key-column semantics.
 5. **Ledger + fingerprints + `stale`**, once the graph derivation lands.
@@ -682,6 +757,26 @@ If step 2 feels wrong in practice, we learned it cheaply and nothing is broken.
   ledger**? A step where 3 of 100 rows failed is neither "completed" nor
   "failed" — the rollup rule needs stating.
 - Tool versioning: source hash or manual `version=`?
+- ~~Are shape verbs modifiers of the tool, or is the tool an argument of the
+  orchestrator?~~ **Settled: modifiers of the tool.** Today's engine has it
+  inverted — `orchestration-map` is the tool that runs and your function is a
+  string argument — which is the mechanical reason `retry(map(f))` is
+  unsayable: `retries` is an argument *of* map, and an argument cannot sit
+  outside its own function.
+- **Still open: one shape verb per step, or several?** §1.1 says at most one;
+  the prototype permits several and folds them. The bracket form makes
+  `score[mod.map(...), mod.filter(...)]` easy to write, so this needs deciding —
+  it gates how `inference.effective_output` composes.
+- **Still open: row/column duality.** `colmap` and friends are wanted later.
+  The blocker is §5: a column verb's unit of work is a column, so its ledger is
+  indexed by column while `data` is indexed by row — different index *spaces*,
+  which makes `view()`'s join produce NaN rather than an error. `axis="columns"`
+  currently raises rather than shipping that silently.
+- **Still open: reference *type* checking at declaration.** `check()` validates
+  that `over=` names an existing, valid, non-circular step, but not that its
+  output *fits* the reader. That needs output schemas; `validation.py`
+  (literals) and `inference.effective_output` (references) are both written and
+  both wired only to the run path.
 - Does `sweep` take parameter lists directly, or a reference to a grid of
   parameter rows? The second composes better; the first reads better.
 - Nested fan-out (a set of tables, then each table's rows): one flat grid with

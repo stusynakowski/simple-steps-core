@@ -1,5 +1,10 @@
 # Simple Steps — Execution Model (the "run" story)
 
+> **Status: describes the engine as it is today.** The object model is converging
+> on a single modifier stack — see [object-model.md](object-model.md) for what is
+> changing and [shape-algebra.md](shape-algebra.md) for why. The engine has not
+> moved yet, so everything here remains accurate.
+
 This is the companion to [object-model.md](object-model.md). That doc is about
 the **nouns** you hold and inspect. This one is about the **verb**: what happens
 when you press *run*. The engine and its helpers are a **separate component** —

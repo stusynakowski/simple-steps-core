@@ -1,5 +1,10 @@
 # Integrating simple-steps-core into the `simple-steps` app
 
+> **Status: describes the engine as it is today.** The object model is converging
+> on a single modifier stack — see [object-model.md](object-model.md) for what is
+> changing and [shape-algebra.md](shape-algebra.md) for why. The engine has not
+> moved yet, so everything here remains accurate.
+
 This guide shows how to use `simple-steps-core` as the backend for the
 `simple-steps` application — a React frontend plus an optional **LangGraph
 agent** that helps users create and manage workflow steps.

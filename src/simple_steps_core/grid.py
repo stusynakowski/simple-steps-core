@@ -37,11 +37,11 @@ __all__ = [
     "expand_", "sweep_", "source_", "identity", "BUILTIN_TOOLS",
     "op", "Modifier", "Operation",
     "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "stage",
-    "ROWS_RULE",
-    "stack", "mod",
+    "ROWS_RULE", "PayloadError",
+
+    "mod",
     "DECORATORS", "MODIFIERS", "ModifierKind", "SHAPE_VERBS", "is_shape",
-    "compile_operation", "Pipeline", "Verb",
-    "Map", "Filter", "Expand", "Group", "Collapse",
+    "compile_operation",
     "PAYLOAD", "LEDGER_COLUMNS",
 ]
 
@@ -49,7 +49,7 @@ __all__ = [
 PAYLOAD = "value"
 
 #: Every ledger has exactly these columns, so the UI can rely on them.
-LEDGER_COLUMNS = ("status", "error", "attempts", "seconds", "source")
+LEDGER_COLUMNS = ("status", "error", "attempts", "seconds", "unit")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -104,30 +104,22 @@ class Output:
         return len(self.data)
 
     @property
-    def shape(self) -> str:
-        return self.meta.get("shape", "grid")
+    def shape(self) -> tuple[int, int]:
+        """Rows x columns — the same thing ``DataFrame.shape`` means."""
+        return self.data.shape
+
+    @property
+    def form(self) -> str:
+        """``"scalar"``, ``"column"`` or ``"grid"`` — the cardinality class.
+
+        Distinct from :attr:`shape`, which is the actual (rows, columns). The
+        form is what a step's mode *promises*; the shape is what it holds.
+        """
+        return self.meta.get("form", "grid")
 
     def progress(self) -> str:
         done = int((self.ledger["status"] == "completed").sum())
         return f"{done}/{len(self.ledger)}"
-
-    # ── chaining: the same verbs, left to right ──────────────────────────
-    # These read in execution order, which nested calls cannot. Each returns a
-    # new Output, so nothing mutates and any intermediate stays inspectable.
-    def map(self, fn, **kw) -> "Output":
-        return map_(self, fn, **kw)
-
-    def filter(self, fn, **kw) -> "Output":
-        return filter_(self, fn, **kw)
-
-    def group(self, fn, **kw) -> "Output":
-        return group_(self, fn, **kw)
-
-    def collapse(self, fn, **kw) -> "Output":
-        return collapse_(self, fn, **kw)
-
-    def expand(self, fn, **kw) -> "Output":
-        return expand_(self, fn, **kw)
 
     def __repr__(self) -> str:
         verb = self.meta.get("verb", "?")
@@ -279,7 +271,7 @@ def map_(source: Any, fn: Callable, *, name: str = PAYLOAD,
     data = frame.copy()
     data[name] = values
     return Output(data=data, ledger=_ledger(records, frame.index),
-                  meta={"verb": "map", "shape": "column", "payload": name,
+                  meta={"verb": "map", "form": "column", "payload": name,
                         "n_in": len(frame)})
 
 
@@ -303,7 +295,7 @@ def filter_(source: Any, fn: Callable, *, retries: int = 0,
     ledger["kept"] = keep
     data = frame[pd.Series(keep, index=frame.index)]
     return Output(data=data, ledger=ledger,
-                  meta={"verb": "filter", "shape": "column",
+                  meta={"verb": "filter", "form": "column",
                         "payload": None, "n_in": len(frame),
                         "n_dropped": len(frame) - len(data)})
 
@@ -324,7 +316,7 @@ def group_(source: Any, fn: Callable, *, name: str = "group",
     data = frame.copy()
     data[name] = keys
     return Output(data=data, ledger=_ledger(records, frame.index),
-                  meta={"verb": "group", "shape": "column", "payload": name,
+                  meta={"verb": "group", "form": "column", "payload": name,
                         "key": name, "n_in": len(frame)})
 
 
@@ -357,14 +349,14 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
         out_rows.append(row_out)
         records.append({"status": status, "error": error, "attempts": 1,
                         "seconds": round(time.perf_counter() - started, 6),
-                        "source": list(chunk.index)})
+                        "unit": list(chunk.index)})
         index.append(position)
 
     data = pd.DataFrame(out_rows, index=index)
     if by is not None:                       # key first reads better
         data = data[[by, name]]
     return Output(data=data, ledger=_ledger(records, index),
-                  meta={"verb": "collapse", "shape": "scalar" if by is None
+                  meta={"verb": "collapse", "form": "scalar" if by is None
                         else "column", "payload": name, "by": by,
                         "n_in": len(frame)})
 
@@ -382,7 +374,7 @@ def expand_(source: Any, fn: Callable, *, name: str = PAYLOAD,
         arg = _as_arg(row)
         produced, record = _call(fn, arg, retries)
         if record["status"] != "completed":
-            records.append({**record, "source": index})
+            records.append({**record, "unit": index})
             out_rows.append({**arg, name: None})
             continue
         items = (list(produced)
@@ -391,11 +383,11 @@ def expand_(source: Any, fn: Callable, *, name: str = PAYLOAD,
                  else [produced])
         for item in items:
             out_rows.append({**arg, name: item})
-            records.append({**record, "source": index})
+            records.append({**record, "unit": index})
 
     data = pd.DataFrame(out_rows).reset_index(drop=True)
     return Output(data=data, ledger=_ledger(records, data.index),
-                  meta={"verb": "expand", "shape": "column", "payload": name,
+                  meta={"verb": "expand", "form": "column", "payload": name,
                         "n_in": len(frame)})
 
 
@@ -424,7 +416,7 @@ def sweep_(fn: Callable, *, name: str = PAYLOAD, retries: int = 0,
     data = pd.DataFrame(out_rows)
     grid_shape = tuple(len(params[k]) for k in names)
     return Output(data=data, ledger=_ledger(records, data.index),
-                  meta={"verb": "sweep", "shape": "grid", "payload": name,
+                  meta={"verb": "sweep", "form": "grid", "payload": name,
                         "params": names, "grid": grid_shape,
                         "n_in": len(combos)})
 
@@ -432,14 +424,14 @@ def sweep_(fn: Callable, *, name: str = PAYLOAD, retries: int = 0,
 def grid(value: Any) -> Output:
     """Lift any value into an Output so a chain can start from it.
 
-    ``grid(df).map(score).filter(big)`` — the source step of a pipeline.
+    ``score[mod.map()](grid(df))`` — how a chain begins.
     """
     frame = rows(value)
     return Output(
         data=frame,
         ledger=_ledger([{"status": "completed", "error": None, "attempts": 1,
                          "seconds": 0.0} for _ in range(len(frame))], frame.index),
-        meta={"verb": "source", "shape": "column", "payload": None,
+        meta={"verb": "source", "form": "column", "payload": None,
               "n_in": len(frame)},
     )
 
@@ -623,12 +615,13 @@ class Modifier:
 class Operation:
     """One tool plus an ordered stack of modifiers — **data, not closures**.
 
-    Built by chaining, which reads in application order: the first modifier
-    added sits closest to the tool. ``op("score").retry(2).map(over="step1")``
-    is the same composition as ``map(retry(score))`` — retry runs per item.
+    Built by decorating: ``score[mod.map(over="step1"), mod.retry(times=2)]``
+    is ``map(retry(score))`` — retry runs per item. The list reads outermost
+    first, like stacked ``@`` lines; :attr:`modifiers` stores it innermost
+    first (§1.1), and :attr:`layers` gives it back in written order.
     """
 
-    tool: str
+    tool_id: str
     modifiers: tuple[Modifier, ...] = ()
     arguments: dict = field(default_factory=dict)
     #: The undecorated function, when this came from a ``@tool`` handle — so a
@@ -642,32 +635,13 @@ class Operation:
         # Dereference here rather than in each caller: this is the one place
         # every modifier passes through, so a StepRef can never survive into
         # stored data as an object.
-        return Operation(self.tool,
+        return Operation(self.tool_id,
                          self.modifiers + (Modifier(kind, _deref(params)),),
                          self.arguments,
                          self.fn)
 
-    # execution modifiers (shape-preserving)
-    def retry(self, times: int) -> "Operation": return self._add("retry", times=times)
-    def timeout(self, seconds: float) -> "Operation": return self._add("timeout", seconds=seconds)
-    def cache(self, on: bool = True) -> "Operation": return self._add("cache", on=on)
-
-    # shape verbs (at most one — see docs/shape-algebra.md §1.1)
-    def map(self, **kw) -> "Operation": return self._shape("map", **kw)
-    def filter(self, **kw) -> "Operation": return self._shape("filter", **kw)
-    def group(self, **kw) -> "Operation": return self._shape("group", **kw)
-    def collapse(self, **kw) -> "Operation": return self._shape("collapse", **kw)
-    def expand(self, **kw) -> "Operation": return self._shape("expand", **kw)
-    def sweep(self, **kw) -> "Operation": return self._shape("sweep", **kw)
-
-    def _shape(self, kind: str, **params) -> "Operation":
-        # A step may chain several shape verbs. Like a spreadsheet formula
-        # `=SUM(FILTER(...))`, the nesting lives inside one cell; the step's
-        # shape is the fold of them all.
-        return self._add(kind, **params)
-
     def __getitem__(self, modifiers: Any) -> "Operation":
-        """``score[mod.map(over=videos), mod.retry(times=2)]`` — the bracket form.
+        """``score[mod.map(over=videos), mod.retry(times=2)]`` — decorate.
 
         Reads top-to-bottom like stacked ``@`` lines (outermost first) and is
         applied bottom-up, so the **last** layer listed sits closest to the
@@ -712,6 +686,40 @@ class Operation:
         verbs = self.shape_verbs
         return verbs[-1] if verbs else None
 
+    def bind(self, **literals) -> "Operation":
+        """Add bound literals, returning a new Operation — closed, like the rest."""
+        return Operation(self.tool_id, self.modifiers,
+                         {**self.arguments, **_deref(literals)}, self.fn)
+
+    # ── as plain data (what the light export carries) ────────────────────
+    def to_dict(self) -> dict:
+        """The Operation as JSON-safe data. The carried function is **not** in it.
+
+        This is the whole point of storing modifiers as descriptors: a step's
+        definition is a few strings and numbers, so exporting a workflow costs
+        nothing and does not drag payloads along.
+        """
+        return {
+            "tool_id": self.tool_id,
+            "arguments": dict(self.arguments),
+            "modifiers": [{"kind": m.kind, "params": dict(m.params)}
+                          for m in self.modifiers],
+        }
+
+    @classmethod
+    def from_dict(cls, blob: dict, tools: dict[str, Callable] | None = None
+                  ) -> "Operation":
+        """Rebuild an Operation from :meth:`to_dict`, re-attaching its function."""
+        table = {**BUILTIN_TOOLS, **(tools or {})}
+        fn = table.get(blob["tool_id"])
+        return cls(
+            tool_id=blob["tool_id"],
+            modifiers=tuple(Modifier(m["kind"], dict(m["params"]))
+                            for m in blob["modifiers"]),
+            arguments=dict(blob.get("arguments") or {}),
+            fn=fn.fn if isinstance(fn, ToolHandle) else fn,
+        )
+
     # ── the other half: hand the decorated tool some data ────────────────
     def __call__(self, source: Any) -> Any:
         """Apply the decorated tool to actual data — ``score[...](videos)``.
@@ -732,11 +740,12 @@ class Operation:
         """
         table = {**BUILTIN_TOOLS, **(tools or {})}
         if self.fn is not None:
-            table.setdefault(self.tool, self.fn)
-        if self.tool not in table:
+            table.setdefault(self.tool_id, self.fn)
+        if self.tool_id not in table:
             raise KeyError(
-                f"cannot run {self.tool!r}: this Operation names its tool by id, "
-                f"so pass the function — run(source, tools={{{self.tool!r}: fn}}). "
+                f"cannot run {self.tool_id!r}: this Operation names its tool "
+                f"by id, so pass the function — "
+                f"run(source, tools={{{self.tool_id!r}: fn}}). "
                 "Operations built from a @tool handle carry it already."
             )
         return compile_operation(self, table)(source)
@@ -746,12 +755,12 @@ class Operation:
         # so a repr can be compared against the source that produced it. The
         # tool comes last because that is what the layers close over.
         stack = "".join(f"{m!r} ∘ " for m in self.layers)
-        return f"<Operation {stack}{self.tool}>"
+        return f"<Operation {stack}{self.tool_id}>"
 
 
-def op(tool: str, **arguments) -> Operation:
-    """Start building an Operation for *tool*."""
-    return Operation(tool=tool, arguments=arguments)
+def op(tool_id: str, **arguments) -> Operation:
+    """Start building an Operation for the tool named *tool_id*."""
+    return Operation(tool_id=tool_id, arguments=arguments)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -790,10 +799,16 @@ def _deref(value: Any) -> Any:
 
 
 class ToolHandle:
-    """What ``@tool`` returns: the function, plus the chain constructors.
+    """What ``@tool`` returns: the plain function, plus a name and brackets.
 
-    ``transcribe.map(over=videos).retry(2)`` reads as one thought and builds an
-    ``Operation`` — the same data ``op("transcribe")...`` would.
+    **Parens run, brackets decorate** — the same contract a bracket-decorator
+    has outside this system, and the only calling rule in it::
+
+        transcribe({"path": "a.mp4"})              # a plain call, undecorated
+        transcribe[mod.map(over=videos)](videos)   # decorated, then run
+
+    Decorating a tool never touches the function, so the same tool is bare in
+    one step and mapped in another.
     """
 
     def __init__(self, fn: Callable, tool_id: str | None = None):
@@ -802,38 +817,30 @@ class ToolHandle:
         self.__doc__ = fn.__doc__
         self.__name__ = self.id
 
-    def __call__(self, **arguments) -> Operation:
-        """Bind literals — the `single` case: run this tool once.
+    def __call__(self, *args, **kwargs) -> Any:
+        """Call the underlying function. Parens always mean run."""
+        return self.fn(*args, **kwargs)
 
-        Keyword-only, which is what keeps it distinct from applying the
-        decorated tool to data: ``score(threshold=3)`` binds, ``score[...](df)``
-        runs.
+    def bind(self, **literals) -> Operation:
+        """Fix some arguments now, leaving the rest to arrive with each row.
+
+        ``score.bind(threshold=5)[mod.map(over=rows)]`` — the literals become
+        the Operation's ``arguments`` and are applied innermost, inside every
+        modifier, so a retry re-runs the same call and a map passes them to
+        every item.
         """
-        return Operation(tool=self.id, arguments=_deref(arguments), fn=self.fn)
+        return Operation(tool_id=self.id, arguments=_deref(literals), fn=self.fn)
 
     def _start(self) -> Operation:
-        return Operation(tool=self.id, fn=self.fn)
+        return Operation(tool_id=self.id, fn=self.fn)
 
     def __getitem__(self, modifiers: Any) -> Operation:
-        """``transcribe[mod.map(over=videos), mod.retry(times=2)]``.
+        """``transcribe[mod.map(over=videos), mod.retry(times=2)]`` — decorate.
 
-        The same composition as ``transcribe.retry(2).map(over=videos)``, read
-        as a decorator stack instead of a chain. Arguments survive it:
-        ``transcribe(model="large")[mod.map(over=videos)]``.
+        Returns an :class:`Operation` (data), never a wrapped function. Bound
+        literals survive it: ``transcribe.bind(model="large")[mod.map(...)]``.
         """
         return self._start()[modifiers]
-
-    # shape verbs
-    def map(self, **kw) -> Operation: return self._start().map(**kw)
-    def filter(self, **kw) -> Operation: return self._start().filter(**kw)
-    def group(self, **kw) -> Operation: return self._start().group(**kw)
-    def collapse(self, **kw) -> Operation: return self._start().collapse(**kw)
-    def expand(self, **kw) -> Operation: return self._start().expand(**kw)
-    def sweep(self, **kw) -> Operation: return self._start().sweep(**kw)
-
-    # execution modifiers
-    def retry(self, times: int) -> Operation: return self._start().retry(times)
-    def timeout(self, seconds: float) -> Operation: return self._start().timeout(seconds)
 
     def __repr__(self) -> str:
         return f"<tool {self.id!r}>"
@@ -844,6 +851,94 @@ def tool(fn: Callable | None = None, *, id: str | None = None):
     if fn is not None:
         return ToolHandle(fn)
     return lambda f: ToolHandle(f, id)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Payload codecs — only the full export needs these
+# ─────────────────────────────────────────────────────────────────────────
+# The light export is strings and numbers, so it needs nothing. Payloads are
+# where serialization gets hard: an object column is not Arrow-serializable
+# (docs/shape-algebra.md §8.8), so these handle frames and JSON-safe values and
+# say so plainly when they meet anything else, rather than writing a `repr`
+# that silently will not load back.
+
+
+class PayloadError(TypeError):
+    """Raised when a payload cannot be represented in a session export."""
+
+
+#: Distinguishes "absent" from a legitimately stored ``None``.
+_MISSING = object()
+
+_JSON_SCALARS = (type(None), bool, int, float, str)
+
+
+def _json_safe(value: Any) -> bool:
+    """Can this survive a JSON round-trip as itself?
+
+    Worth checking rather than trusting: ``DataFrame.to_json`` does **not**
+    fail on an object column, it writes ``{}`` and reads back an empty dict.
+    Silent loss is worse than a refusal, so object columns are vetted per
+    value before the frame is handed to pandas.
+    """
+    if isinstance(value, _JSON_SCALARS):
+        return True
+    if hasattr(value, "item") and hasattr(value, "dtype"):    # numpy scalar
+        return _json_safe(value.item())
+    if isinstance(value, (list, tuple)):
+        return all(_json_safe(v) for v in value)
+    if isinstance(value, dict):
+        return all(isinstance(k, str) and _json_safe(v) for k, v in value.items())
+    return False
+
+
+def _encode(value: Any) -> dict:
+    """One payload as JSON-safe data."""
+    if isinstance(value, pd.DataFrame):
+        for column in value.columns:
+            if value[column].dtype != object:
+                continue
+            bad = next((v for v in value[column] if not _json_safe(v)), _MISSING)
+            if bad is not _MISSING:
+                raise PayloadError(
+                    f"cannot export column {column!r}: it holds a "
+                    f"{type(bad).__name__}, which to_json would silently write "
+                    "as {} and read back as an empty dict. Object payloads "
+                    "persist only as handles or as something with a to_json "
+                    "(§8.8); the light export (to_json) carries no payloads."
+                )
+        return {"kind": "frame", "data": value.to_json(orient="split")}
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return {"kind": "scalar", "data": value}
+    if isinstance(value, (list, tuple)):
+        return {"kind": "list", "data": [_encode(v) for v in value]}
+    raise PayloadError(
+        f"cannot export a {type(value).__name__} payload. Object payloads "
+        "persist only as handles or as something with a to_json (§8.8); the "
+        "light export (to_json) carries no payloads at all."
+    )
+
+
+def _decode(blob: dict) -> Any:
+    kind = blob["kind"]
+    if kind == "frame":
+        import io
+        return pd.read_json(io.StringIO(blob["data"]), orient="split")
+    if kind == "list":
+        return [_decode(v) for v in blob["data"]]
+    return blob["data"]
+
+
+def _encode_output(output: Output) -> dict:
+    return {"data": _encode(output.data),
+            "ledger": _encode(output.ledger),
+            "meta": {k: v for k, v in output.meta.items() if k != "problems"}}
+
+
+def _decode_output(blob: dict) -> Output:
+    return Output(data=_decode(blob["data"]),
+                  ledger=_decode(blob["ledger"]),
+                  meta=dict(blob["meta"]))
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -861,7 +956,8 @@ def tool(fn: Callable | None = None, *, id: str | None = None):
 #   addresses    upstream has an index       — a staged ledger, one row per cell
 
 
-def check(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str, ...]:
+def check(operation: Operation, workflow: "Workflow | None" = None,
+          step_id: str | None = None) -> tuple[str, ...]:
     """Everything wrong with *operation* that is knowable without running it.
 
     Returns the problems, empty when there are none. This never raises: a
@@ -872,24 +968,31 @@ def check(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str
     problems: list[str] = []
 
     # 1. the tool has to exist
-    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool)
+    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool_id)
     if fn is None:
-        problems.append(f"unknown tool {operation.tool!r}")
+        problems.append(f"unknown tool {operation.tool_id!r}")
 
     # 2. every modifier kind has to be in the vocabulary
     for modifier in operation.modifiers:
         if modifier.kind not in MODIFIERS:
             problems.append(f"unknown modifier {modifier.kind!r}")
 
-    # 3. `over` has to name a step that already exists
+    # 3. `over` has to name an existing, valid, non-circular step
     for modifier in operation.modifiers:
         over = modifier.params.get("over")
         if over is None or workflow is None:
             continue
-        if str(over) not in workflow.steps:
+        name = str(over)
+        if name == step_id:
+            problems.append(f"{modifier.kind} over itself ({name!r})")
+        elif name not in workflow.steps:
             problems.append(
-                f"{modifier.kind} over {str(over)!r}, which is not an earlier step"
+                f"{modifier.kind} over {name!r}, which is not an earlier step"
             )
+        elif not workflow.steps[name].valid:
+            problems.append(f"{modifier.kind} over {name!r}, which is invalid")
+        elif step_id is not None and step_id in workflow._upstream_ids(name):
+            problems.append(f"{modifier.kind} over {name!r} is circular")
 
     # 4. source applies no tool
     if any(m.kind == "source" for m in operation.modifiers) and fn is not identity:
@@ -908,7 +1011,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str
             for name in operation.arguments:
                 if name not in parameters:
                     problems.append(
-                        f"{operation.tool}() takes no argument {name!r}; "
+                        f"{operation.tool_id}() takes no argument {name!r}; "
                         f"it accepts {', '.join(list(parameters)[1:]) or '(none)'}"
                     )
     return tuple(problems)
@@ -945,7 +1048,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
             data=pd.DataFrame({PAYLOAD: [None]}, index=[0]),
             ledger=_ledger([{"status": "invalid", "error": problems[0],
                              "attempts": 0, "seconds": 0.0}], [0]),
-            meta={"verb": kind, "shape": "scalar", "payload": PAYLOAD,
+            meta={"verb": kind, "form": "scalar", "payload": PAYLOAD,
                   "staged": True, "problems": problems, "n_in": None,
                   "expected": None, "rows_rule": None},
         )
@@ -969,7 +1072,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     return Output(
         data=pd.DataFrame({PAYLOAD: [None] * len(index)}, index=index),
         ledger=_ledger(records, index),
-        meta={"verb": kind, "shape": "scalar" if kind is None else "column",
+        meta={"verb": kind, "form": "scalar" if kind is None else "column",
               "payload": PAYLOAD, "staged": True, "problems": (),
               "n_in": n_in, "expected": expected, "rows_rule": rule},
     )
@@ -1013,7 +1116,7 @@ class Step:
         if not self.valid:
             return f"invalid · {self.problems[0]}"
         verb = self.output.meta.get("verb")
-        tool = self.operation.tool
+        tool = self.operation.tool_id
         if not self.output.meta.get("staged"):
             n = len(self.output.data)
             return (f"{tool} · one cell" if verb is None
@@ -1055,8 +1158,8 @@ class Workflow:
             # A bare value is a source step: store the payload, declare the
             # Operation that reads it. `wf["raw"] = df` is the common case.
             self.inputs[step_id] = operation
-            operation = Operation(tool="identity", fn=identity)[mod.source()]
-        problems = check(operation, self)
+            operation = Operation(tool_id="identity", fn=identity)[mod.source()]
+        problems = check(operation, self, step_id)
         self.steps[step_id] = Step(
             step_id, operation, stage(operation, self, problems, step_id), problems
         )
@@ -1122,18 +1225,66 @@ class Workflow:
         return None
 
     # ── running ──────────────────────────────────────────────────────────
+    def pending(self, step_id: str) -> list[str]:
+        """The steps *step_id* reads that have not run yet, nearest first."""
+        waiting: list[str] = []
+        for modifier in self.steps[step_id].operation.modifiers:
+            over = modifier.params.get("over")
+            if over is None:
+                continue
+            name = str(over)
+            upstream = self.steps.get(name)
+            if upstream is not None and upstream.output.meta.get("staged"):
+                waiting.extend(self.pending(name))
+                waiting.append(name)
+        return waiting
+
     def run(self, step_id: str, tools: dict[str, Callable] | None = None) -> Step:
-        """Execute a step and replace its staged Output with the real one."""
+        """Execute one step and replace its staged Output with the real one.
+
+        Refuses a step whose inputs are not there yet. Silently running against
+        a staged upstream produced a grid of ``None`` — plausible-looking and
+        wrong, which is the one outcome worth ruling out by construction. Use
+        :meth:`run_all` to compute a chain.
+        """
         step = self.steps[step_id]
         if not step.valid:
             raise ValueError(
                 f"step {step_id!r} is invalid and cannot run: {step.problems[0]}"
+            )
+        waiting = self.pending(step_id)
+        if waiting:
+            raise ValueError(
+                f"step {step_id!r} reads {waiting[-1]!r}, which has not run. "
+                f"Run {' then '.join(repr(w) for w in dict.fromkeys(waiting))} "
+                f"first, or call run_all()."
             )
         step.output = step.operation.run(
             self._input_for(step.operation, step_id), tools
         )
         self._restage_after(step_id)
         return step
+
+    def run_all(self, tools: dict[str, Callable] | None = None) -> "Workflow":
+        """Run every valid step, each after the steps it reads.
+
+        Still explicit — nothing recomputes on its own (§7's push/pull rule).
+        This only saves you from ordering the calls by hand.
+        """
+        done: set[str] = set()
+        remaining = [sid for sid, st in self.steps.items() if st.valid]
+        while remaining:
+            ready = [sid for sid in remaining
+                     if all(w in done for w in self.pending(sid))]
+            if not ready:                    # only reachable if a cycle slipped through
+                raise ValueError(
+                    f"cannot order {remaining!r}: something reads a step that never runs"
+                )
+            for step_id in ready:
+                self.run(step_id, tools)
+                done.add(step_id)
+            remaining = [sid for sid in remaining if sid not in done]
+        return self
 
     def _restage_after(self, step_id: str) -> None:
         """Re-stage everything downstream of *step_id* — cardinality sharpened.
@@ -1160,6 +1311,87 @@ class Workflow:
                 if other.output.meta.get("expected") != before:
                     wave.add(other.step_id)
             changed = wave
+
+    def _upstream_ids(self, step_id: str, _seen: set[str] | None = None) -> set[str]:
+        """Every step *step_id* transitively reads. Used to refuse cycles."""
+        seen = set() if _seen is None else _seen
+        step = self.steps.get(step_id)
+        if step is None:
+            return seen
+        for modifier in step.operation.modifiers:
+            over = modifier.params.get("over")
+            if over is None:
+                continue
+            name = str(over)
+            if name in seen:
+                continue
+            seen.add(name)
+            self._upstream_ids(name, seen)
+        return seen
+
+    # ── exporting: two modes, and the difference is only payloads ────────
+    def to_dict(self) -> dict:
+        """**Light**: the chain of Operations and nothing else.
+
+        No outputs, no payloads — a few strings per step. Staging is derived,
+        so it is not stored; re-declaring from this reproduces it. What it
+        cannot reproduce is *cardinality*, which came from the data: a light
+        round-trip lands at §7's level 1 (shape known, counts not), by design.
+        """
+        return {"version": 1,
+                "steps": [{"step_id": sid, "operation": st.operation.to_dict()}
+                          for sid, st in self.steps.items()]}
+
+    def to_json(self) -> str:
+        import json
+        return json.dumps(self.to_dict())
+
+    def to_session_dict(self) -> dict:
+        """**Full**: the light export plus the payloads — inputs and outputs."""
+        blob = self.to_dict()
+        blob["inputs"] = {sid: _encode(value) for sid, value in self.inputs.items()}
+        blob["outputs"] = {
+            sid: _encode_output(st.output)
+            for sid, st in self.steps.items()
+            if not st.output.meta.get("staged")
+        }
+        return blob
+
+    def to_session_json(self) -> str:
+        import json
+        return json.dumps(self.to_session_dict())
+
+    @classmethod
+    def from_dict(cls, blob: dict, tools: dict[str, Callable] | None = None
+                  ) -> "Workflow":
+        """Rebuild a Workflow from either export — all at once.
+
+        Every step goes through the same :func:`check` and :func:`stage` the
+        incremental path uses, so loading cannot smuggle in a step that
+        declaring would have rejected.
+        """
+        workflow = cls()
+        for sid, encoded in (blob.get("inputs") or {}).items():
+            workflow.inputs[sid] = _decode(encoded)
+        for entry in blob["steps"]:
+            sid = entry["step_id"]
+            operation = Operation.from_dict(entry["operation"], tools)
+            problems = check(operation, workflow, sid)
+            workflow.steps[sid] = Step(sid, operation,
+                                       stage(operation, workflow, problems, sid),
+                                       problems)
+        for sid, encoded in (blob.get("outputs") or {}).items():
+            if sid in workflow.steps:
+                workflow.steps[sid].output = _decode_output(encoded)
+        for sid in (blob.get("outputs") or {}):
+            workflow._restage_after(sid)
+        return workflow
+
+    @classmethod
+    def from_json(cls, data: str, tools: dict[str, Callable] | None = None
+                  ) -> "Workflow":
+        import json
+        return cls.from_dict(json.loads(data), tools)
 
     def validate(self) -> dict[str, tuple[str, ...]]:
         """Every step's problems, keyed by step id — empty tuples for the good ones."""
@@ -1193,31 +1425,6 @@ class _Mods:
 mod = _Mods()
 
 
-def stack(*layers: Any) -> Operation:
-    """Build an Operation from a vertical stack, read like a decorator list.
-
-    The **last** argument is the tool and the ones above it are modifiers,
-    outermost first — exactly how ``@outer`` / ``@inner`` above a ``def``
-    reads::
-
-        stack(
-            mod.map(over=videos),     # outermost
-            mod.retry(times=2),
-            transcribe,               # the tool
-        )
-
-    Applied bottom-up, so this is ``map(retry(transcribe))`` and the retry runs
-    per item. Equivalent to ``transcribe.retry(2).map(over=videos)`` and to the
-    bracket form ``transcribe[mod.map(over=videos), mod.retry(times=2)]``,
-    which this delegates to — one code path, three ways to read it.
-    """
-    if not layers:
-        raise ValueError("stack() needs at least a tool")
-    *modifiers, target = layers
-    tool_id = target.id if isinstance(target, ToolHandle) else str(target)
-    return Operation(tool=tool_id)[tuple(modifiers)]
-
-
 def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Callable:
     """Apply an Operation's stack to its tool, innermost-first.
 
@@ -1226,9 +1433,9 @@ def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Calla
     the function would have produced at definition time.
     """
     table = {**BUILTIN_TOOLS, **tools}
-    if operation.tool not in table:
-        raise KeyError(f"unknown tool {operation.tool!r}; have {sorted(table)}")
-    fn = table[operation.tool]
+    if operation.tool_id not in table:
+        raise KeyError(f"unknown tool {operation.tool_id!r}; have {sorted(table)}")
+    fn = table[operation.tool_id]
     if operation.arguments:
         # Bound literals sit closest to the tool — inside every modifier, so a
         # retry re-runs the same call and a map passes them to every item.
@@ -1242,103 +1449,3 @@ def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Calla
             )
         fn = factory(fn, **modifier.params)
     return fn
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# Pipelines: several verbs, each holding its own literals
-# ─────────────────────────────────────────────────────────────────────────
-# `filter(is_big).map(score).of(raw)` reads as one thought, and each verb keeps
-# its arguments inside its own parentheses. It expands to **one step per
-# shape verb**, so every intermediate keeps an address and stays inspectable
-# — the compact syntax does not cost you the spreadsheet.
-
-
-@dataclass(frozen=True)
-class Verb:
-    """One shape verb plus the tool and literals that belong to it."""
-
-    kind: str
-    tool: Any = None
-    params: dict = field(default_factory=dict)
-
-    @property
-    def tool_id(self) -> str:
-        """The function this verb applies — ``identity`` when none was given.
-
-        A higher-order function is still a function, so ``expand(step1)`` is
-        complete on its own: expand *something* over step1, and the something
-        defaults to passing each item through unchanged.
-        """
-        if isinstance(self.tool, ToolHandle):
-            return self.tool.id
-        if isinstance(self.tool, str):
-            return self.tool
-        return "identity"
-
-    def __repr__(self) -> str:
-        name = getattr(self.tool, "id", self.tool)
-        extra = "".join(f", {k}={v!r}" for k, v in self.params.items())
-        return f"{self.kind}({name}{extra})"
-
-
-class Pipeline:
-    """A chain of verbs, bound to a source only at the end."""
-
-    def __init__(self, verbs: tuple[Verb, ...] = ()):
-        self.verbs = verbs
-
-    def _then(self, kind: str, tool: Any = None, **params) -> "Pipeline":
-        return Pipeline(self.verbs + (Verb(kind, tool, params),))
-
-    def map(self, tool=None, **kw): return self._then("map", tool, **kw)
-    def filter(self, tool=None, **kw): return self._then("filter", tool, **kw)
-    def expand(self, tool=None, **kw): return self._then("expand", tool, **kw)
-    def group(self, tool=None, **kw): return self._then("group", tool, **kw)
-    def collapse(self, tool=None, **kw): return self._then("collapse", tool, **kw)
-
-    def of(self, source: Any) -> Operation:
-        """Bind the source, producing the single Operation for this step."""
-        return _bind(self.verbs, source)
-
-    __call__ = of
-
-    def __repr__(self) -> str:
-        return " -> ".join(repr(v) for v in self.verbs) or "<empty pipeline>"
-
-
-def _bind(verbs: tuple[Verb, ...], source: Any) -> Operation:
-    """Fold a chain of verbs into **one** Operation — one step.
-
-    The innermost verb names the step's tool (the "one real function"); the
-    rest stack on top of it as modifiers, innermost first. ``over`` is recorded
-    once, on the innermost verb, because that is what reads the source.
-    """
-    if not verbs:
-        raise ValueError("a pipeline needs at least one verb")
-    first, *rest = verbs
-    operation = Operation(tool=first.tool_id)._shape(
-        first.kind, over=_deref(source), **first.params
-    )
-    for verb in rest:
-        operation = operation._add(
-            verb.kind, **({"op": verb.tool_id} if verb.tool is not None else {}),
-            **verb.params,
-        )
-    return operation
-
-
-def _verb_entry(kind: str):
-    def make(tool=None, **kw) -> Any:
-        # `Expand(step1)` — the argument is a source, not a tool, so the verb
-        # is already complete and applies identity.
-        if isinstance(tool, StepRef):
-            return _bind((Verb(kind, None, kw),), tool)
-        return Pipeline()._then(kind, tool, **kw)
-    make.__name__ = kind
-    return make
-
-
-#: Top-level verb constructors, so a pipeline can start with any of them.
-Map, Filter, Expand, Group, Collapse = (
-    _verb_entry(k) for k in ("map", "filter", "expand", "group", "collapse")
-)

@@ -1,5 +1,10 @@
 # How simple-steps-core works
 
+> **Status: describes the engine as it is today.** The object model is converging
+> on a single modifier stack — see [object-model.md](object-model.md) for what is
+> changing and [shape-algebra.md](shape-algebra.md) for why. The engine has not
+> moved yet, so everything here remains accurate.
+
 A top-to-bottom explanation of the library as it exists today: what each piece
 is, why it exists, and how the pieces fit together to turn a plain Python
 function into an orchestratable, session-aware, serializable tool.

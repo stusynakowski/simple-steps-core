@@ -1,5 +1,19 @@
 # Simple Steps — Object Model (top-down)
 
+> **Status: describes the engine as it is today.** Where an object is changing,
+> the change is marked inline as **→ converging to**. The four documents and
+> their tenses:
+>
+> | document | tense | authority on |
+> |---|---|---|
+> | **object-model.md** (this) | **present** — the engine | what the code holds today |
+> | [shape-algebra.md](shape-algebra.md) | **target** | *why* the model is changing |
+> | [grid-model.md](grid-model.md) | **present** — the prototype | what is built of the target |
+> | [config-isolation.md](config-isolation.md) | present, being superseded | the shape/conduct split |
+>
+> The engine has not moved yet. `grid.py` is standalone, so nothing here is
+> broken by what is built there.
+
 This is the canonical vocabulary for the library, read from the top (the whole
 running system) down to the smallest unit (a tool's parameter). Every object a
 user is expected to hold and inspect exposes two things:
@@ -10,8 +24,18 @@ user is expected to hold and inspect exposes two things:
   only shapes, counts, and status.
 
 > **Naming note (Option A).** "Tool" is the registered capability. "Operation"
-> is a Tool *equipped* with orchestration + execution + arguments — i.e. the
-> body of a Step. So a **Step = Operation + Data** literally.
+> is a Tool *equipped* — the body of a Step. So a **Step = Operation + Data**
+> literally.
+>
+> **→ Converging to:** an Operation is **one Tool plus an ordered stack of
+> modifiers**, and orchestration and execution are not two config objects but
+> **two classes of modifier in that one stack** — shape verbs (`map`, `filter`,
+> `expand`, `collapse`, `group`, `sweep`, `source`) and execution modifiers
+> (`retry`, `timeout`, `cache`). Order is semantics: `retry(map(f))` retries the
+> whole fan-out, `map(retry(f))` retries each item. The pair's *concerns* stay
+> disjoint — that rule survives as the modifier's `cls` field — but the two
+> classes stop being two objects. And `Data` becomes `Output`
+> (§9). See [shape-algebra.md §1.1](shape-algebra.md).
 
 ---
 
@@ -45,6 +69,27 @@ App                         the whole system (one process)
                     ├─ StepOutput     ref + optional inline value + kind
                     └─ StepError      structured failure (message, type, traceback)
 ```
+
+**→ Converging to** (the two leaves above; everything else is unchanged):
+
+```
+                ├─ Operation    ONE tool + an ordered modifier stack
+                │   ├─ tool_id         which capability
+                │   ├─ arguments       literals bound when the step was wired
+                │   └─ modifiers[]     ORDERED, innermost-first — order is semantics
+                │       ├─ cls="shape"      map | filter | expand | collapse
+                │       │                   | group | sweep | source
+                │       └─ cls="execution"  retry | timeout | cache
+                └─ Output       what it produced
+                    ├─ ref         key into the session store (unchanged indirection)
+                    ├─ data        the payload grid (immutable)
+                    ├─ ledger      per-unit execution state (status, error, attempts, unit)
+                    └─ meta        form, tool id, run id, timings
+```
+
+`StepStatus` becomes a **rollup of the ledger** rather than a field, and
+`StepError` becomes a ledger column — a step where 3 of 100 rows failed is
+neither "completed" nor "failed".
 
 `*` = repeatable (a SessionManager has many Sessions, a Session has many
 Workflows, a Workflow has many Steps).
@@ -167,6 +212,23 @@ flowchart LR
     i1 --> MR
     i2 --> MR
     MR --> ok[".ok / .failed / .values"]
+```
+
+**→ Converging to:** the same fan-out, but `mode = map` is a *modifier* on the
+Operation rather than a config, and the result is a grid plus a row-aligned
+ledger rather than a `MapResult`:
+
+```mermaid
+flowchart LR
+    over["step1 → 3 rows"] --> M{"Operation<br/>tool = scale<br/>modifiers = [map]"}
+    M --> i0["scale(row 0)"]
+    M --> i1["scale(row 1)"]
+    M --> i2["scale(row 2)"]
+    i0 --> G["Output"]
+    i1 --> G
+    i2 --> G
+    G --> d["data — input columns + payload"]
+    G --> l["ledger — status, error, attempts, unit"]
 ```
 
 ---
@@ -412,6 +474,13 @@ of what it produced:
 
 `step.info()` shows both halves side by side.
 
+**→ Converging to:** `Step = Operation + Output`, and **both halves exist from
+declaration**. Declaring a step *is* staging: it has a spec (the template) and
+an Output (the slot, with whatever is already knowable in it). Running does not
+create the Output, it replaces it. A step whose Operation cannot work still
+exists, carrying its problems, and stages as a single cell — reactive editing
+needs to *show* a bad step, not refuse to build one.
+
 ---
 
 ## 8. `Operation` — a Tool, equipped
@@ -433,6 +502,49 @@ Holds:
 Orchestration (breadth) and step execution (this call) are orthogonal — and
 neither cascades to or from the stage/workflow configs (see §6.1).
 
+### → Converging to: one tool, one ordered modifier stack
+
+The two configs become **two classes of modifier in a single ordered list**:
+
+```python
+score[mod.map(over="step1", concurrency=8), mod.retry(times=2)]
+#      └─ cls="shape" ─────────────────────┘  └─ cls="execution" ─┘
+```
+
+| | shape verbs | execution modifiers |
+|---|---|---|
+| which | `map` `filter` `expand` `collapse` `group` `sweep` `source` | `retry` `timeout` `cache` |
+| effect on the signature | **lifts** it: `(row → b)` becomes `(source → Output)` | **preserves** it |
+| effect on shape | changes rows/columns | shape-preserving |
+| staging | must fold it | ignores it entirely |
+
+`cls` is not taxonomy — it is what lets staging compute a step's shape *without
+running anything*, since only shape verbs can change it. That is the whole
+reactive story, and it is why the isolation rule from
+[config-isolation.md](config-isolation.md) survives the collapse: the concerns
+stay disjoint, they just stop being two objects.
+
+**Why the stack rather than two configs.** Order is semantics, and the flat pair
+cannot express half the combinations:
+
+| composition | means | sayable today? |
+|---|---|---|
+| `map(retry(f))` | retry **each item** | yes |
+| `retry(map(f))` | retry **the whole fan-out** | **no** |
+| `map(timeout(f, 60))` | 60s **per item** | yes |
+| `timeout(map(f), 60)` | 60s for **the entire step** | **no** |
+
+The reason is mechanical: `to_tool_call` compiles an orchestrated step into one
+call to `orchestration-map` with your tool as a string argument and `retries` as
+another argument — so retry is structurally *inside* map, and an argument cannot
+sit outside its own function. Fixing that means the orchestrator stops being the
+tool and your function starts being it. See
+[shape-algebra.md §11](shape-algebra.md).
+
+**Modifiers stay data, never closures** — `{"kind": "retry", "params": {"times": 2}}`
+— because reactive staging, `to_json`, dashboard-built steps and fingerprinting
+all die with closures.
+
 ---
 
 ## 9. `Data` — the current status of a Step's output
@@ -446,6 +558,34 @@ A live, payload-free view of what the step has produced *so far*:
 
 The heavy payload never lives on the model; it stays in the session store,
 addressed by `ref`.
+
+### → Converging to: `Output` — one grid, two frames
+
+`Data`, `StepOutput` and `StepError` collapse into a single **`Output`**,
+because per-row state needs somewhere to live:
+
+| today | becomes |
+|---|---|
+| `Data` (the concept) | **`Output`** — an object, not just a concept |
+| `StepOutput` (`ref`, `value`, `kind`) | `Output.ref`, `Output.data`, `Output.meta` |
+| `StepStatus` (one per step) | `Output.status` — a **rollup** of the ledger |
+| `StepError` (one per step) | a **column** in `Output.ledger`, one per row |
+
+`data` is the payload grid (immutable, what downstream steps read); `ledger` is
+per-unit execution state (mutable, never read as data); they share an index, so
+`view()` is a clean join. They are split rather than merged for three reasons:
+real tables already have columns named `value` and `status`; status changes
+*while* the step runs and the payload must not; and the ledger is all scalar
+columns, so progress and error views always render.
+
+The two-layer indirection survives unchanged — `ref` points into the session
+store, `data` is the inline copy. An unorchestrated step has `data` holding a
+single value and no ledger.
+
+Lifecycle gains one state and renames another: `PENDING` → `STAGED`, plus
+**`STALE`** (an upstream changed; the old value is still there to look at).
+Declaring a step *is* staging, so the Output exists from declaration and running
+**replaces** it.
 
 ---
 
@@ -472,6 +612,17 @@ per-item result:
 - **`MapResult`** — aggregate: `.ok`, `.failed`, `.values`, `.ok_count`,
   `.failed_count`.
 - **`ItemOutcome`** — one item: `index`, `status`, `value` | `error`.
+
+### → Converging to: the grid and the ledger
+
+Both are **retired**. `MapResult` splits into the grid (values) and the ledger
+(status/error); `ItemOutcome` is demoted to an in-flight record during a run,
+materialized into the ledger at the end. `Group` and `Groups` go too — `group`
+marks rows with a key column and keeps n rows, and reduction happens in
+`collapse(by=...)`, so the "column of columns" problem disappears rather than
+being solved.
+
+`.ok` and `.failed` survive as views on the Output.
 
 ---
 
