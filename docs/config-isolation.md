@@ -249,14 +249,14 @@ being changed, and awkward to bolt on afterwards.
 
 ## 6. Fixed while mapping this
 
-The dashboard offered a sync/async **mode** selectbox under Runtime settings.
+A client offered a sync/async **mode** control under Runtime settings.
 `StepExecutionConfig` has no `mode` field — the model states sync/async is
 derived from the tool — so the value was collected and dropped. Worse, reloading
 any saved workflow seeded the draft from `model_dump()`, which has no `"mode"`
 key, so every load crashed:
 
 ```
-KeyError: 'mode'   at dashboard.py, Runtime settings tab
+KeyError: 'mode'   in the client's Runtime settings tab
 ```
 
 The phantom control is gone; the tab now displays the derived call style from

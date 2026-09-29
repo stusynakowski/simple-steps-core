@@ -34,7 +34,7 @@ def _normalize_ui(ui: Any) -> dict[str, Any]:
 
     Accepts a prefab-ui protocol document (has a ``"view"`` key) as shorthand
     for ``{"prefab": <doc>}``, or a target→renderer map like
-    ``{"streamlit": fn, "prefab": <doc>}``.
+    ``{"react": fn, "prefab": <doc>}``.
     """
     if ui is None:
         return {}
@@ -77,7 +77,7 @@ class Tool:
         self.definition = definition
         self.is_async = is_async
         self.is_orchestrator = is_orchestrator
-        # UI views keyed by renderer target (prefab, streamlit, ...).
+        # UI views keyed by renderer target (prefab, react, ...).
         self.ui = ui if ui is not None else ToolUI()
 
     @property
@@ -413,7 +413,7 @@ class ToolRegistry:
         return [d for d in self._definitions.values() if d.resource == resource]
 
     def ui_for(self, operation_id: str, target: str = "prefab") -> Any:
-        """Return a tool's UI view for a renderer *target* (``prefab``/``streamlit``/…).
+        """Return a tool's UI view for a renderer *target* (``prefab``/``react``/…).
 
         ``prefab`` is always available (auto-built if not supplied); other
         targets return ``None`` when the tool declares none.

@@ -19,16 +19,14 @@ from simple_steps_core import register_tool, Resource, Workflow, Operation
 names keep their behavior, so never reach into sub-packages
 (`simple_steps_core.execution.workflow`) in your own code.
 
-**Two names break that rule** — the surfaces you actually launch:
+**One name breaks that rule** — the surface you actually launch:
 
 ```python
-from simple_steps_core.serving import Server        # FastAPI    — needs [api]
-from simple_steps_core.streamlit import Dashboard   # Streamlit  — needs [dashboard]
+from simple_steps_core.serving import Server        # FastAPI — needs [api]
 ```
 
-Both are deliberately outside the top level so that importing the package never
-requires the optional extras. See [Change 2](#2-server-and-dashboard-are-invisible)
-— this is the single most common thing new users fail to find.
+It is deliberately outside the top level so that importing the package never
+requires the optional extras.
 
 ---
 
@@ -59,7 +57,7 @@ Rules that bite:
 
 - **Annotate every parameter and the return type.** An unannotated param degrades
   to `Any`; an unannotated return yields `output_schema=None`, which silently
-  disables reference type-checking *and* leaves the dashboard unable to say what
+  disables reference type-checking *and* leaves a frontend unable to say what
   a staged step will produce.
 - **Tools are keyword-only at call time.** The `Tool` wrapper accepts `**kwargs`
   only.
@@ -79,7 +77,7 @@ Rules that bite:
 | `build_default_ui` | Auto-builds a prefab declaration from the input schema. |
 
 ```python
-ui={"streamlit": {"input": render_form, "result": render_result}}
+ui={"react": {"input": render_form, "result": render_result}}
 ```
 
 - `input(st, *, key, defaults) -> dict` — draw widgets, return arguments.
@@ -132,7 +130,7 @@ wf.info(); wf.preview("step2")
 
 **Sync vs async is not a preference.** `CoreEngine.execute()` refuses to nest
 inside a running event loop, so any async or orchestrated step raises under
-FastAPI, Streamlit, or a notebook kernel. Use `arun`/`aexecute` there, `run` in
+FastAPI or a notebook kernel. Use `arun`/`aexecute` there, `run` in
 plain scripts.
 
 ### Execution configs
@@ -157,7 +155,7 @@ inert — see [Change 1](#1-execution-configs-are-declared-but-never-honored).
 
 ## Tier 3 — Hosting and embedding
 
-For building your own surface rather than using `Server` / `Dashboard`.
+For building your own surface rather than using `Server`.
 
 | Group | Names |
 |---|---|
@@ -182,25 +180,28 @@ Resources are **never** serialized; on load they are rebuilt from their factorie
 
 ---
 
-## The two surfaces
+## The surface
 
-Both read the **same tools file**: a script that registers tools plus optional
-module-level `CONFIG` and `RESOURCES` dicts. The bottom line picks the surface.
+`Server` reads a **tools file**: a script that registers tools plus optional
+module-level `CONFIG` and `RESOURCES` dicts.
 
 ```python
 CONFIG = {"title": "My Tools", "port": 8000}
 RESOURCES = {"db": connect}       # callable -> factory, else an instance
 
 if __name__ == "__main__":
-    Server().run()                # or Dashboard().run()
+    Server().run()
 ```
 
-| | `Server` (FastAPI) | `Dashboard` (Streamlit) |
-|---|---|---|
-| Extra | `pip install -e ".[api]"` | `pip install -e ".[dashboard]"` |
-| Routes / UI | `GET /tools`, `POST /call`, `POST /run` | Step Manager: palette, forms, orchestration, JSON load/save |
-| State | **Stateless** — references resolve only within one `/run` body | One `Workflow` per browser session |
-| Registry | `freeze=True` by default | not frozen |
+| | `Server` (FastAPI) |
+|---|---|
+| Extra | `pip install -e ".[api]"` |
+| Routes | `GET /tools`, `POST /call`, `POST /run` |
+| State | **Stateless** — references resolve only within one `/run` body |
+| Registry | `freeze=True` by default |
+
+This library is backend-only: it ships no UI. A frontend consumes the tool
+contract over HTTP — see [react-api.md](react-api.md).
 
 ---
 
@@ -236,11 +237,11 @@ retry loop. `timeout` is harder than it looks: sync tools run via
 `asyncio.to_thread`, and a thread cannot be cancelled — `wait_for` would return
 control while the work continued, which is worse than not implementing it.
 
-## 2. `Server` and `Dashboard` are invisible
+## 2. `Server` is invisible
 
-The two things every user ultimately needs are the two things not in
-`__all__`. `from simple_steps_core import Dashboard` fails, and nothing in the
-top-level namespace hints at where to look.
+The thing most users ultimately need is not in `__all__`.
+`from simple_steps_core import Server` fails, and nothing in the top-level
+namespace hints at where to look.
 
 The lazy-import constraint is real, but solvable with a module-level
 `__getattr__` (PEP 562) that imports on first attribute access and raises a
@@ -248,9 +249,9 @@ helpful error naming the missing extra:
 
 ```python
 def __getattr__(name):
-    if name == "Dashboard":
-        from .streamlit import Dashboard
-        return Dashboard
+    if name == "Server":
+        from .serving import Server
+        return Server
     raise AttributeError(name)
 ```
 

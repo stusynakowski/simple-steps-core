@@ -7,10 +7,9 @@ Import a user's *tools file* — a plain Python script that declares tools with
 ``RESOURCES``). Running the module executes those decorators, registering the
 tools on the shared ``REGISTRY``.
 
-This is deliberately transport-agnostic: both the optional FastAPI server
-(:mod:`simple_steps_core.serving`) and the optional Streamlit dashboard
-(:mod:`simple_steps_core.streamlit.dashboard`) load tools this way, and neither
-requires the other.
+This is deliberately transport-agnostic: the optional FastAPI server
+(:mod:`simple_steps_core.serving`) loads tools this way, and so can any other
+host, without either requiring the other.
 """
 
 from __future__ import annotations

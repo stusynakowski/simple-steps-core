@@ -397,10 +397,10 @@ Each `ToolDefinition` also carries two optional, serializable fields:
   def pick_region(region: str): ...
   ```
   The `ui` (prefab) is for a React frontend. A single tool can also carry
-  renderers for *other* surfaces by passing a `{target: renderer}` map — e.g.
-  the optional **Streamlit dashboard** reads `ui={"streamlit": fn}`:
+  declarations for *other* surfaces by passing a `{target: renderer}` map, so
+  one tool can serve several clients:
   ```python
-  @register_tool("pick_region", ui={"streamlit": render_pick})
+  @register_tool("pick_region", ui={"react": render_pick})
   def pick_region(region: str): ...
   ```
   Every tool exposes a `ToolUI` (`operation.ui`) keyed by target. Read its

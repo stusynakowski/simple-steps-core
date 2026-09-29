@@ -22,10 +22,15 @@ classifiers = [
   "Intended Audience :: Developers",
   "Topic :: Software Development :: Libraries"
 ]
-# Pydantic is the one core runtime dependency: it powers model validation,
-# serialization (save/load of workflows), and argument schema generation.
+# Two core runtime dependencies, and no more. Pydantic powers model
+# validation, serialization (save/load of workflows) and argument schema
+# generation. pandas backs the grid model: its index is the stable cell
+# address that per-cell re-drive and incremental staleness both require
+# (docs/shape-algebra.md §9). Everything else — the HTTP server, notebooks,
+# the agent layer — is an extra, so importing this package pulls in neither a
+# web framework nor Jupyter.
 dependencies = [
-  "notebook>=7.6.0",
+  "pandas>=2.0",
   "pydantic>=2.6",
 ]
 
@@ -49,10 +54,6 @@ dev = [
   "build",
   "twine"
 ]
-dashboard = [
-  "streamlit>=1.30"
-]
-
 [tool.setuptools]
 package-dir = {"" = "src"}
 
@@ -68,12 +69,6 @@ addopts = "-q"
 [tool.coverage.run]
 source = ["src/simple_steps_core"]
 branch = true
-omit = [
-  # Vendored frontend assets and the Streamlit entry points, which need a
-  # running server to exercise and would report 0% and hide real regressions.
-  "*/streamlit/components/*/frontend/*",
-]
-
 [tool.coverage.report]
 show_missing = true
 skip_covered = true

@@ -94,15 +94,15 @@ def test_unified_ui_holds_multiple_targets():
         return region
 
     render = lambda st, *, key, defaults: {"region": "EMEA"}   # noqa: E731
-    registry.register("pick", pick, ui={"streamlit": render})
+    registry.register("pick", pick, ui={"react": render})
 
     op = registry.get_operation("pick")
-    assert set(op.ui.targets()) == {"streamlit", "prefab"}
+    assert set(op.ui.targets()) == {"react", "prefab"}
     # prefab is auto-built and mirrored onto the serialized definition.
     assert op.ui.prefab["view"]["type"] == "Card"
     assert registry.ui_for("pick", "prefab") == registry.get_definition("pick").ui
-    # the streamlit view is retrievable; unknown targets return None.
-    assert registry.ui_for("pick", "streamlit") is render
+    # the react view is retrievable; unknown targets return None.
+    assert registry.ui_for("pick", "react") is render
     assert registry.ui_for("pick", "vue") is None
 
 

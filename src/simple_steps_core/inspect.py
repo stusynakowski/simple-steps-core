@@ -69,7 +69,7 @@ class SummaryTable:
 
     # ── HTML rendering (Jupyter / notebooks) ────────────────────────────
     def _repr_html_(self) -> str:
-        parts = [f"<div style='font-family:var(--jp-code-font-family,monospace)'>"]
+        parts = ["<div style='font-family:var(--jp-code-font-family,monospace)'>"]
         parts.append(f"<strong>{html.escape(self.title)}</strong>")
         if self.caption:
             parts.append(f"<div style='color:#888;font-size:90%'>{html.escape(self.caption)}</div>")

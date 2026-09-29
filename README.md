@@ -39,6 +39,22 @@ For notebook examples:
 python -m pip install -e ".[examples]"
 ```
 
+### As a git submodule
+
+This is a **backend library — it ships no UI.** Core install pulls in exactly
+two packages, `pandas` and `pydantic`; the HTTP server, notebooks and the agent
+layer are all extras, so a parent repo that embeds this gets neither a web
+framework nor Jupyter unless it asks.
+
+```bash
+git submodule add <url> backend/simple-steps-core
+python -m pip install -e "./backend/simple-steps-core[api]"
+```
+
+A frontend talks to it over HTTP — see [docs/react-api.md](docs/react-api.md)
+for the contract and [docs/writing-tools.md](docs/writing-tools.md) for the
+tools it exposes.
+
 ## Why this helps backend workflow management
 
 - Operations are explicit and typed, so execution is predictable.
@@ -137,71 +153,31 @@ runnable script is in [example_server.py](example_server.py). Optional script
 settings: `CONFIG` (`title`/`host`/`port`/`orchestrators`/`freeze`) and
 `RESOURCES` (name → factory) for tools that declare `Resource()` parameters.
 
-## Streamlit dashboard (optional UI)
+## Tool UI contract (for a frontend)
 
-The same tools file can also drive a local **Streamlit** dashboard for building
-and running workflows — a UI counterpart to the server. Import `Dashboard` and
-call it at the bottom of your script:
-
-```python
-from simple_steps_core.streamlit import Dashboard
-
-if __name__ == "__main__":
-    Dashboard().run()
-```
-
-```bash
-python -m pip install -e ".[dashboard]"
-python mytools.py
-```
-
-The tool **contract** is the generic UI schema, rendered many independent ways.
-A tool's `ui` is a `ToolUI` holding per-surface declarations keyed by target.
-The recommended declaration separates the pre-execution `input` view from the
-interactive post-execution `result` view. An advanced `full` view can instead
-own the entire visual experience. The serializable `prefab` input is always
-present when no prefab declaration is supplied.
-
-The dashboard reads Streamlit input renderers with
-`render(st, key, defaults) -> arguments` and result renderers with
-`render(st, key, result)`. Missing renderers use generated form and `st.write`
-fallbacks:
-
-```python
-def _make_list_ui(st, *, key, defaults):
-    return {"n": st.slider("How many?", 1, 20, value=defaults.get("n", 5), key=key)}
-
-def _make_list_result(st, *, key, result):
-  st.bar_chart(result.value)
-
-@register_tool("make_list", ui={
-  "streamlit": {"input": _make_list_ui, "result": _make_list_result},
-})
-def make_list(n: int) -> list[int]:
-    return list(range(n))
-```
-
-Because `ui` is a map, one tool can carry several targets at once — e.g. a
-hand-written prefab view for React *and* a Streamlit view — each surface picks
-its own; omit `prefab` to keep the auto-built default:
+A tool's **contract** is a generic UI schema, rendered independently by whatever
+frontend consumes it. `ui` is a `ToolUI` holding per-surface declarations keyed
+by target, so one tool can carry several at once. The recommended declaration
+separates the pre-execution `input` view from the interactive post-execution
+`result` view; an advanced `full` view can own the whole experience instead. A
+serializable `prefab` input is always present when no prefab declaration is
+supplied.
 
 ```python
 @register_tool("pick_region", ui={
-    "prefab": my_prefab_protocol,     # React frontend
-    "streamlit": _pick_region_form,   # this dashboard
+    "prefab": my_prefab_protocol,     # generated/serializable, for any client
+    "react": _pick_region_component,  # a target-specific declaration
 })
 def pick_region(region: str) -> str:
     return region
 ```
 
-Legacy single renderers remain input views. Use
-`operation.ui.input(target)`, `operation.ui.result(target)`, or
-`operation.ui.full(target)` for lifecycle-aware access; `get(target)` remains a
+Use `operation.ui.input(target)`, `operation.ui.result(target)` or
+`operation.ui.full(target)` for lifecycle-aware access; `get(target)` is a
 compatibility alias for the input or full primary view. See the
-[Tool UI developer contract](docs/tool-ui.md) before implementing a full UI.
-
-A runnable example — with a walkthrough of each tool — is in
-[streamlit_example/](streamlit_example/README.md).
+[Tool UI developer contract](docs/tool-ui.md) before implementing a full UI, and
+[docs/react-api.md](docs/react-api.md) for the HTTP shape a React client
+consumes.
 
 ## Roadmap: tool decoration, orchestration & agents
 

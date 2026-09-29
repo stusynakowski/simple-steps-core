@@ -16,7 +16,7 @@ Recommended composed declaration:
         "input": plot_input_document,
         "result": plot_result_document,
     },
-    "streamlit": {
+    "react": {
         "input": render_plot_input,
         "result": render_plot_result,
     },

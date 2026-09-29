@@ -95,10 +95,10 @@ steps that have **already run** in this session. Running out of order (e.g.
 `run_step("step2")` before `step1` ran) raises *"Reference to unknown or unrun
 step"*.
 
-> **"Run from step N" / re-run** is not on `Workflow` yet — the Streamlit
-> dashboard implements it as "run every step from N to the end." If you want it
-> as a first-class method (handy for re-running after a failure), that's a small
-> addition: `run_from(step_id)`.
+> **"Run from step N" / re-run** is not on `Workflow` yet. A client implements
+> it as "run every step from N to the end." If you want it as a first-class
+> method (handy for re-running after a failure), that's a small addition:
+> `run_from(step_id)`.
 
 ---
 

@@ -1,12 +1,12 @@
-"""The shipped example's pipeline, run end to end.
+"""A four-step orchestration pipeline, run end to end.
 
     step1  load_batches      single             list[list[float]]  one cell
     step2  unpack_batch      expand   over=1    list[float]        one cell per reading
     step3  above_cutoff      filter   over=2    list[float]        readings that pass
     step4  accumulate_stats  collapse over=3    dict               one cell of statistics
 
-Keeping this test green is what stops the example drifting from the tools it
-documents.
+Covers the engine's orchestration modes against real tools, with no renderer
+involved. The tools live in ``_pipeline_tools.py`` beside this file.
 """
 
 import pytest
@@ -24,7 +24,7 @@ from simple_steps_core.operations.registry import REGISTRY
 
 @pytest.fixture(scope="module")
 def example():
-    import streamlit_example.example_tools_and_resources as module
+    import _pipeline_tools as module
 
     register_orchestrators(REGISTRY)
     return module
@@ -99,22 +99,6 @@ def test_cutoff_that_excludes_everything_still_runs(example):
     assert wf["step3"].output.value == []
     assert wf["step4"].status is StepStatus.COMPLETED
     assert wf["step4"].output.value is None
-
-
-def test_pipeline_shape_is_visible_before_running(example):
-    """Staged cells announce type and shape, which is what the grid shows."""
-    from simple_steps_core.streamlit.components import staged_frame
-
-    wf = _pipeline(example)
-    row = staged_frame(wf["step2"].spec, REGISTRY.get_definition("unpack_batch")).iloc[0]
-    assert row["type"] == "list[float]"        # expand flattens, it does not wrap
-    assert row["shape"] == "one cell per item produced from step1"
-    assert row["state"] == "staged"
-
-    collapsed = staged_frame(wf["step4"].spec,
-                             REGISTRY.get_definition("accumulate_stats")).iloc[0]
-    assert collapsed["type"] == "dict"         # collapse yields the accumulator
-    assert collapsed["shape"] == "1 cell"
 
 
 def test_identity_replaces_the_custom_expand_tool(example):

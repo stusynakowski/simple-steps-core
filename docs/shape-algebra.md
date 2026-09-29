@@ -700,7 +700,7 @@ Stated up front so they are designed for, not discovered.
 7. **`collapse` returns a 1-row grid.** The price of the invariant. Give grids
    an `.item()` for the 1×1 case.
 8. **Object columns are not Arrow-serializable.** `to_parquet` hard-fails;
-   Streamlit degrades to `repr` strings. Object payloads persist only when they
+   a client degrades to `repr` strings. Object payloads persist only when they
    are *handles* (`MediaAsset`, `Collection`) or have a `to_json` (plotly).
 
 ---

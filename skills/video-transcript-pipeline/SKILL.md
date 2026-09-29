@@ -157,11 +157,10 @@ if __name__ == "__main__":
 ```
 
 `python tools.py` serves it; `GET /tools` lists the contracts and `POST /run`
-takes `{"steps": [...]}`. For a visual run instead, swap in
-`from simple_steps_core.streamlit import Dashboard` and `Dashboard().run()` —
-the grid shows the video handles, the per-item fan-out, and one tab per stratum.
+takes `{"steps": [...]}`. A frontend renders the grid from those responses —
+the video handles, the per-item fan-out, and one tab per stratum.
 
-Needs `pip install "simple-steps-core[api]"` (or `[dashboard]`).
+Needs `pip install "simple-steps-core[api]"`.
 
 ## Where to look next
 

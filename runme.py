@@ -30,7 +30,6 @@ def main() -> int:
 	workflow = Workflow(engine, session_id="runme")
 
 	make_list_op = registry.get_operation("make_list")
-	total_op = registry.get_operation("total")
 
 	workflow["step1"] = make_list_op(n=5)
 
