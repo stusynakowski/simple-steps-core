@@ -1,3 +1,33 @@
+"""simple-steps-core — a backend runtime for tool-first workflow execution.
+
+Importing this package costs only ``pandas`` and ``pydantic``; the HTTP server,
+notebooks and the agent layer are extras.
+
+**Two models live here during the migration.** The names below are the engine
+as it is today. The grid model (docs/grid-model.md) is reached through its own
+module, and **three names mean different things in each**: ``Workflow``,
+``Operation`` and ``Step``.
+
+Import the module rather than the names, so every call site says which model it
+means::
+
+    from simple_steps_core import grid
+
+    wf = grid.Workflow()
+    wf["readings"] = frame
+    wf["f"] = to_fahrenheit(wf["readings"])
+
+``from simple_steps_core import Workflow`` gives the **engine's** Workflow, not
+the grid's. See docs/shape-algebra.md for where the two are converging.
+"""
+
+from importlib.metadata import PackageNotFoundError, version as _version
+
+try:
+    __version__ = _version("simple-steps-core")
+except PackageNotFoundError:          # running from a source tree, not installed
+    __version__ = "0.0.0.dev0"
+
 from .api.public import (
     DEFAULT_CODECS,
     REGISTRY,
@@ -83,6 +113,7 @@ from .api.public import (
 )
 
 __all__ = [
+    "__version__",
     "DEFAULT_CODECS",
     "REGISTRY",
     "App",

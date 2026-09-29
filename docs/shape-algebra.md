@@ -24,17 +24,49 @@ meanings win; the workflow concepts get new names.
 | **tool** | a plain Python function the user wrote |
 | **step** | a node in the workflow: a tool plus how to run it, plus what it produced |
 | **grid** | the rows × columns output of an **orchestrated** step |
-| **row** | one unit of work — an observation |
-| **column** | one variable about that unit |
+| **row** | a horizontal slice of the grid — an observation |
+| **column** | a vertical slice — one variable about each observation |
 | **cell** | one (row, column) intersection; holds any Python object |
+| **unit** | **what one invocation of the tool covers** (§1.0) — a row, a column or a cell |
 | **index** | a row's stable address, preserved across steps |
 | **payload column** | the column holding the produced object (conventionally `value`) |
-| **ledger** | the per-row execution record, row-aligned with the grid |
+| **ledger** | the per-**unit** execution record |
 | **shape** | a grid's rows × columns — what a verb changes, step to step (§3) |
-| **alignment** | how `data` and `ledger` line up inside one Output — always row-for-row (§5) |
+| **alignment** | how `data` and `ledger` line up inside one Output (§5) |
 
 Deliberately retired: calling a step "a column" (it clashes with a variable),
 and calling a step's output box "a cell" (it clashes with a datum).
+
+### 1.0 A row is not the same thing as a unit of work
+
+These two coincide today and are not the same idea, so they get separate words.
+**Unit** is the abstract one: what a single invocation of the tool covers, and
+therefore what the ledger records one entry of. Which slice of the grid *serves*
+as the unit is the verb's choice:
+
+| unit | how many | the ledger is indexed by | status |
+|---|---|---|---|
+| **row** | n | the row index | the only one built |
+| **column** | m | the column name | guarded — see §11 |
+| **cell** | n × m | (row, column) | depends on 2-D grids — see §11 |
+
+Saying "the row is the unit of work" is true of every verb that exists right
+now, and it is the sentence that would quietly forbid `colmap`. Row-wise is a
+**default**, not a definition.
+
+Two consequences that follow immediately, and that the rest of this document
+depends on:
+
+- §5's alignment rule is *"one ledger entry per unit"*, **not** "per row". That
+  is what already lets `filter` keep a ledger entry for a row it dropped.
+- A column-wise verb does not merely have a different *number* of units; its
+  ledger lives in a different **index space** (column names, not row positions).
+  That is why it cannot be added as an `axis=` flag and nothing else — the join
+  in `Output.view()` stops being meaningful.
+
+The cell case is the least settled, because today every grid is flat: one row
+per unit, with the produced object in one payload column. A cell only becomes a
+distinct unit if grids become genuinely 2-D, which §11 leaves open.
 
 ### 1.1 Tool, Operation, Step, Output
 
@@ -376,8 +408,12 @@ Two different relationships are easy to conflate, so they get different words:
 
 This section is only about the second.
 
-> **`data` and `ledger` are row-aligned: one ledger row per grid row, sharing
-> one index.**
+> **`data` and `ledger` are aligned by unit: one ledger entry per unit of work,
+> sharing one index.**
+>
+> With row-wise verbs — every verb that exists today — a unit *is* a row, so
+> this reads as row-for-row. It is stated in units because that is what makes it
+> survive a column-wise verb (§1.0).
 
 They differ only in *columns* — that is the whole point of the split. The index
 is what joins them, and `view()` is always a clean 1:1 join.
@@ -739,6 +775,11 @@ Not a big-bang refactor. Each step leaves the system working.
 4. **`group` / `collapse`** to key-column semantics.
 5. **Ledger + fingerprints + `stale`**, once the graph derivation lands.
 6. **Retire** `MapResult`, `Group`, `Groups` when nothing depends on them.
+7. **`AppConfig`** — **designed, deferred.** Process-level settings and the
+   ceilings a server needs to protect itself; deliberately holds no step
+   behaviour. Fully specified in [app-config.md](app-config.md) and not yet
+   implemented — it is pure pydantic with no server dependency, so it can land
+   whenever the backend needs it.
 
 If step 2 feels wrong in practice, we learned it cheaply and nothing is broken.
 
@@ -753,10 +794,30 @@ If step 2 feels wrong in practice, we learned it cheaply and nothing is broken.
 - ~~Ledger rows: units of work, or output rows?~~ **Settled:** one row per
   unit of work, indexed by the input's index; `expand`/`collapse` link back
   through a `source` column (§5).
-- Does `Step.status` remain a field, or become a **rollup computed from the
-  ledger**? A step where 3 of 100 rows failed is neither "completed" nor
-  "failed" — the rollup rule needs stating.
-- Tool versioning: source hash or manual `version=`?
+- ~~Does `Step.status` remain a field, or become a rollup?~~ **Settled: a
+  rollup, by precedence.** A stored field would have to be kept in sync with
+  the ledger and could disagree with it; a rollup cannot. The rule is *the most
+  alarming state wins*:
+
+  ```
+  invalid > failed > running > staged > completed
+  ```
+
+  So a step where 3 of 100 units failed reads **`failed`** — never "completed".
+  There is deliberately no `partial` state: a client would still have to read
+  the ledger for the counts, so a seventh word buys nothing that
+  `(ledger.status == "completed").sum()` does not already give. `failed` means
+  *at least one unit failed*; the ledger says how many.
+- ~~Tool versioning: source hash or manual `version=`?~~ **Settled: both,
+  layered.** `inspect.getsource` hashing is the default because it is free and
+  catches the common case (someone edited the function). A manual `version=`
+  overrides it when present, because the cases a source hash misses — a changed
+  global, an upgraded dependency, a tweaked prompt file — are exactly the cases
+  where a human knows and the machine cannot. Picking only one either burdens
+  every tool author or silently misses real changes.
+
+  Resources contribute their own version (§8.2), so the fingerprint is
+  `hash(tool_version, resource_versions, resolved args, upstream fingerprints)`.
 - ~~An `auto` modifier that picks the iteration for you.~~ **Settled: it is a
   resolver, not a modifier.** `score(wf["raw"])` infers the verb at wiring and
   stores it **concretely**. A stored `auto` would be the only modifier whose
@@ -769,15 +830,30 @@ If step 2 feels wrong in practice, we learned it cheaply and nothing is broken.
   string argument — which is the mechanical reason `retry(map(f))` is
   unsayable: `retries` is an argument *of* map, and an argument cannot sit
   outside its own function.
-- **Still open: one shape verb per step, or several?** §1.1 says at most one;
-  the prototype permits several and folds them. The bracket form makes
-  `score[mod.map(...), mod.filter(...)]` easy to write, so this needs deciding —
-  it gates how `inference.effective_output` composes.
-- **Still open: row/column duality.** `colmap` and friends are wanted later.
-  The blocker is §5: a column verb's unit of work is a column, so its ledger is
-  indexed by column while `data` is indexed by row — different index *spaces*,
-  which makes `view()`'s join produce NaN rather than an error. `axis="columns"`
-  currently raises rather than shipping that silently.
+- ~~One shape verb per step, or several?~~ **Settled: at most one.** The
+  re-drive argument decides it. Two shape changes inside one step produce an
+  intermediate grid with no cell address, so a unit that fails *there* cannot be
+  inspected or re-run — and per-cell re-drive is the thing this whole model is
+  built to provide.
+
+  The spreadsheet analogy cuts the other way, which is worth saying because it
+  looks like the strongest counter-argument: `=SUM(FILTER(...))` nests happily
+  because Excel's functions are instant, pure and cannot fail. §0 opens by
+  noting that ours are none of those — which is precisely why every intermediate
+  has to be addressable.
+
+  Enforced in `check()`, so the rule cannot quietly rot.
+- **Still open: which slices can be units (§1.0).** `row` is built; `column`
+  and `cell` are not.
+  - **Column.** `colmap` and friends are wanted. The blocker is §5: a
+    column-wise verb's ledger is indexed by column name while `data` is indexed
+    by row — different index *spaces*, so `view()`'s join yields NaN rather than
+    an error. `axis="columns"` raises today rather than shipping that silently.
+    It also needs deciding whether a column reaches the tool as a **list** or as
+    a dict keyed by the old row index; the half-built transpose did the latter,
+    which is almost never what a column-wise tool wants.
+  - ~~**Cell.**~~ **Settled by the flat-grid decision below: not a distinct
+    unit.** One row is one unit, so a cell and a row coincide.
 - ~~**Reference checking at declaration.**~~ **Half settled.** Once a tool
   declares the values it needs by name rather than taking a row dict, the
   *columns* an upstream must supply are checkable at declaration with no schema
@@ -785,7 +861,24 @@ If step 2 feels wrong in practice, we learned it cheaply and nothing is broken.
   *types*: matching dtypes to parameter annotations. `validation.py` (literals)
   and `inference.effective_output` (reference shapes) are both written and both
   still wired only to the engine's run path.
-- Does `sweep` take parameter lists directly, or a reference to a grid of
-  parameter rows? The second composes better; the first reads better.
-- Nested fan-out (a set of tables, then each table's rows): one flat grid with
-  a source column, or a genuinely 2-D grid? §3 implies flat; unconfirmed.
+- ~~Does `sweep` take parameter lists, or a reference to a grid of parameter
+  rows?~~ **Settled: lists — because the second option is not a sweep.** Running
+  a tool once per row of an existing grid of parameters is exactly `map` with
+  column binding; the parameters are columns and bind by name like any others.
+  So the choice dissolves: `sweep` *generates* a cross product, `map` *consumes*
+  a grid, and nothing is missing.
+- ~~Nested fan-out: one flat grid, or a genuinely 2-D one?~~ **Settled: flat.**
+  Four reasons, in order of weight:
+  1. **Re-drive.** A cell's address is what lets a failed unit be re-run. A
+     nested grid's inner cells have no address in the outer one.
+  2. It costs nothing new: the ledger already links non-1:1 verbs through
+     `unit`, which is the same mechanism.
+  3. A 2-D grid of objects needs nested frames or a MultiIndex, reintroducing
+     the "column of columns" problem §3 retired when `group` stopped nesting.
+  4. The need is already expressible: `group` marks the stratum and
+     `collapse(by=…)` reduces within it.
+
+  **This also settles the cell question above.** If every grid is flat, one row
+  *is* one unit and the produced object sits in one payload column — so a cell
+  and a row coincide, and `cell` is not a distinct unit. The unit question
+  reduces to row (built) versus column (open).

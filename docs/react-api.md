@@ -9,7 +9,8 @@
 
 Every payload here was produced by running the prototype, not written by hand.
 For the server side — how to write the tools this API exposes — see
-[writing-tools.md](writing-tools.md).
+[writing-tools.md](writing-tools.md); for how the process itself is configured,
+[app-config.md](app-config.md).
 
 ---
 
@@ -302,13 +303,14 @@ index, which is the cell address the client needs for per-cell re-drive.
 | `error` | why it failed, per row |
 | `attempts` | retries used |
 | `seconds` | how long it took |
-| `unit` | which **input** row produced this one |
+| `unit` | which **input** unit produced this one (a row, in every verb built so far) |
 
 A verb may add one: `filter` writes `kept`, so a dropped row is still in the
 ledger with `kept: false`. Treat ledger columns as "these five, plus whatever
 the verb added" rather than a fixed list.
 
-`unit` matters for the verbs where rows do not line up. For `map`, `group` and
+One ledger entry per **unit of work** — not per output row. `unit` matters for
+the verbs where the two do not line up. For `map`, `group` and
 `sweep` the two frames share an index exactly. For `filter` the ledger is a
 **superset** — it keeps the rows that were dropped, with a `kept` flag, so the
 UI can answer *"what happened to the other two?"*. For `expand` and `collapse`

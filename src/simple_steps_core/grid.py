@@ -4,6 +4,10 @@ Grid — a working prototype of the target model (docs/shape-algebra.md)
 
 Standalone and importable today. It does **not** touch the engine, the
 registry or the existing orchestrators, so nothing that works now can break.
+
+**Three names here shadow the engine's**: ``Workflow``, ``Operation`` and
+``Step``. Import the module, not the names — ``from simple_steps_core import
+grid`` then ``grid.Workflow()`` — so every call site says which model it means.
 The point is to have something you can actually call::
 
     from simple_steps_core.grid import rows, map_, filter_, group_, collapse_, sweep_
@@ -189,7 +193,11 @@ BUILTIN_TOOLS: dict[str, Callable] = {"identity": identity}
 # Input coercion — "what is a row?"
 # ─────────────────────────────────────────────────────────────────────────
 def rows(value: Any, *, axis: str = "rows") -> pd.DataFrame:
-    """Coerce any step input into a frame of units of work.
+    """Coerce any step input into a frame of rows.
+
+    Rows, specifically — not "units of work". Which slice serves as the unit is
+    the verb's choice (docs/shape-algebra.md §1.0); every verb built so far
+    picks the row, but the coercion here is only about producing a frame.
 
     A DataFrame yields its rows (or its columns with ``axis="columns"``);
     an Output yields its payload grid; a mapping yields one row per entry with
@@ -511,7 +519,7 @@ def _d_apply(fn: Callable, **literals) -> Callable:
     * a tool with ``**kwargs`` receives the whole row, for the cases that
       genuinely want it (``identity``);
     * bound literals fill the rest, and a column **wins** a name collision,
-      because the row is the unit of work — the engine's rule;
+      because the unit is the row here and the unit wins — the engine's rule;
     * a non-dict input (an unorchestrated step over a bare value) is passed
       positionally, since there are no columns to bind.
 
@@ -1113,11 +1121,23 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         elif step_id is not None and step_id in workflow._upstream_ids(name):
             problems.append(f"{modifier.kind} over {name!r} is circular")
 
-    # 4. source applies no tool
+    # 4. at most one shape verb per step (§11). Two shape changes inside one
+    #    step make an intermediate grid with no cell address, so a unit that
+    #    fails there cannot be inspected or re-run.
+    verbs = operation.shape_verbs
+    if len(verbs) > 1:
+        names = ", ".join(v.kind for v in verbs)
+        problems.append(
+            f"{len(verbs)} shape verbs in one step ({names}); at most one is "
+            "allowed. Split them into separate steps so every shape change "
+            "keeps a cell address you can re-drive."
+        )
+
+    # 5. source applies no tool
     if any(m.kind == "source" for m in operation.modifiers) and fn is not identity:
         problems.append("source applies no tool; use map to compute")
 
-    # 5. bound literals have to be parameters the tool accepts — the reactive
+    # 6. bound literals have to be parameters the tool accepts — the reactive
     #    argument check, done against the signature rather than at run time.
     if fn is not None and operation.arguments:
         try:
@@ -1133,7 +1153,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                         f"{operation.tool_id}() takes no argument {name!r}; "
                         f"it accepts {', '.join(list(parameters)[1:]) or '(none)'}"
                     )
-    # 6. the values the tool requires have to exist as columns upstream.
+    # 7. the values the tool requires have to exist as columns upstream.
     #    This is only possible because a tool declares what it needs by name —
     #    with a `def score(row)` convention there is nothing to check against.
     if fn is not None and workflow is not None and not problems:

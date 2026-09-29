@@ -12,6 +12,26 @@ To write tools against this model, see [writing-tools.md](writing-tools.md);
 for the HTTP contract a React client would consume, see
 [react-api.md](react-api.md).
 
+## 0. Importing it
+
+Two models live in the package during the migration, and **three names mean
+different things in each** — `Workflow`, `Operation`, `Step`. Import the
+module, not the names:
+
+```python
+from simple_steps_core import grid      # ✓ every call site says which model
+
+wf = grid.Workflow()
+```
+
+```python
+from simple_steps_core import Workflow  # ✗ this is the ENGINE's Workflow
+```
+
+The convention survives the eventual swap: when the engine adopts this model,
+`grid.Workflow` and `Workflow` become the same thing and nothing written this
+way has to change.
+
 ---
 
 ## 1. The vocabulary
@@ -23,7 +43,8 @@ drifts from it is a bug.
 |---|---|---|
 | **Tool** | a plain Python function declaring the values it needs | `(**values) -> Any` |
 | **ToolHandle** | what `@tool` returns: the function plus an id | object |
-| **Row** | one unit of work; its columns bind to a tool's parameters | data |
+| **Row** | a horizontal slice of the grid; its columns bind to a tool's parameters | data |
+| **Unit** | what one invocation of the tool covers — the ledger has one entry per unit | concept |
 | **Modifier** | a descriptor: `kind` + `params` | data |
 | **ModifierKind** | a vocabulary entry: name, class, applier | table entry |
 | **Operation** | `tool_id` + ordered `Modifier`s + bound literals | data |
@@ -33,7 +54,15 @@ drifts from it is a bug.
 | **Grid** | the DataFrame in `Output.data` | data |
 | **Ledger** | per-unit execution record, beside the grid | data |
 
-Two distinctions that are easy to blur and cost real bugs when blurred:
+Three distinctions that are easy to blur and cost real bugs when blurred:
+
+- **`Row` vs. `Unit`.** They coincide in everything built so far, which is why
+  it is tempting to define one as the other — and that definition is exactly
+  what would forbid `colmap`. A unit is whatever slice one invocation covers:
+  a row today, a column or a cell later. The ledger is indexed by **unit**, so
+  a column-wise verb would index it by column name rather than row position —
+  a different index *space*, not merely a different count. See
+  [shape-algebra.md §1.0](shape-algebra.md).
 
 - **`Modifier` vs. applying one.** `mod.map(over=x)` builds a *descriptor*. It
   is applying it — `op[mod.map(over=x)]` — that returns an `Operation`. The
@@ -86,7 +115,7 @@ the tool unusable unmapped.
 | columns bind **by name** | anything the tool does not declare is not passed |
 | `**kwargs` gets the whole row | for the cases that want it — `identity` is the one |
 | bound literals fill the rest | `score.bind(weight=2)` |
-| a **column wins** a collision | the row is the unit of work — the engine's rule |
+| a **column wins** a collision | the unit is the row here, and the unit wins — the engine's rule |
 | a non-dict input is positional | an unorchestrated step over a bare value |
 
 The payoff is bigger than the tidier signature: because the tool names what it

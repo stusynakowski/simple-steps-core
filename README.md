@@ -55,6 +55,18 @@ A frontend talks to it over HTTP — see [docs/react-api.md](docs/react-api.md)
 for the contract and [docs/writing-tools.md](docs/writing-tools.md) for the
 tools it exposes.
 
+**One import gotcha.** Two models live in the package during the migration, and
+`Workflow`, `Operation` and `Step` mean different things in each. Import the
+module rather than the names:
+
+```python
+from simple_steps_core import grid      # the grid model — docs/grid-model.md
+wf = grid.Workflow()
+```
+
+Importing the package pulls in no web framework and no Jupyter; it exposes
+`__version__` and ships `py.typed`, so a parent repo type-checks against it.
+
 ## Why this helps backend workflow management
 
 - Operations are explicit and typed, so execution is predictable.

@@ -47,7 +47,10 @@ Because execution modifiers cannot change shape, a step's shape is computable
 from its stack before anything runs. That is what makes staging reactive.
 
 **No cascade, no precedence, no `resolved_config()`.** Unchanged. A modifier is
-local to its step, exactly as a config was.
+local to its step, exactly as a config was. The one config that survives —
+[`AppConfig`](app-config.md) — holds process-level facts only, and the
+*default vs. ceiling* distinction is what keeps it from quietly rebuilding the
+cascade.
 
 **The unit-of-work rule**, restated: the unit is what the enclosing shape verb
 makes it. `retry` inside `map` retries an item; `retry` outside `map` retries

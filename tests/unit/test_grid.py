@@ -751,6 +751,22 @@ def test_a_staged_upstream_is_not_column_checked(three):
     assert wf.step("c").output.values == [11, 21, 31]
 
 
+def test_two_shape_verbs_in_one_step_are_refused(three):
+    """§11: an intermediate grid has no cell address, so it cannot be re-driven."""
+    wf = Workflow()
+    wf["raw"] = three
+    wf["both"] = score[mod.map(over=wf["raw"]), mod.filter()]
+    assert not wf.step("both").valid
+    assert "at most one is allowed" in wf.step("both").problems[0]
+
+
+def test_one_shape_verb_with_execution_modifiers_is_fine(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["ok"] = score[mod.map(over=wf["raw"]), mod.retry(times=2), mod.timeout(seconds=5)]
+    assert wf.step("ok").valid
+
+
 def test_a_dangling_reference_is_caught():
     wf = Workflow()
     wf["dangling"] = score[mod.map(over="nope")]
