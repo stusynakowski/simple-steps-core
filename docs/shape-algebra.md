@@ -247,6 +247,24 @@ that is the "shape of the output depends on the shape of the input" part:
 | `group` | n → n | input columns **+ key column** | `group_by` |
 | `sweep` | 1 → n×m | one column **per swept parameter** + payload | `expand_grid` |
 | `source` | value → n | the value's own columns | — |
+| `select` | n → n | the named columns, **in the order given** | `select` |
+| `drop` | n → n | every column except the named ones | `select(-…)` |
+
+`select` and `drop` are the column-axis mirror of `filter`: filter chooses rows,
+these choose columns. Two verbs rather than one with a `drop=` argument, because
+each then does one thing, needs no mutually-exclusive arguments, and reads right
+— "select drop" never did.
+
+Both are **strict**: naming a column the input does not have is a typo, not a
+no-op, and it is caught at declaration. And both apply **no tool**, which is
+what makes them buildable while `colmap` is not — nothing executes, so nothing
+can fail, so there are no per-column ledger entries and none of §5's
+index-space problems arise.
+
+You need it less often than you would expect *before* a `map`, because column
+binding already hands a tool only the values it declares (§6.1). Its job is the
+grid you carry **forward**: `map` passes every input column through, and
+`select` is how you drop the ones downstream does not want.
 
 `source` is the verb a chain starts with. Making it a verb rather than a
 special case is what closes the algebra: **every** step is then (verb, tool,
@@ -371,7 +389,10 @@ These are settled and stay as they are.
 | **`Workflow`** | ordered `Step`s, plus the payloads source steps read |
 | **`check()`** | everything wrong with an Operation that is knowable without running it — returns problems, never raises |
 | **`stage()`** | the `Output` a step has before it runs |
-| **`identity`** | the default tool: what closes the algebra (§6.3) |
+| **`identity`** | the default tool for the mapping verbs: what closes the algebra (§6.3) |
+| **`gather`** | the default tool for `collapse` — the reduction that discards nothing |
+| **builtin reducers** | `count`, `total`, `first`, `last` — so a `collapse` needs no bespoke tool |
+| **`DEFAULT_TOOL`** | verb → the tool it applies when none is named |
 
 ### 4.4 Retired
 
@@ -568,6 +589,13 @@ convention can know, so bind it — `op("identity", column="score")`.
 
 `collapse` is the exception: it needs a two-argument reducer, so identity has
 nothing to mean there.
+
+`collapse` takes a two-argument reducer, so `identity` cannot be its default —
+but a default exists: **`gather`**, which appends each payload to a list.
+`identity` is the map that discards nothing; `gather` is the reduction that
+discards nothing. Different arity, same principle, and it makes `expand` and
+`collapse` exact inverses — a cell holding `[1, 2, 3]` expands to three rows,
+and three rows gather back into that cell.
 
 ### 6.4 Brackets are decoration at run time
 
@@ -845,7 +873,9 @@ If step 2 feels wrong in practice, we learned it cheaply and nothing is broken.
   Enforced in `check()`, so the rule cannot quietly rot.
 - **Still open: which slices can be units (§1.0).** `row` is built; `column`
   and `cell` are not.
-  - **Column.** `colmap` and friends are wanted. The blocker is §5: a
+  - **Column.** Note this is about `colmap` — running a tool *per column*. It
+    is **not** about `select`/`drop`, which choose columns without running
+    anything and are already built (§3). `colmap` and friends are wanted. The blocker is §5: a
     column-wise verb's ledger is indexed by column name while `data` is indexed
     by row — different index *spaces*, so `view()`'s join yields NaN rather than
     an error. `axis="columns"` raises today rather than shipping that silently.

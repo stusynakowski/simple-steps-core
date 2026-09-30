@@ -205,6 +205,110 @@ contract over HTTP — see [react-api.md](react-api.md).
 
 ---
 
+## Tier 4 — the grid model (`simple_steps_core.grid`)
+
+> **Separate surface, separate import.** Three names shadow the engine's —
+> `Workflow`, `Operation`, `Step` — so import the module, never the names:
+> `from simple_steps_core import grid`. Design in
+> [shape-algebra.md](shape-algebra.md), how it is arranged in
+> [grid-model.md](grid-model.md), how to write tools for it in
+> [writing-tools.md](writing-tools.md).
+
+### Authoring
+
+| Name | Is |
+|---|---|
+| `tool` | the decorator; registers into `TOOLS` |
+| `op(tool_id, **literals)` | an Operation naming a tool by id |
+| `mod` | modifier constructors — `mod.map(over=…)`, `mod.retry(times=…)` |
+| `Workflow` | ordered `Step`s and nothing else |
+| `Step` | an `Operation` **and** an `Output`, both from declaration |
+| `StepRef` | what `wf["id"]` returns; wiring a reference builds the step |
+
+Two calling rules, and no third: **brackets decorate, parens apply.** Applying
+to data runs; applying to a `StepRef` wires. `bind(**literals)` fixes constants.
+
+### The tool registries
+
+| Name | Is |
+|---|---|
+| `BUILTIN_TOOLS` | `identity gather count total first last` — system, **protected** |
+| `TOOLS` | whatever `@tool` declared |
+| `DEFAULT_TOOL` | verb → the builtin a bare modifier resolves to |
+| `catalog()` / `tool_entry()` | palette entries: `tool_id`, `description`, `origin`, `params`, `takes_whole_row` |
+
+`@tool` **refuses** a name that collides with a builtin: the shape verbs resolve
+`identity` and `gather` by name, so shadowing one would quietly change what
+`select`, `drop` or a bare `collapse` does.
+
+A bare shape verb is a complete step — `wf["all"] = mod.collapse(over=ref)`
+applies `gather`. A bare *execution* modifier is refused.
+
+### The modifier vocabulary
+
+| Name | Is |
+|---|---|
+| `MODIFIERS` | **the one table** — every kind, its class, its applier |
+| `ModifierKind` | one entry: `name`, `cls` (`shape` / `execution`), `apply` |
+| `SHAPE_VERBS`, `DECORATORS`, `is_shape` | derived from it; never written twice |
+| `ROWS_RULE` | §3's rows column as data — what staging folds |
+| `DEFAULT_PAYLOAD`, `CARRIES_COLUMNS` | which column a verb writes; whose it keeps |
+
+Current verbs: `source map filter select drop group expand collapse sweep`
+(shape) · `retry timeout` (execution).
+
+### Declaring, staging, running
+
+| Name | Is |
+|---|---|
+| `check(operation, workflow, step_id)` | every problem knowable without running; **never raises** |
+| `stage(...)` | the `Output` a step has before it runs |
+| `infer_verb(fn, upstream, literals)` | which verb a tool wants, and why |
+| `predicted_columns(output)` | the columns a step will have, **in order** |
+| `Workflow.pending / run / run_all` | what must run first; run one; run the chain |
+| `compile_operation(operation, tools)` | **the boundary** — data becomes behaviour |
+
+### Output and payloads
+
+| Name | Is |
+|---|---|
+| `Output` | `data` + `ledger` + `meta`; `view()`, `ok`, `failed`, `values`, `item()` |
+| `Output.shape` / `.form` | `(rows, cols)` — pandas' meaning / the cardinality class |
+| `PAYLOAD`, `LEDGER_COLUMNS` | `"value"`; `status error attempts seconds unit` |
+| `to_json` / `to_session_json` / `from_json` | light export (structure) / full (plus payloads) |
+| `PayloadError` | raised rather than writing a payload that cannot load back |
+
+### The implementation layer
+
+Public, but not what you reach for when wiring a workflow. `MODIFIERS` wires
+these up; `mod.map(over=…)` is the authoring form.
+
+| Name | Is |
+|---|---|
+| `map_ filter_ select_ drop_ group_ collapse_ expand_ sweep_ source_` | the verbs themselves — callable directly on a frame, with no Workflow, which is how they are unit-tested |
+| `grid(value)` / `rows(value)` | lift a value into an `Output` / coerce one into a frame of rows |
+| `Modifier` | one stack entry: `kind` + `params`, with `cls` and `is_shape` read from `MODIFIERS` |
+| `ToolHandle` | what `@tool` returns — the function, an id, `bind`, and `__getitem__` |
+| `is_identity(fn)` | recognizes `identity` through the argument adapter; how `source`/`select`/`drop` enforce "no tool" |
+
+Forty-nine exported names is a lot for a submodule to absorb, and roughly a
+quarter of them are this layer. Worth trimming once the authoring surface stops
+moving.
+
+### Not yet in this surface
+
+| | status |
+|---|---|
+| `rename`, `head`/`limit`, `sort`, `distinct` | proposed verbs, not built |
+| `cache`, `gate`, `concurrency` | **promised in §1.1, missing from `MODIFIERS`** |
+| `join` | needs multi-upstream references first |
+| `colmap` and the column-as-unit family | blocked on §5 — `axis="columns"` raises |
+| literal steps via `ast.literal_eval` | decided (one cell), not built |
+| `AppConfig` | specified in [app-config.md](app-config.md), not built |
+| `Output.ref` | no payload store yet; payloads sit inline on the Step |
+
+---
+
 # What to change
 
 Ranked by how much damage each does. Every item below was reproduced against
@@ -339,6 +443,24 @@ never read by the runtime — only `arguments` is enforced. A tool marked
 `requires_confirmation=True` runs without confirmation unless the host
 implements the gate. Worth stating in the class docstring, since the field names
 read like promises.
+
+---
+
+## 10. The grid model is a second, parallel model
+
+`simple_steps_core.grid` implements [shape-algebra.md](shape-algebra.md)
+standalone — it imports nothing from the engine and nothing imports it — so
+`Workflow`, `Operation` and `Step` each mean two things depending on which
+module you took them from. That is survivable during migration and must not
+outlive it. The sequence is in shape-algebra §10; the load-bearing first step is
+making `ToolCall` recursive, because nothing else can land before it.
+
+Three execution modifiers are documented as part of the model and exist in
+neither place: `cache`, `gate`, `concurrency`.
+
+`grid.__all__` also exports 49 names, about a quarter of which are the verb
+implementations a user never calls directly (Tier 4, *implementation layer*).
+Same problem as §8 above, in the newer half of the codebase.
 
 ---
 

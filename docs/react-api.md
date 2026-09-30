@@ -49,17 +49,37 @@ The palette. One entry per registered tool.
   {
     "tool_id": "score",
     "description": "Weight a count.",
+    "origin": "declared",
     "params": [
-      {"name": "n",      "type": "int", "required": true,  "default": null},
-      {"name": "weight", "type": "int", "required": false, "default": 1}
+      {"name": "n",      "required": true,  "default": null},
+      {"name": "weight", "required": false, "default": 1}
     ],
-    "returns": "int"
+    "takes_whole_row": false
+  },
+  {
+    "tool_id": "gather",
+    "description": "Collect every payload into one list.",
+    "origin": "builtin",
+    "params": [{"name": "acc", "required": false, "default": null}],
+    "takes_whole_row": true
   }
 ]
 ```
 
-`required: true` params are the ones a step must get **from a column**;
-optional ones are candidates for `bind` (§4).
+`required: true` params are the ones a step must get **from a column**; optional
+ones are candidates for `bind` (§4).
+
+`origin` separates the system's tools from the user's. The **builtins**
+(`identity`, `gather`, `count`, `total`, `first`, `last`) are always available
+and rarely what someone is hunting for, so group or collapse them rather than
+mixing them into the palette. They are also what a bare shape verb resolves to,
+so a client that offers "collapse these rows" with no tool chosen is really
+offering `gather`.
+
+`takes_whole_row: true` means the tool declares `**kwargs` and receives every
+column — so declaration **cannot** check its inputs against the upstream. Worth
+surfacing, because it is the one case where a step can look valid and still fail
+at run time.
 
 ### `GET /modifiers`
 

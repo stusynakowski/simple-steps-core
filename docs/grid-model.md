@@ -152,6 +152,62 @@ score[mod.map(over=wf["raw"])]
 which is why everything reactive still works: `over` is in the Operation, where
 `check`, staging, cycle detection and the light export all read it.
 
+### A bare shape verb is a complete step
+
+A reshaping step needs no tool of its own, so the verb alone is the step:
+
+```python
+wf["flat"] = mod.expand(over=wf["nested"])    # -> identity
+wf["all"]  = mod.collapse(over=wf["xs"])      # -> gather
+```
+
+Each verb resolves to **the tool that discards nothing** (`DEFAULT_TOOL`) —
+`identity` for the mapping verbs, `gather` for `collapse`, whose reducer takes
+an accumulator first. That arity difference is why one cannot stand in for the
+other, and why `expand` and `collapse` are exact inverses once each has its own.
+
+An **execution** modifier alone is refused: a pass-through that retries is
+inert, and accepting it would hide a half-written step.
+
+```
+mod.retry(times=2)
+# TypeError: 'retry' needs a tool: it is an execution modifier, which changes
+#            nothing on its own. Write <tool>[mod.retry(...)] instead.
+```
+
+### Builtin tools
+
+There are two registries, deliberately separate:
+
+| | | |
+|---|---|---|
+| `BUILTIN_TOOLS` | the pass-throughs and reductions every workflow would otherwise hand-write | system, **protected** |
+| `TOOLS` | whatever `@tool` declared | yours |
+
+`catalog()` merges them into palette entries — `tool_id`, `description`,
+`origin`, `params`, `takes_whole_row` — which is the `GET /tools` shape in
+[react-api.md](react-api.md) §2. `description` is each docstring's first line,
+which is why those first lines are written as user-facing sentences.
+
+`origin` is what lets a client separate the two: the builtins are always
+available and rarely what someone is hunting for, so a palette usually groups or
+hides them.
+
+| id | |
+|---|---|
+| `identity` | Return what the previous step produced. |
+| `gather` | Collect every payload into one list. |
+| `count` | How many rows reached this step. |
+| `total` | Sum of the payloads. |
+| `first` / `last` | The first / last payload, in row order. |
+
+They resolve a row's payload the same way `identity` does, so they work on any
+grid rather than only one whose payload column happens to be `value`.
+
+**A user tool may not shadow a builtin.** `@tool` refuses the name at import,
+because the shape verbs resolve `identity` and `gather` *by name* — a same-named
+user tool would quietly change what `select` or a bare `collapse` does.
+
 ### Inferring the verb
 
 With no shape verb to place, wiring picks one (`infer_verb`) and **stores it
@@ -175,6 +231,12 @@ will write. Inference may use that prediction to *recognize* a pattern, but
 `check` may not use it to *refuse* one — the prediction is a subset (a `map`
 also carries its input's columns through), so rejecting against it would invent
 errors.
+
+Prediction is **ordered**, not a set. Column order is real information —
+`select` reorders deliberately, `map` appends its payload after the columns it
+carried through — and a prediction that came back as a set once matched the
+actual columns only by hash luck. A test asserts predicted order equals actual
+order for every step in a chain.
 
 Prediction covers the **whole column set**, not just the payload: `map`,
 `filter`, `group` and `expand` carry their input's columns through, so a staged
@@ -224,8 +286,13 @@ Because execution modifiers cannot change shape, a step's shape is computable
 from its stack without running anything. That is the whole reactive story in one
 sentence.
 
-Current vocabulary: `source`, `map`, `filter`, `group`, `expand`, `collapse`,
-`sweep` (shape); `retry`, `timeout` (execution).
+Current vocabulary: `source`, `map`, `filter`, `select`, `drop`, `group`,
+`expand`, `collapse`, `sweep` (shape); `retry`, `timeout` (execution).
+
+Three shape verbs — `source`, `select` and `drop` — apply **no tool**; their
+tool is `identity` and `check()` refuses anything else. That is also why the
+column verbs exist while `colmap` does not: running nothing means nothing can
+fail, so none of them needs a ledger indexed by something other than rows.
 
 ### Three orders, only one reversed
 
@@ -309,6 +376,7 @@ step promises only what the verb can guarantee:
 |---|---|---|
 | `map`, `group`, `source` | `same` | "3 cells" |
 | `filter` | `at_most` | "at most 3 cells" |
+| `select` / `drop` | `same` | "3 cells" — and their **columns** are known exactly, order included |
 | `collapse` | `one` | "1 cell" |
 | `expand` | `unknown` | "unknown count from 3 rows" |
 | `sweep` | `generated` | from its own parameters |

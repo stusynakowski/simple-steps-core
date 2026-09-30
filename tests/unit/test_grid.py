@@ -26,6 +26,7 @@ from simple_steps_core.grid import (
     StepRef,
     Workflow,
     TOOLS,
+    catalog,
     compile_operation,
     grid,
     infer_verb,
@@ -57,7 +58,7 @@ def burst(n):
 
 
 @tool
-def total(acc, n):
+def sum_up(acc, n):
     return (acc or 0) + n
 
 
@@ -232,9 +233,215 @@ def test_a_renamed_payload_is_bound_explicitly():
     assert out.values == [1, 2, 3]
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# select — the column-axis mirror of filter, and it applies no tool
+# ─────────────────────────────────────────────────────────────────────────
+@pytest.fixture
+def wide():
+    return pd.DataFrame({"city": ["Oslo", "Cairo"], "celsius": [-5, 38],
+                         "note": ["a", "b"]})
+
+
+def test_select_keeps_and_reorders(wide):
+    wf = Workflow()
+    wf["raw"] = wide
+    wf["narrow"] = op("identity")[mod.select(columns=["celsius", "city"], over=wf["raw"])]
+    wf.run_all()
+    assert list(wf.step("narrow").output.data.columns) == ["celsius", "city"]
+
+
+def test_drop_is_its_own_verb(wide):
+    wf = Workflow()
+    wf["raw"] = wide
+    wf["less"] = op("identity")[mod.drop(columns=["note"], over=wf["raw"])]
+    wf.run_all()
+    assert list(wf.step("less").output.data.columns) == ["city", "celsius"]
+
+
+def test_drop_keeps_the_remaining_order(wide):
+    wf = Workflow()
+    wf["raw"] = wide
+    wf["less"] = op("identity")[mod.drop(columns=["celsius"], over=wf["raw"])]
+    wf.run_all()
+    assert list(wf.step("less").output.data.columns) == ["city", "note"]
+
+
+def test_dropping_a_column_that_is_not_there_is_a_typo_not_a_no_op(wide):
+    wf = Workflow()
+    wf["raw"] = wide
+    wf["typo"] = op("identity")[mod.drop(columns=["nte"], over=wf["raw"])]
+    assert not wf.step("typo").valid
+    assert "drop names 'nte'" in wf.step("typo").problems[0]
+    with pytest.raises(KeyError, match="drop names 'nte'"):
+        op("identity")[mod.drop(columns=["nte"])](wide)
+
+
+def test_drop_applies_no_tool(wide):
+    with pytest.raises(ValueError, match="drop applies no tool"):
+        score[mod.drop(columns=["note"])](wide)
+
+
+def test_both_column_verbs_need_their_columns(wide):
+    with pytest.raises(ValueError, match="select needs columns="):
+        op("identity")[mod.select()](wide)
+    with pytest.raises(ValueError, match="drop needs columns="):
+        op("identity")[mod.drop()](wide)
+
+
+def test_select_predicts_its_columns_exactly_including_order(wide):
+    """The one verb that knows its output columns without seeing the data."""
+    wf = Workflow()
+    wf["raw"] = wide
+    wf["narrow"] = op("identity")[mod.select(columns=["celsius", "city"], over=wf["raw"])]
+    wf["less"] = op("identity")[mod.drop(columns=["note"], over=wf["raw"])]
+    staged = {sid: wf.step(sid).output.meta["columns"] for sid in ("narrow", "less")}
+    wf.run_all()
+    for sid, predicted in staged.items():
+        assert predicted == list(wf.step(sid).output.data.columns), sid
+
+
+def test_select_keeps_every_row(wide):
+    wf = Workflow()
+    wf["raw"] = wide
+    wf["narrow"] = op("identity")[mod.select(columns=["city"], over=wf["raw"])]
+    wf.run_all()
+    assert len(wf.step("narrow").output.data) == 2
+    assert wf.step("narrow").output.meta["payload"] is None
+
+
+def test_select_applies_no_tool(wide):
+    with pytest.raises(ValueError, match="select applies no tool"):
+        score[mod.select(columns=["n"])](wide)
+
+
+def test_select_cannot_keep_a_column_the_input_lacks(wide):
+    wf = Workflow()
+    wf["raw"] = wide
+    wf["bad"] = op("identity")[mod.select(columns=["nope"], over=wf["raw"])]
+    assert not wf.step("bad").valid
+    assert "select names 'nope'" in wf.step("bad").problems[0]
+
+
+def test_is_identity_sees_through_the_adapter():
+    from simple_steps_core.grid import _d_apply, is_identity
+    assert is_identity(identity)
+    assert is_identity(_d_apply(identity))
+    assert not is_identity(_d_apply(score.fn))
+
+
+def test_select_is_a_shape_verb_so_it_cannot_share_a_step(wide):
+    wf = Workflow()
+    wf["raw"] = wide
+    wf["both"] = op("identity")[mod.select(columns=["city"], over=wf["raw"]), mod.map()]
+    assert "at most one is allowed" in wf.step("both").problems[0]
+
+
 def test_source_applies_no_tool():
     with pytest.raises(ValueError, match="source applies no tool"):
         score[mod.source()](pd.DataFrame({"n": [1]}))
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# builtins and bare modifiers — the tool that discards nothing
+# ─────────────────────────────────────────────────────────────────────────
+BUILTIN_IDS = {"identity", "gather", "count", "total", "first", "last"}
+
+
+def test_the_catalog_describes_every_builtin():
+    """First lines are user-facing sentences, because a palette shows them."""
+    described = catalog()
+    assert BUILTIN_IDS <= set(described)
+    for name in BUILTIN_IDS:
+        entry = described[name]
+        assert entry["description"][0].isupper(), name
+        assert entry["description"].endswith("."), name
+        assert entry["origin"] == "builtin", name
+
+
+def test_the_catalog_separates_system_tools_from_declared_ones():
+    described = catalog()
+    assert described["score"]["origin"] == "declared"
+    assert described["identity"]["origin"] == "builtin"
+
+
+def test_a_catalog_entry_carries_what_a_form_needs():
+    entry = catalog()["score"]          # score(n, weight=1)
+    assert entry["params"] == [
+        {"name": "n", "required": True, "default": None},
+        {"name": "weight", "required": False, "default": 1},
+    ]
+    assert entry["takes_whole_row"] is False
+
+
+def test_a_whole_row_tool_is_flagged_in_the_catalog():
+    assert catalog()["identity"]["takes_whole_row"] is True
+
+
+def test_the_catalog_is_json_safe():
+    json.dumps(catalog())
+
+
+def test_a_user_tool_cannot_shadow_a_builtin():
+    with pytest.raises(ValueError, match="is a builtin tool"):
+        @tool
+        def identity(**row):
+            return row
+
+
+def test_a_bare_shape_verb_is_a_complete_step():
+    wf = Workflow()
+    wf["xs"] = pd.DataFrame({"n": [1, 2, 3, 4]})
+    wf["all"] = mod.collapse(over=wf["xs"])
+    assert wf.step("all").operation.tool_id == "gather"
+    wf.run_all()
+    assert wf.step("all").output.item() == [1, 2, 3, 4]
+
+
+def test_collapse_defaults_to_gather_and_expand_to_identity():
+    """The two are exact inverses once each has the tool that discards nothing."""
+    wf = Workflow()
+    wf["xs"] = pd.DataFrame({"n": [1, 2, 3, 4]})
+    wf["one"] = mod.collapse(over=wf["xs"])
+    wf["back"] = mod.expand(over=wf["one"])
+    wf.run_all()
+    assert wf.step("one").output.item() == [1, 2, 3, 4]
+    assert wf.step("back").output.values == [1, 2, 3, 4]
+
+
+@pytest.mark.parametrize("tool_id, expected", [
+    ("gather", [1, 2, 3, 4]), ("count", 4), ("total", 10),
+    ("first", 1), ("last", 4),
+])
+def test_the_builtin_reducers(tool_id, expected):
+    wf = Workflow()
+    wf["xs"] = pd.DataFrame({"n": [1, 2, 3, 4]})
+    wf["out"] = op(tool_id)[mod.collapse(over=wf["xs"])]
+    wf.run_all()
+    assert wf.step("out").output.item() == expected
+
+
+def test_reducers_work_on_any_payload_column():
+    """They resolve the payload like identity, not by demanding a 'value' column."""
+    wf = Workflow()
+    wf["xs"] = pd.DataFrame({"celsius": [1, 2, 3]})
+    wf["sum"] = op("total")[mod.collapse(over=wf["xs"])]
+    wf.run_all()
+    assert wf.step("sum").output.item() == 6
+
+
+def test_an_execution_modifier_alone_is_refused():
+    wf = Workflow()
+    with pytest.raises(TypeError, match="changes nothing on its own"):
+        wf["bad"] = mod.retry(times=2)
+
+
+def test_a_bare_modifier_no_longer_becomes_a_source_step():
+    """It used to build a source step whose payload was the Modifier object."""
+    wf = Workflow()
+    wf["xs"] = pd.DataFrame({"n": [1, 2]})
+    wf["flat"] = mod.expand(over=wf["xs"])
+    assert wf.step("flat").operation.shape_verb.kind == "expand"
+    assert wf.step("flat").operation.tool_id == "identity"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -307,7 +514,7 @@ def test_literals_survive_wiring(three):
 def test_inference_reads_a_reducer_as_collapse(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["sum"] = total(wf["raw"])          # total(acc, n) — acc is not a column
+    wf["sum"] = sum_up(wf["raw"])          # sum_up(acc, n) — acc is not a column
     assert wf.step("sum").operation.shape_verb.kind == "collapse"
     wf.run_all()
     assert wf.step("sum").output.item() == 6
@@ -348,33 +555,35 @@ def test_inference_works_when_the_whole_chain_is_declared_first(three):
 
 
 def test_inference_reads_a_carried_through_column_while_staged(three):
-    """`total(acc, n)` reduces over a column that merely passes through."""
+    """`sum_up(acc, n)` reduces over a column that merely passes through."""
     wf = Workflow()
     wf["raw"] = three
     wf["scored"] = score(wf["raw"])
-    assert total(wf["scored"]).shape_verb.kind == "collapse"   # staged
+    assert sum_up(wf["scored"]).shape_verb.kind == "collapse"   # staged
     wf.run_all()
-    assert total(wf["scored"]).shape_verb.kind == "collapse"   # and after
+    assert sum_up(wf["scored"]).shape_verb.kind == "collapse"   # and after
 
 
 def test_staged_prediction_matches_what_actually_appears(three):
-    """The invariant worth protecting: predicting is not guessing."""
+    """The invariant worth protecting: predicting is not guessing — order too."""
     wf = Workflow()
     wf["raw"] = three
     wf["scored"] = score(wf["raw"])
     wf["kept"] = keep[mod.filter()](wf["scored"])
-    wf["sum"] = total[mod.collapse()](wf["kept"])
+    wf["narrow"] = op("identity")[mod.select(columns=["value", "n"], over=wf["kept"])]
+    wf["thin"] = op("identity")[mod.drop(columns=["n"], over=wf["kept"])]
+    wf["sum"] = sum_up[mod.collapse()](wf["kept"])
     predicted = {sid: predicted_columns(st.output) for sid, st in wf.steps.items()}
     wf.run_all()
     for sid, step in wf.steps.items():
-        assert predicted[sid] == set(step.output.data.columns), sid
+        assert predicted[sid] == list(step.output.data.columns), sid
 
 
 def test_naming_the_payload_column_is_predicted_too(three):
     wf = Workflow()
     wf["raw"] = three
     wf["scored"] = score[mod.map(name="score")](wf["raw"])
-    assert predicted_columns(wf.step("scored").output) == {"n", "score"}
+    assert predicted_columns(wf.step("scored").output) == ["n", "score"]
     wf.run_all()
     assert list(wf.step("scored").output.data.columns) == ["n", "score"]
 
@@ -384,7 +593,7 @@ def test_filter_carries_columns_through_and_writes_none(three):
     wf["raw"] = three
     wf["kept"] = keep[mod.filter()](wf["raw"])
     assert wf.step("kept").output.meta["payload"] is None
-    assert predicted_columns(wf.step("kept").output) == {"n"}
+    assert predicted_columns(wf.step("kept").output) == ["n"]
 
 
 def test_inference_reads_a_list_return_as_expand():
@@ -650,7 +859,7 @@ def test_cardinality_propagates_transitively(three):
     [
         (lambda ref: score[mod.map(over=ref)], "same", "map score · 3 cells"),
         (lambda ref: keep[mod.filter(over=ref)], "at_most", "filter keep · at most 3 cells"),
-        (lambda ref: total[mod.collapse(over=ref)], "one", "collapse total · 1 cell"),
+        (lambda ref: sum_up[mod.collapse(over=ref)], "one", "collapse sum_up · 1 cell"),
         (lambda ref: burst[mod.expand(over=ref)], "unknown",
          "expand burst · unknown count from 3 rows"),
     ],
@@ -730,7 +939,7 @@ def test_a_whole_row_tool_is_never_flagged():
 def test_collapse_does_not_require_its_accumulator_from_the_row(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["sum"] = total[mod.collapse(over=wf["raw"])]   # total(acc, n)
+    wf["sum"] = sum_up[mod.collapse(over=wf["raw"])]   # sum_up(acc, n)
     assert wf.step("sum").valid
     wf.run_all()
     assert wf.step("sum").output.item() == 6

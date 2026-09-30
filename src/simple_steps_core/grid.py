@@ -39,10 +39,14 @@ import pandas as pd
 
 __all__ = [
     "Output", "grid", "rows", "map_", "filter_", "group_", "collapse_",
-    "expand_", "sweep_", "source_", "identity", "BUILTIN_TOOLS", "TOOLS",
+    "expand_", "sweep_", "source_", "select_", "drop_",
+    "identity", "gather", "count", "total", "first", "last",
+    "BUILTIN_TOOLS", "DEFAULT_TOOL", "catalog", "tool_entry",
+    "TOOLS",
     "op", "Modifier", "Operation",
     "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "stage",
-    "ROWS_RULE", "DEFAULT_PAYLOAD", "CARRIES_COLUMNS", "PayloadError", "infer_verb",
+    "ROWS_RULE", "DEFAULT_PAYLOAD", "CARRIES_COLUMNS", "PayloadError",
+    "is_identity", "infer_verb",
     "predicted_columns",
 
     "mod",
@@ -147,6 +151,16 @@ def _ledger(records: list[dict], index: Sequence[Any]) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────────────────
 # identity — the tool that closes the algebra
 # ─────────────────────────────────────────────────────────────────────────
+def is_identity(fn: Callable) -> bool:
+    """True when *fn* is :func:`identity`, through any adapter wrapping it."""
+    seen = 0
+    while fn is not None and seen < 10:
+        if fn is identity:
+            return True
+        fn, seen = getattr(fn, "__wrapped__", None), seen + 1
+    return False
+
+
 def identity(**row: Any) -> Any:
     """Return what the previous step produced — the default tool.
 
@@ -184,9 +198,120 @@ def identity(**row: Any) -> Any:
     return row
 
 
-#: Tools every Operation can name without being handed a registry. Keeping
-#: identity here is what lets a reshape-only step stay a normal step.
-BUILTIN_TOOLS: dict[str, Callable] = {"identity": identity}
+def gather(acc: Any = None, **row: Any) -> list:
+    """Collect every payload into one list.
+
+    The default tool for ``collapse``. Where ``identity`` is the map that
+    discards nothing, this is the **reduction** that discards nothing — so
+    ``collapse`` needs no bespoke tool just to bring a column together, and it
+    becomes the exact inverse of ``expand``: a cell holding ``[1, 2, 3]``
+    expands to three rows, and three rows gather back into that cell.
+
+    Takes the accumulator first, like every reducer, and resolves each row's
+    payload the same way :func:`identity` does — so it works on any grid, not
+    only one whose payload column happens to be called ``value``.
+    """
+    return [*(acc or []), identity(**row)]
+
+
+def count(acc: Any = None, **row: Any) -> int:
+    """How many rows reached this step. Ignores the values entirely."""
+    return (acc or 0) + 1
+
+
+def total(acc: Any = None, **row: Any) -> float:
+    """Sum of the payloads. Raises on a payload that will not add."""
+    return (acc or 0) + identity(**row)
+
+
+def first(acc: Any = None, **row: Any) -> Any:
+    """The first payload, in row order. Later rows are ignored."""
+    return identity(**row) if acc is None else acc
+
+
+def last(acc: Any = None, **row: Any) -> Any:
+    """The last payload, in row order."""
+    return identity(**row)
+
+
+#: Tools every Operation can name without being handed a registry, and the
+#: defaults a bare modifier resolves to. A user may name any of these by id in
+#: place of their own function — they are the reductions and pass-throughs that
+#: would otherwise be written by hand in every workflow.
+BUILTIN_TOOLS: dict[str, Callable] = {
+    "identity": identity,
+    "gather": gather,
+    "count": count,
+    "total": total,
+    "first": first,
+    "last": last,
+}
+
+
+#: The tool a shape verb applies when none is named — *the one that discards
+#: nothing*. For every verb that maps, that is ``identity``; for ``collapse``,
+#: whose tool takes an accumulator first, it is ``gather``. The arity is why one
+#: cannot stand in for the other.
+DEFAULT_TOOL: dict[str, str] = {
+    "source": "identity", "select": "identity", "drop": "identity",
+    "map": "identity", "filter": "identity", "group": "identity",
+    "expand": "identity", "collapse": "gather",
+}
+
+
+def tool_entry(tool_id: str, fn: Callable, origin: str) -> dict:
+    """One tool as a palette entry: what it is, where it came from, what it takes.
+
+    ``description`` is the docstring's first line, which is why those first
+    lines are written as user-facing sentences rather than developer notes.
+    ``origin`` lets a client separate the system's tools from the user's — the
+    builtins are always available and rarely what someone is looking for, so a
+    palette usually groups or hides them.
+    """
+    doc = (inspect.getdoc(fn) or "").strip()
+    try:
+        parameters = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        parameters = []
+
+    params, takes_row = [], False
+    for parameter in parameters:
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            takes_row = True
+            continue
+        if parameter.kind is inspect.Parameter.VAR_POSITIONAL:
+            continue
+        required = parameter.default is inspect.Parameter.empty
+        params.append({
+            "name": parameter.name,
+            "required": required,
+            "default": None if required else parameter.default,
+        })
+
+    return {
+        "tool_id": tool_id,
+        "description": doc.split("\n", 1)[0] if doc else "",
+        "origin": origin,
+        "params": params,
+        # True when the tool declares **kwargs, so it receives every column and
+        # `check` cannot verify its inputs against the upstream (§4).
+        "takes_whole_row": takes_row,
+    }
+
+
+def catalog(tools: dict[str, Callable] | None = None) -> dict[str, dict]:
+    """Every callable tool, id → :func:`tool_entry`, for a palette.
+
+    Feeds the ``GET /tools`` response (docs/react-api.md §2). A user tool cannot
+    shadow a builtin, so an id appears exactly once and ``origin`` is
+    unambiguous.
+    """
+    entries = {}
+    for name, fn in sorted(BUILTIN_TOOLS.items()):
+        entries[name] = tool_entry(name, fn, "builtin")
+    for name, fn in sorted({**TOOLS, **(tools or {})}.items()):
+        entries[name] = tool_entry(name, fn, "declared")
+    return entries
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -445,6 +570,81 @@ def grid(value: Any) -> Output:
     )
 
 
+def _no_tool(verb: str, fn: Callable) -> None:
+    """Refuse a real tool on a verb that applies none (``source``, ``select``, ``drop``)."""
+    if not is_identity(fn):
+        raise ValueError(
+            f"{verb} applies no tool, but got {getattr(fn, '__name__', fn)!r}. "
+            f"It rearranges columns; to compute over them, use map."
+        )
+
+
+def _require_columns(verb: str, frame: pd.DataFrame, names: Sequence[str]) -> None:
+    """Refuse a column the frame does not have — a typo must not pass silently."""
+    missing = [c for c in names if c not in frame.columns]
+    if missing:
+        raise KeyError(
+            f"{verb} names {', '.join(map(repr, missing))}, which the input does "
+            f"not have (it has {', '.join(map(str, frame.columns))})"
+        )
+
+
+def select_(source: Any, fn: Callable = identity, *,
+            columns: Sequence[str] | None = None) -> Output:
+    """``select`` — keep these columns, **in this order**. n rows in, n rows out.
+
+    The column-axis mirror of :func:`filter_`: filter chooses rows, select
+    chooses columns. Like ``source`` and :func:`drop_` it applies **no tool**,
+    which is what makes it buildable while ``colmap`` is not — nothing executes,
+    so nothing can fail, so there are no per-column ledger entries and none of
+    §5's index-space problems arise.
+
+    Reordering is half the reason to reach for it. To remove columns instead,
+    use :func:`drop_` — a separate verb, because "select drop" never read right
+    and a verb that does one thing needs no mutually-exclusive arguments.
+
+    You rarely need this *before* a map: column binding already hands a tool only
+    the values it declares. Its job is the grid you carry **forward** — ``map``
+    passes every input column through, and this is how you narrow what
+    downstream sees.
+    """
+    _no_tool("select", fn)
+    if not columns:
+        raise ValueError("select needs columns= — the columns to keep")
+    frame = rows(source)
+    _require_columns("select", frame, columns)
+    return _column_output("select", frame, frame[list(columns)])
+
+
+def drop_(source: Any, fn: Callable = identity, *,
+          columns: Sequence[str] | None = None) -> Output:
+    """``drop`` — remove these columns, keeping the rest in place.
+
+    The complement of :func:`select_`, and strict about it: dropping a column
+    that is not there is a typo, not a no-op, so it raises rather than quietly
+    doing nothing.
+    """
+    _no_tool("drop", fn)
+    if not columns:
+        raise ValueError("drop needs columns= — the columns to remove")
+    frame = rows(source)
+    _require_columns("drop", frame, columns)
+    return _column_output("drop", frame, frame.drop(columns=list(columns)))
+
+
+def _column_output(verb: str, frame: pd.DataFrame, data: pd.DataFrame) -> Output:
+    """The Output shared by the column-rearranging verbs.
+
+    Nothing ran, so every unit is trivially complete and ``attempts: 0`` says
+    so. The ledger stays row-aligned, which keeps ``view()`` a clean join.
+    """
+    records = [{"status": "completed", "error": None, "attempts": 0,
+                "seconds": 0.0} for _ in range(len(frame))]
+    return Output(data=data, ledger=_ledger(records, frame.index),
+                  meta={"verb": verb, "form": "column", "payload": None,
+                        "n_in": len(frame), "columns": list(data.columns)})
+
+
 def source_(value: Any, fn: Callable = identity, **_params) -> Output:
     """``source`` — lift a literal into a grid. The verb a flow starts with.
 
@@ -454,7 +654,7 @@ def source_(value: Any, fn: Callable = identity, **_params) -> Output:
     computing it — applying a real tool is a ``map``, and refusing it here
     keeps the two from blurring.
     """
-    if fn is not identity:
+    if not is_identity(fn):
         raise ValueError(
             f"source applies no tool, but got {getattr(fn, '__name__', fn)!r}. "
             "A source step holds its data; to compute over it, use map."
@@ -545,6 +745,10 @@ def _d_apply(fn: Callable, **literals) -> Callable:
         return fn(*leading, **bound)
 
     run.__name__ = f"apply({getattr(fn, '__name__', 'fn')})"
+    # The verbs that apply no tool (source, select) need to recognize identity
+    # through this wrapper — compile_operation always applies it, so comparing
+    # against the bare function would never match.
+    run.__wrapped__ = fn
     return run
 
 
@@ -608,6 +812,8 @@ MODIFIERS: dict[str, ModifierKind] = {k.name: k for k in (
     _kind("source",   "shape", _lift(source_)),
     _kind("map",      "shape", _lift(map_)),
     _kind("filter",   "shape", _lift(filter_)),
+    _kind("select",   "shape", _lift(select_)),
+    _kind("drop",     "shape", _lift(drop_)),
     _kind("group",    "shape", _lift(group_)),
     _kind("expand",   "shape", _lift(expand_)),
     _kind("collapse", "shape", _lift(collapse_)),
@@ -971,6 +1177,15 @@ def tool(fn: Callable | None = None, *, id: str | None = None):
     """
     def make(f: Callable, tool_id: str | None) -> ToolHandle:
         handle = ToolHandle(f, tool_id)
+        if handle.id in BUILTIN_TOOLS:
+            # Shadowing a builtin is never intended and never harmless: the
+            # shape verbs resolve `identity` and `gather` by name, so a
+            # same-named user tool would quietly change what `select` or a bare
+            # `collapse` does. Refused at import, where it is cheap to rename.
+            raise ValueError(
+                f"{handle.id!r} is a builtin tool ({BUILTIN_TOOLS[handle.id].__doc__ or ''}"
+                f"). Give yours another name, or pass id= to rename it."
+            )
         TOOLS[handle.id] = f
         return handle
 
@@ -1133,9 +1348,23 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             "keeps a cell address you can re-drive."
         )
 
-    # 5. source applies no tool
-    if any(m.kind == "source" for m in operation.modifiers) and fn is not identity:
-        problems.append("source applies no tool; use map to compute")
+    # 5. the column verbs apply no tool
+    for kind in ("source", "select", "drop"):
+        if any(m.kind == kind for m in operation.modifiers) and not is_identity(fn):
+            problems.append(f"{kind} applies no tool; use map to compute")
+
+    # 5b. select and drop must name columns the input will actually have
+    verb = operation.shape_verb
+    if (verb is not None and verb.kind in ("select", "drop")
+            and workflow is not None and verb.params.get("columns")):
+        available = workflow._known_columns(operation)
+        if available:
+            missing = [c for c in verb.params["columns"] if c not in available]
+            if missing:
+                problems.append(
+                    f"{verb.kind} names {', '.join(map(repr, missing))}, which "
+                    f"the input does not have (it has {', '.join(available)})"
+                )
 
     # 6. bound literals have to be parameters the tool accepts — the reactive
     #    argument check, done against the signature rather than at run time.
@@ -1208,13 +1437,16 @@ def _missing_columns(operation: Operation, fn: Callable,
 #: step predicts the *right* column name — which is what lets a downstream
 #: reducer be recognized before anything has run.
 DEFAULT_PAYLOAD: dict[str, str | None] = {
-    "source": None, "filter": None, "group": "group",
+    "source": None, "filter": None, "select": None, "drop": None,
+    "group": "group",
     "map": PAYLOAD, "collapse": PAYLOAD, "expand": PAYLOAD, "sweep": PAYLOAD,
 }
 
 
-#: Verbs whose output keeps the input's columns (§3's columns column).
-#: ``collapse`` and ``sweep`` do not — they build their rows from scratch.
+#: Verbs whose output keeps **all** the input's columns (§3's columns column).
+#: ``collapse`` and ``sweep`` build their rows from scratch; ``select`` keeps a
+#: chosen subset, so it predicts its columns exactly and gets its own branch in
+#: :func:`stage`.
 CARRIES_COLUMNS: frozenset[str] = frozenset({"map", "filter", "group", "expand"})
 
 
@@ -1223,13 +1455,19 @@ CARRIES_COLUMNS: frozenset[str] = frozenset({"map", "filter", "group", "expand"}
 #: ``filter`` can promise "at most n", never "n".
 ROWS_RULE: dict[str, str] = {
     "source": "same", "map": "same", "group": "same",
-    "filter": "at_most", "collapse": "one",
+    "filter": "at_most", "select": "same", "drop": "same",
+    "collapse": "one",
     "expand": "unknown", "sweep": "generated",
 }
 
 
-def predicted_columns(output: Output) -> set[str]:
-    """The column names a step's output will have, as far as is known.
+def predicted_columns(output: Output) -> list[str]:
+    """The column names a step's output will have, **in order**, as far as known.
+
+    Ordered, not a set: column order is real information — ``select`` reorders
+    deliberately, and ``map`` appends its payload after the columns it carried
+    through. Returning a set once let a prediction come out in hash order, which
+    matched the actual columns only by luck.
 
     A step that has run knows them exactly. A **staged** one knows only the
     name of the payload column it is going to write — but that single name is
@@ -1241,12 +1479,12 @@ def predicted_columns(output: Output) -> set[str]:
     to *refuse*.
     """
     if not output.meta.get("staged"):
-        return set(output.data.columns)
+        return list(output.data.columns)
     recorded = output.meta.get("columns")
     if recorded is not None:
-        return set(recorded)
+        return list(recorded)
     payload = output.meta.get("payload")
-    return {payload} if payload else set()
+    return [payload] if payload else []
 
 
 def infer_verb(fn: Callable, upstream: Any, literals: dict) -> tuple[str, str]:
@@ -1266,7 +1504,7 @@ def infer_verb(fn: Callable, upstream: Any, literals: dict) -> tuple[str, str]:
     columns: set[str] = set()
     n_rows: int | None = None
     if isinstance(upstream, Output):
-        columns = predicted_columns(upstream)
+        columns = set(predicted_columns(upstream))
         n_rows = upstream.meta.get("expected") if upstream.meta.get("staged") \
             else len(upstream.data)
     elif upstream is not None:
@@ -1333,7 +1571,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
                              "attempts": 0, "seconds": 0.0}], [0]),
             meta={"verb": kind, "form": "scalar", "payload": PAYLOAD,
                   "staged": True, "problems": problems, "n_in": None,
-                  "expected": None, "rows_rule": None},
+                  "expected": None, "rows_rule": None, "columns": [PAYLOAD]},
         )
 
     known = workflow._known_index(operation) if workflow is not None else None
@@ -1359,23 +1597,35 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     # only the payload would lose every column that simply passes through.
     upstream_columns = (workflow._known_columns(operation)
                         if workflow is not None else set())
-    columns = set(upstream_columns) if kind in CARRIES_COLUMNS else set()
-    if kind == "sweep":
-        columns |= {k for k in verb.params if k not in ("name", "over", "retries")}
-    if kind == "collapse" and verb.params.get("by"):
-        columns.add(verb.params["by"])
-    if payload:
-        columns.add(payload)
+    # Predicted in order, because order is what a reader and a downstream tool
+    # both see. Each verb contributes its own columns and then the payload is
+    # appended, which is exactly what the verbs do to the frame.
+    ordered: list[str] = []
+    if kind == "select":
+        ordered = list(verb.params.get("columns") or [])
+    elif kind == "drop":
+        removed = set(verb.params.get("columns") or [])
+        ordered = [c for c in upstream_columns if c not in removed]
+    elif kind in CARRIES_COLUMNS:
+        ordered = list(upstream_columns)
+    elif kind == "sweep":
+        ordered = [k for k in verb.params if k not in ("name", "over", "retries")]
+    elif kind == "collapse" and verb.params.get("by"):
+        ordered = [verb.params["by"]]
+    if payload and payload not in ordered:
+        ordered.append(payload)
+    index_names = ordered
 
     records = [{"status": "staged", "error": None, "attempts": 0, "seconds": 0.0}
                for _ in index]
     return Output(
-        data=pd.DataFrame({payload or PAYLOAD: [None] * len(index)}, index=index),
+        data=pd.DataFrame({c: [None] * len(index) for c in index_names or [PAYLOAD]},
+                          index=index),
         ledger=_ledger(records, index),
         meta={"verb": kind, "form": "scalar" if kind is None else "column",
               "payload": payload, "staged": True, "problems": (),
               "n_in": n_in, "expected": expected, "rows_rule": rule,
-              "columns": sorted(columns)},
+              "columns": ordered},
     )
 
 
@@ -1451,6 +1701,23 @@ class Workflow:
 
     # ── declaring ────────────────────────────────────────────────────────
     def __setitem__(self, step_id: str, operation: Any) -> None:
+        if isinstance(operation, Modifier):
+            # A bare shape verb is a complete step: it applies the tool that
+            # discards nothing, so `wf["flat"] = mod.expand(over=ref)` needs no
+            # tool of its own. Execution modifiers are refused — a pass-through
+            # that retries is inert, and silently accepting it would hide a
+            # half-written step.
+            default = DEFAULT_TOOL.get(operation.kind)
+            if default is None:
+                why = ("an execution modifier, which changes nothing on its own"
+                       if operation.kind in MODIFIERS else "not a shape verb")
+                raise TypeError(
+                    f"{operation.kind!r} needs a tool: it is {why}. "
+                    f"Write <tool>[mod.{operation.kind}(...)] instead."
+                )
+            operation = Operation(tool_id=default,
+                                  fn=BUILTIN_TOOLS[default])[operation]
+
         if not isinstance(operation, Operation):
             # A bare value is a source step, and a source step's data **is its
             # output** — it arrived with the declaration, so there is nothing
@@ -1481,15 +1748,15 @@ class Workflow:
         return self.steps[step_id]
 
     # ── what a step reads ────────────────────────────────────────────────
-    def _known_columns(self, operation: Operation) -> set[str]:
-        """The columns this operation's input will have, as far as is known."""
+    def _known_columns(self, operation: Operation) -> list[str]:
+        """The columns this operation's input will have, in order, as far as known."""
         for modifier in operation.modifiers:
             over = modifier.params.get("over")
             if over is None:
                 continue
             step = self.steps.get(str(over))
-            return set() if step is None else predicted_columns(step.output)
-        return set()
+            return [] if step is None else predicted_columns(step.output)
+        return []
 
     def _known_index(self, operation: Operation) -> Sequence[Any] | None:
         """The input's index, when known — enough to stage, short of running.
