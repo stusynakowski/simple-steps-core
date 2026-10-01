@@ -8,9 +8,10 @@ it is arranged. Where they disagree, that one is the intent and this one is the
 present.
 
 Tests: `tests/unit/test_grid.py`, organized by the same three layers as §2 below.
-To write tools against this model, see [writing-tools.md](writing-tools.md);
-for the HTTP contract a React client would consume, see
-[react-api.md](react-api.md).
+To write tools against this model, see [writing-tools.md](writing-tools.md); for
+the grammar of declaring a step once you have one, see
+[defining-operations.md](defining-operations.md); for the HTTP contract a React
+client would consume, see [react-api.md](react-api.md).
 
 ## 0. Importing it
 
@@ -68,6 +69,16 @@ Three distinctions that are easy to blur and cost real bugs when blurred:
   is applying it — `op[mod.map(over=x)]` — that returns an `Operation`. The
   descriptor has to exist separately, or you could not name a modifier before
   you had a tool to put it on.
+- **A step's `id` vs. a `StepRef`.** A step is *named* by its id, so an id alone
+  cannot say which workflow it meant. `Modifier.params` therefore keeps the
+  `StepRef` itself — which knows its workflow — and flattens it to the id only in
+  `Operation.to_dict()`, where JSON begins. That is the entire provenance
+  mechanism: no side channel, just information the modifier declines to discard,
+  and it is free because every reader already goes through `str(over)`.
+  `Modifier.__eq__` compares params flattened, so naming a step either way is the
+  same modifier. A plain string ref carries no workflow and is unchecked by
+  design. See
+  [defining-operations.md §11](defining-operations.md#11-references-belong-to-one-workflow).
 - **`Output.shape` vs. `Output.form`.** `shape` is `(rows, columns)`, exactly
   what pandas means by it. `form` is the cardinality class — `"scalar"`,
   `"column"`, `"grid"`. The form is what a step's mode *promises*; the shape is
@@ -286,13 +297,21 @@ Because execution modifiers cannot change shape, a step's shape is computable
 from its stack without running anything. That is the whole reactive story in one
 sentence.
 
-Current vocabulary: `source`, `map`, `filter`, `select`, `drop`, `group`,
-`expand`, `collapse`, `sweep` (shape); `retry`, `timeout` (execution).
+Current vocabulary: `source`, `map`, `filter`, `select`, `drop`, `widen`,
+`group`, `expand`, `collapse`, `sweep` (shape); `retry`, `timeout` (execution).
 
-Three shape verbs — `source`, `select` and `drop` — apply **no tool**; their
-tool is `identity` and `check()` refuses anything else. That is also why the
-column verbs exist while `colmap` does not: running nothing means nothing can
-fail, so none of them needs a ledger indexed by something other than rows.
+Four shape verbs — `source`, `select`, `drop` and `widen` — apply **no tool**;
+their tool is `identity` and `check()` refuses anything else. For the first
+three, running nothing means nothing can fail, so none needs a ledger indexed by
+anything but rows — which is why they exist while `colmap` does not. `widen` is
+the exception that proves the rule: it applies no *user* tool but does read a
+field out of each row, so it keeps a real per-unit ledger and stays row-indexed.
+
+`widen` is `expand`'s column-axis twin — `unnest_wider` to its `unnest_longer`.
+It **requires** `columns=`, because the fields live in the data and a step's
+column set has to be knowable at declaration: `_missing_columns` validates every
+downstream step against column names, and `predicted_columns` would otherwise
+have nothing to predict.
 
 ### Three orders, only one reversed
 
@@ -409,6 +428,7 @@ Caught at declaration today:
 |---|---|
 | unknown tool / unknown modifier kind | |
 | `over` dangles, self-references, is circular, or names an invalid step | |
+| **`over` was read from a different `Workflow`** | `map over 'raw' reads a different Workflow…` |
 | `source` applied to a real tool | |
 | a bound literal the signature does not accept | `score.bind(wieght=2)` |
 | **a required value the upstream cannot supply** | `score() needs 'n', which 'raw' does not have (it has count)` |
@@ -420,8 +440,14 @@ real columns, so checking one would invent errors. The check therefore sharpens
 as the workflow runs, the same way staging does — and a source step is born
 completed, so the common case is covered from declaration.
 
-**Not** yet caught: whether the upstream's column *types* fit the parameters.
-Columns exist or they do not; matching dtypes to annotations is the next step.
+Also caught, once the tool is annotated: whether the upstream's column *types*
+fit the parameters (`_type_mismatches`). A bound literal is checked at
+declaration; a column needs its upstream to have run, the same timing rule as
+above. Only *certain* mismatches are reported — an undecidable annotation
+(`object`, a union, an all-null column) is not an error, because a false positive
+would refuse a step that runs. `@tool(strict=True)`, or `grid.STRICT_TYPES =
+True`, makes the annotations mandatory. See
+[defining-operations.md §10](defining-operations.md#10-typed-steps).
 
 ---
 
@@ -496,7 +522,9 @@ a refusal, so object columns are vetted per value before pandas sees the frame
 
 ## 7. Known gaps
 
-Stated so they are not rediscovered as surprises.
+`grid.py`'s internals specifically. For the consolidated current-state review —
+what landed, every open issue with its size and blocker, and what to do next —
+see [status.md](status.md).
 
 1. **The engine has not moved.** `grid.py` is standalone. In the engine,
    `orchestration-map` is still the tool that runs and your function is a string
@@ -510,7 +538,10 @@ Stated so they are not rediscovered as surprises.
 3. **`timeout` is a placeholder.** It records intent; real enforcement needs the
    async engine.
 4. **Column verbs are guarded, not built.** `axis="columns"` raises. See §11.
-5. **One shape verb per step is undecided.** The prototype permits several.
+5. ~~**One shape verb per step is undecided.**~~ **Resolved.** `check()` refuses
+   a step with more than one (rule 4): two shape changes in one step make an
+   intermediate grid with no cell address, so a unit that failed there could not
+   be inspected or re-run. Split them into separate steps.
 6. **No fingerprints, no `stale`.** Staleness (§7) and incremental recompute are
    designed but unbuilt; nothing is cached.
 7. **`Output` has no `ref`.** [shape-algebra.md §5](shape-algebra.md) gives

@@ -3,8 +3,9 @@
 How to write functions the grid model can drive, and how to serve them. Every
 example here was run; the outputs are copied from the terminal, not typed.
 
-Companion docs: [grid-model.md](grid-model.md) for how the machinery works,
-[react-api.md](react-api.md) for the HTTP contract.
+Companion docs: [defining-operations.md](defining-operations.md) for the grammar
+of wiring a tool into a step, [grid-model.md](grid-model.md) for how the
+machinery works, [react-api.md](react-api.md) for the HTTP contract.
 
 ---
 
@@ -49,7 +50,237 @@ bad() needs 'row', which 'readings' does not have (it has celsius, city)
 
 ---
 
-## 2. A worked example
+## 2. The declaration contract
+
+The grid drives your function **by name**: it reads your signature to bind
+columns, to infer a verb, to validate a step before running, and to build the
+palette. That only works if a declaration is well formed, so it is worth being
+precise about what "well formed" means.
+
+Three tiers, and the difference matters: what `@tool` refuses today, what
+*should* be refused because it currently fails silently, and what cannot be
+enforced but is load-bearing anyway.
+
+The broken examples below all run against the same two-row grid, so each is
+reproducible on its own:
+
+```python
+wf = grid.Workflow()
+wf["raw"] = pd.DataFrame({"n": [1, 2]})
+```
+
+### 2.1 Enforced today
+
+| rule | if you break it |
+|---|---|
+| the id may not shadow a builtin (`identity`, `gather`, `count`, `total`, `first`, `last`) | `ValueError` at import |
+| **every parameter and the return must be annotated** — when `grid.STRICT_TYPES` is on, or `@tool(strict=True)` | `TypeError` at import |
+
+The typing rule is **off by default** so tools written before it existed keep
+working; turn it on once, at import time, and it applies to everything declared
+after. It is the rule that pays for itself: the annotations are what let
+declaration compare a parameter against the upstream column's real dtype
+([defining-operations.md §10](defining-operations.md#10-typed-steps)).
+
+```python
+from simple_steps_core import grid
+grid.STRICT_TYPES = True
+
+@tool
+def sloppy(x):
+    return x
+# TypeError: tool 'sloppy' is not fully typed: parameter 'x' has no type
+#            annotation; it has no return annotation.
+```
+
+Everything below is still unchecked.
+
+### 2.2 The rules worth hardcoding
+
+Each of these is a declaration the system cannot drive correctly, and each
+fails *late* today — three of them with a wrong answer and no error at all.
+
+**a. No positional-only parameters.** Binding is by name, so a positional-only
+parameter can never be filled:
+
+```python
+@tool
+def poso(n, /): return n * 2          # accepted at import
+
+wf["out"] = poso[mod.map()](wf["raw"])
+wf.step("out").problems               # ()  — nothing wrong, apparently
+wf.run("out")
+#    n value
+# 0  1  None      every row failed
+# 1  2  None
+```
+
+**b. No `*args`.** This is the worst case in the set, because it produces a
+plausible number rather than a failure. `_d_apply` passes only what the
+signature declares by name, and `*args` declares nothing:
+
+```python
+@tool
+def var(*args): return sum(args)
+
+wf["out"] = var[mod.map()](wf["raw"])
+wf.run("out")
+#    n  value
+# 0  1      0      sum(()) — the tool was called with no arguments
+# 1  2      0
+```
+
+`catalog()["var"]["params"]` is `[]`, so the palette shows a tool that takes
+nothing. A `*args` tool is structurally undrivable; refusing it at import costs
+nothing.
+
+**c. The id must be a valid Python identifier.** It is a JSON key, a palette
+entry and a dropdown label, and today anything is accepted:
+
+```python
+tool(lambda n: n * 2).id        # '<lambda>'   — and every lambda collides
+@tool(id="my tool!")            # accepted
+```
+
+**d. No mutable default arguments.** A step must be re-runnable — re-driving a
+failed unit is central to the model — and a mutable default quietly makes a tool
+stateful across runs:
+
+```python
+@tool
+def accum(n, seen=[]): seen.append(n); return len(seen)
+
+wf.run("out")   # [1, 2]
+wf.run("out")   # [3, 4]   same input, different answer
+```
+
+**e. One id, one tool — but as a warning, not an error.** A duplicate
+registration silently overwrites:
+
+```python
+@tool
+def dup(n): return "first"
+@tool
+def dup(n): return "second"      # no complaint; "first" is simply gone
+```
+
+For a server importing two tool modules this is a real hazard, and it is
+[already noted as a known limit](#10-known-limits). But re-declaration is
+legitimate in the two places tools are usually written — re-running a notebook
+cell, and a test that declares a throwaway tool per case (this repo's own suite
+re-declares `again` five times). So the recommendation here is a warning by
+default, with a strict mode for servers, rather than a hard refusal that would
+make the model painful in a notebook.
+
+### 2.3 Reserved names
+
+Two names are load-bearing elsewhere in the system and will collide silently.
+
+**`column` is reserved as a grid column name.** The builtins resolve which cell
+is the payload by popping `column` from the row, so a data column of that name
+hijacks the resolver:
+
+```python
+wf["raw"] = pd.DataFrame({"column": ["nope"], "celsius": [10]})
+wf["g"]   = op("gather")[mod.collapse()](wf["raw"])
+wf.run("g")
+wf.step("g").status                          # 'failed'
+wf.step("g").output.ledger["error"]          # ["KeyError: 'nope'"]
+```
+
+Worse, when the value *happens* to name a real column it silently redirects
+rather than failing. A tool parameter called `column` is fine — only the grid
+column is reserved.
+
+**`sweep` reserves `name`, `retries` and `over`**, so a swept parameter cannot
+use those names. Today the collision surfaces as a cryptic pandas error:
+
+```python
+@tool
+def cell(name): return name
+
+wf["s"] = cell[mod.sweep(name=["a", "b"])]   # `name` is the payload column name
+wf.run("s")
+# TypeError: unhashable type: 'list'
+```
+
+### 2.4 Load-bearing conventions
+
+These cannot be enforced from a signature, but something downstream reads them,
+so breaking one degrades the system quietly rather than loudly.
+
+**The return annotation changes the inferred verb.** It is optional, but when
+present it decides behaviour — `bool` means `filter`, `list`/`tuple`/`set` means
+`expand`. An annotation that lies is obeyed:
+
+```python
+@tool
+def liar(n) -> bool: return n * 10
+
+wf["out"] = liar(wf["raw"])
+# <Operation filter(over='raw') ∘ liar>   — a filter, and 10 is truthy
+```
+
+So annotate a predicate `-> bool` and a fan-out `-> list[...]`, and make sure a
+mapper's annotation is true.
+
+Note the tension this creates with strict typing (§2.1): once **every** tool is
+annotated, an ordinary `map` that happens to return a bool is indistinguishable
+from a predicate, so inference will read it as a `filter`. The two are
+compatible in one direction only — **the more you type your tools, the more you
+should name the verb explicitly** rather than letting it be inferred.
+
+**The docstring's first line is the palette description.** Omit it and the
+client shows an empty string:
+
+```python
+catalog()["undocumented"]["description"]     # ''
+```
+
+Write it as a user-facing sentence, not a developer note.
+
+**`**kwargs` opts out of input checking.** A tool that takes the whole row can't
+be verified against the upstream, so the "required value the upstream cannot
+supply" check goes quiet for it. `catalog()` reports this as
+`takes_whole_row: True`. Use it when you mean it (§7), not as a shortcut.
+
+**A tool should be a pure function of its arguments.** Nothing checks it, but a
+step may be re-run, re-driven after a failure, or run per row in any order.
+
+**Name the payload column you write, and don't collide with your input.** A map
+whose `name=` matches an existing column overwrites it, which loses the lineage:
+
+```python
+@tool
+def bump(value): return value + 1
+
+wf["a"] = bump[mod.map()](wf["raw"])   # writes the default column, `value`
+wf["b"] = bump[mod.map()](wf["a"])     # reads `value`, overwrites `value`
+#    value
+# 0      3    right answers, but what they were computed from is gone
+# 1      4
+```
+
+### 2.5 The contract, as a checklist
+
+A tool is well formed when:
+
+- [ ] every parameter can be filled **by name** — no positional-only, no `*args`
+- [ ] the id is a valid identifier, unique, and not a builtin's name
+- [ ] no mutable default arguments
+- [ ] no parameter needs a grid column called `column`, and no swept parameter is
+      called `name`, `retries` or `over`
+- [ ] a predicate is annotated `-> bool`; a fan-out `-> list[...]`; nothing else
+      is annotated unless it is true
+- [ ] the first docstring line is a sentence a user would read
+- [ ] it is pure, and safe to run twice
+
+The first three tiers are mechanical and could be checked at import; the rest is
+why the checklist exists.
+
+---
+
+## 3. A worked example
 
 ```python
 import pandas as pd
@@ -88,7 +319,7 @@ Nothing has run. The workflow already knows its shape:
 ```
 
 Note `is_freezing` and `warmest` got `filter` and `collapse` without being told
-(§4), and `filter` promises *at most* 3 — never more than it can guarantee.
+(§5), and `filter` promises *at most* 3 — never more than it can guarantee.
 
 ```python
 wf.run_all()
@@ -106,7 +337,7 @@ between a spreadsheet and a list comprehension: `city` is still there.
 
 ---
 
-## 3. One tool shape per verb
+## 4. One tool shape per verb
 
 ### `map` — one value in, one value out
 
@@ -193,7 +424,7 @@ group and filter:
 
 ---
 
-## 4. Let the verb be inferred
+## 5. Let the verb be inferred
 
 `score(wf["raw"])` picks the iteration from the tool's signature:
 
@@ -223,7 +454,7 @@ trivially overridden.
 
 ---
 
-## 5. Constants: `bind`
+## 6. Constants: `bind`
 
 Parameters with defaults are knobs, not columns:
 
@@ -249,7 +480,7 @@ work.
 
 ---
 
-## 6. When you really do want the whole row
+## 7. When you really do want the whole row
 
 ```python
 @tool
@@ -267,7 +498,7 @@ parameters is checkable at declaration and one with `**row` is not.
 
 ---
 
-## 7. Serving them
+## 8. Serving them
 
 `@tool` registers the function in `TOOLS`, so a workflow that arrives as JSON
 can be turned back into something runnable by importing the module that declares
@@ -314,7 +545,7 @@ source step 'readings' has no data. Assign it: wf['readings'] = <a frame, list o
 
 ---
 
-## 8. What gets caught before anything runs
+## 9. What gets caught before anything runs
 
 Declaring a step never raises. An unusable step still exists, carrying its
 problems, so an editor can show it mid-keystroke:
@@ -335,14 +566,17 @@ step 'twice' reads 'scored', which has not run. Run 'scored' first, or call run_
 
 ---
 
-## 9. Known limits
+## 10. Known limits
 
 - **No resources.** The engine injects databases and clients via `Resource()`;
   the grid prototype has no equivalent, so tools must take their inputs as
   values.
 - **No async.** Tools are called synchronously. `timeout` records intent and
   does not yet enforce.
-- **Column types are not checked.** Declaration verifies a column *exists*, not
-  that its dtype fits the parameter.
+- ~~**Column types are not checked.**~~ **Resolved** for annotated tools:
+  declaration compares each parameter's annotation against the upstream column's
+  dtype, and each bound literal against its own. Only certain mismatches are
+  reported; an undecidable annotation is not an error. See
+  [defining-operations.md §10](defining-operations.md#10-typed-steps).
 - **The tool id is the function name**, with no namespacing. Two tools with the
   same name in different modules collide in `TOOLS`.

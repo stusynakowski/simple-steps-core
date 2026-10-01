@@ -13,6 +13,7 @@ import json
 import pandas as pd
 import pytest
 
+from simple_steps_core import grid as grid_module
 from simple_steps_core.grid import (
     BUILTIN_TOOLS,
     DECORATORS,
@@ -26,6 +27,7 @@ from simple_steps_core.grid import (
     StepRef,
     Workflow,
     TOOLS,
+    annotation_problems,
     catalog,
     compile_operation,
     grid,
@@ -37,6 +39,7 @@ from simple_steps_core.grid import (
     op,
     rows,
     tool,
+    widen_,
 )
 
 
@@ -161,9 +164,12 @@ def test_a_plain_decorator_is_refused():
         score[lambda fn: fn]
 
 
-def test_step_refs_never_survive_into_stored_data():
+def test_step_refs_never_survive_into_the_export():
+    """A ref is kept in memory (it knows its workflow) and flattened for JSON."""
     stored = score[mod.map(over=StepRef("videos"))]
-    assert stored.modifiers[0].params["over"] == "videos"
+    assert isinstance(stored.modifiers[0].params["over"], StepRef)
+    assert stored.to_dict()["modifiers"][0]["params"]["over"] == "videos"
+    json.dumps(stored.to_dict())
 
 
 def test_carried_function_is_not_part_of_the_data():
@@ -365,12 +371,29 @@ def test_the_catalog_separates_system_tools_from_declared_ones():
 
 
 def test_a_catalog_entry_carries_what_a_form_needs():
-    entry = catalog()["score"]          # score(n, weight=1)
+    entry = catalog()["score"]          # score(n, weight=1) — unannotated
     assert entry["params"] == [
-        {"name": "n", "required": True, "default": None},
-        {"name": "weight", "required": False, "default": 1},
+        {"name": "n", "required": True, "default": None, "type": None},
+        {"name": "weight", "required": False, "default": 1, "type": None},
     ]
     assert entry["takes_whole_row"] is False
+    assert entry["returns"] is None
+    assert entry["typed"] is False
+
+
+def test_a_catalog_entry_publishes_a_typed_tools_boundary():
+    """The palette says what goes in and what comes out, not just the names."""
+    @tool(strict=True)
+    def celsius_to_f(celsius: float) -> float:
+        """Convert one reading."""
+        return celsius * 9 / 5 + 32
+
+    entry = catalog()["celsius_to_f"]
+    assert entry["params"] == [
+        {"name": "celsius", "required": True, "default": None, "type": "float"},
+    ]
+    assert entry["returns"] == "float"
+    assert entry["typed"] is True
 
 
 def test_a_whole_row_tool_is_flagged_in_the_catalog():
@@ -1118,3 +1141,517 @@ def test_exports_are_json(ran):
     full = json.loads(ran.to_session_json())
     assert "inputs" not in full, "one payload map, not two"
     assert full["outputs"]["raw"]["data"]["kind"] == "frame"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# typing: the tool's declared boundary, and what it is checked against
+# ─────────────────────────────────────────────────────────────────────────
+def test_strict_typing_refuses_an_unannotated_tool():
+    with pytest.raises(TypeError, match="is not fully typed"):
+        @tool(strict=True)
+        def untyped(n):
+            return n
+
+
+def test_strict_typing_names_every_gap_at_once():
+    @tool(strict=False)
+    def half(n: int, weight):
+        return n
+
+    assert annotation_problems(half.fn) == [
+        "parameter 'weight' has no type annotation",
+        "it has no return annotation",
+    ]
+
+
+def test_strict_typing_exempts_a_whole_row_tool():
+    """**kwargs has no per-column parameter to annotate; the return still does."""
+    @tool(strict=True)
+    def whole(**row: object) -> int:
+        return len(row)
+
+    assert catalog()["whole"]["typed"] is True
+
+
+def test_strict_types_can_be_turned_on_globally(monkeypatch):
+    monkeypatch.setattr(grid_module, "STRICT_TYPES", True)
+    with pytest.raises(TypeError, match="is not fully typed"):
+        @tool
+        def bare(n):
+            return n
+
+
+def test_a_bound_literal_is_checked_against_its_annotation():
+    @tool(strict=True)
+    def scaled(n: int, factor: int = 2) -> int:
+        return n * factor
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"n": [1, 2]})
+    wf["bad"] = scaled.bind(factor="three")[mod.map(over=wf["raw"])]
+    assert "declares factor: int" in wf.step("bad").problems[0]
+    assert "'three'" in wf.step("bad").problems[0]
+
+
+def test_an_upstream_dtype_is_checked_against_its_annotation():
+    @tool(strict=True)
+    def needs_number(city: float) -> float:
+        return city * 2
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"city": ["SF", "NYC"]})
+    wf["bad"] = needs_number[mod.map(over=wf["raw"])]
+    problem = wf.step("bad").problems[0]
+    assert "declares city: float" in problem
+    assert "'raw' has city as str" in problem
+
+
+def test_an_int_column_satisfies_a_float_parameter():
+    """Widening is not a mismatch — refusing it would reject a step that runs."""
+    @tool(strict=True)
+    def halve(n: float) -> float:
+        return n / 2
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"n": [1, 2]})
+    wf["ok"] = halve[mod.map(over=wf["raw"])]
+    assert wf.step("ok").problems == ()
+    wf.run("ok")
+    assert wf.step("ok").output.values == [0.5, 1.0]
+
+
+def test_an_undecidable_annotation_is_not_a_problem():
+    @tool(strict=True)
+    def anything(value: object) -> object:
+        return value
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"value": [object(), object()]})
+    wf["ok"] = anything[mod.map(over=wf["raw"])]
+    assert wf.step("ok").problems == ()
+
+
+def test_dtype_checking_waits_for_the_upstream_to_run():
+    """Same timing rule as the missing-column check: a staged Output has no dtypes."""
+    @tool(strict=True)
+    def to_f(celsius: float) -> float:
+        return celsius * 9 / 5 + 32
+
+    @tool(strict=True)
+    def needs_text(fahrenheit: str) -> str:
+        return fahrenheit.upper()
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"celsius": [1.0, 2.0]})
+    wf["f"] = to_f[mod.map(over=wf["raw"], name="fahrenheit")]
+    wf["bad"] = needs_text[mod.map(over=wf["f"])]
+    assert wf.step("bad").problems == (), "staged upstream: nothing to check yet"
+
+    wf.run("f")
+    wf["bad"] = needs_text[mod.map(over=wf["f"])]
+    assert "declares fahrenheit: str" in wf.step("bad").problems[0]
+
+
+def test_a_string_column_satisfies_a_string_parameter():
+    """The guard against the obvious false positive: str on a text column."""
+    @tool(strict=True)
+    def shout(city: str) -> str:
+        return city.upper()
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"city": ["SF", "NYC"]})
+    wf["ok"] = shout[mod.map(over=wf["raw"])]
+    assert wf.step("ok").problems == ()
+    wf.run("ok")
+    assert wf.step("ok").output.values == ["SF".upper(), "NYC".upper()]
+
+
+def test_a_list_column_satisfies_a_list_parameter():
+    @tool(strict=True)
+    def size(xs: list) -> int:
+        return len(xs)
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"xs": [[1, 2], [3]]})
+    wf["ok"] = size[mod.map(over=wf["raw"])]
+    assert wf.step("ok").problems == ()
+    wf.run("ok")
+    assert wf.step("ok").output.values == [2, 1]
+
+
+def test_a_collapse_accumulator_is_not_type_checked_against_a_column():
+    """The verb supplies acc, so it is never bound from the grid."""
+    @tool(strict=True)
+    def add_up(acc: float | None, n: int) -> float:
+        return (acc or 0) + n
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"n": [1, 2, 3]})
+    wf["sum"] = add_up[mod.collapse(over=wf["raw"])]
+    assert wf.step("sum").problems == ()
+    wf.run("sum")
+    assert wf.step("sum").output.item() == 6
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# provenance: a reference belongs to the workflow it was read from
+# ─────────────────────────────────────────────────────────────────────────
+@pytest.fixture
+def two_workflows():
+    """Two workflows with a same-named step holding different data."""
+    a, b = Workflow(), Workflow()
+    a["raw"] = pd.DataFrame({"n": [1, 2, 3]})
+    b["raw"] = pd.DataFrame({"n": [100, 200]})
+    return a, b
+
+
+def test_a_ref_carries_the_workflow_it_was_read_from(two_workflows):
+    """No side channel: the ref itself is what stays in params."""
+    a, _ = two_workflows
+    assert a["raw"].workflow is a
+    assert score[mod.map(over=a["raw"])].modifiers[0].params["over"].workflow is a
+
+
+def test_provenance_is_not_part_of_the_data(two_workflows):
+    """Naming a step two ways must not change equality or the export."""
+    a, _ = two_workflows
+    from_ref = score[mod.map(over=a["raw"])]
+    from_str = score[mod.map(over="raw")]
+    assert from_ref == from_str
+    assert from_ref.to_dict() == from_str.to_dict()
+    assert from_str.modifiers[0].params["over"] == "raw"
+
+
+def test_a_ref_from_another_workflow_is_refused(two_workflows):
+    """The silent case: both have 'raw', so nothing else would have caught it."""
+    a, b = two_workflows
+    b["x"] = score[mod.map()](a["raw"])
+    assert "reads a different Workflow" in b.step("x").problems[0]
+
+
+def test_a_borrowed_ref_cannot_run(two_workflows):
+    a, b = two_workflows
+    b["x"] = score[mod.map()](a["raw"])
+    with pytest.raises(ValueError, match="reads a different Workflow"):
+        b.run("x")
+
+
+def test_the_over_form_is_refused_the_same_way(two_workflows):
+    a, b = two_workflows
+    b["x"] = score[mod.map(over=a["raw"])]
+    assert "reads a different Workflow" in b.step("x").problems[0]
+
+
+def test_a_borrowed_bare_shape_verb_is_refused(two_workflows):
+    a, b = two_workflows
+    b["flat"] = mod.collapse(over=a["raw"])
+    assert "reads a different Workflow" in b.step("flat").problems[0]
+
+
+def test_provenance_is_diagnosed_before_a_dangling_reference(two_workflows):
+    """Borrowing is the root cause, so it must be problems[0], not the symptom."""
+    a, _ = two_workflows
+    c = Workflow()
+    c["other"] = pd.DataFrame({"n": [9]})
+    c["x"] = score[mod.map()](a["raw"])
+    assert "reads a different Workflow" in c.step("x").problems[0]
+
+
+def test_a_string_ref_means_whatever_is_here(two_workflows):
+    """The escape hatch: no origin, so no provenance to violate."""
+    a, b = two_workflows
+    b["x"] = score[mod.map(over="raw")]
+    assert b.step("x").problems == ()
+    b.run("x")
+    assert b.step("x").output.values == [1000, 2000], "ran on b's own raw"
+
+
+def test_an_operation_with_a_string_ref_is_reusable(two_workflows):
+    a, b = two_workflows
+    template = score[mod.map(over="raw")]
+    a["x"] = template
+    b["x"] = template
+    assert a.step("x").problems == () and b.step("x").problems == ()
+
+
+def test_a_reloaded_workflow_has_no_stale_provenance(ran):
+    """from_dict rebuilds refs as plain strings, so an import is never self-flagged."""
+    back = Workflow.from_json(ran.to_session_json(), TOOLS)
+    assert all(p == () for p in back.validate().values())
+    assert all(not isinstance(m.params.get("over"), StepRef)
+               for step in back.steps.values()
+               for m in step.operation.modifiers)
+
+
+def test_a_stale_ref_into_an_imported_workflow_is_refused(ran):
+    """Export, import as a second workflow, then use the ORIGINAL's ref."""
+    imported = Workflow.from_json(ran.to_session_json(), TOOLS)
+    imported["late"] = score[mod.map()](ran["raw"])      # ran, not imported
+    assert "reads a different Workflow" in imported.step("late").problems[0]
+
+
+def test_an_imported_workflow_extends_with_its_own_refs(ran):
+    imported = Workflow.from_json(ran.to_session_json(), TOOLS)
+    imported["late"] = score[mod.map(name="again")](imported["raw"])
+    assert imported.step("late").problems == ()
+    imported.run("late")
+    assert imported.step("late").output.values == [10, 20, 30]
+
+
+def test_a_session_round_trip_preserves_dtypes():
+    """JSON carries no types, so they are recorded beside the data.
+
+    This went from cosmetic to load-bearing when annotations started being
+    checked against real dtypes: a float column of whole numbers came back
+    int64, which could change a step's verdict after a reload.
+    """
+    @tool(strict=True)
+    def to_f(celsius: float) -> float:
+        """C to F."""
+        return celsius * 9 / 5 + 32
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"celsius": [18.0, 31.0],      # whole floats
+                              "city": ["SF", "NYC"],
+                              "n": [1, 2],
+                              "flag": [True, False]})
+    wf["f"] = to_f[mod.map(name="fahrenheit")](wf["raw"])
+    wf.run_all()
+
+    back = Workflow.from_json(wf.to_session_json(), TOOLS)
+    for sid in ("raw", "f"):
+        before, after = wf.step(sid).output.data, back.step(sid).output.data
+        assert list(before.dtypes) == list(after.dtypes), sid
+        assert list(before.columns) == list(after.columns), sid
+    assert list(wf.step("f").output.ledger.dtypes) == \
+           list(back.step("f").output.ledger.dtypes)
+
+
+def test_an_export_without_dtypes_still_decodes():
+    """Exports written before dtypes were recorded keep working."""
+    from simple_steps_core.grid import _decode
+    frame = _decode({"kind": "frame",
+                     "data": pd.DataFrame({"a": [1, 2]}).to_json(orient="split")})
+    assert list(frame["a"]) == [1, 2]
+
+
+def test_a_repr_does_not_depend_on_how_a_step_was_named(two_workflows):
+    """A ref lives in params, so a repr must flatten it like __eq__ does."""
+    a, _ = two_workflows
+    assert repr(score[mod.map()](a["raw"])) == repr(score[mod.map(over="raw")])
+    assert "over='raw'" in repr(score[mod.map(over=a["raw"])])
+
+
+def test_a_problem_message_names_the_step_not_the_ref(two_workflows):
+    @tool(strict=True)
+    def needs_absent(nope: int) -> int:
+        """Asks for a column that is not there."""
+        return nope
+
+    a, _ = two_workflows
+    a["x"] = needs_absent[mod.map()](a["raw"])
+    assert "which 'raw' does not have" in a.step("x").problems[0]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# an empty result is "ran and produced nothing", not "has not run"
+# ─────────────────────────────────────────────────────────────────────────
+def test_an_expand_to_nothing_keeps_its_columns_and_their_dtypes():
+    """`filter` keeps its columns when it drops every row; expand must agree.
+
+    `DataFrame([])` has no columns, which made a downstream step report "it has
+    no columns" rather than "it is empty" — two different problems.
+    """
+    @tool(strict=True)
+    def nothing(n: int) -> list:
+        """Always expands to nothing."""
+        return []
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"n": [1, 2], "city": ["a", "b"]})
+    wf["gone"] = nothing[mod.expand()](wf["raw"])
+    wf.run("gone")
+
+    out = wf.step("gone").output.data
+    assert len(out) == 0
+    assert list(out.columns) == ["n", "city", "value"]
+    # carried dtypes survive, so a downstream annotation is not falsely refused
+    assert out["n"].dtype == wf.step("raw").output.data["n"].dtype
+
+
+def test_a_downstream_step_of_an_empty_expand_still_validates_and_runs():
+    @tool(strict=True)
+    def nothing(n: int) -> list:
+        """Expands to nothing."""
+        return []
+
+    @tool(strict=True)
+    def dbl(n: int) -> int:
+        """Double."""
+        return n * 2
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"n": [1, 2]})
+    wf["gone"] = nothing[mod.expand()](wf["raw"])
+    wf.run("gone")
+    wf["after"] = dbl[mod.map()](wf["gone"])
+    assert wf.step("after").problems == ()
+    wf.run("after")
+    assert wf.step("after").status == "completed"
+
+
+def test_a_step_that_ran_to_zero_rows_reports_completed():
+    """An empty ledger cannot say which; meta['staged'] is what distinguishes."""
+    @tool(strict=True)
+    def nothing(n: int) -> list:
+        """Expands to nothing."""
+        return []
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"n": [1, 2]})
+    wf["gone"] = nothing[mod.expand()](wf["raw"])
+    assert wf.step("gone").status == "staged", "before running"
+    wf.run("gone")
+    assert wf.step("gone").status == "completed", "ran, and legitimately empty"
+
+
+def test_a_filter_that_keeps_nothing_agrees_with_expand():
+    @tool(strict=True)
+    def never(n: int) -> bool:
+        """Keeps nothing."""
+        return False
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"n": [1, 2], "city": ["a", "b"]})
+    wf["none"] = never[mod.filter()](wf["raw"])
+    wf.run("none")
+    assert wf.step("none").status == "completed"
+    assert list(wf.step("none").output.data.columns) == ["n", "city"]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# widen — one cell's fields become columns (unnest_wider to expand's longer)
+# ─────────────────────────────────────────────────────────────────────────
+@pytest.fixture
+def records():
+    return pd.DataFrame({"value": [{"city": "SF", "temp": 18.0},
+                                   {"city": "NYC", "temp": 31.0}]})
+
+
+def test_widen_lifts_fields_into_columns(records):
+    wf = Workflow()
+    wf["raw"] = records
+    wf["wide"] = mod.widen(columns=["city", "temp"], over=wf["raw"])
+    wf.run_all()
+
+    out = wf.step("wide").output.data
+    assert list(out.columns) == ["value", "city", "temp"], "carried, then fields"
+    assert list(out["city"]) == ["SF", "NYC"]
+    assert list(out["temp"]) == [18.0, 31.0]
+    assert list(out.index) == list(records.index), "1:1, index preserved"
+    assert wf.step("wide").status == "completed"
+
+
+def test_widen_predicts_its_columns_exactly(records):
+    """The reason columns= is required: staging has to know them."""
+    wf = Workflow()
+    wf["raw"] = records
+    wf["wide"] = mod.widen(columns=["city", "temp"], over=wf["raw"])
+    predicted = predicted_columns(wf.step("wide").output)
+    wf.run_all()
+    assert predicted == list(wf.step("wide").output.data.columns)
+
+
+def test_a_downstream_tool_binds_to_a_widened_field(records):
+    @tool(strict=True)
+    def to_f(temp: float) -> float:
+        """C to F."""
+        return temp * 9 / 5 + 32
+
+    wf = Workflow()
+    wf["raw"] = records
+    wf["wide"] = mod.widen(columns=["city", "temp"], over=wf["raw"])
+    wf.run("wide")
+    wf["f"] = to_f[mod.map(name="fahrenheit")](wf["wide"])
+    assert wf.step("f").problems == ()
+    wf.run("f")
+    assert wf.step("f").output.values == [64.4, 87.8]
+
+
+def test_widen_needs_columns():
+    with pytest.raises(ValueError, match="widen needs columns="):
+        widen_(pd.DataFrame({"value": [{"a": 1}]}))
+
+
+def test_widen_applies_no_tool(records):
+    wf = Workflow()
+    wf["raw"] = records
+    wf["bad"] = score[mod.widen(columns=["city"], over=wf["raw"])]
+    assert "widen applies no tool" in wf.step("bad").problems[0]
+
+
+def test_widen_does_not_check_its_columns_against_the_upstream(records):
+    """Its columns are the record's fields — they are not upstream by design."""
+    wf = Workflow()
+    wf["raw"] = records
+    wf["wide"] = mod.widen(columns=["city", "temp"], over=wf["raw"])
+    assert wf.step("wide").problems == ()
+
+
+def test_a_non_mapping_cell_is_a_per_unit_failure():
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"value": [{"a": 1}, 42]})
+    wf["wide"] = mod.widen(columns=["a"], over=wf["raw"])
+    wf.run_all()
+    ledger = wf.step("wide").output.ledger
+    assert list(ledger["status"]) == ["completed", "failed"]
+    assert "needs a mapping per row" in ledger["error"].iloc[1]
+    assert list(wf.step("wide").output.failed.index) == [1], "re-drivable"
+
+
+def test_a_missing_field_is_a_per_unit_failure_not_a_crash():
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"value": [{"a": 1, "b": 2}, {"a": 3}]})
+    wf["wide"] = mod.widen(columns=["a", "b"], over=wf["raw"])
+    wf.run_all()
+    ledger = wf.step("wide").output.ledger
+    assert list(ledger["status"]) == ["completed", "failed"]
+    assert "has no 'b'" in ledger["error"].iloc[1]
+    assert wf.step("wide").output.data["a"].iloc[1] == 3, "the rest still lifted"
+
+
+def test_widen_round_trips(records):
+    wf = Workflow()
+    wf["raw"] = records
+    wf["wide"] = mod.widen(columns=["city", "temp"], over=wf["raw"])
+    wf.run_all()
+    back = Workflow.from_json(wf.to_session_json(), TOOLS)
+    assert all(p == () for p in back.validate().values())
+    assert list(back.step("wide").output.data.columns) == ["value", "city", "temp"]
+    assert back.to_dict()["steps"][1]["operation"]["modifiers"] == [
+        {"kind": "widen", "params": {"columns": ["city", "temp"], "over": "raw"}}
+    ]
+
+
+def test_widen_is_one_shape_verb_like_the_rest(records):
+    wf = Workflow()
+    wf["raw"] = records
+    wf["both"] = op("identity")[mod.widen(columns=["city"], over=wf["raw"]),
+                                mod.map()]
+    assert "at most one is allowed" in wf.step("both").problems[0]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+def test_expand_refuses_a_dataframe_instead_of_yielding_column_names():
+    """Iterating a DataFrame yields its columns — a silent wrong answer before."""
+    @tool(strict=True)
+    def frame(n: int) -> pd.DataFrame:
+        """Returns a frame."""
+        return pd.DataFrame({"city": ["SF"], "temp": [18]})
+
+    wf = Workflow()
+    wf["seed"] = pd.DataFrame({"n": [1]})
+    wf["e"] = frame[mod.expand()](wf["seed"])
+    wf.run("e")
+    assert wf.step("e").status == "failed"
+    assert "yields its column names" in wf.step("e").output.ledger["error"].iloc[0]

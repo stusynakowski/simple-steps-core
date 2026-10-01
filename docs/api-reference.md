@@ -212,13 +212,16 @@ contract over HTTP — see [react-api.md](react-api.md).
 > `from simple_steps_core import grid`. Design in
 > [shape-algebra.md](shape-algebra.md), how it is arranged in
 > [grid-model.md](grid-model.md), how to write tools for it in
-> [writing-tools.md](writing-tools.md).
+> [writing-tools.md](writing-tools.md), and the grammar for declaring a step in
+> [defining-operations.md](defining-operations.md).
 
 ### Authoring
 
 | Name | Is |
 |---|---|
-| `tool` | the decorator; registers into `TOOLS` |
+| `tool` | the decorator; registers into `TOOLS`. `tool(id=…, strict=…)` |
+| `STRICT_TYPES` | module flag: require a full annotation on every tool. Default `False` |
+| `annotation_problems(fn)` | what is unannotated about a function; `[]` when fully typed |
 | `op(tool_id, **literals)` | an Operation naming a tool by id |
 | `mod` | modifier constructors — `mod.map(over=…)`, `mod.retry(times=…)` |
 | `Workflow` | ordered `Step`s and nothing else |
@@ -228,6 +231,10 @@ contract over HTTP — see [react-api.md](react-api.md).
 Two calling rules, and no third: **brackets decorate, parens apply.** Applying
 to data runs; applying to a `StepRef` wires. `bind(**literals)` fixes constants.
 
+The canonical form puts the verb in brackets and the data in the call position —
+`score[mod.map(name="pts")](wf["raw"])`. `over=` is the same step written the
+other way round and is what gets stored; the two are equal and export identically.
+
 ### The tool registries
 
 | Name | Is |
@@ -235,7 +242,7 @@ to data runs; applying to a `StepRef` wires. `bind(**literals)` fixes constants.
 | `BUILTIN_TOOLS` | `identity gather count total first last` — system, **protected** |
 | `TOOLS` | whatever `@tool` declared |
 | `DEFAULT_TOOL` | verb → the builtin a bare modifier resolves to |
-| `catalog()` / `tool_entry()` | palette entries: `tool_id`, `description`, `origin`, `params`, `takes_whole_row` |
+| `catalog()` / `tool_entry()` | palette entries: `tool_id`, `description`, `origin`, `params` (each with `name`, `required`, `default`, **`type`**), **`returns`**, **`typed`**, `takes_whole_row` |
 
 `@tool` **refuses** a name that collides with a builtin: the shape verbs resolve
 `identity` and `gather` by name, so shadowing one would quietly change what
@@ -254,7 +261,7 @@ applies `gather`. A bare *execution* modifier is refused.
 | `ROWS_RULE` | §3's rows column as data — what staging folds |
 | `DEFAULT_PAYLOAD`, `CARRIES_COLUMNS` | which column a verb writes; whose it keeps |
 
-Current verbs: `source map filter select drop group expand collapse sweep`
+Current verbs: `source map filter select drop widen group expand collapse sweep`
 (shape) · `retry timeout` (execution).
 
 ### Declaring, staging, running
@@ -262,6 +269,7 @@ Current verbs: `source map filter select drop group expand collapse sweep`
 | Name | Is |
 |---|---|
 | `check(operation, workflow, step_id)` | every problem knowable without running; **never raises** |
+| ↳ what it refuses | unknown tool/modifier · a ref read from **another `Workflow`** · `over` dangling, self-referential or circular · more than one shape verb · a tool on `source`/`select`/`drop` · `select`/`drop` naming absent columns · a bound literal the signature rejects · a required value the upstream lacks · **a declared type the literal or upstream dtype contradicts** |
 | `stage(...)` | the `Output` a step has before it runs |
 | `infer_verb(fn, upstream, literals)` | which verb a tool wants, and why |
 | `predicted_columns(output)` | the columns a step will have, **in order** |
@@ -275,7 +283,7 @@ Current verbs: `source map filter select drop group expand collapse sweep`
 | `Output` | `data` + `ledger` + `meta`; `view()`, `ok`, `failed`, `values`, `item()` |
 | `Output.shape` / `.form` | `(rows, cols)` — pandas' meaning / the cardinality class |
 | `PAYLOAD`, `LEDGER_COLUMNS` | `"value"`; `status error attempts seconds unit` |
-| `to_json` / `to_session_json` / `from_json` | light export (structure) / full (plus payloads) |
+| `to_json` / `to_session_json` / `from_json` | light export (structure) / full (plus payloads). Frame payloads carry their **dtypes**, which JSON itself cannot express |
 | `PayloadError` | raised rather than writing a payload that cannot load back |
 
 ### The implementation layer
@@ -285,23 +293,29 @@ these up; `mod.map(over=…)` is the authoring form.
 
 | Name | Is |
 |---|---|
-| `map_ filter_ select_ drop_ group_ collapse_ expand_ sweep_ source_` | the verbs themselves — callable directly on a frame, with no Workflow, which is how they are unit-tested |
+| `map_ filter_ select_ drop_ widen_ group_ collapse_ expand_ sweep_ source_` | the verbs themselves — callable directly on a frame, with no Workflow, which is how they are unit-tested |
 | `grid(value)` / `rows(value)` | lift a value into an `Output` / coerce one into a frame of rows |
-| `Modifier` | one stack entry: `kind` + `params`, with `cls` and `is_shape` read from `MODIFIERS` |
+| `Modifier` | one stack entry: `kind` + `params`, with `cls` and `is_shape` read from `MODIFIERS`. `params` may hold a `StepRef`, which knows its `Workflow`; it flattens to a bare id in `Operation.to_dict()`. `__eq__` compares params flattened, so naming a step either way is the same modifier |
 | `ToolHandle` | what `@tool` returns — the function, an id, `bind`, and `__getitem__` |
 | `is_identity(fn)` | recognizes `identity` through the argument adapter; how `source`/`select`/`drop` enforce "no tool" |
 
-Forty-nine exported names is a lot for a submodule to absorb, and roughly a
+Fifty-two exported names is a lot for a submodule to absorb, and roughly a
 quarter of them are this layer. Worth trimming once the authoring surface stops
 moving.
 
 ### Not yet in this surface
 
+Public names only. [status.md](status.md) is the consolidated review, with the
+blocker and rough size for each.
+
 | | status |
 |---|---|
-| `rename`, `head`/`limit`, `sort`, `distinct` | proposed verbs, not built |
+| `rename`, `sort`, `distinct` | proposed verbs, not built |
+| `slice` / `head` / `limit` | proposed. **Row position is unreachable today** — a tool cannot see its index, even with `**row`, so positional selection is not expressible at all. Workaround: `df.reset_index(names="row_no")`, then `filter` |
 | `cache`, `gate`, `concurrency` | **promised in §1.1, missing from `MODIFIERS`** |
-| `join` | needs multi-upstream references first |
+| `join` | needs multi-upstream references first. A step reads **exactly one** upstream: two `over`s are two shape verbs and are refused |
+| source schemas | nothing declares a `source` step's column types, so they are the only dtypes no annotation governs — and the ones a replaced source could silently change |
+| `Workflow.adopt` / namespacing | composing two workflows forces a rename. Mechanical on the export (rename ids, rewrite `over`), but not in the library |
 | `colmap` and the column-as-unit family | blocked on §5 — `axis="columns"` raises |
 | literal steps via `ast.literal_eval` | decided (one cell), not built |
 | `AppConfig` | specified in [app-config.md](app-config.md), not built |
@@ -458,7 +472,7 @@ making `ToolCall` recursive, because nothing else can land before it.
 Three execution modifiers are documented as part of the model and exist in
 neither place: `cache`, `gate`, `concurrency`.
 
-`grid.__all__` also exports 49 names, about a quarter of which are the verb
+`grid.__all__` also exports 52 names, about a quarter of which are the verb
 implementations a user never calls directly (Tier 4, *implementation layer*).
 Same problem as §8 above, in the newer half of the codebase.
 

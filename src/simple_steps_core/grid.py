@@ -33,18 +33,20 @@ import time
 import traceback
 import typing
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 from typing import Any, Callable, Iterable, Sequence
 
 import pandas as pd
 
 __all__ = [
     "Output", "grid", "rows", "map_", "filter_", "group_", "collapse_",
-    "expand_", "sweep_", "source_", "select_", "drop_",
+    "expand_", "sweep_", "source_", "select_", "drop_", "widen_",
     "identity", "gather", "count", "total", "first", "last",
     "BUILTIN_TOOLS", "DEFAULT_TOOL", "catalog", "tool_entry",
     "TOOLS",
     "op", "Modifier", "Operation",
     "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "stage",
+    "STRICT_TYPES", "annotation_problems",
     "ROWS_RULE", "DEFAULT_PAYLOAD", "CARRIES_COLUMNS", "PayloadError",
     "is_identity", "infer_verb",
     "predicted_columns",
@@ -254,9 +256,100 @@ BUILTIN_TOOLS: dict[str, Callable] = {
 #: cannot stand in for the other.
 DEFAULT_TOOL: dict[str, str] = {
     "source": "identity", "select": "identity", "drop": "identity",
+    "widen": "identity",
     "map": "identity", "filter": "identity", "group": "identity",
     "expand": "identity", "collapse": "gather",
 }
+
+
+#: Whether ``@tool`` requires a type annotation on every parameter and on the
+#: return. Off by default so tools written before the rule existed keep working;
+#: a project that wants the guarantee everywhere sets this once, at import time,
+#: before declaring anything. ``@tool(strict=True)`` opts in one tool at a time.
+#:
+#: What the annotations buy, and why it is worth the keystrokes: they are the
+#: only description of a step's boundary that both a human and the machine read.
+#: ``check`` compares them against the upstream's real dtypes
+#: (:func:`_dtype_problems`), and ``catalog`` publishes them, so a palette can
+#: say what a tool takes and returns instead of only naming its parameters.
+STRICT_TYPES: bool = False
+
+
+def _type_name(annotation: Any) -> str | None:
+    """A readable name for an annotation — ``None`` when there is not one."""
+    if annotation is inspect.Parameter.empty:
+        return None
+    if isinstance(annotation, str):                  # from __future__ annotations
+        return annotation
+    return (getattr(annotation, "__name__", None)
+            or str(annotation).replace("typing.", ""))
+
+
+def annotation_problems(fn: Callable) -> list[str]:
+    """What is unannotated about *fn*. Empty when it is fully typed.
+
+    ``**kwargs`` and ``*args`` are exempt: a tool that takes the whole row has
+    no per-column parameter to type, and the row's columns are not knowable from
+    the signature.
+    """
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):                  # builtins have no signature
+        return ["its signature cannot be read"]
+
+    untyped = [p.name for p in signature.parameters.values()
+               if p.kind not in (inspect.Parameter.VAR_KEYWORD,
+                                 inspect.Parameter.VAR_POSITIONAL)
+               and p.annotation is inspect.Parameter.empty]
+    problems = []
+    if untyped:
+        plural = "s" if len(untyped) > 1 else ""
+        problems.append(
+            f"parameter{plural} {', '.join(map(repr, untyped))} "
+            f"{'have' if plural else 'has'} no type annotation"
+        )
+    if signature.return_annotation is inspect.Signature.empty:
+        problems.append("it has no return annotation")
+    return problems
+
+
+def _value_fits(value: Any, annotation: Any) -> bool | None:
+    """Does one literal fit an annotation? ``None`` when it cannot be decided."""
+    origin = typing.get_origin(annotation) or annotation
+    if not isinstance(origin, type) or origin is object:
+        return None                                  # Any, unions, protocols…
+    if origin is float and isinstance(value, int) and not isinstance(value, bool):
+        return True                                  # an int is a fine float
+    return isinstance(value, origin)
+
+
+def _column_fits(series: pd.Series, annotation: Any) -> bool | None:
+    """Does a column's dtype fit an annotation? ``None`` when undecidable.
+
+    Deliberately asymmetric: it returns ``False`` only when the mismatch is
+    certain, because a false positive here would refuse a step that works. A
+    numeric dtype answers exactly; an object column is decided by its first
+    non-null value, which is the most an unparameterized ``object`` dtype can
+    tell us.
+    """
+    origin = typing.get_origin(annotation) or annotation
+    if not isinstance(origin, type) or origin is object:
+        return None
+    kind = getattr(series.dtype, "kind", None)
+    if kind is None:
+        return None
+    if origin is bool:
+        return kind == "b"
+    if origin is int:
+        return kind in "iu"
+    if origin is float:
+        return kind in "iufc"                        # an int column fits a float
+    if kind != "O":                                  # a real dtype, a non-numeric annotation
+        return False if origin in (str, list, tuple, dict, set) else None
+    present = series.dropna()
+    if present.empty:
+        return None
+    return isinstance(present.iloc[0], origin)
 
 
 def tool_entry(tool_id: str, fn: Callable, origin: str) -> dict:
@@ -270,9 +363,11 @@ def tool_entry(tool_id: str, fn: Callable, origin: str) -> dict:
     """
     doc = (inspect.getdoc(fn) or "").strip()
     try:
-        parameters = list(inspect.signature(fn).parameters.values())
+        signature = inspect.signature(fn)
+        parameters = list(signature.parameters.values())
+        returns = _type_name(signature.return_annotation)
     except (TypeError, ValueError):
-        parameters = []
+        parameters, returns = [], None
 
     params, takes_row = [], False
     for parameter in parameters:
@@ -286,6 +381,9 @@ def tool_entry(tool_id: str, fn: Callable, origin: str) -> dict:
             "name": parameter.name,
             "required": required,
             "default": None if required else parameter.default,
+            # The declared type, or None when the tool left it off. A palette
+            # shows this so a user knows what a step consumes before wiring it.
+            "type": _type_name(parameter.annotation),
         })
 
     return {
@@ -293,6 +391,11 @@ def tool_entry(tool_id: str, fn: Callable, origin: str) -> dict:
         "description": doc.split("\n", 1)[0] if doc else "",
         "origin": origin,
         "params": params,
+        #: The declared return type, or None. With `params` above, this is the
+        #: tool's whole boundary: what goes in, what comes out.
+        "returns": returns,
+        #: True when every parameter and the return are annotated.
+        "typed": not annotation_problems(fn),
         # True when the tool declares **kwargs, so it receives every column and
         # `check` cannot verify its inputs against the upstream (§4).
         "takes_whole_row": takes_row,
@@ -511,6 +614,17 @@ def expand_(source: Any, fn: Callable, *, name: str = PAYLOAD,
             records.append({**record, "unit": index})
             out_rows.append({**arg, name: None})
             continue
+        if isinstance(produced, pd.DataFrame):
+            # Iterating a DataFrame yields its column names, so the old
+            # behaviour was a silent wrong answer. A per-unit failure, like any
+            # other unusable return, so it stays inspectable.
+            records.append({**record, "status": "failed", "unit": index,
+                            "error": "TypeError: expand received a DataFrame; "
+                                     "iterating one yields its column names. "
+                                     "Return a list of values, widen it into "
+                                     "columns, or assign it as a source step."})
+            out_rows.append({**arg, name: None})
+            continue
         items = (list(produced)
                  if isinstance(produced, Iterable)
                  and not isinstance(produced, (str, bytes, dict))
@@ -520,6 +634,19 @@ def expand_(source: Any, fn: Callable, *, name: str = PAYLOAD,
             records.append({**record, "unit": index})
 
     data = pd.DataFrame(out_rows).reset_index(drop=True)
+    if not len(data.columns):
+        # Every unit expanded to nothing. `DataFrame([])` has no columns at all,
+        # which would make a downstream step report "it has no columns" rather
+        # than "it is empty" — two different problems. `filter` keeps its columns
+        # when it drops every row; expand has to agree.
+        #
+        # Sliced from the input rather than rebuilt, so the carried columns keep
+        # their **dtypes** too: an empty column built from `[]` would come out
+        # float64 and a downstream `n: int` would be reported as a mismatch. The
+        # payload is object, which is the honest answer — nothing was produced,
+        # so its type is unknown, and an empty column is undecidable anyway.
+        data = frame.iloc[:0].copy().reset_index(drop=True)
+        data[name] = pd.Series([], dtype=object)
     return Output(data=data, ledger=_ledger(records, data.index),
                   meta={"verb": "expand", "form": "column", "payload": name,
                         "n_in": len(frame)})
@@ -630,6 +757,78 @@ def drop_(source: Any, fn: Callable = identity, *,
     frame = rows(source)
     _require_columns("drop", frame, columns)
     return _column_output("drop", frame, frame.drop(columns=list(columns)))
+
+
+def widen_(source: Any, fn: Callable = identity, *,
+           columns: Sequence[str] | None = None, retries: int = 0,
+           axis: str = "rows") -> Output:
+    """``unnest_wider`` — one cell's fields become columns. n rows in, n rows out.
+
+    The column-axis counterpart of :func:`expand_`, and the pair completes the
+    unnesting story: ``expand`` makes a collection **longer** (one row per
+    element), this makes a record **wider** (one column per field).
+
+        value                          ->  city   temp
+        {"city": "SF", "temp": 18}         SF     18
+
+    **``columns=`` is required, and that is the design, not a limitation.** The
+    fields live in the data, so discovering them at run time would make this the
+    one verb whose *column set* is unknowable before it runs — and unlike
+    ``expand``'s unknown row count, unknown columns are not survivable: `check`
+    validates every downstream step against column *names*
+    (:func:`_missing_columns`), so each would become unvalidatable until this ran,
+    and :func:`predicted_columns` would have nothing to predict. Declaring them
+    keeps staging exact.
+
+    Applies **no tool**, like ``select`` and ``drop`` — ``identity`` resolves
+    which cell holds the record, by the usual convention (an explicit
+    ``column=``, else ``value``, else the only column). Unlike those two it does
+    execute per row, so it has a real ledger: a cell that is not a mapping, or is
+    missing a declared field, is a **per-unit failure** that leaves `None` in the
+    row and an error beside it — inspectable and re-drivable like any other.
+    """
+    _no_tool("widen", fn)
+    if not columns:
+        raise ValueError(
+            "widen needs columns= — the fields to lift out of the record. They "
+            "cannot be discovered at run time: a step's column set has to be "
+            "known at declaration, or nothing downstream can be validated."
+        )
+    frame = rows(source, axis=axis)
+    wanted = list(columns)
+
+    lifted: list[dict] = []
+    records = []
+    for _index, row in frame.iterrows():
+        cell, record = _call(fn, _as_arg(row), retries)
+        if record["status"] != "completed":
+            lifted.append({column: None for column in wanted})
+            records.append(record)
+            continue
+        if not isinstance(cell, Mapping):
+            lifted.append({column: None for column in wanted})
+            records.append({**record, "status": "failed",
+                            "error": f"TypeError: widen needs a mapping per row, "
+                                     f"got {type(cell).__name__}"})
+            continue
+        missing = [column for column in wanted if column not in cell]
+        lifted.append({column: cell.get(column) for column in wanted})
+        records.append(record if not missing else {
+            **record, "status": "failed",
+            "error": f"KeyError: the record has no "
+                     f"{', '.join(map(repr, missing))} "
+                     f"(it has {', '.join(map(str, cell)) or 'nothing'})",
+        })
+
+    # Carried columns first, then the fields — the order `map` uses, and the
+    # order a reader sees. A field that shadows a carried column wins, because
+    # naming it is what the step was asked to do.
+    data = frame.copy()
+    for column in wanted:
+        data[column] = [row[column] for row in lifted]
+    return Output(data=data, ledger=_ledger(records, frame.index),
+                  meta={"verb": "widen", "form": "column", "payload": None,
+                        "n_in": len(frame), "columns": list(data.columns)})
 
 
 def _column_output(verb: str, frame: pd.DataFrame, data: pd.DataFrame) -> Output:
@@ -814,6 +1013,7 @@ MODIFIERS: dict[str, ModifierKind] = {k.name: k for k in (
     _kind("filter",   "shape", _lift(filter_)),
     _kind("select",   "shape", _lift(select_)),
     _kind("drop",     "shape", _lift(drop_)),
+    _kind("widen",    "shape", _lift(widen_)),
     _kind("group",    "shape", _lift(group_)),
     _kind("expand",   "shape", _lift(expand_)),
     _kind("collapse", "shape", _lift(collapse_)),
@@ -841,12 +1041,34 @@ DECORATORS: dict[str, Callable] = {n: k.apply for n, k in MODIFIERS.items()}
 # ─────────────────────────────────────────────────────────────────────────
 # The deferred half: a stack of modifiers, as data
 # ─────────────────────────────────────────────────────────────────────────
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Modifier:
-    """One entry in an Operation's stack: what to apply, and with what."""
+    """One entry in an Operation's stack: what to apply, and with what.
+
+    ``params`` may hold a :class:`StepRef` wherever a step id goes. The ref is
+    kept **as the ref** — it is flattened to its id only at the JSON boundary
+    (:meth:`Operation.to_dict`) — because a ref knows which `Workflow` it was
+    read from and a bare id does not. That is the whole provenance mechanism:
+    not a second field to carry, just information this class declines to throw
+    away. Everything that reads a step id does so through ``str()``, which is
+    why holding the richer object costs nothing.
+    """
 
     kind: str
     params: dict = field(default_factory=dict)
+
+    def __eq__(self, other: Any) -> bool:
+        """Equal when they name the same step — however it was named.
+
+        ``mod.map(over=wf["raw"])`` and ``mod.map(over="raw")`` are the same
+        modifier, so equality compares the flattened params. Hand-written
+        because the dataclass default would call a `StepRef` different from its
+        own id and break every round-trip comparison.
+        """
+        if not isinstance(other, Modifier):
+            return NotImplemented
+        return (self.kind == other.kind
+                and _deref(self.params) == _deref(other.params))
 
     @property
     def cls(self) -> str:
@@ -859,7 +1081,9 @@ class Modifier:
         return self.cls == "shape"
 
     def __repr__(self) -> str:
-        args = ", ".join(f"{k}={v!r}" for k, v in self.params.items())
+        # Flattened, for the same reason __eq__ is: how a step was named is not
+        # part of what this modifier says, so a repr must not depend on it.
+        args = ", ".join(f"{k}={v!r}" for k, v in _deref(self.params).items())
         return f"{self.kind}({args})"
 
 
@@ -884,11 +1108,8 @@ class Operation:
     fn: Callable | None = field(default=None, compare=False, repr=False)
 
     def _add(self, kind: str, **params) -> "Operation":
-        # Dereference here rather than in each caller: this is the one place
-        # every modifier passes through, so a StepRef can never survive into
-        # stored data as an object.
         return Operation(self.tool_id,
-                         self.modifiers + (Modifier(kind, _deref(params)),),
+                         self.modifiers + (Modifier(kind, params),),
                          self.arguments,
                          self.fn)
 
@@ -953,8 +1174,9 @@ class Operation:
         """
         return {
             "tool_id": self.tool_id,
-            "arguments": dict(self.arguments),
-            "modifiers": [{"kind": m.kind, "params": dict(m.params)}
+            "arguments": _deref(self.arguments),
+            # The one place a StepRef flattens to its id: JSON starts here.
+            "modifiers": [{"kind": m.kind, "params": _deref(m.params)}
                           for m in self.modifiers],
         }
 
@@ -1003,7 +1225,7 @@ class Operation:
         if verb is not None:
             return Operation(
                 self.tool_id,
-                tuple(Modifier(m.kind, {**m.params, "over": ref.id})
+                tuple(Modifier(m.kind, {**m.params, "over": ref})
                       if m is verb else m for m in self.modifiers),
                 self.arguments, self.fn,
             )
@@ -1018,7 +1240,7 @@ class Operation:
             or BUILTIN_TOOLS.get(self.tool_id)
         kind = ("map" if fn is None
                 else infer_verb(fn, upstream, self.arguments)[0])
-        return self._add(kind, over=ref.id)
+        return self._add(kind, over=ref)      # the ref, not ref.id — it knows its workflow
 
     def run(self, source: Any, tools: dict[str, Callable] | None = None) -> Any:
         """Compile the stack and apply it to *source*.
@@ -1100,6 +1322,7 @@ def _deref(value: Any) -> Any:
     return value
 
 
+
 class ToolHandle:
     """What ``@tool`` returns: the plain function, plus a name and brackets.
 
@@ -1169,14 +1392,32 @@ class ToolHandle:
 TOOLS: dict[str, Callable] = {}
 
 
-def tool(fn: Callable | None = None, *, id: str | None = None):
+def tool(fn: Callable | None = None, *, id: str | None = None,
+         strict: bool | None = None):
     """Mark a plain function as a tool. Usable bare or with an id.
 
     Registers it in :data:`TOOLS` so a workflow loaded from JSON can find it
     without the caller assembling a name→function map by hand.
+
+    *strict* requires a type annotation on every parameter and on the return,
+    refusing the declaration at import when one is missing. It defaults to
+    :data:`STRICT_TYPES`, so a project turns the rule on once rather than
+    repeating it per tool. The annotations are not decoration: ``check``
+    compares them against the upstream's real dtypes, and ``catalog`` publishes
+    them as the tool's boundary.
     """
     def make(f: Callable, tool_id: str | None) -> ToolHandle:
         handle = ToolHandle(f, tool_id)
+        if STRICT_TYPES if strict is None else strict:
+            found = annotation_problems(f)
+            if found:
+                raise TypeError(
+                    f"tool {handle.id!r} is not fully typed: {'; '.join(found)}. "
+                    "A step's boundary is its annotations — they are what "
+                    "`check` compares against the upstream's dtypes and what a "
+                    "palette shows a user. Annotate it, or declare it with "
+                    "strict=False."
+                )
         if handle.id in BUILTIN_TOOLS:
             # Shadowing a builtin is never intended and never harmless: the
             # shape verbs resolve `identity` and `gather` by name, so a
@@ -1248,7 +1489,14 @@ def _encode(value: Any) -> dict:
                     "persist only as handles or as something with a to_json "
                     "(§8.8); the light export (to_json) carries no payloads."
                 )
-        return {"kind": "frame", "data": value.to_json(orient="split")}
+        # Dtypes travel beside the data: JSON has no type information, so
+        # `read_json` re-infers, and a float column of whole numbers comes back
+        # int64. That used to be cosmetic; now that annotations are checked
+        # against real dtypes, a round trip could change a step's verdict.
+        # Stored positionally — a column name need not be a string.
+        return {"kind": "frame",
+                "data": value.to_json(orient="split"),
+                "dtypes": [str(dtype) for dtype in value.dtypes]}
     if value is None or isinstance(value, (bool, int, float, str)):
         return {"kind": "scalar", "data": value}
     if isinstance(value, (list, tuple)):
@@ -1264,7 +1512,19 @@ def _decode(blob: dict) -> Any:
     kind = blob["kind"]
     if kind == "frame":
         import io
-        return pd.read_json(io.StringIO(blob["data"]), orient="split")
+        frame = pd.read_json(io.StringIO(blob["data"]), orient="split")
+        # Restore what JSON could not carry. Absent on exports written before
+        # dtypes were recorded, which then behave as they always did.
+        dtypes = blob.get("dtypes")
+        if dtypes and len(dtypes) == len(frame.columns):
+            for column, dtype in zip(frame.columns, dtypes):
+                if str(frame[column].dtype) == dtype:
+                    continue
+                try:
+                    frame[column] = frame[column].astype(dtype)
+                except (TypeError, ValueError):
+                    pass          # an object column that cannot be re-cast
+        return frame
     if kind == "list":
         return [_decode(v) for v in blob["data"]]
     return blob["data"]
@@ -1319,7 +1579,27 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         if modifier.kind not in MODIFIERS:
             problems.append(f"unknown modifier {modifier.kind!r}")
 
-    # 3. `over` has to name an existing, valid, non-circular step
+    # 3. a reference has to have been read from *this* workflow. A step is
+    #    named by its id, so a ref borrowed from another workflow would resolve
+    #    against a same-named local step — silently running the wrong data when
+    #    both happen to have one. A StepRef knows which workflow it came from,
+    #    which is the whole reason `params` keeps the ref instead of its id.
+    for modifier in operation.modifiers:
+        over = modifier.params.get("over")
+        if workflow is None or not isinstance(over, StepRef):
+            continue
+        if over.workflow is None or over.workflow is workflow:
+            continue
+        name = over.id
+        problems.append(
+            f"{modifier.kind} over {name!r} reads a different Workflow. A step "
+            f"is named by its id, so this would resolve to *this* workflow's "
+            f"{name!r} — not the step you pointed at. Read it from this "
+            f"workflow, or pass {name!r} as a plain string to say you mean "
+            f"whatever {name!r} is here."
+        )
+
+    # 4. `over` has to name an existing, valid, non-circular step
     for modifier in operation.modifiers:
         over = modifier.params.get("over")
         if over is None or workflow is None:
@@ -1336,7 +1616,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         elif step_id is not None and step_id in workflow._upstream_ids(name):
             problems.append(f"{modifier.kind} over {name!r} is circular")
 
-    # 4. at most one shape verb per step (§11). Two shape changes inside one
+    # 5. at most one shape verb per step (§11). Two shape changes inside one
     #    step make an intermediate grid with no cell address, so a unit that
     #    fails there cannot be inspected or re-run.
     verbs = operation.shape_verbs
@@ -1348,13 +1628,15 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             "keeps a cell address you can re-drive."
         )
 
-    # 5. the column verbs apply no tool
-    for kind in ("source", "select", "drop"):
+    # 6. the column verbs apply no tool
+    for kind in ("source", "select", "drop", "widen"):
         if any(m.kind == kind for m in operation.modifiers) and not is_identity(fn):
             problems.append(f"{kind} applies no tool; use map to compute")
 
-    # 5b. select and drop must name columns the input will actually have
+    # 6b. select and drop must name columns the input will actually have
     verb = operation.shape_verb
+    # Deliberately not `widen`: its columns are the record's fields, which do
+    # not exist upstream — that is the whole point of the verb.
     if (verb is not None and verb.kind in ("select", "drop")
             and workflow is not None and verb.params.get("columns")):
         available = workflow._known_columns(operation)
@@ -1366,7 +1648,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                     f"the input does not have (it has {', '.join(available)})"
                 )
 
-    # 6. bound literals have to be parameters the tool accepts — the reactive
+    # 7. bound literals have to be parameters the tool accepts — the reactive
     #    argument check, done against the signature rather than at run time.
     if fn is not None and operation.arguments:
         try:
@@ -1382,11 +1664,17 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                         f"{operation.tool_id}() takes no argument {name!r}; "
                         f"it accepts {', '.join(list(parameters)[1:]) or '(none)'}"
                     )
-    # 7. the values the tool requires have to exist as columns upstream.
+    # 8. the values the tool requires have to exist as columns upstream.
     #    This is only possible because a tool declares what it needs by name —
     #    with a `def score(row)` convention there is nothing to check against.
     if fn is not None and workflow is not None and not problems:
         problems.extend(_missing_columns(operation, fn, workflow))
+
+    # 9. declared types have to match what is actually there — the bound
+    #    literals always, the upstream's dtypes once it has run. This is what
+    #    the annotations are *for*; without it they would be documentation.
+    if fn is not None and not problems:
+        problems.extend(_type_mismatches(operation, fn, workflow))
 
     return tuple(problems)
 
@@ -1427,9 +1715,68 @@ def _missing_columns(operation: Operation, fn: Callable,
         return []
     return [
         f"{operation.tool_id}() needs {', '.join(repr(m) for m in missing)}, "
-        f"which {verb.params.get('over', 'the input')!r} does not have "
+        f"which {str(verb.params.get('over', 'the input'))!r} does not have "
         f"(it has {', '.join(sorted(available)) or 'no columns'})"
     ]
+
+
+def _type_mismatches(operation: Operation, fn: Callable,
+                     workflow: "Workflow | None") -> list[str]:
+    """Where the tool's declared types disagree with what will reach it.
+
+    Two sources, checked on the same terms as everything else in :func:`check`:
+    a **bound literal** is in hand at declaration, so it is always checkable; an
+    **upstream column** needs that step to have run, exactly like
+    :func:`_missing_columns`, because a staged Output holds placeholder rows.
+
+    Only certain mismatches are reported. ``_column_fits`` answers ``None`` for
+    anything it cannot decide, and an undecidable type is not an error — a false
+    positive here would refuse a step that runs.
+    """
+    try:
+        parameters = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return []
+
+    problems: list[str] = []
+    for name, value in operation.arguments.items():
+        parameter = parameters.get(name)
+        if parameter is None or parameter.annotation is inspect.Parameter.empty:
+            continue
+        if _value_fits(value, parameter.annotation) is False:
+            problems.append(
+                f"{operation.tool_id}() declares {name}: "
+                f"{_type_name(parameter.annotation)}, but it is bound to "
+                f"{value!r} ({type(value).__name__})"
+            )
+
+    verb = operation.shape_verb
+    if workflow is None or verb is None or verb.kind in ("source", "sweep",
+                                                         "select", "drop"):
+        return problems
+    upstream = workflow._input_for(operation)
+    if upstream is None:
+        return problems
+
+    frame = rows(upstream)
+    declared = list(parameters.values())
+    if verb.kind == "collapse":
+        declared = declared[1:]          # the verb supplies the accumulator
+    for parameter in declared:
+        if parameter.name in operation.arguments:
+            continue                     # a literal, checked above
+        if parameter.name not in frame.columns:
+            continue                     # missing columns are rule 7's job
+        if parameter.annotation is inspect.Parameter.empty:
+            continue
+        if _column_fits(frame[parameter.name], parameter.annotation) is False:
+            problems.append(
+                f"{operation.tool_id}() declares {parameter.name}: "
+                f"{_type_name(parameter.annotation)}, but "
+                f"{str(verb.params.get('over', 'the input'))!r} has "
+                f"{parameter.name} as {frame[parameter.name].dtype}"
+            )
+    return problems
 
 
 #: The payload column each verb writes when ``name=`` is not given. ``None``
@@ -1438,6 +1785,8 @@ def _missing_columns(operation: Operation, fn: Callable,
 #: reducer be recognized before anything has run.
 DEFAULT_PAYLOAD: dict[str, str | None] = {
     "source": None, "filter": None, "select": None, "drop": None,
+    # widen writes several *named* columns, so it has no single payload.
+    "widen": None,
     "group": "group",
     "map": PAYLOAD, "collapse": PAYLOAD, "expand": PAYLOAD, "sweep": PAYLOAD,
 }
@@ -1455,7 +1804,7 @@ CARRIES_COLUMNS: frozenset[str] = frozenset({"map", "filter", "group", "expand"}
 #: ``filter`` can promise "at most n", never "n".
 ROWS_RULE: dict[str, str] = {
     "source": "same", "map": "same", "group": "same",
-    "filter": "at_most", "select": "same", "drop": "same",
+    "filter": "at_most", "select": "same", "drop": "same", "widen": "same",
     "collapse": "one",
     "expand": "unknown", "sweep": "generated",
 }
@@ -1606,6 +1955,10 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     elif kind == "drop":
         removed = set(verb.params.get("columns") or [])
         ordered = [c for c in upstream_columns if c not in removed]
+    elif kind == "widen":
+        ordered = list(upstream_columns)
+        ordered += [c for c in (verb.params.get("columns") or [])
+                    if c not in ordered]
     elif kind in CARRIES_COLUMNS:
         ordered = list(upstream_columns)
     elif kind == "sweep":
@@ -1654,7 +2007,13 @@ class Step:
         for state in ("invalid", "failed", "running", "staged"):
             if state in states:
                 return state
-        return "completed" if states else "staged"
+        if states:
+            return "completed"
+        # No ledger rows at all is ambiguous, and the ledger cannot settle it:
+        # either this step is staged and its addresses are not yet knowable, or
+        # it ran and legitimately produced nothing (every unit filtered out, or
+        # expanded to zero rows). `meta["staged"]` is what distinguishes them.
+        return "staged" if self.output.meta.get("staged") else "completed"
 
     def describe(self) -> str:
         """What this step is, in words.
@@ -1990,7 +2349,7 @@ class _Mods:
             )
 
         def make(**params) -> Modifier:
-            return Modifier(kind, _deref(params))
+            return Modifier(kind, params)
         make.__name__ = kind
         return make
 
