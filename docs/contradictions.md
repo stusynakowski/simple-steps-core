@@ -1,6 +1,7 @@
 # Contradictions audit — streamlining usage
 
-**As of 2026-10-05. Report only — no code was changed to produce this.**
+**Audited 2026-10-05. The audit itself changed no code; follow-up doc fixes have
+since begun — see the Progress note below and the per-item ✓/◑/○ markers.**
 
 Scope: the whole repo (`src/`, `docs/`, `specs/`, `examples/`, `tests/`, the
 `.claude` skill). Focus areas requested: **do the shape modifiers work**,
@@ -15,8 +16,15 @@ a *different one of the two* without saying so. A reader following one doc
 writes code the neighbouring doc calls wrong.
 
 Each item below is **C#** (contradiction) or **L#** (loose end), with file and
-line evidence and a one-line streamlining recommendation. Nothing here is a
-request to change code yet.
+line evidence and a one-line streamlining recommendation.
+
+> **Progress (2026-10-05).** Doc reconciliation has started on the shape
+> algebra. `shape-algebra.md` was brought level with the 14 shipped verbs:
+> §1.1 is now a three-tier modifier table (run-a-tool / no-tool / execution),
+> a new **§2.1 "Tidy intent"** documents how a Python return becomes a tidy
+> grid (the one-cell rule + the return-type→verb map), and **§3** is split into
+> the two shape-verb classes with an added **index (row-identity)** column.
+> Items annotated **✓ fixed** / **◑ partial** / **○ open** below.
 
 ---
 
@@ -70,7 +78,13 @@ and reducing verbs ([§6.3](shape-algebra.md)).
 > only. The sentence "every step is (verb, tool, arguments)" is false for the
 > engine and should not be read as describing today's `ToolCall`.
 
-### C2 — The shape-verb vocabulary has three different sizes
+### C2 — The shape-verb vocabulary has three different sizes  ◑ partial
+> **Update (2026-10-05).** `shape-algebra.md` now carries **all 14** shipped
+> verbs (§1.1 three-tier table, new §2.1, §3's two tables + index column), so the
+> design doc no longer lags the implementation. **Remaining drift:**
+> `object-model.md §converging` still lists 7, and the engine enum still 6 — the
+> engine gap is inherent to the two-model split and only closes at migration.
+
 Three authorities, three verb lists:
 
 | source | verbs | count |
@@ -89,7 +103,13 @@ doc reads as the future while being behind the present.
 > [shape-algebra.md §3](shape-algebra.md)'s table, or add a one-line "built
 > beyond this table: …" note. One canonical verb list, referenced everywhere.
 
-### C3 — "At most one shape verb per step" — undecided vs enforced
+### C3 — "At most one shape verb per step" — undecided vs enforced  ○ open
+> **Update (2026-10-05): still open.** One stale line remains —
+> [shape-algebra.md:136](shape-algebra.md) (§1.1) still reads "proposed, not
+> settled (§11)", even though [defining-operations.md:742](defining-operations.md)
+> and `test_grid.py` (`at most one is allowed`) both treat it as enforced. Flip
+> that line and §11.
+
 [shape-algebra.md §1.1 / §11](shape-algebra.md) says this rule is "**proposed,
 not settled**." [status.md §2](status.md) explicitly lists it as a *corrected
 stale claim*: "one shape verb per step is undecided (**it is enforced**)," and
@@ -99,7 +119,11 @@ enforcement. shape-algebra.md was never updated.
 > **Streamline:** change §11's "proposed, not settled" to "enforced" (or delete
 > the open question). It is decided and tested.
 
-### C4 — Execution modifiers `cache` / `gate` / `concurrency` are documented but not built
+### C4 — Execution modifiers `cache` / `gate` / `concurrency` are documented but not built  ○ open
+> **Update (2026-10-05): still open.** `shape-algebra.md §1.1`'s execution-modifier
+> row still lists `cache`/`gate`/`concurrency` with no "planned" marker; only
+> `retry` and `timeout` are built (and `timeout` is inert — L1).
+
 [object-model.md §converging](object-model.md) and
 [shape-algebra.md §1.1](shape-algebra.md) list execution modifiers as
 `retry | timeout | cache` (+ `gate`, `concurrency`). [status.md §4 B5](status.md)
@@ -303,16 +327,32 @@ backends.
 
 Ranked by "how likely is a user to hit it," not by effort.
 
-| # | fix | why first |
-|---|---|---|
-| 1 | **C8** — repair the walkthrough notebook import (`OperationRegistry`→`ToolRegistry`) | the advertised quick-start errors on line 1 |
-| 2 | **C5 / C6** — one banner per orchestration doc naming its model (grid vs engine) | removes the "which spelling is real?" confusion at the source |
-| 3 | **L3** — stop silently handing out the engine `Operation` under a bare import | the name collision is the sharpest runtime trap |
-| 4 | **C9-C12** — mechanical Option-A rename pass over docs/specs/examples/notebooks/types.ts | large but purely find-replace; kills a whole class of stale names |
-| 5 | **C2 / C3 / C4** — reconcile shape-algebra.md with the 14 shipped verbs, the enforced one-verb rule, and the unbuilt execution modifiers | makes the design doc describe the implementation instead of lagging it |
-| 6 | **C14 / L2** — single-source the test counts and gap lists | stops the status docs contradicting themselves |
-| 7 | **C13** — settle `operation_id` vs `tool_id` direction | low-traffic but it is the exact wart the docs keep re-opening |
-| 8 | **L4** — drop the `build/` duplicate | removes an editable shadow copy |
+| # | fix | status | why first |
+|---|---|---|---|
+| 1 | **C8** — repair the walkthrough notebook import (`OperationRegistry`→`ToolRegistry`) | ○ open | the advertised quick-start errors on line 1 |
+| 2 | **C5 / C6** — one banner per orchestration doc naming its model (grid vs engine) | ○ open | removes the "which spelling is real?" confusion at the source |
+| 3 | **L3** — stop silently handing out the engine `Operation` under a bare import | ○ open | the name collision is the sharpest runtime trap |
+| 4 | **C9-C12** — mechanical Option-A rename pass over docs/specs/examples/notebooks/types.ts | ○ open | large but purely find-replace; kills a whole class of stale names |
+| 5 | **C2 / C3 / C4** — reconcile shape-algebra.md with the 14 verbs, the one-verb rule, the unbuilt exec modifiers | ◑ C2 done; C3/C4 open | makes the design doc describe the implementation instead of lagging it |
+| 6 | **C14 / L2** — single-source the test counts and gap lists | ○ open | stops the status docs contradicting themselves |
+| 7 | **C13** — settle `operation_id` vs `tool_id` direction | ○ open | low-traffic but it is the exact wart the docs keep re-opening |
+| 8 | **L4** — drop the `build/` duplicate | ○ open | removes an editable shadow copy |
+
+### What we still need to fix (the short list, updated 2026-10-05)
+
+**Cheap, do-now doc fixes (minutes each):**
+- **C3** — flip "proposed, not settled (§11)" at [shape-algebra.md:136](shape-algebra.md) to "enforced"; update §11 to match.
+- **C4** — mark `cache`/`gate`/`concurrency` as "planned" in [shape-algebra.md §1.1](shape-algebra.md)'s execution row (and L1: note `timeout` is inert).
+- **C2 leftover** — bring [object-model.md §converging](object-model.md)'s 7-verb list up to the 14 (or link it to shape-algebra.md §3 as the one source).
+- **C14** — correct the stale test counts in [status.md §1](status.md) (408 total / 214 grid).
+
+**Higher-impact, decide-then-do:**
+- **C8** — fix the walkthrough notebook's first-line import (the only *runtime* break in the docs).
+- **C5 / C6 / L3** — the model-signposting problem: one banner per orchestration doc, and stop exporting a bare `Operation`/`Workflow`/`Step`. This is the real usability cliff and is the same decision the migration-plan hinges on.
+- **C9-C12** — the Option-A rename sweep across specs/examples/notebooks/`types.ts`.
+
+**Structural (tracked in [migration-plan.md](migration-plan.md), not quick doc edits):**
+- The two-model split itself (root cause §0) — C1, C7, C15, L5 all dissolve once the engine is retired onto the grid model.
 
 ### What is *not* broken
 - The shape modifiers themselves: `test_grid.py` is 214/214, full suite 408/408.
