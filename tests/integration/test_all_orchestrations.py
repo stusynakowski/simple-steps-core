@@ -1,0 +1,145 @@
+"""The one consolidated example, asserted end to end.
+
+Imports the shared registry + builders from ``examples/all_orchestrations`` and
+checks every orchestration's output. This is what keeps that example honest —
+one registry of tools, every shape verb, both fan-out chains, the execution
+modifiers, serialization, staging/validation and per-row failure.
+"""
+
+import sys
+from pathlib import Path
+
+import pytest
+
+_EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "all_orchestrations"
+sys.path.insert(0, str(_EXAMPLE))
+
+import pipeline  # noqa: E402  (path inserted above)
+
+
+@pytest.fixture(scope="module")
+def wf():
+    return pipeline.run()
+
+
+# ── sources: a value is one cell until a verb fans out ──────────────────
+def test_source_is_a_grid_of_rows(wf):
+    assert wf.step("readings").output.shape == (4, 2)
+    assert wf.step("records").output.shape == (2, 1)
+
+
+# ── map: n -> n, input columns carried through plus a payload ───────────
+def test_map_adds_a_payload_column_and_keeps_the_rest(wf):
+    scored = wf.step("scored").output
+    assert scored.values == [10, 20, 30, 20]
+    assert list(scored.data.columns) == ["city", "n", "score"]
+
+
+# ── row-axis reshapers (no tool) ────────────────────────────────────────
+def test_filter_keeps_only_matching_rows(wf):
+    assert list(wf.step("kept").output.data["n"]) == [2, 3, 2]
+
+
+def test_slice_takes_rows_by_position(wf):
+    assert len(wf.step("head2").output.data) == 2
+
+
+def test_sort_reorders_rows_descending(wf):
+    assert list(wf.step("ranked").output.data["score"]) == [30, 20, 20, 10]
+
+
+def test_distinct_keeps_first_of_each_group(wf):
+    assert list(wf.step("unique_city").output.data["city"]) == ["SF", "NYC", "LA"]
+
+
+# ── column-axis reshapers (no tool) ─────────────────────────────────────
+def test_select_keeps_named_columns_in_order(wf):
+    assert list(wf.step("picked").output.data.columns) == ["city", "score"]
+
+
+def test_drop_removes_named_columns(wf):
+    assert "score" not in wf.step("dropped").output.data.columns
+
+
+def test_rename_changes_names_keeps_values(wf):
+    renamed = wf.step("renamed").output.data
+    assert "count" in renamed.columns and "n" not in renamed.columns
+
+
+# ── group -> collapse: the stratified summary ───────────────────────────
+def test_group_marks_rows_without_nesting(wf):
+    bucketed = wf.step("bucketed").output.data
+    assert "bucket" in bucketed.columns and len(bucketed) == 4
+
+
+def test_collapse_by_group_sums_per_city(wf):
+    per_city = wf.step("per_city").output.data.set_index("bucket")["value"]
+    assert per_city.to_dict() == {"SF": 4, "NYC": 2, "LA": 2}
+
+
+# ── collapse to one row ─────────────────────────────────────────────────
+def test_collapse_count_and_sum(wf):
+    assert wf.step("n_rows").output.item() == 4
+    assert wf.step("sum_n").output.item() == 8
+
+
+# ── expand (unnest longer) and expand -> widen ──────────────────────────
+def test_expand_makes_the_grid_longer(wf):
+    assert len(wf.step("bursts").output.data) == 1 + 2 + 3 + 2
+
+
+def test_expand_then_widen_spreads_records_into_columns(wf):
+    spread = wf.step("spread").output.data
+    assert len(spread) == 8
+    assert {"axis", "val"} <= set(spread.columns)
+
+
+# ── widen (unnest wider) straight off a column of records ───────────────
+def test_widen_lifts_fields_into_columns(wf):
+    assert list(wf.step("wide").output.data.columns) == ["value", "city", "temp"]
+
+
+# ── sweep: the cross product of parameters ──────────────────────────────
+def test_sweep_builds_one_row_per_combination(wf):
+    sweep = wf.step("grid_search").output.data
+    assert list(sweep.columns) == ["model", "window", "value"]
+    assert len(sweep) == 4
+
+
+# ── execution modifiers are shape-preserving ────────────────────────────
+def test_execution_modifiers_do_not_change_the_result(wf):
+    assert wf.step("robust").output.values == [10, 20, 30, 20]
+
+
+# ── every declared step is valid and completed ──────────────────────────
+def test_the_whole_workflow_is_valid_and_done(wf):
+    assert all(not p for p in wf.validate().values())
+    assert all(st.status == "completed" for st in wf.steps.values())
+
+
+# ── failure: the ledger keeps every unit, failed ones re-drivable ───────
+def test_failure_lands_in_the_ledger_not_an_exception():
+    fail = pipeline.failure()
+    failed = fail.step("out").output.failed
+    assert list(failed.index) == [1, 3]        # the two readings whose n == 2
+    assert fail.step("out").output.ok.shape[0] == 2
+
+
+# ── staging / validation happen before anything runs ────────────────────
+def test_validation_reports_problems_without_running():
+    checks = pipeline.validation()
+    problems = checks.validate()
+    assert problems["readings"] == () and problems["scored"] == ()
+    assert "nope" in problems["bad_arg"][0]
+    assert "not an earlier step" in problems["dangling"][0]
+    # the good step is staged with a predicted cell count, nothing executed
+    assert "map scale" in checks.step("scored").describe()
+
+
+# ── serialization round-trip reproduces the outputs ─────────────────────
+def test_full_session_roundtrip_reproduces_results():
+    original, reloaded = pipeline.roundtrip()
+    assert reloaded.step("scored").output.values == original.step("scored").output.values
+    assert reloaded.step("per_city").output.data.equals(
+        original.step("per_city").output.data
+    )
