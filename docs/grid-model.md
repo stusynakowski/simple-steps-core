@@ -298,9 +298,11 @@ from its stack without running anything. That is the whole reactive story in one
 sentence.
 
 Current vocabulary: `source`, `map`, `filter`, `select`, `drop`, `widen`,
-`group`, `expand`, `collapse`, `sweep` (shape); `retry`, `timeout` (execution).
+`slice`, `rename`, `sort`, `distinct`, `group`, `expand`, `collapse`, `sweep`
+(shape); `retry`, `timeout` (execution).
 
-Four shape verbs — `source`, `select`, `drop` and `widen` — apply **no tool**;
+Eight shape verbs — `source`, `select`, `drop`, `widen`, `slice`, `rename`,
+`sort` and `distinct` — apply **no tool**;
 their tool is `identity` and `check()` refuses anything else. For the first
 three, running nothing means nothing can fail, so none needs a ledger indexed by
 anything but rows — which is why they exist while `colmap` does not. `widen` is

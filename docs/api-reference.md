@@ -221,6 +221,8 @@ contract over HTTP — see [react-api.md](react-api.md).
 |---|---|
 | `tool` | the decorator; registers into `TOOLS`. `tool(id=…, strict=…)` |
 | `STRICT_TYPES` | module flag: require a full annotation on every tool. Default `False` |
+| `declaration_problems(fn, id)` | what makes a function undrivable as a tool; enforced by `@tool` |
+| `PARAM_TYPES` / `PARAM_TYPES_BY_VERB` | the type each modifier parameter must be, checked at declaration |
 | `annotation_problems(fn)` | what is unannotated about a function; `[]` when fully typed |
 | `op(tool_id, **literals)` | an Operation naming a tool by id |
 | `mod` | modifier constructors — `mod.map(over=…)`, `mod.retry(times=…)` |
@@ -261,7 +263,8 @@ applies `gather`. A bare *execution* modifier is refused.
 | `ROWS_RULE` | §3's rows column as data — what staging folds |
 | `DEFAULT_PAYLOAD`, `CARRIES_COLUMNS` | which column a verb writes; whose it keeps |
 
-Current verbs: `source map filter select drop widen group expand collapse sweep`
+Current verbs: `source map filter select drop widen slice rename sort distinct
+group expand collapse sweep`
 (shape) · `retry timeout` (execution).
 
 ### Declaring, staging, running
@@ -293,7 +296,7 @@ these up; `mod.map(over=…)` is the authoring form.
 
 | Name | Is |
 |---|---|
-| `map_ filter_ select_ drop_ widen_ group_ collapse_ expand_ sweep_ source_` | the verbs themselves — callable directly on a frame, with no Workflow, which is how they are unit-tested |
+| `map_ filter_ select_ drop_ widen_ slice_ rename_ sort_ distinct_ group_ collapse_ expand_ sweep_ source_` | the verbs themselves — callable directly on a frame, with no Workflow, which is how they are unit-tested |
 | `grid(value)` / `rows(value)` | lift a value into an `Output` / coerce one into a frame of rows |
 | `Modifier` | one stack entry: `kind` + `params`, with `cls` and `is_shape` read from `MODIFIERS`. `params` may hold a `StepRef`, which knows its `Workflow`; it flattens to a bare id in `Operation.to_dict()`. `__eq__` compares params flattened, so naming a step either way is the same modifier |
 | `ToolHandle` | what `@tool` returns — the function, an id, `bind`, and `__getitem__` |
@@ -310,8 +313,6 @@ blocker and rough size for each.
 
 | | status |
 |---|---|
-| `rename`, `sort`, `distinct` | proposed verbs, not built |
-| `slice` / `head` / `limit` | proposed. **Row position is unreachable today** — a tool cannot see its index, even with `**row`, so positional selection is not expressible at all. Workaround: `df.reset_index(names="row_no")`, then `filter` |
 | `cache`, `gate`, `concurrency` | **promised in §1.1, missing from `MODIFIERS`** |
 | `join` | needs multi-upstream references first. A step reads **exactly one** upstream: two `over`s are two shape verbs and are refused |
 | source schemas | nothing declares a `source` step's column types, so they are the only dtypes no annotation governs — and the ones a replaced source could silently change |

@@ -17,12 +17,14 @@ from simple_steps_core import grid as grid_module
 from simple_steps_core.grid import (
     BUILTIN_TOOLS,
     DECORATORS,
+    DEFAULT_PAYLOAD,
     MODIFIERS,
     SHAPE_VERBS,
     Modifier,
     Operation,
     Output,
     PayloadError,
+    ROWS_RULE,
     Step,
     StepRef,
     Workflow,
@@ -38,8 +40,13 @@ from simple_steps_core.grid import (
     mod,
     op,
     rows,
+    slice_,
+    sort_,
+    distinct_,
+    rename_,
     tool,
     widen_,
+    declaration_problems,
 )
 
 
@@ -1655,3 +1662,347 @@ def test_expand_refuses_a_dataframe_instead_of_yielding_column_names():
     wf.run("e")
     assert wf.step("e").status == "failed"
     assert "yields its column names" in wf.step("e").output.ledger["error"].iloc[0]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# F1 — a bound literal is a value, never a step reference
+# ─────────────────────────────────────────────────────────────────────────
+def test_binding_a_step_reference_is_refused():
+    """It used to store the id string and fail per row with a type error."""
+    wf = Workflow()
+    wf["cutoff"] = pd.DataFrame({"k": [60.0]})
+    with pytest.raises(TypeError, match="cannot bind 'weight' to a step reference"):
+        score.bind(weight=wf["cutoff"])
+
+
+def test_binding_a_step_reference_is_refused_on_an_operation_too():
+    wf = Workflow()
+    wf["cutoff"] = pd.DataFrame({"k": [60.0]})
+    with pytest.raises(TypeError, match="step reference"):
+        score[mod.map()].bind(weight=wf["cutoff"])
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# F2/F3 — the declaration contract
+# ─────────────────────────────────────────────────────────────────────────
+def test_a_positional_only_parameter_is_refused():
+    def poso(n, /):
+        return n
+    with pytest.raises(TypeError, match="positional-only"):
+        tool(poso)
+
+
+def test_a_var_positional_tool_is_refused():
+    """*args silently received nothing and returned a plausible wrong answer."""
+    def varargs(*args):
+        return sum(args)
+    with pytest.raises(TypeError, match=r"\*args declares no names"):
+        tool(varargs)
+
+
+def test_a_mutable_default_is_refused():
+    def accum(n, seen=[]):
+        seen.append(n)
+        return len(seen)
+    with pytest.raises(TypeError, match="mutable default"):
+        tool(accum)
+
+
+def test_a_tool_id_must_be_an_identifier():
+    with pytest.raises(TypeError, match="not a valid identifier"):
+        tool(lambda n: n)
+    with pytest.raises(TypeError, match="not a valid identifier"):
+        tool(id="my tool!")(lambda n: n)
+
+
+def test_declaration_problems_reports_every_gap_at_once():
+    def bad(n, /, *args, seen=[]):
+        return n
+    found = declaration_problems(bad, "bad")
+    assert len(found) == 3, found
+
+
+def test_a_duplicate_tool_id_warns_rather_than_raising():
+    @tool
+    def dupe_a(n):
+        return 1
+    with pytest.warns(UserWarning, match="already declared"):
+        @tool(id="dupe_a")
+        def dupe_b(n):
+            return 2
+
+
+def test_redeclaring_the_same_function_does_not_warn():
+    """Re-running a notebook cell is the common case and must stay quiet."""
+    @tool
+    def same_fn(n):
+        return n
+    import warnings as _w
+    with _w.catch_warnings():
+        _w.simplefilter("error")
+        tool(same_fn.fn)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# F4/F5 — a modifier's own parameters are checked, by name and by type
+# ─────────────────────────────────────────────────────────────────────────
+def test_an_unknown_modifier_parameter_is_caught_at_declaration(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["t"] = score[mod.map(nmae="s")](wf["raw"])
+    assert "map takes no parameter 'nmae'" in wf.step("t").problems[0]
+    assert "it accepts axis, name, over, retries" in wf.step("t").problems[0]
+
+
+def test_sweep_accepts_arbitrary_parameter_names(three):
+    """Its parameters are the user's own, so names cannot be validated."""
+    @tool
+    def cell(model, window):
+        return f"{model}{window}"
+    wf = Workflow()
+    wf["s"] = cell[mod.sweep(model=["a"], window=[1])]
+    assert wf.step("s").problems == ()
+
+
+def test_a_swept_parameter_cannot_shadow_the_verbs_own(three):
+    @tool
+    def labelled(name):
+        return name
+    wf = Workflow()
+    wf["s"] = labelled[mod.sweep(name=["a", "b"])]
+    assert "must be str, got list" in wf.step("s").problems[0]
+    assert "collides with the verb's own" in wf.step("s").problems[0]
+
+
+def test_a_bool_does_not_satisfy_an_int_parameter(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["s"] = mod.slice(stop=True, over=wf["raw"])
+    assert "stop= must be int, got bool" in wf.step("s").problems[0]
+
+
+def test_a_bool_parameter_accepts_a_bool(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["s"] = mod.sort(by="n", ascending=False, over=wf["raw"])
+    assert wf.step("s").problems == ()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# F6/F7 — staged claims that depend on the verb's own parameters
+# ─────────────────────────────────────────────────────────────────────────
+def test_collapse_by_stages_as_one_per_group_not_one_cell(three):
+    @tool
+    def hemi(n):
+        return "lo" if n < 3 else "hi"
+
+    wf = Workflow()
+    wf["raw"] = three
+    wf["g"] = hemi[mod.group(name="h")](wf["raw"])
+    wf.run_all()
+    wf["c"] = sum_up[mod.collapse(by="h", over=wf["g"])]
+    assert "one cell per group" in wf.step("c").describe()
+    wf.run("c")
+    assert wf.step("c").describe().endswith("2 cells")
+
+
+def test_sweep_stages_its_exact_count_from_its_own_parameters():
+    @tool
+    def cell(model, window):
+        return f"{model}{window}"
+    wf = Workflow()
+    wf["s"] = cell[mod.sweep(model=["a", "b"], window=[7, 30, 90])]
+    assert wf.step("s").describe().endswith("6 cells"), wf.step("s").describe()
+    assert len(wf.step("s").output.ledger) == 6, "addresses are known in advance"
+    wf.run("s")
+    assert len(wf.step("s").output.data) == 6
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# F8 — a RangeIndex survives a session round trip
+# ─────────────────────────────────────────────────────────────────────────
+def test_a_range_index_round_trips_as_a_range_index(ran):
+    back = Workflow.from_json(ran.to_session_json(), TOOLS)
+    for sid in ran.steps:
+        before, after = ran.step(sid).output.data, back.step(sid).output.data
+        assert type(before.index) is type(after.index), sid
+        assert before.equals(after), sid
+
+
+def test_a_labelled_index_is_not_turned_into_a_range(three):
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"n": [1, 2]}, index=["p", "q"])
+    wf["s"] = score[mod.map(over=wf["raw"])]
+    wf.run_all()
+    back = Workflow.from_json(wf.to_session_json(), TOOLS)
+    assert list(back.step("s").output.data.index) == ["p", "q"]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# B2 — wf[0] is positional sugar that resolves to an id
+# ─────────────────────────────────────────────────────────────────────────
+def test_a_workflow_can_be_indexed_by_position(three):
+    wf = Workflow()
+    wf["raw"] = three
+    wf["scored"] = score[mod.map(over=wf["raw"])]
+    assert wf[0] == wf["raw"]
+    assert wf[-1] == wf["scored"]
+
+
+def test_a_positional_reference_stores_the_id_not_the_position(three):
+    """Positions shift when a step is inserted; a stored id cannot."""
+    wf = Workflow()
+    wf["raw"] = three
+    wf["scored"] = score[mod.map()](wf[0])
+    assert wf.step("scored").operation.to_dict()["modifiers"][0]["params"]["over"] == "raw"
+
+
+def test_an_int_is_a_position_and_a_string_is_a_name():
+    wf = Workflow()
+    wf["0"] = pd.DataFrame({"n": [7]})
+    wf["b"] = pd.DataFrame({"n": [8]})
+    assert wf["0"].id == "0", "a step named '0' stays reachable"
+    assert wf[1].id == "b", "an int counts"
+
+
+def test_a_position_past_the_end_says_so(three):
+    wf = Workflow()
+    wf["raw"] = three
+    with pytest.raises(KeyError, match="no step at position 9"):
+        wf[9]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# B1/B3/B4 — slice, rename, sort, distinct
+# ─────────────────────────────────────────────────────────────────────────
+@pytest.fixture
+def table():
+    return pd.DataFrame({"city": ["Oslo", "Cairo", "Lima", "Cairo"],
+                         "n": [3, 1, 2, 1]}, index=["p", "q", "r", "s"])
+
+
+def test_slice_takes_rows_by_position(table):
+    wf = Workflow()
+    wf["raw"] = table
+    wf["first2"] = mod.slice(stop=2, over=wf["raw"])
+    wf["mid"] = mod.slice(start=1, stop=3, over=wf["raw"])
+    wf["picked"] = mod.slice(at=[0, 3], over=wf["raw"])
+    wf.run_all()
+    assert list(wf.step("first2").output.data.index) == ["p", "q"]
+    assert list(wf.step("mid").output.data.index) == ["q", "r"]
+    assert list(wf.step("picked").output.data.index) == ["p", "s"]
+    assert list(wf.step("first2").output.data.columns) == ["city", "n"]
+
+
+def test_slice_promises_at_most_and_applies_no_tool(table):
+    wf = Workflow()
+    wf["raw"] = table
+    wf["s"] = mod.slice(stop=2, over=wf["raw"])
+    assert "at most 4 cells" in wf.step("s").describe()
+    wf["bad"] = score[mod.slice(stop=2, over=wf["raw"])]
+    assert "slice applies no tool" in wf.step("bad").problems[0]
+
+
+def test_slice_refuses_both_forms_at_once(table):
+    with pytest.raises(ValueError, match="at= or start=/stop="):
+        slice_(table, at=[0], stop=2)
+
+
+def test_slice_refuses_a_position_past_the_end(table):
+    with pytest.raises(IndexError, match=r"names position\(s\) \[9\]"):
+        slice_(table, at=[0, 9])
+
+
+def test_rename_changes_names_and_keeps_order(table):
+    wf = Workflow()
+    wf["raw"] = table
+    wf["r"] = mod.rename(columns={"n": "count"}, over=wf["raw"])
+    assert predicted_columns(wf.step("r").output) == ["city", "count"]
+    wf.run_all()
+    out = wf.step("r").output.data
+    assert list(out.columns) == ["city", "count"]
+    assert list(out["count"]) == [3, 1, 2, 1]
+    assert list(out.index) == list(table.index)
+
+
+def test_rename_refuses_an_absent_column(table):
+    wf = Workflow()
+    wf["raw"] = table
+    wf["r"] = mod.rename(columns={"nope": "x"}, over=wf["raw"])
+    assert "which the input does not have" in wf.step("r").problems[0]
+
+
+def test_rename_refuses_to_overwrite_an_existing_column(table):
+    with pytest.raises(ValueError, match="would overwrite"):
+        rename_(table, columns={"n": "city"})
+
+
+def test_sort_reorders_rows_and_the_index_travels(table):
+    wf = Workflow()
+    wf["raw"] = table
+    wf["asc"] = mod.sort(by="n", over=wf["raw"])
+    wf["desc"] = mod.sort(by=["n"], ascending=False, over=wf["raw"])
+    wf.run_all()
+    assert list(wf.step("asc").output.data["n"]) == [1, 1, 2, 3]
+    assert list(wf.step("desc").output.data["n"]) == [3, 2, 1, 1]
+    assert set(wf.step("asc").output.data.index) == set(table.index)
+
+
+def test_sort_accepts_one_column_or_several(table):
+    assert list(sort_(table, by="n").data["n"]) == [1, 1, 2, 3]
+    assert list(sort_(table, by=["city", "n"]).data["city"])[0] == "Cairo"
+
+
+def test_sort_refuses_an_absent_column(table):
+    wf = Workflow()
+    wf["raw"] = table
+    wf["s"] = mod.sort(by="nope", over=wf["raw"])
+    assert "which the input does not have" in wf.step("s").problems[0]
+
+
+def test_distinct_keeps_the_first_of_each_group(table):
+    wf = Workflow()
+    wf["raw"] = table
+    wf["u"] = mod.distinct(columns=["city"], over=wf["raw"])
+    wf.run_all()
+    out = wf.step("u").output.data
+    assert list(out["city"]) == ["Oslo", "Cairo", "Lima"]
+    assert list(out.index) == ["p", "q", "r"], "the first occurrence keeps its address"
+
+
+def test_distinct_over_the_whole_row_by_default():
+    frame = pd.DataFrame({"a": [1, 1, 2], "b": ["x", "x", "y"]})
+    assert len(distinct_(frame).data) == 2
+
+
+def test_the_new_verbs_are_in_every_derived_table():
+    for verb in ("slice", "rename", "sort", "distinct"):
+        assert verb in MODIFIERS and verb in SHAPE_VERBS
+        assert verb in DECORATORS and verb in ROWS_RULE
+        assert verb in DEFAULT_PAYLOAD and DEFAULT_PAYLOAD[verb] is None
+
+
+def test_the_new_verbs_round_trip(table):
+    wf = Workflow()
+    wf["raw"] = table
+    wf["s"] = mod.slice(stop=2, over=wf["raw"])
+    wf["r"] = mod.rename(columns={"n": "count"}, over=wf["s"])
+    wf["o"] = mod.sort(by="count", over=wf["r"])
+    wf["d"] = mod.distinct(columns=["city"], over=wf["o"])
+    wf.run_all()
+    back = Workflow.from_json(wf.to_session_json(), TOOLS)
+    assert all(p == () for p in back.validate().values())
+    assert list(back.step("d").output.data.columns) == ["city", "count"]
+
+
+def test_a_bare_sweep_is_refused_for_the_right_reason():
+    """It used to be called an execution modifier, which it is not."""
+    wf = Workflow()
+    with pytest.raises(TypeError, match="a shape verb with no default tool"):
+        wf["s"] = mod.sweep(model=["a"])
+
+
+def test_a_bare_execution_modifier_still_says_so():
+    wf = Workflow()
+    with pytest.raises(TypeError, match="an execution modifier"):
+        wf["s"] = mod.retry(times=2)

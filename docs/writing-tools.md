@@ -57,9 +57,9 @@ columns, to infer a verb, to validate a step before running, and to build the
 palette. That only works if a declaration is well formed, so it is worth being
 precise about what "well formed" means.
 
-Three tiers, and the difference matters: what `@tool` refuses today, what
-*should* be refused because it currently fails silently, and what cannot be
-enforced but is load-bearing anyway.
+Two tiers now: what `@tool` **refuses** at import, and what cannot be enforced
+from a signature but is load-bearing anyway. Everything in the first tier used to
+fail late — three of them with a wrong answer and no error.
 
 The broken examples below all run against the same two-row grid, so each is
 reproducible on its own:
@@ -105,15 +105,13 @@ parameter can never be filled:
 
 ```python
 @tool
-def poso(n, /): return n * 2          # accepted at import
-
-wf["out"] = poso[mod.map()](wf["raw"])
-wf.step("out").problems               # ()  — nothing wrong, apparently
-wf.run("out")
-#    n value
-# 0  1  None      every row failed
-# 1  2  None
+def poso(n, /): return n * 2
+# TypeError: cannot declare tool 'poso': parameter 'n' is positional-only, and
+#            columns bind by name — nothing could ever fill them.
 ```
+
+Before this was enforced it declared fine, reported no problem, and failed every
+row with `None`.
 
 **b. No `*args`.** This is the worst case in the set, because it produces a
 plausible number rather than a failure. `_d_apply` passes only what the
@@ -122,24 +120,22 @@ signature declares by name, and `*args` declares nothing:
 ```python
 @tool
 def var(*args): return sum(args)
-
-wf["out"] = var[mod.map()](wf["raw"])
-wf.run("out")
-#    n  value
-# 0  1      0      sum(()) — the tool was called with no arguments
-# 1  2      0
+# TypeError: cannot declare tool 'var': *args declares no names, so the tool
+#            would be called with no arguments at all and return a plausible
+#            wrong answer. Declare the values it needs, or take **kwargs for
+#            the whole row.
 ```
 
-`catalog()["var"]["params"]` is `[]`, so the palette shows a tool that takes
-nothing. A `*args` tool is structurally undrivable; refusing it at import costs
-nothing.
+It used to return `0` for every row — `sum(())` — with no error anywhere.
 
 **c. The id must be a valid Python identifier.** It is a JSON key, a palette
-entry and a dropdown label, and today anything is accepted:
+entry and a dropdown label:
 
 ```python
-tool(lambda n: n * 2).id        # '<lambda>'   — and every lambda collides
-@tool(id="my tool!")            # accepted
+tool(lambda n: n * 2)
+# TypeError: cannot declare tool '<lambda>': '<lambda>' is not a valid
+#            identifier … (every lambda would collide on '<lambda>'). Pass id=
+#            to name it.
 ```
 
 **d. No mutable default arguments.** A step must be re-runnable — re-driving a
@@ -149,28 +145,29 @@ stateful across runs:
 ```python
 @tool
 def accum(n, seen=[]): seen.append(n); return len(seen)
-
-wf.run("out")   # [1, 2]
-wf.run("out")   # [3, 4]   same input, different answer
+# TypeError: cannot declare tool 'accum': parameter 'seen' has a mutable
+#            default, which makes the tool stateful across runs — a step has to
+#            be re-runnable.
 ```
 
-**e. One id, one tool — but as a warning, not an error.** A duplicate
-registration silently overwrites:
+It used to return `[1, 2]` on the first run and `[3, 4]` on the second.
+
+**e. One id, one tool — a warning, not an error.** A duplicate registration
+used to overwrite in silence:
 
 ```python
 @tool
 def dup(n): return "first"
 @tool
-def dup(n): return "second"      # no complaint; "first" is simply gone
+def dup(n): return "second"
+# UserWarning: tool 'dup' is already declared and is being replaced. If these
+#              are two different tools, give one another name or pass id= …
 ```
 
-For a server importing two tool modules this is a real hazard, and it is
-[already noted as a known limit](#10-known-limits). But re-declaration is
-legitimate in the two places tools are usually written — re-running a notebook
-cell, and a test that declares a throwaway tool per case (this repo's own suite
-re-declares `again` five times). So the recommendation here is a warning by
-default, with a strict mode for servers, rather than a hard refusal that would
-make the model painful in a notebook.
+A warning rather than a refusal on purpose: re-declaration is legitimate in the
+two places tools are usually written — re-running a notebook cell, and a test
+that declares a throwaway tool per case. Re-registering the **same** function is
+silent, so a notebook re-run says nothing.
 
 ### 2.3 Reserved names
 
@@ -193,16 +190,19 @@ rather than failing. A tool parameter called `column` is fine — only the grid
 column is reserved.
 
 **`sweep` reserves `name`, `retries` and `over`**, so a swept parameter cannot
-use those names. Today the collision surfaces as a cryptic pandas error:
+use those names. The collision is now named at declaration:
 
 ```python
 @tool
 def cell(name): return name
 
-wf["s"] = cell[mod.sweep(name=["a", "b"])]   # `name` is the payload column name
-wf.run("s")
-# TypeError: unhashable type: 'list'
+wf["s"] = cell[mod.sweep(name=["a", "b"])]
+wf.step("s").problems[0]
+# "sweep's name= must be str, got list. A swept parameter cannot be called
+#  'name' — it collides with the verb's own"
 ```
+
+It used to surface as `TypeError: unhashable type: 'list'` from inside pandas.
 
 ### 2.4 Load-bearing conventions
 
@@ -265,9 +265,11 @@ wf["b"] = bump[mod.map()](wf["a"])     # reads `value`, overwrites `value`
 
 A tool is well formed when:
 
-- [ ] every parameter can be filled **by name** — no positional-only, no `*args`
-- [ ] the id is a valid identifier, unique, and not a builtin's name
-- [ ] no mutable default arguments
+- [x] every parameter can be filled **by name** — no positional-only, no `*args`
+      *(enforced)*
+- [x] the id is a valid identifier and not a builtin's name *(enforced;
+      duplicates warn)*
+- [x] no mutable default arguments *(enforced)*
 - [ ] no parameter needs a grid column called `column`, and no swept parameter is
       called `name`, `retries` or `over`
 - [ ] a predicate is annotated `-> bool`; a fan-out `-> list[...]`; nothing else
@@ -275,8 +277,8 @@ A tool is well formed when:
 - [ ] the first docstring line is a sentence a user would read
 - [ ] it is pure, and safe to run twice
 
-The first three tiers are mechanical and could be checked at import; the rest is
-why the checklist exists.
+The boxes ticked above are checked at import — `@tool` raises. The rest is why
+the checklist exists.
 
 ---
 

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import inspect
 import itertools
+import warnings
 import time
 import traceback
 import typing
@@ -41,12 +42,14 @@ import pandas as pd
 __all__ = [
     "Output", "grid", "rows", "map_", "filter_", "group_", "collapse_",
     "expand_", "sweep_", "source_", "select_", "drop_", "widen_",
+    "slice_", "rename_", "sort_", "distinct_",
     "identity", "gather", "count", "total", "first", "last",
     "BUILTIN_TOOLS", "DEFAULT_TOOL", "catalog", "tool_entry",
     "TOOLS",
     "op", "Modifier", "Operation",
     "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "stage",
-    "STRICT_TYPES", "annotation_problems",
+    "STRICT_TYPES", "annotation_problems", "declaration_problems",
+    "PARAM_TYPES", "PARAM_TYPES_BY_VERB",
     "ROWS_RULE", "DEFAULT_PAYLOAD", "CARRIES_COLUMNS", "PayloadError",
     "is_identity", "infer_verb",
     "predicted_columns",
@@ -256,7 +259,8 @@ BUILTIN_TOOLS: dict[str, Callable] = {
 #: cannot stand in for the other.
 DEFAULT_TOOL: dict[str, str] = {
     "source": "identity", "select": "identity", "drop": "identity",
-    "widen": "identity",
+    "widen": "identity", "slice": "identity", "rename": "identity",
+    "sort": "identity", "distinct": "identity",
     "map": "identity", "filter": "identity", "group": "identity",
     "expand": "identity", "collapse": "gather",
 }
@@ -310,6 +314,57 @@ def annotation_problems(fn: Callable) -> list[str]:
         )
     if signature.return_annotation is inspect.Signature.empty:
         problems.append("it has no return annotation")
+    return problems
+
+
+def declaration_problems(fn: Callable, tool_id: str) -> list[str]:
+    """What makes *fn* undrivable as a tool. Empty when it is well formed.
+
+    Every rule here catches something that currently fails **late** — three of
+    them with a wrong answer and no error — and none of them rejects a tool
+    anyone would write on purpose. See writing-tools.md §2.2.
+    """
+    problems: list[str] = []
+    if not tool_id.isidentifier():
+        problems.append(
+            f"{tool_id!r} is not a valid identifier, so it cannot be a stable "
+            f"id in a palette, a JSON key, or a dropdown label"
+            + (" (every lambda would collide on '<lambda>')"
+               if tool_id == "<lambda>" else "")
+            + ". Pass id= to name it"
+        )
+    try:
+        parameters = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        return problems + ["its signature cannot be read, so columns cannot bind"]
+
+    positional_only = [p.name for p in parameters
+                       if p.kind is inspect.Parameter.POSITIONAL_ONLY]
+    if positional_only:
+        problems.append(
+            f"parameter{'s' if len(positional_only) > 1 else ''} "
+            f"{', '.join(map(repr, positional_only))} "
+            f"{'are' if len(positional_only) > 1 else 'is'} positional-only, "
+            "and columns bind by name — nothing could ever fill them"
+        )
+    var_positional = [p.name for p in parameters
+                      if p.kind is inspect.Parameter.VAR_POSITIONAL]
+    if var_positional:
+        problems.append(
+            f"*{var_positional[0]} declares no names, so the tool would be "
+            "called with no arguments at all and return a plausible wrong "
+            "answer. Declare the values it needs, or take **kwargs for the "
+            "whole row"
+        )
+    mutable = [p.name for p in parameters
+               if isinstance(p.default, (list, dict, set, bytearray))]
+    if mutable:
+        problems.append(
+            f"parameter{'s' if len(mutable) > 1 else ''} "
+            f"{', '.join(map(repr, mutable))} "
+            f"{'have' if len(mutable) > 1 else 'has'} a mutable default, which "
+            "makes the tool stateful across runs — a step has to be re-runnable"
+        )
     return problems
 
 
@@ -662,6 +717,19 @@ def sweep_(fn: Callable, *, name: str = PAYLOAD, retries: int = 0,
         sweep_(plot, model=["a", "b"], window=[7, 30])
         →  model | window | value
     """
+    if not isinstance(name, str):
+        raise ValueError(
+            f"sweep's name= is the payload column and must be a string, got "
+            f"{type(name).__name__}. A swept parameter cannot be called 'name' "
+            f"— it collides with the verb's own. Rename the tool's parameter, "
+            f"or sweep it under another name and bind it."
+        )
+    if not isinstance(retries, int) or isinstance(retries, bool):
+        raise ValueError(
+            f"sweep's retries= is a count and must be an int, got "
+            f"{type(retries).__name__}. A swept parameter cannot be called "
+            f"'retries' — it collides with the verb's own."
+        )
     if not params:
         raise ValueError("sweep_ needs at least one parameter list")
     names = list(params)
@@ -831,15 +899,129 @@ def widen_(source: Any, fn: Callable = identity, *,
                         "n_in": len(frame), "columns": list(data.columns)})
 
 
-def _column_output(verb: str, frame: pd.DataFrame, data: pd.DataFrame) -> Output:
-    """The Output shared by the column-rearranging verbs.
+def slice_(source: Any, fn: Callable = identity, *, start: int = 0,
+           stop: int | None = None, at: Sequence[int] | None = None) -> Output:
+    """``slice`` — rows **by position**. The one selection no tool can express.
+
+    A tool never sees its row index — not even with ``**row`` — so positional
+    selection is not merely verbose without this verb, it is impossible. The
+    nearest workaround was to put the position in a column at the source
+    (``df.reset_index(names="row_no")``) and ``filter`` on it.
+
+    Two forms, and they are exclusive::
+
+        mod.slice(stop=10)            the first ten rows
+        mod.slice(start=5, stop=10)   a half-open range, like Python's
+        mod.slice(at=[0, 2, 4])       exactly these positions, in this order
+
+    Applies **no tool**: it chooses rows without computing anything, so nothing
+    can fail and the ledger records no attempt — the same reasoning as
+    ``select`` and ``drop``.
+
+    **Positional selection is brittle on purpose-built pipelines**: position 2
+    is a different row the moment upstream data changes. ``filter`` with a
+    predicate survives that and says in its ledger which rows it kept. Reach
+    for this for "the first N" and fixed offsets, not for picking records.
+    """
+    _no_tool("slice", fn)
+    if at is not None and (start or stop is not None):
+        raise ValueError(
+            "slice takes at= or start=/stop=, not both: one names positions, "
+            "the other a range."
+        )
+    frame = rows(source)
+    if at is not None:
+        out_of_range = [p for p in at if not -len(frame) <= p < len(frame)]
+        if out_of_range:
+            raise IndexError(
+                f"slice at={list(at)} names position(s) {out_of_range}, but the "
+                f"input has {len(frame)} row(s)."
+            )
+        data = frame.iloc[list(at)]
+    else:
+        data = frame.iloc[start:stop]
+    return _column_output("slice", frame, data, index=data.index)
+
+
+def rename_(source: Any, fn: Callable = identity, *,
+            columns: dict[str, str] | None = None) -> Output:
+    """``rename`` — change column names, keeping their order and values.
+
+    The missing piece between a step's output and the next tool's parameter
+    names: without it, matching a column to a differently-named parameter took
+    a ``map`` over ``identity`` and then a ``select``, two steps of pure
+    plumbing. Applies **no tool**.
+
+    Strict about a name that is not there, for the same reason ``drop`` is: it
+    is a typo, not a no-op.
+    """
+    _no_tool("rename", fn)
+    if not columns:
+        raise ValueError("rename needs columns={old: new}")
+    frame = rows(source)
+    _require_columns("rename", frame, list(columns))
+    clashes = [new for new in columns.values()
+               if new in frame.columns and new not in columns]
+    if clashes:
+        raise ValueError(
+            f"rename would overwrite existing column(s) "
+            f"{', '.join(map(repr, clashes))}. Drop them first, or pick other "
+            f"names — silently replacing a column loses it."
+        )
+    return _column_output("rename", frame, frame.rename(columns=dict(columns)))
+
+
+def sort_(source: Any, fn: Callable = identity, *, by: Sequence[str] | None = None,
+          ascending: bool = True) -> Output:
+    """``sort`` — reorder rows by one or more columns. Same rows, same columns.
+
+    The index travels with its row, so a cell keeps its address and the ledger
+    stays joinable — sorting moves rows about without renaming any of them.
+    Applies **no tool**.
+    """
+    _no_tool("sort", fn)
+    if not by:
+        raise ValueError("sort needs by= — the column(s) to order on")
+    order = [by] if isinstance(by, str) else list(by)
+    frame = rows(source)
+    _require_columns("sort", frame, order)
+    data = frame.sort_values(order, ascending=ascending, kind="stable")
+    return _column_output("sort", frame, data, index=data.index)
+
+
+def distinct_(source: Any, fn: Callable = identity, *,
+              columns: Sequence[str] | None = None) -> Output:
+    """``distinct`` — keep the first row of each duplicate group.
+
+    With ``columns``, two rows are duplicates when those columns match; without
+    it, when the whole row matches. Keeps the **first** occurrence and its
+    index, so what survives is addressable. Applies **no tool**.
+    """
+    _no_tool("distinct", fn)
+    frame = rows(source)
+    if columns:
+        _require_columns("distinct", frame, list(columns))
+    data = frame.drop_duplicates(subset=list(columns) if columns else None,
+                                 keep="first")
+    return _column_output("distinct", frame, data, index=data.index)
+
+
+def _column_output(verb: str, frame: pd.DataFrame, data: pd.DataFrame,
+                   index: Any = None) -> Output:
+    """The Output shared by every verb that rearranges without computing.
 
     Nothing ran, so every unit is trivially complete and ``attempts: 0`` says
     so. The ledger stays row-aligned, which keeps ``view()`` a clean join.
+
+    *index* is for the verbs that choose **rows** (``slice``, ``sort``,
+    ``distinct``): their ledger covers the rows that survived, since a row that
+    was never selected has no unit to record. The column verbs leave it alone
+    and keep one entry per input row.
     """
+    ledger_index = frame.index if index is None else index
     records = [{"status": "completed", "error": None, "attempts": 0,
-                "seconds": 0.0} for _ in range(len(frame))]
-    return Output(data=data, ledger=_ledger(records, frame.index),
+                "seconds": 0.0} for _ in range(len(ledger_index))]
+    return Output(data=data, ledger=_ledger(records, ledger_index),
                   meta={"verb": verb, "form": "column", "payload": None,
                         "n_in": len(frame), "columns": list(data.columns)})
 
@@ -980,10 +1162,33 @@ class ModifierKind:
     name: str
     cls: str                     # "shape" | "execution"
     apply: Callable              # (fn, **params) -> fn
+    #: The parameter names this kind accepts, derived from the underlying verb
+    #: or decorator. ``None`` means "anything" — only ``sweep``, whose
+    #: parameters *are* the user's own names.
+    accepts: frozenset[str] | None = None
 
 
-def _kind(name: str, cls: str, apply: Callable) -> ModifierKind:
-    return ModifierKind(name, cls, apply)
+def _accepted_params(fn: Callable, extra: Sequence[str] = ()) -> frozenset[str] | None:
+    """Keyword names *fn* takes, or None when it takes arbitrary ones."""
+    try:
+        parameters = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return None
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
+        return None                              # sweep: the params are the data
+    names = {p.name for p in parameters
+             if p.kind in (inspect.Parameter.KEYWORD_ONLY,
+                           inspect.Parameter.POSITIONAL_OR_KEYWORD)}
+    return frozenset(names - {"source", "fn"} | set(extra))
+
+
+def _kind(name: str, cls: str, apply: Callable,
+          verb: Callable | None = None) -> ModifierKind:
+    # `over` names the step this modifier reads; every shape verb takes it even
+    # though the verb function itself never sees it (`_lift` pops it).
+    extra = ("over",) if cls == "shape" else ()
+    return ModifierKind(name, cls, apply,
+                        _accepted_params(verb, extra) if verb else None)
 
 
 def _lift_generated(verb: Callable) -> Callable:
@@ -1008,20 +1213,54 @@ def _lift_generated(verb: Callable) -> Callable:
 #: there is no second list to keep in step.
 MODIFIERS: dict[str, ModifierKind] = {k.name: k for k in (
     # shape verbs — at most one decides the step's final shape (§1.1)
-    _kind("source",   "shape", _lift(source_)),
-    _kind("map",      "shape", _lift(map_)),
-    _kind("filter",   "shape", _lift(filter_)),
-    _kind("select",   "shape", _lift(select_)),
-    _kind("drop",     "shape", _lift(drop_)),
-    _kind("widen",    "shape", _lift(widen_)),
-    _kind("group",    "shape", _lift(group_)),
-    _kind("expand",   "shape", _lift(expand_)),
-    _kind("collapse", "shape", _lift(collapse_)),
-    _kind("sweep",    "shape", _lift_generated(sweep_)),
+    _kind("source",   "shape", _lift(source_), source_),
+    _kind("map",      "shape", _lift(map_), map_),
+    _kind("filter",   "shape", _lift(filter_), filter_),
+    _kind("select",   "shape", _lift(select_), select_),
+    _kind("drop",     "shape", _lift(drop_), drop_),
+    _kind("widen",    "shape", _lift(widen_), widen_),
+    _kind("slice",    "shape", _lift(slice_), slice_),
+    _kind("rename",   "shape", _lift(rename_), rename_),
+    _kind("sort",     "shape", _lift(sort_), sort_),
+    _kind("distinct", "shape", _lift(distinct_), distinct_),
+    _kind("group",    "shape", _lift(group_), group_),
+    _kind("expand",   "shape", _lift(expand_), expand_),
+    _kind("collapse", "shape", _lift(collapse_), collapse_),
+    _kind("sweep",    "shape", _lift_generated(sweep_), sweep_),
     # execution modifiers — shape-preserving
-    _kind("retry",    "execution", _d_retry),
-    _kind("timeout",  "execution", _d_timeout),
+    _kind("retry",    "execution", _d_retry, _d_retry),
+    _kind("timeout",  "execution", _d_timeout, _d_timeout),
 )}
+
+
+#: What type each modifier parameter must be. Checked at declaration, because
+#: staging reads several of them to predict columns — a list where a column
+#: *name* belongs used to crash inside `stage()` with `unhashable type: 'list'`,
+#: which named neither the parameter nor the verb.
+PARAM_TYPES: dict[str, tuple[type, ...]] = {
+    "name": (str,),
+    "by": (str,),
+    "axis": (str,),
+    "retries": (int,),
+    "times": (int,),
+    "seconds": (int, float),
+    "columns": (list, tuple, dict),
+    "start": (int,),
+    "stop": (int,),
+    "at": (list, tuple),
+    "ascending": (bool,),
+}
+
+#: Where one verb means something different by the same parameter name.
+#: ``collapse(by=)`` is a single grouping column — it becomes a column name in
+#: the output, so it must be hashable. ``sort(by=)`` is an ordering, which is
+#: naturally several columns.
+PARAM_TYPES_BY_VERB: dict[str, dict[str, tuple[type, ...]]] = {
+    "sort": {"by": (str, list, tuple)},
+}
+
+
+
 
 
 #: The shape verbs, derived — never written out a second time.
@@ -1161,8 +1400,9 @@ class Operation:
 
     def bind(self, **literals) -> "Operation":
         """Add bound literals, returning a new Operation — closed, like the rest."""
+        _no_step_refs(self.tool_id, literals)
         return Operation(self.tool_id, self.modifiers,
-                         {**self.arguments, **_deref(literals)}, self.fn)
+                         {**self.arguments, **literals}, self.fn)
 
     # ── as plain data (what the light export carries) ────────────────────
     def to_dict(self) -> dict:
@@ -1195,8 +1435,15 @@ class Operation:
         )
 
     # ── the other half: hand the decorated tool some data ────────────────
-    def __call__(self, source: Any) -> Any:
+    def __call__(self, source: Any, /, **literals) -> Any:
         """Apply the decorated tool to its input.
+
+        Keyword arguments here are **bound literals**, exactly as
+        :meth:`bind` would set them — ``score[mod.map()](ref, weight=2)`` and
+        ``score.bind(weight=2)[mod.map()](ref)`` are the same Operation.
+        ``ToolHandle.__call__`` already accepted them; this is the other half.
+        *source* is positional-only so a tool may still have a parameter of its
+        own called ``source``.
 
         **Parens apply; a reference is an input you do not have yet.** So one
         rule covers both times:
@@ -1215,9 +1462,10 @@ class Operation:
         it concretely — so ``wf["scored"] = score(wf["raw"])`` is the whole
         step, and the verb it chose is visible and replaceable.
         """
+        operation = self.bind(**literals) if literals else self
         if isinstance(source, StepRef):
-            return self._wire(source)
-        return self.run(source)
+            return operation._wire(source)
+        return operation.run(source)
 
     def _wire(self, ref: "StepRef") -> "Operation":
         """Record that this step reads *ref*, inferring a verb if none is set."""
@@ -1313,6 +1561,26 @@ class StepRef:
         return f"<{self.id}>"
 
 
+def _no_step_refs(tool_id: str, literals: dict) -> None:
+    """Refuse a :class:`StepRef` bound as a constant.
+
+    A bound literal is a **value**, so a reference is never what was meant —
+    and dereferencing it would store the step's *id string*, which then reaches
+    the tool as text. That used to pass declaration silently and fail per row
+    with a type error about a ``str``. ``over=`` is where a reference belongs.
+    """
+    refs = [name for name, value in literals.items() if isinstance(value, StepRef)]
+    if refs:
+        names = ", ".join(map(repr, refs))
+        raise TypeError(
+            f"cannot bind {names} to a step reference: a bound literal is a "
+            f"constant, and a reference names a step rather than its value. "
+            f"{tool_id}() would have received the id as a string. A step's "
+            f"input is `over=` (or the call position), not an argument — and "
+            f"one step reads one input, so combining two needs a merge verb."
+        )
+
+
 def _deref(value: Any) -> Any:
     """StepRefs become their ids; everything else passes through."""
     if isinstance(value, StepRef):
@@ -1368,7 +1636,8 @@ class ToolHandle:
         modifier, so a retry re-runs the same call and a map passes them to
         every item.
         """
-        return Operation(tool_id=self.id, arguments=_deref(literals), fn=self.fn)
+        _no_step_refs(self.id, literals)
+        return Operation(tool_id=self.id, arguments=dict(literals), fn=self.fn)
 
     def _start(self) -> Operation:
         return Operation(tool_id=self.id, fn=self.fn)
@@ -1408,6 +1677,23 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
     """
     def make(f: Callable, tool_id: str | None) -> ToolHandle:
         handle = ToolHandle(f, tool_id)
+        found = declaration_problems(f, handle.id)
+        if found:
+            raise TypeError(
+                f"cannot declare tool {handle.id!r}: " + "; ".join(found) + "."
+            )
+        if handle.id in TOOLS and TOOLS[handle.id] is not f:
+            # A warning, not an error: re-running a notebook cell and declaring
+            # a throwaway tool per test are both legitimate. Silently replacing
+            # a *different* function is the case worth surfacing — two modules
+            # claiming one id in a server is a real hazard.
+            warnings.warn(
+                f"tool {handle.id!r} is already declared and is being replaced. "
+                f"If these are two different tools, give one another name or "
+                f"pass id= — a workflow loaded from JSON resolves the id to "
+                f"whichever was declared last.",
+                stacklevel=3,
+            )
         if STRICT_TYPES if strict is None else strict:
             found = annotation_problems(f)
             if found:
@@ -1496,7 +1782,12 @@ def _encode(value: Any) -> dict:
         # Stored positionally — a column name need not be a string.
         return {"kind": "frame",
                 "data": value.to_json(orient="split"),
-                "dtypes": [str(dtype) for dtype in value.dtypes]}
+                "dtypes": [str(dtype) for dtype in value.dtypes],
+                # `orient="split"` writes the index as a plain list, so a
+                # RangeIndex comes back as an Index of the same values. The
+                # values align either way; recording it keeps a round trip
+                # byte-identical rather than merely equivalent.
+                "range_index": isinstance(value.index, pd.RangeIndex)}
     if value is None or isinstance(value, (bool, int, float, str)):
         return {"kind": "scalar", "data": value}
     if isinstance(value, (list, tuple)):
@@ -1524,6 +1815,8 @@ def _decode(blob: dict) -> Any:
                     frame[column] = frame[column].astype(dtype)
                 except (TypeError, ValueError):
                     pass          # an object column that cannot be re-cast
+        if blob.get("range_index") and list(frame.index) == list(range(len(frame))):
+            frame.index = pd.RangeIndex(len(frame))
         return frame
     if kind == "list":
         return [_decode(v) for v in blob["data"]]
@@ -1579,6 +1872,46 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         if modifier.kind not in MODIFIERS:
             problems.append(f"unknown modifier {modifier.kind!r}")
 
+    # 2b. a modifier's own parameters have to be ones its verb accepts. A typo
+    #     here used to pass declaration and surface at run time as a TypeError
+    #     from `map_()`, which is the one validation gap `arguments` did not
+    #     have. `sweep` accepts anything, because its parameters are the data.
+    for modifier in operation.modifiers:
+        entry = MODIFIERS.get(modifier.kind)
+        if entry is None or entry.accepts is None:
+            continue
+        unknown = [name for name in modifier.params if name not in entry.accepts]
+        if unknown:
+            problems.append(
+                f"{modifier.kind} takes no parameter "
+                f"{', '.join(map(repr, unknown))}; it accepts "
+                f"{', '.join(sorted(entry.accepts))}"
+            )
+
+    # 2c. and they have to be the right *type*. `sweep` is why this matters:
+    #     a swept parameter called `name` lands in the verb's own `name=`, and
+    #     a list there is not a usable column name.
+    for modifier in operation.modifiers:
+        overrides = PARAM_TYPES_BY_VERB.get(modifier.kind, {})
+        for parameter, expected in {**PARAM_TYPES, **overrides}.items():
+            if parameter not in modifier.params:
+                continue
+            value = modifier.params[parameter]
+            # bool is a subclass of int, so it must not satisfy an int-typed
+            # parameter — unless bool is what was asked for.
+            if isinstance(value, expected) and (
+                    bool in expected or not isinstance(value, bool)):
+                continue
+            names = " or ".join(t.__name__ for t in expected)
+            extra = ""
+            if modifier.kind == "sweep" and parameter in ("name", "retries"):
+                extra = (f". A swept parameter cannot be called {parameter!r} — "
+                         f"it collides with the verb's own")
+            problems.append(
+                f"{modifier.kind}'s {parameter}= must be {names}, got "
+                f"{type(value).__name__}{extra}"
+            )
+
     # 3. a reference has to have been read from *this* workflow. A step is
     #    named by its id, so a ref borrowed from another workflow would resolve
     #    against a same-named local step — silently running the wrong data when
@@ -1629,7 +1962,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         )
 
     # 6. the column verbs apply no tool
-    for kind in ("source", "select", "drop", "widen"):
+    for kind in ("source", "select", "drop", "widen", "slice", "rename",
+                 "sort", "distinct"):
         if any(m.kind == kind for m in operation.modifiers) and not is_identity(fn):
             problems.append(f"{kind} applies no tool; use map to compute")
 
@@ -1637,11 +1971,16 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     verb = operation.shape_verb
     # Deliberately not `widen`: its columns are the record's fields, which do
     # not exist upstream — that is the whole point of the verb.
-    if (verb is not None and verb.kind in ("select", "drop")
-            and workflow is not None and verb.params.get("columns")):
+    if (verb is not None and verb.kind in ("select", "drop", "rename", "sort",
+                                           "distinct")
+            and workflow is not None
+            and (verb.params.get("columns") or verb.params.get("by"))):
         available = workflow._known_columns(operation)
+        by = verb.params.get("by")
+        named = list(verb.params.get("columns") or
+                     ([by] if isinstance(by, str) else by) or ())
         if available:
-            missing = [c for c in verb.params["columns"] if c not in available]
+            missing = [c for c in named if c not in available]
             if missing:
                 problems.append(
                     f"{verb.kind} names {', '.join(map(repr, missing))}, which "
@@ -1787,6 +2126,8 @@ DEFAULT_PAYLOAD: dict[str, str | None] = {
     "source": None, "filter": None, "select": None, "drop": None,
     # widen writes several *named* columns, so it has no single payload.
     "widen": None,
+    # the rearranging verbs write nothing new at all.
+    "slice": None, "rename": None, "sort": None, "distinct": None,
     "group": "group",
     "map": PAYLOAD, "collapse": PAYLOAD, "expand": PAYLOAD, "sweep": PAYLOAD,
 }
@@ -1805,6 +2146,8 @@ CARRIES_COLUMNS: frozenset[str] = frozenset({"map", "filter", "group", "expand"}
 ROWS_RULE: dict[str, str] = {
     "source": "same", "map": "same", "group": "same",
     "filter": "at_most", "select": "same", "drop": "same", "widen": "same",
+    "rename": "same", "sort": "same",
+    "slice": "at_most", "distinct": "at_most",
     "collapse": "one",
     "expand": "unknown", "sweep": "generated",
 }
@@ -1927,12 +2270,30 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     n_in = None if known is None else len(known)
     rule = ROWS_RULE.get(kind)
 
+    # F6: `collapse(by=)` makes one row per *group*, and the group count comes
+    #     from the data — so it is unknowable, not "one". F7: `sweep` is the
+    #     opposite case: its count is fully determined by its own parameter
+    #     lists, with no upstream involved at all.
+    swept = 0
+    if kind == "collapse" and verb.params.get("by"):
+        rule = "per_group"
+    elif kind == "sweep":
+        lists = [v for k, v in verb.params.items()
+                 if k not in ("name", "over", "retries")]
+        if lists and all(isinstance(v, (list, tuple)) for v in lists):
+            swept = 1
+            for values in lists:
+                swept *= len(values)
+            rule = "generated"
+
     if kind is None:                       # no orchestration → a single value
         index, expected = [0], 1
     elif rule == "same" and known is not None:
         index, expected = list(known), n_in
     elif rule == "one":
         index, expected = [0], 1
+    elif rule == "generated" and swept:
+        index, expected = list(range(swept)), swept
     else:                                  # not addressable yet
         index, expected = [], None
 
@@ -1955,6 +2316,11 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     elif kind == "drop":
         removed = set(verb.params.get("columns") or [])
         ordered = [c for c in upstream_columns if c not in removed]
+    elif kind == "rename":
+        mapping = verb.params.get("columns") or {}
+        ordered = [mapping.get(c, c) for c in upstream_columns]
+    elif kind in ("slice", "sort", "distinct"):
+        ordered = list(upstream_columns)
     elif kind == "widen":
         ordered = list(upstream_columns)
         ordered += [c for c in (verb.params.get("columns") or [])
@@ -2036,6 +2402,13 @@ class Step:
         n_in, rule = self.output.meta.get("n_in"), self.output.meta.get("rows_rule")
         if rule == "one":
             return f"{verb} {tool} · 1 cell"
+        if rule == "generated":
+            expected = self.output.meta.get("expected")
+            return (f"{verb} {tool} · {expected} cells" if expected
+                    else f"{verb} {tool} · one cell per parameter combination")
+        if rule == "per_group":
+            return (f"{verb} {tool} · one cell per group"
+                    + (f", from {n_in} rows" if n_in is not None else ""))
         if n_in is None:
             return f"{verb} {tool} · one cell per upstream row"
         if rule == "same":
@@ -2068,8 +2441,17 @@ class Workflow:
             # half-written step.
             default = DEFAULT_TOOL.get(operation.kind)
             if default is None:
-                why = ("an execution modifier, which changes nothing on its own"
-                       if operation.kind in MODIFIERS else "not a shape verb")
+                # Three different reasons, and they used to collapse into one
+                # wrong sentence: a bare `mod.sweep()` was called an execution
+                # modifier, which it is not.
+                if operation.kind not in MODIFIERS:
+                    why = "not a modifier at all"
+                elif is_shape(operation.kind):
+                    why = ("a shape verb with no default tool — it generates "
+                           "rows by calling something, so there is nothing for "
+                           "it to apply on its own")
+                else:
+                    why = "an execution modifier, which changes nothing on its own"
                 raise TypeError(
                     f"{operation.kind!r} needs a tool: it is {why}. "
                     f"Write <tool>[mod.{operation.kind}(...)] instead."
@@ -2094,7 +2476,27 @@ class Workflow:
             step_id, operation, stage(operation, self, problems), problems
         )
 
-    def __getitem__(self, step_id: str) -> StepRef:
+    def __getitem__(self, step_id: str | int) -> StepRef:
+        """A reference to a step, by **name** or by **position**.
+
+        ``wf["raw"]`` names it; ``wf[0]`` and ``wf[-1]`` count. A ``str`` is
+        always a name and an ``int`` always a position, so a step called
+        ``"0"`` stays reachable as ``wf["0"]``.
+
+        The position is resolved to the step's **id** right here, and that is
+        the whole of why it is safe: positions shift when a step is inserted
+        earlier, so a stored position would silently rewire the graph. Same
+        rule as verb inference — resolve once, store something concrete.
+        """
+        if isinstance(step_id, int) and not isinstance(step_id, bool):
+            ids = list(self.steps)
+            try:
+                return StepRef(ids[step_id], self)
+            except IndexError:
+                raise KeyError(
+                    f"no step at position {step_id}; the workflow has "
+                    f"{len(ids)} step(s): {ids}"
+                ) from None
         if step_id not in self.steps:
             raise KeyError(f"no step {step_id!r}; defined so far: {list(self.steps)}")
         return StepRef(step_id, self)

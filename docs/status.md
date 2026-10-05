@@ -54,35 +54,45 @@ annotated tools), and `grid.__all__` was missing `STRICT_TYPES` and
 
 ---
 
-## 3. Fix now — verified defects
+## 3. Fixed — F1–F9, all nine
 
-Each was reproduced by running it. None needs a design decision; the first two
-are the ones that return **wrong answers with no error**, which is the worst
-failure mode the system has.
+Every one reproduced first, then fixed, then pinned by a test.
 
-| # | defect | symptom | size |
-|---|---|---|---|
-| F1 | **`bind()` dereferences a `StepRef`** | `over_threshold.bind(threshold=wf["cutoff"])` stores the id **string** `'cutoff'`, reports no problem, and yields `[None, None, None]` at run time. A bind literal is a constant and can never be a step reference, so the deref is wrong in every case — it should raise where it is written | ~3 lines |
-| F2 | **The declaration contract is unenforced** | [writing-tools.md §2.2](writing-tools.md) specifies four rules that fail silently today: positional-only parameters (every row fails, `problems` empty), **`*args` (the tool is called with no arguments and returns a plausible number)**, non-identifier ids (`<lambda>`), mutable defaults (a step stops being re-runnable). Verified that no tool in this repo and no builtin violates any of them | ~20 lines, zero breakage |
-| F3 | **Duplicate tool ids overwrite silently** | the second `@tool def dup` replaces the first with no complaint. Recommended as a **warning**, not an error — re-declaration is legitimate in notebooks and in tests (this suite re-declares `again` five times) | ~5 lines |
-| F4 | **Modifier parameter names are unvalidated** | unlike a bound literal, a typo in a verb's own parameter passes declaration and surfaces at run time: `mod.map(nmae="f")` → `TypeError: map_() got an unexpected keyword argument` | small |
-| F5 | **`sweep` reserved-name collision is cryptic** | a swept parameter called `name`, `retries` or `over` collides with the verb's own, surfacing as `TypeError: unhashable type: 'list'` | small |
-| F6 | **`collapse(by=)` stages as `1 cell`** | regardless of how many groups the data has, because `ROWS_RULE` is per-verb and cannot see the data. Correct once run | small |
-| F7 | **`sweep` describes itself wrongly when staged** | reports `one cell per upstream row`, which is wrong wording for a verb with no upstream; its count is knowable from its own parameter lists. Correct once run | small |
-| F8 | **`RangeIndex` reloads as a plain `Index`** | values are identical so alignment is unaffected; only `DataFrame.equals` strict-fails | small |
-| F9 | **The two `__call__`s disagree about literals** | `score(ref, weight=2.0)` works — kwargs in the call position are routed to `bind`. `score[mod.map()](ref, weight=2.0)` is a `TypeError`, because `ToolHandle.__call__` takes `**kwargs` and `Operation.__call__` takes only `source`. No principle behind it, so the two forms should be equivalent. Note the signature must be `(self, source, /, **literals)` — without the `/`, a tool with a parameter genuinely named `source` raises *multiple values for argument* | ~5 lines |
+| # | was | now |
+|---|---|---|
+| F1 | `bind(x=wf["step"])` stored the id **string** and yielded `[None, None, None]` | `TypeError` at the line that wrote it, naming `over=` as where a reference belongs |
+| F2 | the declaration contract was unenforced | `@tool` refuses positional-only parameters, `*args`, non-identifier ids and mutable defaults, reporting every problem at once. `declaration_problems(fn, id)` is the same check, callable |
+| F3 | a duplicate tool id overwrote in silence | `UserWarning`; re-registering the **same** function stays silent, so a notebook re-run says nothing |
+| F4 | a modifier's own parameter names were unchecked | `map takes no parameter 'nmae'; it accepts axis, name, over, retries`. Derived from each verb's signature, so it cannot drift; `sweep` still accepts anything, because its parameters are the data |
+| F5 | a swept parameter called `name` crashed inside pandas with `unhashable type: 'list'` | `sweep's name= must be str, got list. A swept parameter cannot be called 'name' — it collides with the verb's own`. Generalised into `PARAM_TYPES`, so every modifier parameter is type-checked at declaration |
+| F6 | `collapse(by=)` staged as `1 cell` regardless of group count | `one cell per group, from 3 rows` — a new `per_group` rows rule |
+| F7 | `sweep` staged as `one cell per upstream row` | `6 cells` — the count is computed from its own parameter lists, so its addresses are known before it runs |
+| F8 | a `RangeIndex` reloaded as a plain `Index` | recorded alongside the dtypes; a labelled index is still left alone |
+| F9 | `score[mod.map()](ref, weight=2)` was a `TypeError` | works, and equals `score.bind(weight=2)[mod.map()](ref)`. `source` is positional-only so a tool may still have a parameter called `source` |
+
+One more found while doing it: a bare `mod.sweep(...)` was refused with *"it is
+an execution modifier"*, which it is not. The message now distinguishes a shape
+verb with no default tool from an execution modifier from a non-modifier.
 
 ---
 
-## 4. Build next — missing capability, no decision needed
+## 4. Built — four new verbs, plus positional step access
 
-| # | what | why it is needed |
+| # | what | notes |
 |---|---|---|
-| B1 | **`slice` verb** | the sharpest gap in the vocabulary. **Row position is unreachable today** — a tool cannot see its index, even with `**row`, so positional row selection is not expressible *at all*, not merely verbose. Workaround is `df.reset_index(names="row_no")` then `filter`. One `MODIFIERS` entry plus a `ROWS_RULE` line |
-| B2 | **`wf[0]` positional step access** | `wf[0]` / `wf[-1]` as sugar for a step id. Prototyped. The one condition: it must **resolve to the id immediately**, because positions shift when a step is inserted — storing a position would silently rewire the graph. `int` → position, `str` → name, so a step named `"0"` stays reachable |
-| B3 | **`rename` verb** | matching a column to a differently-named parameter takes map-then-select: two plumbing steps. `widen` covers the records case but not renaming an existing column |
-| B4 | **`sort`, `distinct`** | proposed, no blocker |
-| B5 | **`cache`, `gate`, `concurrency`** | documented as part of the model in shape-algebra §1.1 and present in neither model |
+| B1 | **`slice`** | rows by position — `mod.slice(stop=2)`, `mod.slice(start=1, stop=3)`, `mod.slice(at=[0, 3])`. The one selection no tool can make, since a tool never sees its row index. `at=` and `start`/`stop` are exclusive. Applies no tool; `at_most` rows |
+| B2 | **`wf[0]` / `wf[-1]`** | positional step access. **Resolves to the id immediately** — positions shift when a step is inserted, so a stored position would silently rewire the graph. `int` is a position, `str` a name, so a step called `"0"` stays reachable |
+| B3 | **`rename`** | `mod.rename(columns={"n": "count"})`. Strict about an absent name, and **refuses to overwrite** an existing column rather than losing it |
+| B4 | **`sort` / `distinct`** | `sort` takes one column or several and `ascending=`; **the index travels with its row**, so cells keep their addresses. `distinct` keeps the first of each group and its index |
+
+Not built — **B5 `cache`, `gate`, `concurrency`**. These are documented in
+shape-algebra §1.1 but none is implementable yet: `cache` needs a payload store
+(§4c D5) and nothing is cached today, while `gate` and `concurrency` need the
+async engine that `timeout` is also still waiting on. Adding them now would mean
+three more placeholders like `timeout`, which is dead API rather than progress.
+
+The vocabulary is now **14 shape verbs**, 2 execution modifiers, and
+`grid.__all__` exports 59 names. Suite: **408 passing**, up from 326.
 
 ---
 
@@ -103,11 +113,109 @@ Recorded so they stop being re-litigated.
 
 | # | issue | the decision |
 |---|---|---|
-| D1 | **Multi-input** | **The real gap, and the one the reference-grammar idea was masking.** A step reads exactly one upstream: two `over`s are refused, and there is no way to use a value from another step (F1 is what happens when you try). Three options, each with different semantics: align on index, align on a shared key (a `join`), or broadcast a scalar. Also unsettled: what the ledger's unit becomes, and how binding says which step a column came from |
+| D1 | **Multi-input** | **The real gap, and the one the reference-grammar idea was masking.** A step reads exactly one upstream. Spelled out in §4d below |
 | D2 | **Source schemas** | nothing declares a `source` step's column types, so they are the only dtypes no annotation governs — and they propagate into every step that carries columns forward. Worth doing for its own sake: it would validate a source whose **data is replaced**, a supported flow (`wf["raw"] = <different data>` after an import) that nothing currently checks |
 | D3 | **Namespacing / `Workflow.adopt`** | composing two workflows forces a rename. Mechanical on the export and prototyped in ~25 lines, but **mostly obviated** by the recommended pattern: a reusable pipeline is a Python function taking a ref and returning a ref, with the prefix a parameter. No library change, provenance intact |
 | D4 | **`colmap` / column-as-unit** | blocked on shape-algebra §5: a column-wise verb needs a ledger indexed by column, a different index *space*. `axis="columns"` raises today rather than transposing and producing NaN |
 | D5 | **`Output.ref`** | no payload store; payloads sit inline on each Step, so two steps reading one grid each hold it and storage cannot move to disk or Redis |
+
+---
+
+## 4d. Multi-input — the exact problems, and the operations they imply
+
+D1 in one sentence: **a step reads exactly one upstream, and there is no way to
+use a value from another step.** Two concrete walls:
+
+```python
+wf["j"] = over_threshold[mod.map(over=wf["a"]), mod.map(over=wf["b"])]
+# "2 shape verbs in one step (map, map); at most one is allowed"
+
+over_threshold.bind(threshold=wf["cutoff"])
+# TypeError (F1) — a bound literal is a value, not a step
+```
+
+Before choosing a syntax, these are the five things that actually have to be
+decided. They are what makes this bigger than adding a verb.
+
+### P1 — Where does a second input live?
+
+`_input_for` walks the modifiers, returns the first `over` it finds, and stops.
+One step therefore has one input by construction, and check rule 5 enforces one
+shape verb per step — so there is nowhere to put a second reference today.
+
+A merge verb needs either two named parameters (`left=`, `right=`) or a list
+(`over=[a, b]`). The second reads better but makes `over` polymorphic, which
+every resolver and the cycle check would have to follow.
+
+### P2 — What is a unit, once there are two inputs?
+
+The ledger has one row per unit, and today a unit is an input row. With two
+inputs of different lengths that breaks down:
+
+- for a **join**, is a unit one output row, or one left row?
+- a unit that fails — which input do you re-drive, and from which position?
+- `expand` already solved a version of this by recording the originating row in
+  the ledger's `unit` column. A merge needs the same idea, but with **two**
+  origins per output row.
+
+This is the one that decides whether the ledger stays a flat table.
+
+### P3 — Which input does a column come from?
+
+Binding is by name, and the rule is "a column wins a bound literal." With two
+inputs, if both have a `score` column, nothing says which one a tool's `score`
+parameter means. Options: require disjoint column names, prefix them
+(`left.score`), or make the merge verb rename on collision like pandas'
+`suffixes=`. Each changes what downstream tools must declare.
+
+### P4 — Alignment: three operations, not one
+
+This is the part that cannot be papered over — **these are different operations
+with different row rules, and no single verb covers them.**
+
+| operation | aligns on | rows out | `ROWS_RULE` |
+|---|---|---|---|
+| **`join`** / `merge` | a shared key (`on=`) | depends on cardinality: 1:1, 1:many, many:many | `unknown` — like `expand`, not knowable without the data |
+| **`stack`** / `concat` | nothing — appends rows | the **sum** of both | `sum`, knowable at declaration |
+| **`zip`** | position / index, row *i* with row *i* | the same as either side; requires equal length | `same`, knowable |
+| **`broadcast`** | one side is a single row or scalar | the **larger** side | `same` as the big side |
+
+Each is the right answer to a different question, so the realistic outcome is
+**three verbs, not one** — plus a decision on whether `broadcast` is a verb at
+all or belongs with `bind` (see P5).
+
+`join` is the only one whose row count is unknowable in advance, which puts it
+in `expand`'s category for staging: it can promise a shape but not a count.
+
+### P5 — Is a scalar from another step really a merge?
+
+The commonest real case is not a join at all: *"use this one value as a constant
+for every row."* That is `broadcast` above, and it may not want a verb —
+it could be a second form of `bind` that resolves a reference at run time
+(`bind(threshold=wf["cutoff"].cell(...))`), which is precisely what F1 now
+refuses. Deciding this one first is worthwhile, because it is the most common
+need and the cheapest to satisfy, and it may remove most of the demand for a
+general `join`.
+
+### Suggested operations, if these are settled
+
+| verb | signature sketch | rows | tool |
+|---|---|---|---|
+| `stack` | `mod.stack(over=[a, b])` | sum | none — pure structure |
+| `zip` | `mod.zip(over=[a, b])` | same (refuse unequal) | none |
+| `join` | `mod.join(left=a, right=b, on="k", how="inner")` | unknown | none |
+| *broadcast* | probably not a verb — see P5 | — | — |
+
+All three would apply **no tool**, like `select` and `drop`: they rearrange
+without computing, so nothing can fail per unit. That keeps them inside the
+existing design rather than requiring a new kind of ledger — which is the
+strongest argument for doing merge as its own step, and leaving `map` to compute
+over the result.
+
+**Recommended order:** settle P5 first (cheapest, most common), then `stack` and
+`zip` (both have knowable row rules and need no key semantics), and leave `join`
+last, chosen against a real pipeline so `how=` and the collision rule are
+decided by a case rather than guessed.
 
 ---
 
@@ -165,37 +273,30 @@ it teach itself.
 
 ---
 
-## 7. The order I would do them in
+## 7. What is left
 
-**First — the two silent-wrong-answer bugs.** Both are small and neither needs a
-decision.
+Everything in §3 and §4 is done. What remains, in the order I would take it:
 
-1. **F1** — `bind()` refusing a `StepRef`. Three lines, and it converts a
-   `[None, None, None]` result into an error at the line that caused it.
-2. **F2** — enforce the declaration contract. ~20 lines, verified zero breakage,
-   and `*args` is the worst failure mode in the system.
+1. **P5** (§4d) — decide whether a scalar from another step is a `bind` form or
+   a verb. Cheapest, most common need, and it may remove most of the demand for
+   a general `join`.
+2. **`stack` and `zip`** — both have knowable row rules and need no key
+   semantics, so they can land before `join` is settled.
+3. **D2 source schemas** — the last place types are undeclared, and it closes
+   the unchecked "replace the source's data" flow.
+4. **`join`** — last, and chosen against a real pipeline so `how=` and the
+   column-collision rule are decided by a case rather than guessed.
+5. **D5 `Output.ref`** — a payload store; also what `cache` (B5) is waiting on.
+6. **The strategic one** (§6) — the engine still has not moved onto this model.
 
-**Then — the one thing that is impossible rather than awkward.**
+`colmap` (D4) stays blocked on shape-algebra §5, and B5's three execution
+modifiers stay blocked on the async engine.
 
-3. **B1** — `slice`. Positional rows cannot be expressed at all today, and it
-   fits the verb table exactly.
+---
 
-**Then, cheap and obvious.**
+## 8. Tests
 
-4. **F9** — make the two `__call__`s agree about literals. Five lines, and it
-   removes the main reason `bind` feels like ceremony: the form most people
-   reach for first (`score[mod.map()](ref, weight=2.0)`) starts working.
-5. **B2** — `wf[0]`, prototyped and verified.
-6. **F3–F8** — the remaining small defects, in any order.
-
-**And the one real design question.**
-
-7. **D1 — multi-input.** Everything else on this list is additive; this one
-   changes what a step *is*. It is also what the app's formula bar needs:
-   a formula like `=score(url=step1["url"], n=step2["k"][0])` references two
-   steps in one expression, which the grid model cannot express at all. That
-   incompatibility — not subscript syntax — is the thing to settle before the
-   app targets the grid model.
-
-I would pick D1's semantics against a concrete pipeline that needs it rather
-than choose in the abstract.
+`tests/unit/test_grid.py` — **408 passing**, up from 326 at the start of this
+round. Every defect in §3 has a test that fails without its fix, and every verb
+in §4 is covered for its happy path, its refusals, its staged prediction, and a
+session round trip.

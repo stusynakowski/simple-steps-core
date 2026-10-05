@@ -443,6 +443,49 @@ unit is re-drivable:
 The input cell is **kept**, like every carried column. `drop` it in a later step
 if the raw record is noise.
 
+### `slice` — rows by position
+
+The one selection no tool can make: a tool never sees its row index, not even
+with `**row`.
+
+```python
+wf["first2"] = mod.slice(stop=2, over=wf["raw"])            # the first two
+wf["mid"]    = mod.slice(start=1, stop=3, over=wf["raw"])   # half-open, like Python
+wf["picked"] = mod.slice(at=[0, 3], over=wf["raw"])         # exactly these
+```
+
+`at=` and `start=`/`stop=` are exclusive — one names positions, the other a
+range. Applies no tool, so nothing can fail.
+
+**Positional selection is brittle**, and worth saying out loud: position 2 is a
+different row the moment upstream data changes. `filter` with a predicate
+survives that and records in its ledger which rows it kept. Use `slice` for
+"the first N" and fixed offsets, not for picking records.
+
+### `rename` — change a column's name
+
+```python
+wf["r"] = mod.rename(columns={"n": "count"}, over=wf["raw"])
+```
+
+The piece between a step's output and the next tool's parameter names. Without
+it, matching the two took a `map` over `identity` and then a `select` — two
+steps of pure plumbing. Strict about a name that is not there, and it **refuses
+to overwrite** an existing column rather than silently losing it.
+
+### `sort` / `distinct` — reorder, and drop duplicates
+
+```python
+wf["asc"]  = mod.sort(by="n", over=wf["raw"])                   # one column
+wf["desc"] = mod.sort(by=["city", "n"], ascending=False, over=wf["raw"])
+wf["uniq"] = mod.distinct(columns=["city"], over=wf["raw"])
+```
+
+`sort` moves rows without renaming them — **the index travels with its row**, so
+a cell keeps its address and the ledger stays joinable. `distinct` keeps the
+**first** of each duplicate group, and its index, so what survives is still
+addressable. With no `columns=`, a whole-row comparison.
+
 ### `sweep` — generate the grid from parameter lists
 
 ```python
@@ -537,6 +580,10 @@ Every shape verb takes its input from the call position, or equivalently from
 | `select` | `columns=[…]` **(required)** | no tool (`identity`) | — | same |
 | `drop` | `columns=[…]` **(required)** | no tool (`identity`) | — | same |
 | `widen` | `columns=[…]` **(required)**, `retries=0` | no tool (`identity`) | one column per field | same |
+| `slice` | `stop=`, `start=0`, or `at=[…]` | no tool (`identity`) | — | at most n |
+| `rename` | `columns={old: new}` **(required)** | no tool (`identity`) | — | same |
+| `sort` | `by=` **(required)**, `ascending=True` | no tool (`identity`) | — | same |
+| `distinct` | `columns=[…]` (default: the whole row) | no tool (`identity`) | — | at most n |
 | `retry` | `times=` | *(shape-preserving)* | — | — |
 | `timeout` | `seconds=` | *(shape-preserving)* | — | — |
 
@@ -1118,6 +1165,10 @@ The full table. "Carried" means the input's columns pass through untouched.
 | `select` | exactly the ones named, in that order | input index preserved |
 | `drop` | carried minus the ones named | input index preserved |
 | `widen` | carried **+** one per declared field | input index preserved |
+| `slice` | carried, none added | input index, **subset** |
+| `rename` | carried, renamed in place | input index preserved |
+| `sort` | carried, none added | input index, **reordered with its row** |
+| `distinct` | carried, none added | input index, **first of each group** |
 | `expand` | carried **+** payload | **reset** to `0…n-1` |
 | `collapse` | **only** `[by] + [payload]` — carried columns are dropped | `0…n-1`, one per group |
 | `sweep` | one per swept parameter **+** payload | `0…n-1` |
