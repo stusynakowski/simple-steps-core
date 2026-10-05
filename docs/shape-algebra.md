@@ -121,9 +121,13 @@ when `single`, one item when fanned out"* — the mode decides for you, and
 
 #### Two classes of modifier
 
+Shape verbs split again by whether they **run a tool** (§2.1), so the vocabulary
+is really three tiers:
+
 | class | modifiers | effect on shape |
 |---|---|---|
-| **shape verbs** | `map` `filter` `expand` `collapse` `group` `sweep` | change rows/columns (§3) |
+| **shape verbs · run a tool** | `map` `filter` `group` `expand` `collapse` `sweep` | change rows/columns **and** can fail per unit (§3) |
+| **shape verbs · no tool** | `source` `select` `drop` `rename` `widen` `slice` `sort` `distinct` | change rows/columns, nothing runs so nothing fails (§3) |
 | **execution modifiers** | `retry` `timeout` `cache` `gate` `concurrency` | shape-preserving |
 
 Staged shape is the **fold of the shape verbs in stack order** — still pure
@@ -220,6 +224,80 @@ which is written on the step before anything runs.
 
 ---
 
+## 2.1 Tidy intent: the return type does not decide the shape — the verb does
+
+The goal of the grid is a **tidy table**, in Wickham's exact sense:
+
+1. **each column is a variable** — one attribute measured across every unit;
+2. **each row is an observation** — all the values measured on one unit;
+3. **each cell is a single value** — one discrete measurement.
+
+A tool, though, is a plain Python function, and Python return types do not carry
+tidy intent. `list_files` returns `["a.csv", "b.csv"]`; is that **two
+observations of one variable** (two files) or **one observation holding a
+vector** (a single value that happens to be a list)? `("SF", 18)` — one
+observation with two variables, or two observations? The type alone cannot say.
+
+The model's answer is the principle you are generalizing:
+
+> **A tool invocation always produces exactly one cell** — one value, of any
+> Python type. **Turning that cell into rows and columns is a separate
+> declaration: the shape modifier.** The tool stays tidy-agnostic; the verb
+> carries the tidy intent.
+
+So `list_files` undecorated is *one cell* holding the list (rule 3 is not
+violated — nobody asked for a table yet). It becomes a tidy column of files only
+when a verb says what the list *means*. That is the whole job of the reshaping
+verbs, and there are exactly **two directions** to unnest a cell, which is why
+`expand` and `widen` are a pair:
+
+| direction | tidyr | makes the grid | from a cell holding | verb |
+|---|---|---|---|---|
+| **longer** | `unnest_longer` | more **observations** (rows) | a collection of like things | `expand` |
+| **wider** | `unnest_wider` | more **variables** (columns) | a record of named fields | `widen` |
+
+### The return-type → tidy-grid map
+
+Reading any Python return as a tidy shape, and the verb that declares it:
+
+| a cell holds | tidy reading | declare with | result |
+|---|---|---|---|
+| a **scalar** (`18`, `"a.csv"`) | one value of one variable | — (already a cell) | stays 1 cell |
+| a **list/tuple of like values** (`["a.csv", "b.csv"]`) | **n observations, one variable** | `expand` | n rows × `value` |
+| a **dict / named record** (`{"city": "SF", "temp": 18}`) | **one observation, n variables** | `widen(columns=…)` | 1 row × `city, temp` |
+| a **list of dicts** (`[{…}, {…}]`) | **n observations, n variables** — a table | `expand` **then** `widen` | n rows × those columns |
+| a **DataFrame** | already tidy | `source` / pass through | n rows × m columns |
+
+Three rules make this intuitive instead of guessy:
+
+- **Name your variables, position your observations.** If the pieces are
+  *different attributes* (a city **and** a temperature), return a **dict** so
+  `widen` can give each a named column — rule 1. If they are *the same thing
+  repeated* (many files), return a **list** so `expand` can give each its own
+  row — rule 2. A bare `tuple` of heterogeneous values has no names, so it can
+  only become positional rows; that is the signal to return a dict instead.
+
+- **Longer and wider compose, one step each.** A `list of dicts` is both
+  directions at once, so it is two steps: `expand` to one dict per row, then
+  `widen` to spread each dict into columns. The one-shape-verb-per-step rule
+  (§11) is what keeps each reshape a visible, addressable cell rather than a
+  hidden nested frame — which is itself tidier than doing both at once.
+
+- **Row identity follows the direction.** `expand` adds rows, so it cannot keep
+  the input's index — it resets to positional and records each new row's origin
+  in the ledger's `unit` column (§5). `widen` adds columns and keeps every row,
+  so the observation keeps its address. This is the coercion table of §3's
+  "n rows are" column, stated as intent.
+
+A fourth, deliberate limit: the only thing that *starts* a grid from raw data is
+`source`. It lifts a literal (a list, a dict, a frame) into the first grid using
+the same coercion — a list becomes rows, a dict becomes rows keyed by its keys,
+a scalar becomes one cell. `source` is `expand`'s counterpart at the head of a
+chain: `expand` unnests an **upstream** step's cell, `source` unnests a
+**literal** you hand it.
+
+---
+
 ## 3. The shape algebra
 
 *Shape* here means the **step-to-step** relationship: how one step's grid
@@ -236,19 +314,47 @@ Every orchestration first coerces its input to **n rows**:
 | a single object | 1 row |
 
 Then the verb transforms. Output **columns are a function of input columns** —
-that is the "shape of the output depends on the shape of the input" part:
+that is the "shape of the output depends on the shape of the input" part. There
+are **fourteen** verbs, in the two classes §2.1 draws: those that **run a tool**
+(and so can fail per unit) and those that **purely reshape** (apply no tool, so
+nothing can fail). A third column, **index**, tracks row identity — the address
+a cell keeps across the step, which is what §5's ledger joins on.
 
-| verb | rows | columns | tidy name |
-|---|---|---|---|
-| `map` | n → n | input columns **+ payload** | `mutate` |
-| `filter` | n → k ≤ n | input columns unchanged | `filter` |
-| `expand` | n → m | input columns repeated per produced row **+ payload** | `unnest` |
-| `collapse` | n → 1 (or k with `by=`) | payload + group keys | `summarise` |
-| `group` | n → n | input columns **+ key column** | `group_by` |
-| `sweep` | 1 → n×m | one column **per swept parameter** + payload | `expand_grid` |
-| `source` | value → n | the value's own columns | — |
-| `select` | n → n | the named columns, **in the order given** | `select` |
-| `drop` | n → n | every column except the named ones | `select(-…)` |
+Index legend: *preserved* = the row keeps its address (the index travels with
+it); *reset* = output rows outnumber inputs, so a positional index replaces it
+and the ledger's `unit` column records each row's origin; *from value* = taken
+from the coerced literal (a list → positional, a dict → its keys); *new* = built
+fresh because the rows are.
+
+**Verbs that run a tool** — compute *and* reshape:
+
+| verb | rows | columns | index | tidy name |
+|---|---|---|---|---|
+| `map` | n → n | input columns **+ payload** | preserved | `mutate` |
+| `filter` | n → k ≤ n | input columns unchanged | preserved (dropped rows stay in the ledger) | `filter` |
+| `group` | n → n | input columns **+ key column** | preserved | `group_by` |
+| `expand` | n → m | input columns carried **+ payload** | **reset** — origin in `unit` | `unnest_longer` |
+| `collapse` | n → 1 (or k with `by=`) | payload **+** group key | **new** — origin in `unit` | `summarise` |
+| `sweep` | 1 → n×m | one column **per swept parameter + payload** | **new** — the parameter grid | `crossing` |
+
+**Verbs that apply no tool** — purely reshape (§2.1):
+
+| verb | rows | columns | index | tidy name |
+|---|---|---|---|---|
+| `source` | value → n | the value's own columns | **from value** | — (chain start) |
+| `select` | n → n | the named columns, **in the order given** | preserved | `select` |
+| `drop` | n → n | every column except the named ones | preserved | `select(-…)` |
+| `rename` | n → n | same columns, renamed (order + values kept) | preserved | `rename` |
+| `widen` | n → n | input columns **+ the lifted fields** | preserved | `unnest_wider` |
+| `slice` | n → k ≤ n | unchanged | preserved (surviving rows) | `slice` |
+| `sort` | n → n | unchanged | preserved (travels with the row) | `arrange` |
+| `distinct` | n → k ≤ n | unchanged | preserved (first of each kept) | `distinct` |
+
+The default payload column is `value`; the mapping verbs (`map`, `expand`,
+`collapse`, `sweep`) and `group`'s key column accept `name=` to rename it.
+`widen` is the one no-tool verb that still runs **per row** — it has a real
+ledger, so a cell that is not a record, or is missing a declared field, is an
+inspectable per-unit failure rather than a crash.
 
 `select` and `drop` are the column-axis mirror of `filter`: filter chooses rows,
 these choose columns. Two verbs rather than one with a `drop=` argument, because
@@ -275,8 +381,12 @@ folds it. That is what lets a staged claim be honest: `map` can promise *n*
 cells, `filter` only *at most n*, `collapse` exactly one, and `expand` cannot
 know (§7).
 
-Naming note: `expand` is tidyr's `unnest` and `sweep` is `crossing`. Only
-`map`, `filter` and `group` match dplyr's names directly. We keep our names.
+Naming note: the tidy-name column borrows dplyr/tidyr where a verb matches one —
+`filter`, `select`, `rename`, `distinct`, `slice`, `arrange`, `group_by`,
+`summarise`, and the two unnests (`expand` = `unnest_longer`, `widen` =
+`unnest_wider`, `sweep` = `crossing`). `map` is dplyr's `mutate`, and `drop` is
+`select(-…)`. We keep our own names in the API; the column is only there to lend
+each verb a one-word meaning a reader may already hold.
 
 ### Two consequences worth stating plainly
 
