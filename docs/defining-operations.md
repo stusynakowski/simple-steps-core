@@ -559,16 +559,18 @@ Four rules govern the whole thing:
 1. **At most one shape verb per operation.** Two shape changes in one step would
    make an intermediate grid with no cell address, so a unit that failed there
    could not be inspected or re-run.
-2. **The input belongs to the shape verb.** Whether you pass it in the call
-   position or as `over=`, it is stored on that verb — and never on an execution
-   modifier: `score[mod.map()](wf["raw"]) == score[mod.map(over=wf["raw"])]`.
+2. **The input is a slot of its own.** Whether you pass it in the call position
+   or as `over=`, it is hoisted into the Operation's `input` — never stored in a
+   modifier, which stays **literal-only**:
+   `score[mod.map()](wf["raw"]) == score[mod.map(over=wf["raw"])]`.
 3. **Written order is outermost-first**, like stacked `@` lines.
 4. **Everything is data.** A plain decorator would not serialize, so a bracket
    layer must be a `Modifier`; passing anything else is a `TypeError`.
 
 `wiring` and `over=` are alternatives, not both — and if you write both, the
 call position wins. The only operand that *requires* `over=` is the bare shape
-verb, which has no tool to decorate (§2d).
+verb, which has no tool to decorate (§2d). See
+[step-expressions.md](step-expressions.md) for the full rules and the reasons.
 
 ### Verb reference
 
