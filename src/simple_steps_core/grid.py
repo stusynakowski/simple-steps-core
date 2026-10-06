@@ -45,6 +45,7 @@ __all__ = [
     "slice_", "rename_", "sort_", "distinct_",
     "identity", "gather", "count", "total", "first", "last",
     "BUILTIN_TOOLS", "DEFAULT_TOOL", "catalog", "tool_entry",
+    "modifier_catalog",
     "TOOLS",
     "op", "Modifier", "Operation",
     "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "stage",
@@ -407,6 +408,61 @@ def _column_fits(series: pd.Series, annotation: Any) -> bool | None:
     return isinstance(present.iloc[0], origin)
 
 
+def _arg_docs(fn: Callable) -> dict[str, str]:
+    """Per-parameter text from a Google-style ``Args:`` docstring section.
+
+    A form shows this as the field's help; the summary line stays the tool's
+    own description. Continuation lines are folded into the parameter above them.
+    """
+    doc = inspect.getdoc(fn) or ""
+    sections = {"args", "arguments", "parameters", "returns", "return", "raises",
+                "yields", "examples", "example", "note", "notes", "attributes"}
+    out: dict[str, str] = {}
+    current, in_args = None, False
+    for raw in doc.splitlines():
+        stripped = raw.strip()
+        if stripped.rstrip(":").lower() in sections:
+            in_args = stripped.rstrip(":").lower() in ("args", "arguments", "parameters")
+            current = None
+            continue
+        if not in_args or not stripped:
+            continue
+        name_part, sep, desc = stripped.partition(":")
+        name = name_part.split("(")[0].strip().lstrip("*")
+        if sep and name.isidentifier():
+            out[name] = desc.strip()
+            current = name
+        elif current:                                # a wrapped continuation line
+            out[current] = f"{out[current]} {stripped}".strip()
+    return out
+
+
+def _param_type_info(annotation: Any) -> tuple[str | None, list | None, bool]:
+    """``(type_name, choices, nullable)`` for a parameter annotation.
+
+    Keeps the inner type of ``Optional[X]`` (and sets ``nullable``) and the
+    options of ``Literal[...]`` (with their own type as ``type_name``), so a form
+    renders a dropdown or a typed field instead of a bare "Optional"/"Literal".
+    """
+    if annotation is inspect.Parameter.empty:
+        return None, None, False
+    origin = typing.get_origin(annotation)
+    if origin is typing.Union:
+        args = typing.get_args(annotation)
+        nullable = type(None) in args
+        inner = [a for a in args if a is not type(None)]
+        if len(inner) == 1:
+            name, choices, _ = _param_type_info(inner[0])
+            return name, choices, nullable
+        names = [n for n in (_type_name(a) for a in inner) if n]
+        return (" | ".join(names) or None), None, nullable
+    if origin is typing.Literal:
+        choices = list(typing.get_args(annotation))
+        element = _type_name(type(choices[0])) if choices else None
+        return element, choices, False
+    return _type_name(annotation), None, False
+
+
 def tool_entry(tool_id: str, fn: Callable, origin: str) -> dict:
     """One tool as a palette entry: what it is, where it came from, what it takes.
 
@@ -415,14 +471,29 @@ def tool_entry(tool_id: str, fn: Callable, origin: str) -> dict:
     ``origin`` lets a client separate the system's tools from the user's — the
     builtins are always available and rarely what someone is looking for, so a
     palette usually groups or hides them.
+
+    Each parameter carries enough to render a form field: ``type`` (the inner
+    type of an ``Optional``, not the word "Optional"), ``choices`` (a
+    ``Literal``'s options), ``nullable``, and ``description`` (its ``Args:`` text).
     """
     doc = (inspect.getdoc(fn) or "").strip()
     try:
         signature = inspect.signature(fn)
         parameters = list(signature.parameters.values())
-        returns = _type_name(signature.return_annotation)
     except (TypeError, ValueError):
-        parameters, returns = [], None
+        signature, parameters = None, []
+    # Resolve string annotations (PEP 563) to real types so Literal/Optional stay
+    # inspectable; fall back to the raw annotation when a forward ref won't resolve.
+    try:
+        hints = typing.get_type_hints(fn, include_extras=True)
+    except Exception:
+        hints = {}
+    arg_docs = _arg_docs(fn)
+    return_ann = hints.get("return")
+    if return_ann is None and signature is not None:
+        return_ann = signature.return_annotation
+    returns = _type_name(return_ann if return_ann is not None
+                         else inspect.Parameter.empty)
 
     params, takes_row = [], False
     for parameter in parameters:
@@ -432,13 +503,16 @@ def tool_entry(tool_id: str, fn: Callable, origin: str) -> dict:
         if parameter.kind is inspect.Parameter.VAR_POSITIONAL:
             continue
         required = parameter.default is inspect.Parameter.empty
+        annotation = hints.get(parameter.name, parameter.annotation)
+        type_name, choices, nullable = _param_type_info(annotation)
         params.append({
             "name": parameter.name,
             "required": required,
             "default": None if required else parameter.default,
-            # The declared type, or None when the tool left it off. A palette
-            # shows this so a user knows what a step consumes before wiring it.
-            "type": _type_name(parameter.annotation),
+            "type": type_name,
+            "choices": choices,
+            "nullable": nullable,
+            "description": arg_docs.get(parameter.name),
         })
 
     return {
@@ -1065,20 +1139,20 @@ def _column_output(verb: str, frame: pd.DataFrame, data: pd.DataFrame,
 
 
 def source_(value: Any, fn: Callable = identity, **_params) -> Output:
-    """``source`` — lift a literal into a grid. The verb a flow starts with.
+    """``source`` — start a flow, from a literal or a no-input tool.
 
     Making this a verb rather than a special case is what closes the algebra:
-    every step is then (verb, tool, arguments), the first one included. Its
-    tool is ``identity``, because a source step *holds* data rather than
-    computing it — applying a real tool is a ``map``, and refusing it here
-    keeps the two from blurring.
+    every step is then (verb, tool, arguments), the first one included. With the
+    default ``identity`` tool it **holds** a literal you assigned. With a real
+    tool it **computes** the first grid from the tool's bound arguments and no
+    input row — ``load_csv.bind(path=…)[mod.source()]`` — so loading data is a
+    step in the workflow, saved and re-runnable, not something done outside it. A
+    returned DataFrame becomes the step's rows and columns.
     """
-    if not is_identity(fn):
-        raise ValueError(
-            f"source applies no tool, but got {getattr(fn, '__name__', fn)!r}. "
-            "A source step holds its data; to compute over it, use map."
-        )
-    return grid(value)
+    if is_identity(fn):
+        return grid(value)
+    # A no-input tool: an empty row lets `_d_apply` fill the bound arguments.
+    return grid(fn({}))
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1204,6 +1278,9 @@ class ModifierKind:
     #: or decorator. ``None`` means "anything" — only ``sweep``, whose
     #: parameters *are* the user's own names.
     accepts: frozenset[str] | None = None
+    #: The raw verb/decorator function, kept for introspection only
+    #: (:func:`modifier_catalog` reads its defaults). Never serialized.
+    verb: Callable | None = None
 
 
 def _accepted_params(fn: Callable, extra: Sequence[str] = ()) -> frozenset[str] | None:
@@ -1226,7 +1303,8 @@ def _kind(name: str, cls: str, apply: Callable,
     # though the verb function itself never sees it (`_lift` pops it).
     extra = ("over",) if cls == "shape" else ()
     return ModifierKind(name, cls, apply,
-                        _accepted_params(verb, extra) if verb else None)
+                        _accepted_params(verb, extra) if verb else None,
+                        verb)
 
 
 def _lift_generated(verb: Callable) -> Callable:
@@ -1314,6 +1392,65 @@ def is_shape(kind: str) -> bool:
 
 #: kind -> decorator factory, derived from :data:`MODIFIERS`.
 DECORATORS: dict[str, Callable] = {n: k.apply for n, k in MODIFIERS.items()}
+
+
+def _setting_type(verb: str, param: str) -> str | None:
+    """A readable type name for a verb's setting, from the PARAM_TYPES tables."""
+    types = PARAM_TYPES_BY_VERB.get(verb, {}).get(param) or PARAM_TYPES.get(param)
+    if types:
+        return " | ".join(t.__name__ for t in types)
+    return None
+
+
+def _modifier_settings(name: str, kind: ModifierKind) -> list[dict]:
+    """The settings a verb form shows, each with type, required and default."""
+    if name == "source":                 # a source holds a literal — no settings
+        return []
+    settings: list[dict] = []
+    if kind.cls == "shape":               # `over` is popped by _lift, so add it here
+        settings.append({"name": "over", "type": "reference",
+                         "required": name != "sweep", "default": None,
+                         "description": "the step this reads"})
+    takes_extra = False
+    try:
+        for p in inspect.signature(kind.verb).parameters.values():
+            if p.name in ("source", "fn"):
+                continue
+            if p.kind is inspect.Parameter.VAR_KEYWORD:
+                takes_extra = True
+                continue
+            if p.kind is inspect.Parameter.VAR_POSITIONAL:
+                continue
+            required = p.default is inspect.Parameter.empty
+            settings.append({"name": p.name, "type": _setting_type(name, p.name),
+                             "required": required,
+                             "default": None if required else p.default})
+    except (TypeError, ValueError):
+        pass
+    if takes_extra:                       # sweep: extra named params are the data
+        settings.append({"name": "<swept>", "type": "list", "required": False,
+                         "default": None,
+                         "description": "any extra named parameter is swept; "
+                                        "its value is a list of values"})
+    return settings
+
+
+def modifier_catalog() -> dict[str, dict]:
+    """Every modifier kind as JSON — class, row rule, and settings per verb.
+
+    Feeds ``GET /modifiers`` (docs/react-api.md): a client builds each verb's
+    form from this instead of hard-coding the fields. Unlike :data:`MODIFIERS`
+    — which holds the appliers and so cannot be serialized — this is plain data.
+    """
+    return {
+        name: {
+            "name": name,
+            "class": kind.cls,                                   # shape | execution
+            "row_rule": ROWS_RULE.get(name) if kind.cls == "shape" else None,
+            "settings": _modifier_settings(name, kind),
+        }
+        for name, kind in MODIFIERS.items()
+    }
 
 # ─────────────────────────────────────────────────────────────────────────
 # The deferred half: a stack of modifiers, as data
@@ -1999,8 +2136,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             "keeps a cell address you can re-drive."
         )
 
-    # 6. the column verbs apply no tool
-    for kind in ("source", "select", "drop", "widen", "slice", "rename",
+    # 6. the column verbs apply no tool (source may: it can compute its grid)
+    for kind in ("select", "drop", "widen", "slice", "rename",
                  "sort", "distinct"):
         if any(m.kind == kind for m in operation.modifiers) and not is_identity(fn):
             problems.append(f"{kind} applies no tool; use map to compute")
@@ -2626,8 +2763,15 @@ class Workflow:
                 f"step {step_id!r} is invalid and cannot run: {step.problems[0]}"
             )
         if step.operation.shape_verb and step.operation.shape_verb.kind == "source":
-            # A source step holds its data rather than computing it, so running
-            # one is either a no-op or a mistake — never a computation.
+            tool = (step.operation.fn or TOOLS.get(step.operation.tool_id)
+                    or BUILTIN_TOOLS.get(step.operation.tool_id))
+            if not is_identity(tool):
+                # A tool source computes its grid from a no-input tool.
+                step.output = step.operation.run(None, tools)
+                self._restage_after(step_id)
+                return step
+            # A literal source holds its data, so running one is a no-op — unless
+            # it was reloaded without payloads and has nothing to hold.
             if step.output.meta.get("staged"):
                 raise ValueError(
                     f"source step {step_id!r} has no data. Assign it: "

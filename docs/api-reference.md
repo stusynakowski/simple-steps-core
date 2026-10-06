@@ -164,16 +164,41 @@ Each entry:
 
 ```json
 {
-  "tool_id": "scale",
-  "description": "map: a value per row — the score.",
+  "tool_id": "pick",
+  "description": "Pick rows.",
   "origin": "declared",                      // or "builtin"
-  "params": [{"name": "n", "required": true, "default": null, "type": "int"},
-             {"name": "weight", "required": false, "default": 1, "type": "int"}],
-  "returns": "int",
+  "params": [
+    {"name": "region", "required": true, "default": null,
+     "type": "str", "choices": ["EMEA", "AMER"], "nullable": false,
+     "description": "which region to load."},
+    {"name": "limit", "required": false, "default": null,
+     "type": "int", "choices": null, "nullable": true,
+     "description": "cap the row count."}
+  ],
+  "returns": "list",
   "typed": true,
   "takes_whole_row": false
 }
 ```
+
+Per parameter: `type` is the **inner** type (`Optional[int]` → `"int"`),
+`choices` are a `Literal`'s options (`null` otherwise), `nullable` marks an
+`Optional`, and `description` is the parameter's `Args:` docstring text. String
+annotations (`from __future__ import annotations`) are resolved, so these work
+regardless of how the tool is written.
+
+### The verb palette — `modifier_catalog()`
+
+```python
+grid.modifier_catalog()       # {verb: {class, row_rule, settings}} — JSON, GET /modifiers
+```
+
+Each verb entry carries its `class` (`"shape"` | `"execution"`), its `row_rule`
+(`same` / `at_most` / `one` / `unknown` / `generated`, `null` for execution
+modifiers), and a `settings` list — each `{name, type, required, default}` — so a
+client builds the verb's form from core instead of hard-coding it. `over` is a
+`"reference"` setting; `sweep`'s `<swept>` setting marks that extra named
+parameters are the data.
 
 ### An operation — `Operation.to_dict()`
 
@@ -208,7 +233,7 @@ Output grid rows                          lift & inspect a value
 map_ filter_ group_ collapse_ expand_ sweep_ source_
 select_ drop_ widen_ slice_ rename_ sort_ distinct_   the verb functions
 identity gather count total first last    builtin tools / reducers
-tool ToolHandle TOOLS BUILTIN_TOOLS catalog tool_entry   the registry
+tool ToolHandle TOOLS BUILTIN_TOOLS catalog tool_entry modifier_catalog   the registry
 op Operation Modifier mod                 authoring
 Step Workflow StepRef                     the workflow (Workflow.validate() is a method)
 check stage                               declaration-time checks

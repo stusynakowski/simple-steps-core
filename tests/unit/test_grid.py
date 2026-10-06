@@ -349,9 +349,21 @@ def test_select_is_a_shape_verb_so_it_cannot_share_a_step(wide):
     assert "at most one is allowed" in wf.step("both").problems[0]
 
 
-def test_source_applies_no_tool():
-    with pytest.raises(ValueError, match="source applies no tool"):
-        score[mod.source()](pd.DataFrame({"n": [1]}))
+def test_source_can_compute_from_a_no_input_tool():
+    @tool
+    def load_rows(path: str) -> pd.DataFrame:
+        """Load a tiny table (pretend path)."""
+        return pd.DataFrame({"city": ["SF", "NYC"], "n": [1, 2]})
+
+    wf = Workflow()
+    wf["raw"] = load_rows.bind(path="x.csv")[mod.source()]
+    assert wf.step("raw").problems == ()           # a source may compute its grid
+    assert wf.step("raw").status == "staged"       # it has to run, unlike a literal
+    wf.run_all()
+    assert wf.step("raw").output.data["n"].tolist() == [1, 2]
+    # it is in the workflow, so the full session round-trips the computed grid
+    back = Workflow.from_json(wf.to_session_json(), TOOLS)
+    assert len(back.step("raw").output.data) == 2
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -380,8 +392,10 @@ def test_the_catalog_separates_system_tools_from_declared_ones():
 def test_a_catalog_entry_carries_what_a_form_needs():
     entry = catalog()["score"]          # score(n, weight=1) — unannotated
     assert entry["params"] == [
-        {"name": "n", "required": True, "default": None, "type": None},
-        {"name": "weight", "required": False, "default": 1, "type": None},
+        {"name": "n", "required": True, "default": None, "type": None,
+         "choices": None, "nullable": False, "description": None},
+        {"name": "weight", "required": False, "default": 1, "type": None,
+         "choices": None, "nullable": False, "description": None},
     ]
     assert entry["takes_whole_row"] is False
     assert entry["returns"] is None
@@ -397,10 +411,31 @@ def test_a_catalog_entry_publishes_a_typed_tools_boundary():
 
     entry = catalog()["celsius_to_f"]
     assert entry["params"] == [
-        {"name": "celsius", "required": True, "default": None, "type": "float"},
+        {"name": "celsius", "required": True, "default": None, "type": "float",
+         "choices": None, "nullable": False, "description": None},
     ]
     assert entry["returns"] == "float"
     assert entry["typed"] is True
+
+
+def test_catalog_keeps_literal_choices_and_optional_inner_type():
+    from typing import Literal, Optional
+
+    @tool
+    def pick(region: Literal["EMEA", "AMER"], limit: Optional[int] = None) -> list:
+        """Pick rows.
+
+        Args:
+            region: which region to load.
+            limit: cap the row count.
+        """
+        return []
+
+    region, limit = catalog()["pick"]["params"]
+    assert region["type"] == "str" and region["choices"] == ["EMEA", "AMER"]
+    assert region["description"] == "which region to load."
+    assert limit["type"] == "int" and limit["nullable"] is True
+    assert limit["choices"] is None and limit["description"] == "cap the row count."
 
 
 def test_a_whole_row_tool_is_flagged_in_the_catalog():
@@ -409,6 +444,24 @@ def test_a_whole_row_tool_is_flagged_in_the_catalog():
 
 def test_the_catalog_is_json_safe():
     json.dumps(catalog())
+
+
+def test_modifier_catalog_is_json_and_lists_each_verbs_settings():
+    from simple_steps_core.grid import modifier_catalog
+
+    mc = modifier_catalog()
+    json.dumps(mc)                                   # serves as GET /modifiers
+    assert set(mc) == set(MODIFIERS)
+    # a shape verb carries its class and row rule
+    assert mc["map"]["class"] == "shape" and mc["map"]["row_rule"] == "same"
+    # settings are typed, with required/default
+    by_name = {s["name"]: s for s in mc["map"]["settings"]}
+    assert by_name["over"]["type"] == "reference" and by_name["over"]["required"]
+    assert by_name["name"]["type"] == "str" and by_name["name"]["default"] == "value"
+    # an execution modifier has no row rule and a required setting
+    assert mc["retry"]["class"] == "execution" and mc["retry"]["row_rule"] is None
+    assert {s["name"] for s in mc["retry"]["settings"]} == {"times"}
+    assert mc["retry"]["settings"][0]["required"] is True
 
 
 def test_a_user_tool_cannot_shadow_a_builtin():
