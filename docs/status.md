@@ -123,15 +123,21 @@ Recorded so they stop being re-litigated.
 
 ## 4d. Multi-input — the exact problems, and the operations they imply
 
-D1 in one sentence: **a step reads exactly one upstream, and there is no way to
-use a value from another step.** Two concrete walls:
+> **Update (2026-10):** the *single-value* half of D1 is **solved** — a bound
+> argument may now be a `StepRef`, resolved at run (value references, K10), so
+> `bind(threshold=wf["cutoff"])` works. P5 below is therefore settled. What
+> remains is true **multi-grid** combine (`stack`/`zip`/`join`), now specified in
+> [core-proposals/005](core-proposals/005-reshaping-merging-and-status-grids.md).
+
+D1 in one sentence: **a step reads exactly one upstream.** The single-value case
+(*"use one value from another step"*) is handled by value references; the
+remaining wall is combining two whole **grids**:
 
 ```python
 wf["j"] = over_threshold[mod.map(over=wf["a"]), mod.map(over=wf["b"])]
 # "2 shape verbs in one step (map, map); at most one is allowed"
 
-over_threshold.bind(threshold=wf["cutoff"])
-# TypeError (F1) — a bound literal is a value, not a step
+over_threshold.bind(threshold=wf["cutoff"])   # now OK — a value reference (K10)
 ```
 
 Before choosing a syntax, these are the five things that actually have to be
@@ -187,15 +193,15 @@ all or belongs with `bind` (see P5).
 `join` is the only one whose row count is unknowable in advance, which puts it
 in `expand`'s category for staging: it can promise a shape but not a count.
 
-### P5 — Is a scalar from another step really a merge?
+### P5 — Is a scalar from another step really a merge?  **— settled (K10)**
 
 The commonest real case is not a join at all: *"use this one value as a constant
-for every row."* That is `broadcast` above, and it may not want a verb —
-it could be a second form of `bind` that resolves a reference at run time
-(`bind(threshold=wf["cutoff"].cell(...))`), which is precisely what F1 now
-refuses. Deciding this one first is worthwhile, because it is the most common
-need and the cheapest to satisfy, and it may remove most of the demand for a
-general `join`.
+for every row."* **This is now built:** a bound argument may be a `StepRef`,
+resolved at run (one-cell → the cell, else the whole grid), and it lands in
+`reads` so it is ordered and guarded like any input. `broadcast` needs no verb,
+and this removed most of the demand for a general `join` — leaving only true
+multi-grid combine, specified in
+[core-proposals/005](core-proposals/005-reshaping-merging-and-status-grids.md).
 
 ### Suggested operations, if these are settled
 
@@ -275,19 +281,23 @@ it teach itself.
 
 ## 7. What is left
 
-Everything in §3 and §4 is done. What remains, in the order I would take it:
+Everything in §3 and §4 is done. What remains, in the order I would take it —
+now specified in [core-proposals/005](core-proposals/005-reshaping-merging-and-status-grids.md)
+and [006](core-proposals/006-tool-contracts-and-resources.md):
 
-1. **P5** (§4d) — decide whether a scalar from another step is a `bind` form or
-   a verb. Cheapest, most common need, and it may remove most of the demand for
-   a general `join`.
-2. **`stack` and `zip`** — both have knowable row rules and need no key
-   semantics, so they can land before `join` is settled.
-3. **D2 source schemas** — the last place types are undeclared, and it closes
-   the unchecked "replace the source's data" flow.
-4. **`join`** — last, and chosen against a real pipeline so `how=` and the
-   column-collision rule are decided by a case rather than guessed.
-5. **D5 `Output.ref`** — a payload store; also what `cache` (B5) is waiting on.
-6. **The strategic one** (§6) — the engine still has not moved onto this model.
+1. **Baseline fixes** — ✅ P5 settled (value references); ✅ a required verb
+   setting (`select`/`drop`/`sort`/`rename`) is now caught at declaration, not at
+   run (005 A2).
+2. **The warning/severity tier** (005 C) — turn the silent column-expectation
+   optimism into 🟡/🟠/🔴 warnings; cheap, the predicted columns already exist.
+3. **The cell-shaped status grid** (005 D) — parallel typed status grids; the
+   per-row ledger and `Step.status` become rollups over it.
+4. **`stack` / `zip` / `join`** (005 B) — combine verbs as operation
+   constructors; `join` last, chosen against a real pipeline.
+5. **D2 source schemas** — the last place types are undeclared.
+6. **Resources** (006) — port the engine's Resource system onto the grid.
+7. **D5 `Output.ref`** — a payload store; also what `cache` (B5) is waiting on.
+8. **The strategic one** (§6) — the engine still has not moved onto this model.
 
 `colmap` (D4) stays blocked on shape-algebra §5, and B5's three execution
 modifiers stay blocked on the async engine.

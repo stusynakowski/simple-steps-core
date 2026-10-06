@@ -48,7 +48,7 @@ __all__ = [
     "modifier_catalog",
     "TOOLS",
     "op", "Modifier", "Operation",
-    "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "stage",
+    "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "warn", "stage",
     "STRICT_TYPES", "annotation_problems", "declaration_problems",
     "PARAM_TYPES", "PARAM_TYPES_BY_VERB",
     "ROWS_RULE", "DEFAULT_PAYLOAD", "CARRIES_COLUMNS", "PayloadError",
@@ -1377,6 +1377,17 @@ PARAM_TYPES_BY_VERB: dict[str, dict[str, tuple[type, ...]]] = {
     "sort": {"by": (str, list, tuple)},
 }
 
+#: Shape verbs whose literal setting is mandatory — caught at declaration (005
+#: A2) instead of raised at run. ``widen`` is absent on purpose: a tuple cell
+#: auto-names, so ``columns=`` is optional there.
+REQUIRED_PARAMS: dict[str, tuple[str, ...]] = {
+    "select": ("columns",),
+    "drop": ("columns",),
+    "rename": ("columns",),
+    "sort": ("by",),
+}
+
+
 
 
 
@@ -2107,6 +2118,18 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 f"{type(value).__name__}{extra}"
             )
 
+    # 2d. a verb whose literal setting is mandatory must carry it at
+    #     declaration, not discover it missing at run. select/drop/sort/rename
+    #     each raise from their verb without their one required setting; catch
+    #     it here instead, like every other declaration check.
+    for modifier in operation.modifiers:
+        for required in REQUIRED_PARAMS.get(modifier.kind, ()):
+            if not modifier.params.get(required):
+                problems.append(
+                    f"{modifier.kind} needs {required}= — it has no default, "
+                    f"so a step without it cannot run"
+                )
+
     # The references this operation reads: the input grid, plus any argument
     # bound to a step. Both are validated the same way.
     references: list[tuple[str, Any]] = []
@@ -2213,6 +2236,61 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         problems.extend(_type_mismatches(operation, fn, workflow))
 
     return tuple(problems)
+
+
+def warn(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str, ...]:
+    """Non-blocking column expectations, before the upstream has run (005 C).
+
+    The hard column check (:func:`_missing_columns`) only fires once the upstream
+    is real, so a step declared ahead of its inputs says nothing. But staging
+    already *predicts* the upstream's columns, so we can surface what a step
+    **expects** without blocking it: a column predicted present is 🟡
+    unconfirmed, one predicted absent is 🟠 likely-missing. Both clear (or harden
+    into a problem) when the upstream runs. Warnings never stop a run.
+    """
+    if workflow is None or operation.input is None:
+        return ()
+    verb = operation.shape_verb
+    if verb is None or verb.kind in ("source", "sweep"):
+        return ()
+    upstream = workflow.steps.get(str(operation.input))
+    # Only predict while the upstream is staged; once it runs, `check` is exact.
+    if upstream is None or not upstream.output.meta.get("staged"):
+        return ()
+    fn = operation.fn or TOOLS.get(operation.tool_id) \
+        or BUILTIN_TOOLS.get(operation.tool_id)
+    if isinstance(fn, ToolHandle):
+        fn = fn.fn
+    if fn is None:
+        return ()
+    try:
+        parameters = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        return ()
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
+        return ()                       # takes the whole row; nothing to expect
+    if verb.kind == "collapse":
+        parameters = parameters[1:]     # the verb supplies the accumulator
+    predicted = set(rows(upstream.output).columns) | set(operation.arguments)
+    required = [p.name for p in parameters
+                if p.default is inspect.Parameter.empty
+                and p.kind is not inspect.Parameter.VAR_POSITIONAL]
+    up = str(operation.input)
+    shown = ", ".join(sorted(predicted)) or "no columns"
+    warnings: list[str] = []
+    absent = [r for r in required if r not in predicted]
+    present = [r for r in required if r in predicted]
+    if absent:
+        warnings.append(
+            f"expects {', '.join(map(repr, absent))} from {up!r}, which is "
+            f"predicted to produce ({shown}) — likely missing once it runs"
+        )
+    if present:
+        warnings.append(
+            f"expects {', '.join(map(repr, present))} from {up!r}, "
+            f"unconfirmed until it runs"
+        )
+    return tuple(warnings)
 
 
 def _missing_columns(operation: Operation, fn: Callable,
@@ -2570,6 +2648,9 @@ class Step:
     operation: Operation
     output: Output
     problems: tuple[str, ...] = ()
+    #: Non-blocking column expectations (005 C) — what this step predicts it
+    #: will need from an upstream that has not run yet. Never stops a run.
+    warnings: tuple[str, ...] = ()
 
     @property
     def valid(self) -> bool:
@@ -2689,7 +2770,8 @@ class Workflow:
             return
         problems = check(operation, self, step_id)
         self.steps[step_id] = Step(
-            step_id, operation, stage(operation, self, problems), problems
+            step_id, operation, stage(operation, self, problems), problems,
+            warn(operation, self),
         )
         if existed:
             self._mark_stale_dependents(step_id)
@@ -3017,7 +3099,7 @@ class Workflow:
             problems = check(operation, workflow, sid)
             workflow.steps[sid] = Step(sid, operation,
                                        stage(operation, workflow, problems),
-                                       problems)
+                                       problems, warn(operation, workflow))
         for sid, encoded in (blob.get("outputs") or {}).items():
             if sid in workflow.steps:
                 workflow.steps[sid].output = _decode_output(encoded)

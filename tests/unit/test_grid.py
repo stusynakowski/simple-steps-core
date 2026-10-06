@@ -1963,6 +1963,69 @@ def test_an_unknown_modifier_parameter_is_caught_at_declaration(three):
     assert "it accepts axis, name, retries" in wf.step("t").problems[0]
 
 
+def test_a_required_setting_is_caught_at_declaration(three):
+    """select/drop/sort/rename each raise from their verb without their one
+    required setting; 005 A2 makes that a declaration problem instead of a run
+    crash — so `run()` refuses it and an editor shows it mid-keystroke."""
+    wf = Workflow()
+    wf["raw"] = three
+    wf["s"] = mod.select(over=wf["raw"])            # no columns=
+    wf["d"] = mod.drop(over=wf["raw"])              # no columns=
+    wf["o"] = mod.sort(over=wf["raw"])              # no by=
+    wf["r"] = mod.rename(over=wf["raw"])            # no columns=
+    assert "select needs columns=" in wf.step("s").problems[0]
+    assert "drop needs columns=" in wf.step("d").problems[0]
+    assert "sort needs by=" in wf.step("o").problems[0]
+    assert "rename needs columns=" in wf.step("r").problems[0]
+    # and it really blocks the run, rather than crashing inside the verb
+    with pytest.raises(ValueError, match="invalid"):
+        wf.run("s")
+
+
+def test_widen_still_allows_no_columns(three):
+    """`widen` is deliberately absent from the required list: a tuple cell
+    auto-names, so `columns=` is optional there."""
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"value": [(10, 1), (20, 4)]})
+    wf["w"] = mod.widen(over=wf["raw"])             # no columns= — still fine
+    assert wf.step("w").problems == ()
+
+
+def test_a_column_expectation_is_a_warning_before_the_upstream_runs():
+    """005 C: a step declared ahead of its input says what it expects — 🟠 when
+    the column is predicted absent, 🟡 when predicted present — without blocking
+    the run. The warning clears (or hardens into a problem) once it runs."""
+    @tool
+    def needs_city(city: str) -> str:
+        return city.upper()
+
+    @tool
+    def keep_n(n: int) -> int:
+        return n
+
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"city": ["SF"], "n": [1]})
+    wf.run("raw")
+    wf["narrow"] = mod.select(columns=["n"], over=wf["raw"])   # staged, drops city
+
+    # 🟠 predicted absent — a warning, not a problem, so it does not block
+    wf["up"] = needs_city[mod.map()](wf["narrow"])
+    assert wf.step("up").problems == ()
+    assert "expects 'city'" in wf.step("up").warnings[0]
+    assert "likely missing" in wf.step("up").warnings[0]
+
+    # 🟡 predicted present — unconfirmed, still only a warning
+    wf["keep"] = keep_n[mod.map()](wf["narrow"])
+    assert wf.step("keep").problems == ()
+    assert "unconfirmed until it runs" in wf.step("keep").warnings[0]
+
+    # once the upstream runs, the warning clears and the hard check takes over
+    wf.run("narrow")
+    wf["up"] = needs_city[mod.map()](wf["narrow"])
+    assert wf.step("up").warnings == ()
+    assert "needs 'city'" in wf.step("up").problems[0]
+
+
 def test_sweep_accepts_arbitrary_parameter_names(three):
     """Its parameters are the user's own, so names cannot be validated."""
     @tool
