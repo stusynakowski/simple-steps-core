@@ -198,16 +198,18 @@ stateDiagram-v2
     running --> completed : all units ok
     running --> failed : a unit raised
     staged --> invalid : check() found a problem
-    completed --> staged : reassign the step
+    completed --> stale : an upstream changed
+    stale --> running : re-run
 ```
 
 `describe()` says what a step is in words — a **staged** step reports what
 staging can *promise* (`"map scale · 4 cells"`, or "at most n", or "unknown"
 for `expand`), while a run step reports what it actually holds.
 
-> There is **no automatic staleness**: changing an upstream step does not revert
-> a completed one — it stays `completed` until you reassign it. Nothing
-> recomputes on its own ([status.md](status.md) §5).
+> **Staleness is marked, never recomputed.** Reassigning an upstream step marks
+> its completed dependents **`stale`** — their data is kept, their `status`
+> reads `stale` — until you re-run them. Nothing recomputes on its own
+> ([status.md](status.md) §5).
 
 ---
 
@@ -220,6 +222,8 @@ A **`Workflow`** is an insertion-ordered dict of Steps and nothing else.
 | `wf[sid] = <Operation \| value>` | declare a step (a bare value is a source step, born completed) |
 | `wf[sid]` / `wf[0]` | a `StepRef` by **name** or **position** (a position resolves to the id at once) |
 | `wf.step(sid)` | the `Step` itself |
+| `del wf[sid]` / `wf.remove(sid)` | delete a step — refused (naming the readers) if a later step reads it |
+| `wf.rename(old, new)` | rename a step, rewriting every `over=` that pointed at it; outputs kept |
 | `wf.run(sid)` / `wf.run_all()` | execute — explicit; nothing recomputes on its own |
 | `wf.validate()` | `{sid: problems}` for every step, without running |
 | `wf.to_json()` / `to_session_json()` | light (structure) / full (structure + payloads) export |

@@ -109,9 +109,13 @@ drift: `MODIFIERS`, `SHAPE_VERBS`, `is_shape(kind)`, `DECORATORS`,
 ```python
 wf.run_all()                      # run every valid step, each after the ones it reads
 wf.run("scored")                  # or one step (refuses if an input has not run)
+
+del wf["scored"]                  # or wf.remove("scored") — refused if a later step reads it
+wf.rename("raw", "readings")      # rewrites every over= that pointed at it; outputs kept
 ```
 
-`run`/`run_all` are **explicit** — nothing recomputes on its own.
+`run`/`run_all` are **explicit** — nothing recomputes on its own. Reassigning an
+upstream step marks its completed dependents `stale` (data kept) until re-run.
 
 ### `Output` — what a step produced
 
@@ -134,7 +138,7 @@ wf.run("scored")                  # or one step (refuses if an input has not run
 | member | is |
 |---|---|
 | `.operation` / `.output` | what to run / what it produced (always both, from declaration) |
-| `.status` | a **rollup** of the ledger: `staged \| running \| completed \| failed \| invalid` |
+| `.status` | a **rollup** of the ledger: `staged \| running \| completed \| failed \| invalid`, plus `stale` when an upstream changed |
 | `.describe()` | what the step is, in words — a staged step reports its *predicted* cell count |
 | `.problems` / `.valid` | declaration-time problems (empty = valid) |
 

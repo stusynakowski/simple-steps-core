@@ -2558,6 +2558,10 @@ class Step:
         for state in ("invalid", "failed", "running", "staged"):
             if state in states:
                 return state
+        # Completed, but an upstream changed since it ran: the data is outdated
+        # until it is re-run (nothing recomputes on its own).
+        if self.output.meta.get("stale"):
+            return "stale"
         if states:
             return "completed"
         # No ledger rows at all is ambiguous, and the ledger cannot settle it:
@@ -2618,6 +2622,7 @@ class Workflow:
 
     # ── declaring ────────────────────────────────────────────────────────
     def __setitem__(self, step_id: str, operation: Any) -> None:
+        existed = step_id in self.steps
         if isinstance(operation, Modifier):
             # A bare shape verb is a complete step: it applies the tool that
             # discards nothing, so `wf["flat"] = mod.expand(over=ref)` needs no
@@ -2655,11 +2660,15 @@ class Workflow:
                 Operation(tool_id="identity", fn=identity)[mod.source()],
                 source_(operation),
             )
+            if existed:
+                self._mark_stale_dependents(step_id)
             return
         problems = check(operation, self, step_id)
         self.steps[step_id] = Step(
             step_id, operation, stage(operation, self, problems), problems
         )
+        if existed:
+            self._mark_stale_dependents(step_id)
 
     def __getitem__(self, step_id: str | int) -> StepRef:
         """A reference to a step, by **name** or by **position**.
@@ -2692,6 +2701,80 @@ class Workflow:
     def step(self, step_id: str) -> Step:
         """The Step itself, rather than a reference to it."""
         return self.steps[step_id]
+
+    # ── editing: delete, rename, and staleness ───────────────────────
+    def _dependents(self, step_id: str) -> list[str]:
+        """Steps whose ``over=`` reads *step_id* directly, in insertion order."""
+        return [sid for sid, st in self.steps.items()
+                if any(m.params.get("over") is not None
+                       and str(m.params.get("over")) == step_id
+                       for m in st.operation.modifiers)]
+
+    def __delitem__(self, step_id: str) -> None:
+        self.remove(step_id)
+
+    def remove(self, step_id: str) -> None:
+        """Delete a step, refusing when later steps still read it.
+
+        The error names the readers so an editor can show exactly what breaks;
+        remove or rename them first.
+        """
+        if step_id not in self.steps:
+            raise KeyError(f"no step {step_id!r}; have {list(self.steps)}")
+        readers = self._dependents(step_id)
+        if readers:
+            raise ValueError(
+                f"cannot remove {step_id!r}: {', '.join(map(repr, readers))} "
+                f"read it. Remove or rename {'it' if len(readers) == 1 else 'them'} "
+                "first."
+            )
+        del self.steps[step_id]
+
+    def rename(self, old: str, new: str) -> None:
+        """Rename a step, rewriting every ``over=`` that pointed at it.
+
+        Outputs are kept — a rename is not a recompute — and insertion order is
+        preserved so positions do not shift.
+        """
+        if old not in self.steps:
+            raise KeyError(f"no step {old!r}; have {list(self.steps)}")
+        if not isinstance(new, str) or not new:
+            raise ValueError("a step id must be a non-empty string")
+        if new == old:
+            return
+        if new in self.steps:
+            raise ValueError(f"step {new!r} already exists")
+        self.steps = {(new if sid == old else sid): st
+                      for sid, st in self.steps.items()}
+        self.steps[new].step_id = new
+        for st in self.steps.values():
+            modifiers = tuple(
+                Modifier(m.kind, {**m.params, "over": StepRef(new, self)})
+                if (m.params.get("over") is not None
+                    and str(m.params.get("over")) == old) else m
+                for m in st.operation.modifiers
+            )
+            if modifiers != st.operation.modifiers:
+                op = st.operation
+                st.operation = Operation(op.tool_id, modifiers, op.arguments, op.fn)
+
+    def _mark_stale_dependents(self, step_id: str) -> None:
+        """Mark every transitive reader that has already run as ``stale``.
+
+        Changing an upstream recomputes nothing (§7's push/pull), but a dependent
+        that ran now holds outdated data — ``status`` says ``stale`` until it is
+        re-run. Staged dependents are left alone: they have no data to be stale.
+        """
+        frontier, seen = [step_id], set()
+        while frontier:
+            for sid in self._dependents(frontier.pop()):
+                if sid in seen:
+                    continue
+                seen.add(sid)
+                output = self.steps[sid].output
+                if not output.meta.get("staged"):
+                    output.meta["stale"] = True
+                frontier.append(sid)
 
     # ── what a step reads ────────────────────────────────────────────────
     def _known_columns(self, operation: Operation) -> list[str]:

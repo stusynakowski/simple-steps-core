@@ -94,7 +94,10 @@ workflow, can't be re-run, and a reload fails with "source step has no data".
 as the step's grid.
 
 ### A4. Steps need to be deletable and renamable
-*New.*
+*New.* **✅ Built (2026-10-05).** `del wf[sid]` / `wf.remove(sid)` delete a step,
+refusing (and naming the readers) when a later step reads it; `wf.rename(old,
+new)` rewrites every `over=` that pointed at it, keeps outputs, and preserves
+order.
 
 ```python
 hasattr(grid.Workflow, "__delitem__"), hasattr(grid.Workflow, "remove"), \
@@ -106,7 +109,9 @@ hasattr(grid.Workflow, "rename")
 the broken steps, when later steps read the one being deleted.
 
 ### A5. Downstream steps should go stale when an upstream step changes
-*Already on core's list as future work ([react-api.md](../react-api.md) §11, [status.md](../status.md) §5).*
+*Already on core's list as future work ([react-api.md](../react-api.md) §11, [status.md](../status.md) §5).* **✅ Built (2026-10-05).** Reassigning an upstream
+marks its completed transitive dependents `stale` (data kept, nothing
+recomputed); `Step.status` reads `stale` until the step is re-run.
 
 ```python
 w["s"] = sc(w["r"]); w.run_all()
@@ -199,8 +204,8 @@ Already working on the grid model, or the app doesn't need them:
 | A1 | blocking | richer `catalog()` params (`choices`, `description`, `nullable`, inner `Optional`) | **✅ built** |
 | A2 | blocking | `modifier_catalog()` → JSON verb/settings (`GET /modifiers`) | **✅ built** |
 | A3 | blocking | source step from a no-input tool returning a DataFrame | **✅ built** |
-| A4 | blocking | `Workflow` delete / remove / rename with dependency checks | new |
-| A5 | blocking | mark dependents `stale` on upstream change (no recompute) | planned §11/§5 |
+| A4 | blocking | `Workflow` delete / remove / rename with dependency checks | **✅ built** |
+| A5 | blocking | mark dependents `stale` on upstream change (no recompute) | **✅ built** |
 | B6 | soon | multi-input (P5 value refs first, then `join`) | planned D1/P5 |
 | B7 | soon | per-unit progress callback on `run` | new |
 | B8 | soon | `redrive(step_id)` for failed rows only | planned §11 |

@@ -367,6 +367,61 @@ def test_source_can_compute_from_a_no_input_tool():
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# editing: staleness, delete, rename
+# ─────────────────────────────────────────────────────────────────────────
+def test_reassigning_an_upstream_marks_dependents_stale():
+    @tool
+    def times10(n):
+        return n * 10
+
+    wf = Workflow()
+    wf["r"] = pd.DataFrame({"n": [1, 2, 3]})
+    wf["s"] = times10(wf["r"])
+    wf.run_all()
+    assert wf.step("s").status == "completed"
+    wf["r"] = pd.DataFrame({"n": [9, 9]})           # reassign the upstream
+    assert wf.step("s").status == "stale"           # outdated, not recomputed
+    assert wf.step("s").output.values == [10, 20, 30], "data left untouched"
+    wf.run("s")
+    assert wf.step("s").status == "completed"
+    assert wf.step("s").output.values == [90, 90]
+
+
+def test_remove_refuses_when_a_later_step_reads_it():
+    @tool
+    def times10(n):
+        return n * 10
+
+    wf = Workflow()
+    wf["r"] = pd.DataFrame({"n": [1, 2]})
+    wf["s"] = times10(wf["r"])
+    with pytest.raises(ValueError, match="cannot remove 'r'"):
+        wf.remove("r")
+    del wf["s"]                                       # a leaf deletes fine
+    wf.remove("r")
+    assert list(wf.steps) == []
+
+
+def test_rename_rewrites_references_and_keeps_output():
+    @tool
+    def times10(n):
+        return n * 10
+
+    wf = Workflow()
+    wf["r"] = pd.DataFrame({"n": [1, 2]})
+    wf["s"] = times10(wf["r"])
+    wf.run_all()
+    wf.rename("r", "raw")
+    assert list(wf.steps) == ["raw", "s"], "order preserved"
+    assert wf.step("s").operation.to_dict()["modifiers"][0]["params"]["over"] == "raw"
+    assert wf.step("s").output.values == [10, 20], "output kept, not recomputed"
+    wf.run_all()                                     # the rewritten ref still resolves
+    assert wf.step("s").output.values == [10, 20]
+    with pytest.raises(ValueError, match="already exists"):
+        wf.rename("raw", "s")
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # builtins and bare modifiers — the tool that discards nothing
 # ─────────────────────────────────────────────────────────────────────────
 BUILTIN_IDS = {"identity", "gather", "count", "total", "first", "last"}
