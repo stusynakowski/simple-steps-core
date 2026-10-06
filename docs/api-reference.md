@@ -200,22 +200,27 @@ grid.modifier_catalog()       # {verb: {class, row_rule, settings}} — JSON, GE
 Each verb entry carries its `class` (`"shape"` | `"execution"`), its `row_rule`
 (`same` / `at_most` / `one` / `unknown` / `generated`, `null` for execution
 modifiers), and a `settings` list — each `{name, type, required, default}` — so a
-client builds the verb's form from core instead of hard-coding it. `over` is a
-`"reference"` setting; `sweep`'s `<swept>` setting marks that extra named
-parameters are the data.
+client builds the verb's form from core instead of hard-coding it. A verb's data
+input is **not** a setting (it is the step's `input`, below); `sweep`'s
+`<swept>` setting marks that extra named parameters are the data.
 
 ### An operation — `Operation.to_dict()`
 
 ```json
 {
   "tool_id": "scale",
+  "input": {"$ref": "readings"},
   "arguments": {"weight": 2},
-  "modifiers": [{"kind": "map", "params": {"over": "readings", "name": "score"}}]
+  "modifiers": [{"kind": "map", "params": {"name": "score"}}]
 }
 ```
 
-A `StepRef` flattens to the step's **id** here — this is the only place that
-happens.
+`input` is the step whose grid this reads — the data, taken from the call
+position (or `over=`). `arguments` are bound literals; a value that is itself a
+reference to another step appears as `{"$ref": id}` too. Modifiers are
+**literal-only** — they say how to orchestrate, never what data. A `StepRef`
+serializes to `{"$ref": id}` everywhere; that is the only envelope a reference
+takes.
 
 ### A workflow — two export modes
 

@@ -149,11 +149,12 @@ The stack is stored as an ordered list of descriptors, never as closures:
 ```python
 Operation(
   tool="score",
+  input=StepRef("step1"),
   arguments={...},
   modifiers=[
     Modifier(kind="timeout", params={"seconds": 30}),
     Modifier(kind="retry",   params={"times": 3}),
-    Modifier(kind="map",     params={"over": "step1", "concurrency": 8}),
+    Modifier(kind="map",     params={"concurrency": 8}),
   ],
 )
 ```

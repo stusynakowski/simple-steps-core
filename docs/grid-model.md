@@ -429,8 +429,8 @@ Caught at declaration today:
 | check | example |
 |---|---|
 | unknown tool / unknown modifier kind | |
-| `over` dangles, self-references, is circular, or names an invalid step | |
-| **`over` was read from a different `Workflow`** | `map over 'raw' reads a different Workflow…` |
+| the `input` dangles, self-references, is circular, or names an invalid step | |
+| **the `input` was read from a different `Workflow`** | `input 'raw' reads a different Workflow…` |
 | `source` applied to a real tool | |
 | a bound literal the signature does not accept | `score.bind(wieght=2)` |
 | **a required value the upstream cannot supply** | `score() needs 'n', which 'raw' does not have (it has count)` |

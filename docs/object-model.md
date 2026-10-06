@@ -111,28 +111,32 @@ kind is declared:
 | field | is |
 |---|---|
 | `kind` | `"map"`, `"widen"`, `"retry"`, … |
-| `params` | the verb's own arguments (`over`, `name`, `columns`, `by`, `times`, …) |
+| `params` | the verb's own **literal** arguments (`name`, `columns`, `by`, `times`, …) — never a reference |
 | `cls` (via `ModifierKind`) | `"shape"` (changes rows/columns) or `"execution"` (shape-preserving) |
 
-Build one with `mod.<kind>(...)`; it does nothing until applied to a tool.
+Build one with `mod.<kind>(...)`; it does nothing until applied to a tool. A
+modifier says only *how* to orchestrate — the data it reads is the Operation's
+`input`, not a param. `over=` is accepted as authoring sugar and hoisted to that
+slot, so it never lands in `params`.
 
 ---
 
 ## 3. Operation — one tool, an ordered stack of modifiers
 
-An **`Operation`** is **data**: a `tool_id`, bound `arguments`, and an ordered
-tuple of `modifiers`. **Order is semantics** — the stack is stored
+An **`Operation`** is **data**: a `tool_id`, its data `input`, bound `arguments`,
+and an ordered tuple of `modifiers`. **Order is semantics** — the stack is stored
 innermost-first (closest to the tool runs first), so `[retry, map]` retries each
 item and `[map, retry]` retries the whole fan-out.
 
 | member | is |
 |---|---|
-| `tool_id` · `arguments` · `modifiers` | which tool, bound literals, the stack |
-| `.bind(**literals)` | fix arguments without running |
+| `tool_id` · `input` · `arguments` · `modifiers` | which tool, the step it reads (a `StepRef`), bound literals, the stack |
+| `.reads` | every step id this reads — the `input` grid plus any reference `arguments` |
+| `.bind(**literals)` | fix arguments without running (a value may be a `StepRef` — a value reference) |
 | `op[mod.…]` | append modifiers (decorate) — returns a new Operation |
 | `.shape_verb` / `.shape_verbs` | the (at most one) shape verb in the stack |
 | `.layers` | the stack as written (outermost-first), the reverse of `modifiers` |
-| `.to_dict()` / `from_dict()` | `{tool_id, arguments, modifiers:[{kind, params}]}` |
+| `.to_dict()` / `from_dict()` | `{tool_id, input, arguments, modifiers:[{kind, params}]}` |
 | `op(data)` / `op(ref)` | **run** on data, or **wire** when given a `StepRef` |
 
 At most **one shape verb** per Operation (enforced): two shape changes in one
@@ -176,6 +180,7 @@ flowchart LR
       direction LR
       subgraph Operation["Operation (what to run)"]
         T["tool_id"]
+        I["input (StepRef)"]
         A["arguments"]
         M["modifiers[] (ordered)"]
       end
@@ -223,15 +228,16 @@ A **`Workflow`** is an insertion-ordered dict of Steps and nothing else.
 | `wf[sid]` / `wf[0]` | a `StepRef` by **name** or **position** (a position resolves to the id at once) |
 | `wf.step(sid)` | the `Step` itself |
 | `del wf[sid]` / `wf.remove(sid)` | delete a step — refused (naming the readers) if a later step reads it |
-| `wf.rename(old, new)` | rename a step, rewriting every `over=` that pointed at it; outputs kept |
+| `wf.rename(old, new)` | rename a step, rewriting every reference that pointed at it; outputs kept |
 | `wf.run(sid)` / `wf.run_all()` | execute — explicit; nothing recomputes on its own |
 | `wf.validate()` | `{sid: problems}` for every step, without running |
 | `wf.to_json()` / `to_session_json()` | light (structure) / full (structure + payloads) export |
 | `Workflow.from_json(data, tools)` | rebuild either, re-attaching functions |
 
 A **`StepRef`** (id + the workflow it belongs to) is how one step names another;
-it serializes to the plain id and is what a modifier's `over=` holds. Staleness
-and fingerprints are not built — nothing recomputes automatically ([status.md](status.md) §5).
+it serializes to `{"$ref": id}` and is what an Operation's `input` holds (and any
+value reference in `arguments`). Staleness and fingerprints are not built —
+nothing recomputes automatically ([status.md](status.md) §5).
 
 ---
 
@@ -240,12 +246,13 @@ and fingerprints are not built — nothing recomputes automatically ([status.md]
 ```mermaid
 flowchart LR
     s1["step1.output.data (a grid)"]
-    s2["step2.operation.modifiers[0].params.over = StepRef('step1')"]
+    s2["step2.operation.input = StepRef('step1')"]
     s2 -. "resolved at run time" .-> s1
 ```
 
-A later step reads an earlier one through `over=wf["step1"]`. Accessor paths
-resolve on a reference — `step1.ok`, `step1.failed`, `step1[0]`, `step1["col"]`.
+A later step reads an earlier one through its `input` — `score(wf["step1"])` or
+`score[mod.map(over=wf["step1"])]`. Accessor paths resolve on a reference —
+`step1.ok`, `step1.failed`, `step1[0]`, `step1["col"]`.
 Because payloads are inline today, two steps reading one grid each hold a copy;
 moving them behind `Output.ref` into a store is the next structural step
 ([migration-plan.md](migration-plan.md)).

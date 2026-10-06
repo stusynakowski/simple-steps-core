@@ -80,8 +80,10 @@ look like ceremony.
 
 ```python
 wf["with_f"] = to_fahrenheit[mod.map()](wf["readings"])
+wf.step("with_f").operation.to_dict()["input"]
+# {'$ref': 'readings'}      <- the call position became the step's input
 wf.step("with_f").operation.to_dict()["modifiers"]
-# [{'kind': 'map', 'params': {'over': 'readings'}}]      <- `over` is what the parens became
+# [{'kind': 'map', 'params': {}}]      <- modifiers stay literal-only
 ```
 
 ### b. `over=` — the same step, and what actually gets stored
@@ -97,21 +99,25 @@ to_fahrenheit[mod.map()](wf["readings"]) == to_fahrenheit[mod.map(over=wf["readi
 # True
 ```
 
-Wiring writes `over` into the shape verb, so the stored data is identical either
-way. That is deliberate: `over` is where `check`, staging, cycle detection and
-the light export all read a step's input, so it has to end up in the modifier.
-The call position is sugar over it, not a second mechanism — which is why you can
-write the readable form and still get a workflow that serializes and validates.
+Both forms put the input in the Operation's own `input` slot. `over=` is
+authoring sugar: it is hoisted out of the modifier into `input`, so a modifier
+never carries a reference. That slot is where `check`, staging, cycle detection
+and the light export all read a step's input, and it serializes as a
+`{"$ref": id}` envelope — distinct from a literal string argument.
 
-You will see `over=` in a `repr`, in `to_dict()`, and in anything a UI round-trips.
-Two details, once you are writing the call form:
+You will see the input in a `repr` (`over='readings'`), and as `input` in
+`to_dict()` and anything a UI round-trips. Two details, once you are writing the
+call form:
 
-- **`over` lands on the shape verb**, never on an execution modifier:
+- **the input is one slot, never on a modifier**, shape or execution:
 
   ```python
-  to_fahrenheit[mod.map(), mod.retry(times=2)](wf["readings"])
+  op = to_fahrenheit[mod.map(), mod.retry(times=2)](wf["readings"])
+  op.to_dict()["input"]
+  # {'$ref': 'readings'}
+  op.to_dict()["modifiers"]
   # [{'kind': 'retry', 'params': {'times': 2}},
-  #  {'kind': 'map',   'params': {'over': 'readings'}}]
+  #  {'kind': 'map',   'params': {}}]
   ```
 
 - **the call position wins.** Wiring overwrites an `over=` already in the
@@ -277,8 +283,9 @@ wf.step("with_f")
 
 wf.step("with_f").operation.to_dict()
 # {'tool_id': 'to_fahrenheit',
+#  'input': {'$ref': 'readings'},
 #  'arguments': {},
-#  'modifiers': [{'kind': 'map', 'params': {'over': 'readings', 'name': 'fahrenheit'}}]}
+#  'modifiers': [{'kind': 'map', 'params': {'name': 'fahrenheit'}}]}
 ```
 
 That dict is the entire step definition — which is why exporting a workflow is
@@ -738,7 +745,7 @@ Caught at declaration:
 | check | message |
 |---|---|
 | unknown tool or modifier kind | `unknown tool 'scoer'` |
-| `over` dangles, self-references, is circular, or names an invalid step | `map over 'raw', which is not an earlier step` |
+| the `input` dangles, self-references, is circular, or names an invalid step | `input 'raw', which is not an earlier step` |
 | two shape verbs in one step | `2 shape verbs in one step (map, select); at most one is allowed…` |
 | `source` / `select` / `drop` given a real tool | `select applies no tool; use map to compute` |
 | `select` / `drop` naming a column the input lacks | `select names 'temp', which the input does not have (it has city, celsius)` |
@@ -977,27 +984,26 @@ wf1["raw"].workflow is wf1        # True
 ```
 
 That ref used to be flattened to `"raw"` the moment it was stored, so the
-workflow was lost before anything could check it. Now the ref is simply **kept**,
-and flattened only at the JSON boundary:
+workflow was lost before anything could check it. Now the ref is simply **kept**
+in the Operation's `input` slot, and flattened only at the JSON boundary:
 
 ```python
-double[mod.map(over=wf1["raw"])].modifiers[0].params
-# {'over': <raw>}                          the ref, which knows wf1
+double[mod.map(over=wf1["raw"])].input
+# <raw>                                    the ref, which knows wf1
 
-double[mod.map(over=wf1["raw"])].to_dict()["modifiers"][0]["params"]
-# {'over': 'raw'}                          flat, where JSON begins
+double[mod.map(over=wf1["raw"])].to_dict()["input"]
+# {'$ref': 'raw'}                          the envelope, where JSON begins
 ```
 
 This costs nothing at read time because every reader already went through
-`str(over)`, and `StepRef.__str__` is its id. So the check is one comparison:
+`str(input)`, and `StepRef.__str__` is its id. So the check is one comparison:
 
 ```python
 wf2["x"] = double[mod.map()](wf1["raw"])
 wf2.step("x").problems[0]
-# "map over 'raw' reads a different Workflow. A reference is stored as a step
-#  id, so this would resolve to *this* workflow's 'raw' instead of the one you
-#  named. Read the step from this workflow, or pass the id as a plain string to
-#  say you mean whatever 'raw' is here."
+# "input 'raw' reads a different Workflow. A step is named by its id, so this
+#  would resolve to *this* workflow's 'raw' — not the step you pointed at. Read
+#  it from this workflow."
 ```
 
 It is a **problem**, not an exception — consistent with everything else in §7,
@@ -1005,8 +1011,8 @@ and `run()` refuses an invalid step, so it cannot execute. It is also diagnosed
 *before* a dangling reference, because borrowing is the cause and "no such step"
 is only the symptom.
 
-Naming a step two ways stays the same step, so nothing else moves — `Modifier`
-compares its params flattened:
+Naming a step two ways stays the same step, so nothing else moves — an
+Operation compares its input flattened:
 
 ```python
 score[mod.map(over=wf["raw"])] == score[mod.map(over="raw")]       # True

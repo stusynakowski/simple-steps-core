@@ -218,7 +218,7 @@ present it decides behaviour — `bool` means `filter`, `list`/`tuple`/`set` mea
 def liar(n) -> bool: return n * 10
 
 wf["out"] = liar(wf["raw"])
-# <Operation filter(over='raw') ∘ liar>   — a filter, and 10 is truthy
+# <Operation filter() ∘ liar over='raw'>   — a filter, and 10 is truthy
 ```
 
 So annotate a predicate `-> bool` and a fan-out `-> list[...]`, and make sure a

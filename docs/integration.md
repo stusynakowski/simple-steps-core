@@ -90,14 +90,16 @@ An operation serializes to exactly this (`Operation.to_dict()`):
 ```json
 {
   "tool_id": "scale",
+  "input": {"$ref": "readings"},
   "arguments": {"weight": 2},
-  "modifiers": [{"kind": "map", "params": {"over": "readings", "name": "score"}}]
+  "modifiers": [{"kind": "map", "params": {"name": "score"}}]
 }
 ```
 
 A workflow is `{"version": 1, "steps": [{"step_id": "...", "operation": {...}}]}`.
-References between steps are the plain **step id** in a modifier's `over`
-param. The vocabulary of `kind` values is the 14 shape verbs plus `retry` /
+References between steps are a `{"$ref": id}` envelope: the step's data `input`,
+and any value reference bound in `arguments`. Modifiers are **literal-only**. The
+vocabulary of `kind` values is the 14 shape verbs plus `retry` /
 `timeout` ([api-reference.md](api-reference.md)); a client builds the modifier
 UI from them.
 

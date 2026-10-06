@@ -120,8 +120,9 @@ client may hold, diff and reorder it freely.
 ```json
 {
   "tool_id": "score",
+  "input": {"$ref": "raw"},
   "arguments": {"weight": 2},
-  "modifiers": [{"kind": "map", "params": {"over": "raw"}}]
+  "modifiers": [{"kind": "map", "params": {}}]
 }
 ```
 
@@ -140,11 +141,12 @@ Get this wrong and every stack appears backwards. `[retry, map]` stored means
 whole fan-out. They are different runs, so reordering in the UI is a real edit,
 not a cosmetic one.
 
-### `over` is a graph edge
+### `input` is a graph edge
 
-`params.over` names the step this one reads. The dependency graph is **derived**
-from these tokens, never stored separately — so the client can draw the DAG from
-the workflow payload alone, with no `/dag` call.
+`input` names the step this one reads, as `{"$ref": id}`. A value reference in
+`arguments` (also `{"$ref": id}`) is an edge too. The dependency graph is
+**derived** from these references, never stored separately — so the client can
+draw the DAG from the workflow payload alone, with no `/dag` call.
 
 ---
 

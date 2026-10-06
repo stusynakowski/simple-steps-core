@@ -174,8 +174,9 @@ def test_a_plain_decorator_is_refused():
 def test_step_refs_never_survive_into_the_export():
     """A ref is kept in memory (it knows its workflow) and flattened for JSON."""
     stored = score[mod.map(over=StepRef("videos"))]
-    assert isinstance(stored.modifiers[0].params["over"], StepRef)
-    assert stored.to_dict()["modifiers"][0]["params"]["over"] == "videos"
+    assert isinstance(stored.input, StepRef)
+    assert stored.to_dict()["input"] == {"$ref": "videos"}
+    assert stored.to_dict()["modifiers"][0]["params"] == {}
     json.dumps(stored.to_dict())
 
 
@@ -413,7 +414,7 @@ def test_rename_rewrites_references_and_keeps_output():
     wf.run_all()
     wf.rename("r", "raw")
     assert list(wf.steps) == ["raw", "s"], "order preserved"
-    assert wf.step("s").operation.to_dict()["modifiers"][0]["params"]["over"] == "raw"
+    assert wf.step("s").operation.to_dict()["input"] == {"$ref": "raw"}
     assert wf.step("s").output.values == [10, 20], "output kept, not recomputed"
     wf.run_all()                                     # the rewritten ref still resolves
     assert wf.step("s").output.values == [10, 20]
@@ -511,7 +512,7 @@ def test_modifier_catalog_is_json_and_lists_each_verbs_settings():
     assert mc["map"]["class"] == "shape" and mc["map"]["row_rule"] == "same"
     # settings are typed, with required/default
     by_name = {s["name"]: s for s in mc["map"]["settings"]}
-    assert by_name["over"]["type"] == "reference" and by_name["over"]["required"]
+    assert "over" not in by_name, "the data input is not a modifier setting"
     assert by_name["name"]["type"] == "str" and by_name["name"]["default"] == "value"
     # an execution modifier has no row rule and a required setting
     assert mc["retry"]["class"] == "execution" and mc["retry"]["row_rule"] is None
@@ -1149,7 +1150,7 @@ def test_self_reference_is_caught(three):
     wf["raw"] = three
     wf["loop"] = score[mod.map(over=wf["raw"])]
     wf["loop"] = score[mod.map(over="loop")]
-    assert "over itself" in wf.step("loop").problems[0]
+    assert "input is itself" in wf.step("loop").problems[0]
 
 
 def test_a_cycle_is_caught(three):
@@ -1214,8 +1215,9 @@ def test_the_light_export_is_structure_only(ran):
     assert set(blob) == {"version", "steps"}
     assert blob["steps"][1]["operation"] == {
         "tool_id": "score",
+        "input": {"$ref": "raw"},
         "arguments": {},
-        "modifiers": [{"kind": "map", "params": {"over": "raw"}}],
+        "modifiers": [{"kind": "map", "params": {}}],
     }
 
 
@@ -1460,7 +1462,7 @@ def test_a_ref_carries_the_workflow_it_was_read_from(two_workflows):
     """No side channel: the ref itself is what stays in params."""
     a, _ = two_workflows
     assert a["raw"].workflow is a
-    assert score[mod.map(over=a["raw"])].modifiers[0].params["over"].workflow is a
+    assert score[mod.map(over=a["raw"])].input.workflow is a
 
 
 def test_provenance_is_not_part_of_the_data(two_workflows):
@@ -1470,7 +1472,8 @@ def test_provenance_is_not_part_of_the_data(two_workflows):
     from_str = score[mod.map(over="raw")]
     assert from_ref == from_str
     assert from_ref.to_dict() == from_str.to_dict()
-    assert from_str.modifiers[0].params["over"] == "raw"
+    assert str(from_str.input) == "raw"
+    assert from_str.to_dict()["input"] == {"$ref": "raw"}
 
 
 def test_a_ref_from_another_workflow_is_refused(two_workflows):
@@ -1779,8 +1782,9 @@ def test_widen_round_trips(records):
     back = Workflow.from_json(wf.to_session_json(), TOOLS)
     assert all(p == () for p in back.validate().values())
     assert list(back.step("wide").output.data.columns) == ["value", "city", "temp"]
+    assert back.to_dict()["steps"][1]["operation"]["input"] == {"$ref": "raw"}
     assert back.to_dict()["steps"][1]["operation"]["modifiers"] == [
-        {"kind": "widen", "params": {"columns": ["city", "temp"], "over": "raw"}}
+        {"kind": "widen", "params": {"columns": ["city", "temp"]}}
     ]
 
 
@@ -1858,21 +1862,33 @@ def test_expand_refuses_a_dataframe_instead_of_yielding_column_names():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# F1 — a bound literal is a value, never a step reference
+# K10 — a bound argument may be a value reference to another step
 # ─────────────────────────────────────────────────────────────────────────
-def test_binding_a_step_reference_is_refused():
-    """It used to store the id string and fail per row with a type error."""
+def test_binding_a_step_reference_is_a_value_reference_on_a_tool_too():
+    """A StepRef bound as an argument is kept as the ref, serialized $ref, and
+    resolved to the step's value at run — a one-cell step gives the cell."""
     wf = Workflow()
     wf["cutoff"] = pd.DataFrame({"k": [60.0]})
-    with pytest.raises(TypeError, match="cannot bind 'weight' to a step reference"):
-        score.bind(weight=wf["cutoff"])
+    wf["raw"] = pd.DataFrame({"n": [50.0, 70.0]})
+
+    @tool(strict=True)
+    def above(n: float, k: float) -> bool:
+        return n > k
+
+    wf["flag"] = above[mod.map()](wf["raw"], k=wf["cutoff"])
+    assert wf.step("flag").operation.arguments["k"] == StepRef("cutoff")
+    assert wf.step("flag").operation.to_dict()["arguments"]["k"] == {"$ref": "cutoff"}
+    assert wf.step("flag").problems == ()
+    wf.run_all()
+    assert list(wf.step("flag").output.values) == [False, True]
 
 
-def test_binding_a_step_reference_is_refused_on_an_operation_too():
-    wf = Workflow()
-    wf["cutoff"] = pd.DataFrame({"k": [60.0]})
-    with pytest.raises(TypeError, match="step reference"):
-        score[mod.map()].bind(weight=wf["cutoff"])
+def test_binding_a_step_reference_is_a_value_reference(two_workflows):
+    """K10: a bound StepRef is a value reference — kept as a ref, serialized $ref."""
+    a, _ = two_workflows
+    bound = score[mod.map()].bind(weight=a["raw"])
+    assert bound.arguments["weight"] == StepRef("raw")
+    assert bound.to_dict()["arguments"]["weight"] == {"$ref": "raw"}
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1944,7 +1960,7 @@ def test_an_unknown_modifier_parameter_is_caught_at_declaration(three):
     wf["raw"] = three
     wf["t"] = score[mod.map(nmae="s")](wf["raw"])
     assert "map takes no parameter 'nmae'" in wf.step("t").problems[0]
-    assert "it accepts axis, name, over, retries" in wf.step("t").problems[0]
+    assert "it accepts axis, name, retries" in wf.step("t").problems[0]
 
 
 def test_sweep_accepts_arbitrary_parameter_names(three):
@@ -2047,7 +2063,7 @@ def test_a_positional_reference_stores_the_id_not_the_position(three):
     wf = Workflow()
     wf["raw"] = three
     wf["scored"] = score[mod.map()](wf[0])
-    assert wf.step("scored").operation.to_dict()["modifiers"][0]["params"]["over"] == "raw"
+    assert wf.step("scored").operation.to_dict()["input"] == {"$ref": "raw"}
 
 
 def test_an_int_is_a_position_and_a_string_is_a_name():

@@ -1301,7 +1301,9 @@ def _kind(name: str, cls: str, apply: Callable,
           verb: Callable | None = None) -> ModifierKind:
     # `over` names the step this modifier reads; every shape verb takes it even
     # though the verb function itself never sees it (`_lift` pops it).
-    extra = ("over",) if cls == "shape" else ()
+    # `over` is authoring sugar for the input and is hoisted out of the
+    # modifier, so it is never a stored modifier parameter.
+    extra = ()
     return ModifierKind(name, cls, apply,
                         _accepted_params(verb, extra) if verb else None,
                         verb)
@@ -1407,10 +1409,6 @@ def _modifier_settings(name: str, kind: ModifierKind) -> list[dict]:
     if name == "source":                 # a source holds a literal — no settings
         return []
     settings: list[dict] = []
-    if kind.cls == "shape":               # `over` is popped by _lift, so add it here
-        settings.append({"name": "over", "type": "reference",
-                         "required": name != "sweep", "default": None,
-                         "description": "the step this reads"})
     takes_extra = False
     try:
         for p in inspect.signature(kind.verb).parameters.values():
@@ -1459,13 +1457,11 @@ def modifier_catalog() -> dict[str, dict]:
 class Modifier:
     """One entry in an Operation's stack: what to apply, and with what.
 
-    ``params`` may hold a :class:`StepRef` wherever a step id goes. The ref is
-    kept **as the ref** — it is flattened to its id only at the JSON boundary
-    (:meth:`Operation.to_dict`) — because a ref knows which `Workflow` it was
-    read from and a bare id does not. That is the whole provenance mechanism:
-    not a second field to carry, just information this class declines to throw
-    away. Everything that reads a step id does so through ``str()``, which is
-    why holding the richer object costs nothing.
+    ``params`` are **literals only** — how to orchestrate, never what data. A
+    reference to another step is not a modifier setting: the data input lives in
+    :attr:`Operation.input` and a value reference lives in
+    :attr:`Operation.arguments`. ``over=`` is accepted as authoring sugar but is
+    hoisted out of the modifier into the input slot, so it never lands here.
     """
 
     kind: str
@@ -1520,12 +1516,28 @@ class Operation:
     #: so two Operations built the same way stay equal whether or not they
     #: happen to be carrying it.
     fn: Callable | None = field(default=None, compare=False, repr=False)
+    #: The step whose grid this reads — the DATA, taken from the call position.
+    #: Its own slot so no reference ever hides inside a modifier: modifiers say
+    #: only *how* to orchestrate, never *what* data. A StepRef, or None (source).
+    input: Any = None
+
+    @property
+    def reads(self) -> list[str]:
+        """Every step id this reads — the input grid plus any reference arguments."""
+        ids = [str(self.input)] if self.input is not None else []
+        ids += [str(v) for v in self.arguments.values() if isinstance(v, StepRef)]
+        return ids
 
     def _add(self, kind: str, **params) -> "Operation":
+        # `over=` is accepted as authoring sugar but never stored in a modifier:
+        # it is the data input, so it is hoisted to its own slot. Modifiers stay
+        # literal-only and the data stays explicit.
+        over = params.pop("over", None)
+        new_input = self.input if over is None else (
+            over if isinstance(over, StepRef) else StepRef(over))
         return Operation(self.tool_id,
                          self.modifiers + (Modifier(kind, params),),
-                         self.arguments,
-                         self.fn)
+                         self.arguments, self.fn, new_input)
 
     def __getitem__(self, modifiers: Any) -> "Operation":
         """``score[mod.map(over=videos), mod.retry(times=2)]`` — decorate.
@@ -1574,10 +1586,9 @@ class Operation:
         return verbs[-1] if verbs else None
 
     def bind(self, **literals) -> "Operation":
-        """Add bound literals, returning a new Operation — closed, like the rest."""
-        _no_step_refs(self.tool_id, literals)
+        """Add bound arguments — literals, or a StepRef to read another step's value."""
         return Operation(self.tool_id, self.modifiers,
-                         {**self.arguments, **literals}, self.fn)
+                         {**self.arguments, **literals}, self.fn, self.input)
 
     # ── as plain data (what the light export carries) ────────────────────
     def to_dict(self) -> dict:
@@ -1589,10 +1600,11 @@ class Operation:
         """
         return {
             "tool_id": self.tool_id,
-            "arguments": _deref(self.arguments),
-            # The one place a StepRef flattens to its id: JSON starts here.
+            "input": _encode_ref(self.input),          # {"$ref": id} or null — the data
+            "arguments": {k: (_encode_ref(v) if isinstance(v, StepRef) else v)
+                          for k, v in self.arguments.items()},
             "modifiers": [{"kind": m.kind, "params": _deref(m.params)}
-                          for m in self.modifiers],
+                          for m in self.modifiers],     # literal-only
         }
 
     @classmethod
@@ -1601,12 +1613,22 @@ class Operation:
         """Rebuild an Operation from :meth:`to_dict`, re-attaching its function."""
         table = {**BUILTIN_TOOLS, **TOOLS, **(tools or {})}
         fn = table.get(blob["tool_id"])
+        # Legacy (v1) stored the input as `over` inside a modifier; hoist it.
+        modifiers, hoisted = [], None
+        for m in blob["modifiers"]:
+            params = dict(m["params"])
+            over = params.pop("over", None)
+            if over is not None:
+                hoisted = over
+            modifiers.append(Modifier(m["kind"], params))
+        arguments = {k: (_decode_ref(v) if _is_ref(v) else v)
+                     for k, v in (blob.get("arguments") or {}).items()}
         return cls(
             tool_id=blob["tool_id"],
-            modifiers=tuple(Modifier(m["kind"], dict(m["params"]))
-                            for m in blob["modifiers"]),
-            arguments=dict(blob.get("arguments") or {}),
+            modifiers=tuple(modifiers),
+            arguments=arguments,
             fn=fn.fn if isinstance(fn, ToolHandle) else fn,
+            input=_decode_ref(blob.get("input", hoisted)),
         )
 
     # ── the other half: hand the decorated tool some data ────────────────
@@ -1643,27 +1665,22 @@ class Operation:
         return operation.run(source)
 
     def _wire(self, ref: "StepRef") -> "Operation":
-        """Record that this step reads *ref*, inferring a verb if none is set."""
-        verb = self.shape_verb
-        if verb is not None:
-            return Operation(
-                self.tool_id,
-                tuple(Modifier(m.kind, {**m.params, "over": ref})
-                      if m is verb else m for m in self.modifiers),
-                self.arguments, self.fn,
-            )
+        """Record that this step reads *ref* as its input, inferring a verb if none is set."""
+        based = Operation(self.tool_id, self.modifiers,
+                          self.arguments, self.fn, ref)
+        if based.shape_verb is not None:
+            return based
         upstream = None
         if ref.workflow is not None:
             step = ref.workflow.steps.get(ref.id)
-            # A staged upstream still predicts its payload column, which is
-            # what lets `total(acc, value)` read as a reducer before anything
-            # has run — the build-it-all-at-once case.
+            # A staged upstream still predicts its payload column, which is what
+            # lets `total(acc, value)` read as a reducer before anything runs.
             upstream = None if step is None else step.output
         fn = self.fn or TOOLS.get(self.tool_id) \
             or BUILTIN_TOOLS.get(self.tool_id)
         kind = ("map" if fn is None
                 else infer_verb(fn, upstream, self.arguments)[0])
-        return self._add(kind, over=ref)      # the ref, not ref.id — it knows its workflow
+        return based._add(kind)               # _add carries based.input forward
 
     def run(self, source: Any, tools: dict[str, Callable] | None = None) -> Any:
         """Compile the stack and apply it to *source*.
@@ -1676,10 +1693,9 @@ class Operation:
         if isinstance(source, StepRef):
             raise TypeError(
                 f"cannot run against the reference {source.id!r} — a reference "
-                "names a step, it is not data. A step's input is part of its "
-                "definition, so it belongs in the modifier: "
-                f"wf[...] = <tool>[mod.map(over=wf[{source.id!r}])]. "
-                "Calling an Operation is for data you already hold."
+                "names a step, it is not data. Wire it as the step's input via "
+                f"the call position: wf[...] = <tool>[mod...](wf[{source.id!r}]). "
+                "Calling an Operation directly is for data you already hold."
             )
         table = {**BUILTIN_TOOLS, **TOOLS, **(tools or {})}
         if self.fn is not None:
@@ -1696,9 +1712,12 @@ class Operation:
     def __repr__(self) -> str:
         # Written order, outermost first — the order the brackets were typed in,
         # so a repr can be compared against the source that produced it. The
-        # tool comes last because that is what the layers close over.
+        # tool comes last because that is what the layers close over. The input
+        # is flattened to its id, so a repr does not depend on how a step was
+        # named (same reason __eq__ flattens it).
         stack = "".join(f"{m!r} ∘ " for m in self.layers)
-        return f"<Operation {stack}{self.tool_id}>"
+        src = f" over={self.input.id!r}" if isinstance(self.input, StepRef) else ""
+        return f"<Operation {stack}{self.tool_id}{src}>"
 
 
 def op(tool_id: str, **arguments) -> Operation:
@@ -1736,32 +1755,33 @@ class StepRef:
         return f"<{self.id}>"
 
 
-def _no_step_refs(tool_id: str, literals: dict) -> None:
-    """Refuse a :class:`StepRef` bound as a constant.
-
-    A bound literal is a **value**, so a reference is never what was meant —
-    and dereferencing it would store the step's *id string*, which then reaches
-    the tool as text. That used to pass declaration silently and fail per row
-    with a type error about a ``str``. ``over=`` is where a reference belongs.
-    """
-    refs = [name for name, value in literals.items() if isinstance(value, StepRef)]
-    if refs:
-        names = ", ".join(map(repr, refs))
-        raise TypeError(
-            f"cannot bind {names} to a step reference: a bound literal is a "
-            f"constant, and a reference names a step rather than its value. "
-            f"{tool_id}() would have received the id as a string. A step's "
-            f"input is `over=` (or the call position), not an argument — and "
-            f"one step reads one input, so combining two needs a merge verb."
-        )
-
-
 def _deref(value: Any) -> Any:
     """StepRefs become their ids; everything else passes through."""
     if isinstance(value, StepRef):
         return value.id
     if isinstance(value, dict):
         return {k: _deref(v) for k, v in value.items()}
+    return value
+
+
+def _encode_ref(ref: Any) -> dict | None:
+    """A step reference as JSON — ``{"$ref": id}``, distinct from a literal string."""
+    return None if ref is None else {"$ref": str(ref)}
+
+
+def _is_ref(value: Any) -> bool:
+    """True for a ``{"$ref": id}`` reference envelope."""
+    return isinstance(value, dict) and set(value) == {"$ref"}
+
+
+def _decode_ref(value: Any) -> Any:
+    """JSON back to a StepRef. A bare id string (legacy ``over``) decodes too."""
+    if value is None:
+        return None
+    if _is_ref(value):
+        return StepRef(value["$ref"])
+    if isinstance(value, str):
+        return StepRef(value)
     return value
 
 
@@ -1809,9 +1829,9 @@ class ToolHandle:
         ``score.bind(threshold=5)[mod.map(over=rows)]`` — the literals become
         the Operation's ``arguments`` and are applied innermost, inside every
         modifier, so a retry re-runs the same call and a map passes them to
-        every item.
+        every item. A value may be a :class:`StepRef`: a *value reference*
+        (K10), kept as the ref and resolved to that step's value at run.
         """
-        _no_step_refs(self.id, literals)
         return Operation(tool_id=self.id, arguments=dict(literals), fn=self.fn)
 
     def _start(self) -> Operation:
@@ -2087,42 +2107,44 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 f"{type(value).__name__}{extra}"
             )
 
+    # The references this operation reads: the input grid, plus any argument
+    # bound to a step. Both are validated the same way.
+    references: list[tuple[str, Any]] = []
+    if operation.input is not None:
+        references.append(("input", operation.input))
+    references += [(f"argument {name!r}", value)
+                   for name, value in operation.arguments.items()
+                   if isinstance(value, StepRef)]
+
     # 3. a reference has to have been read from *this* workflow. A step is
     #    named by its id, so a ref borrowed from another workflow would resolve
     #    against a same-named local step — silently running the wrong data when
-    #    both happen to have one. A StepRef knows which workflow it came from,
-    #    which is the whole reason `params` keeps the ref instead of its id.
-    for modifier in operation.modifiers:
-        over = modifier.params.get("over")
-        if workflow is None or not isinstance(over, StepRef):
+    #    both happen to have one. A StepRef knows which workflow it came from.
+    for label, ref in references:
+        if workflow is None or not isinstance(ref, StepRef):
             continue
-        if over.workflow is None or over.workflow is workflow:
+        if ref.workflow is None or ref.workflow is workflow:
             continue
-        name = over.id
+        name = ref.id
         problems.append(
-            f"{modifier.kind} over {name!r} reads a different Workflow. A step "
-            f"is named by its id, so this would resolve to *this* workflow's "
-            f"{name!r} — not the step you pointed at. Read it from this "
-            f"workflow, or pass {name!r} as a plain string to say you mean "
-            f"whatever {name!r} is here."
+            f"{label} {name!r} reads a different Workflow. A step is named by "
+            f"its id, so this would resolve to *this* workflow's {name!r} — not "
+            f"the step you pointed at. Read it from this workflow."
         )
 
-    # 4. `over` has to name an existing, valid, non-circular step
-    for modifier in operation.modifiers:
-        over = modifier.params.get("over")
-        if over is None or workflow is None:
+    # 4. a reference has to name an existing, valid, non-circular step
+    for label, ref in references:
+        if workflow is None:
             continue
-        name = str(over)
+        name = str(ref)
         if name == step_id:
-            problems.append(f"{modifier.kind} over itself ({name!r})")
+            problems.append(f"{label} is itself ({name!r})")
         elif name not in workflow.steps:
-            problems.append(
-                f"{modifier.kind} over {name!r}, which is not an earlier step"
-            )
+            problems.append(f"{label} {name!r}, which is not an earlier step")
         elif not workflow.steps[name].valid:
-            problems.append(f"{modifier.kind} over {name!r}, which is invalid")
+            problems.append(f"{label} {name!r}, which is invalid")
         elif step_id is not None and step_id in workflow._upstream_ids(name):
-            problems.append(f"{modifier.kind} over {name!r} is circular")
+            problems.append(f"{label} {name!r} is circular")
 
     # 5. at most one shape verb per step (§11). Two shape changes inside one
     #    step make an intermediate grid with no cell address, so a unit that
@@ -2229,7 +2251,7 @@ def _missing_columns(operation: Operation, fn: Callable,
         return []
     return [
         f"{operation.tool_id}() needs {', '.join(repr(m) for m in missing)}, "
-        f"which {str(verb.params.get('over', 'the input'))!r} does not have "
+        f"which {str(operation.input) if operation.input is not None else 'the input'!r} does not have "
         f"(it has {', '.join(sorted(available)) or 'no columns'})"
     ]
 
@@ -2257,6 +2279,8 @@ def _type_mismatches(operation: Operation, fn: Callable,
         parameter = parameters.get(name)
         if parameter is None or parameter.annotation is inspect.Parameter.empty:
             continue
+        if isinstance(value, StepRef):
+            continue                     # a value reference, resolved at run
         if _value_fits(value, parameter.annotation) is False:
             problems.append(
                 f"{operation.tool_id}() declares {name}: "
@@ -2287,7 +2311,7 @@ def _type_mismatches(operation: Operation, fn: Callable,
             problems.append(
                 f"{operation.tool_id}() declares {parameter.name}: "
                 f"{_type_name(parameter.annotation)}, but "
-                f"{str(verb.params.get('over', 'the input'))!r} has "
+                f"{str(operation.input) if operation.input is not None else 'the input'!r} has "
                 f"{parameter.name} as {frame[parameter.name].dtype}"
             )
     return problems
@@ -2704,11 +2728,9 @@ class Workflow:
 
     # ── editing: delete, rename, and staleness ───────────────────────
     def _dependents(self, step_id: str) -> list[str]:
-        """Steps whose ``over=`` reads *step_id* directly, in insertion order."""
+        """Steps that read *step_id* — as input or as a reference argument."""
         return [sid for sid, st in self.steps.items()
-                if any(m.params.get("over") is not None
-                       and str(m.params.get("over")) == step_id
-                       for m in st.operation.modifiers)]
+                if step_id in st.operation.reads]
 
     def __delitem__(self, step_id: str) -> None:
         self.remove(step_id)
@@ -2748,15 +2770,20 @@ class Workflow:
                       for sid, st in self.steps.items()}
         self.steps[new].step_id = new
         for st in self.steps.values():
-            modifiers = tuple(
-                Modifier(m.kind, {**m.params, "over": StepRef(new, self)})
-                if (m.params.get("over") is not None
-                    and str(m.params.get("over")) == old) else m
-                for m in st.operation.modifiers
-            )
-            if modifiers != st.operation.modifiers:
-                op = st.operation
-                st.operation = Operation(op.tool_id, modifiers, op.arguments, op.fn)
+            op = st.operation
+            changed = False
+            new_input = op.input
+            if op.input is not None and str(op.input) == old:
+                new_input, changed = StepRef(new, self), True
+            new_args = {}
+            for key, value in op.arguments.items():
+                if isinstance(value, StepRef) and str(value) == old:
+                    new_args[key], changed = StepRef(new, self), True
+                else:
+                    new_args[key] = value
+            if changed:
+                st.operation = Operation(op.tool_id, op.modifiers, new_args,
+                                         op.fn, new_input)
 
     def _mark_stale_dependents(self, step_id: str) -> None:
         """Mark every transitive reader that has already run as ``stale``.
@@ -2779,13 +2806,10 @@ class Workflow:
     # ── what a step reads ────────────────────────────────────────────────
     def _known_columns(self, operation: Operation) -> list[str]:
         """The columns this operation's input will have, in order, as far as known."""
-        for modifier in operation.modifiers:
-            over = modifier.params.get("over")
-            if over is None:
-                continue
-            step = self.steps.get(str(over))
-            return [] if step is None else predicted_columns(step.output)
-        return []
+        if operation.input is None:
+            return []
+        step = self.steps.get(str(operation.input))
+        return [] if step is None else predicted_columns(step.output)
 
     def _known_index(self, operation: Operation) -> Sequence[Any] | None:
         """The input's index, when known — enough to stage, short of running.
@@ -2794,43 +2818,51 @@ class Workflow:
         cardinality propagates down the chain before anything has executed.
         That is §7's level 2/3 without a run.
         """
-        for modifier in operation.modifiers:
-            over = modifier.params.get("over")
-            if over is None:
-                continue
-            step = self.steps.get(str(over))
-            if step is None or not step.valid:
-                return None
-            index = step.output.data.index
-            return index if len(index) or not step.output.meta.get("staged") else None
-        return None
+        if operation.input is None:
+            return None
+        step = self.steps.get(str(operation.input))
+        if step is None or not step.valid:
+            return None
+        index = step.output.data.index
+        return index if len(index) or not step.output.meta.get("staged") else None
 
     def _input_for(self, operation: Operation) -> Any | None:
         """The upstream Output this operation reads, once that step has run."""
-        for modifier in operation.modifiers:
-            over = modifier.params.get("over")
-            if over is None:
-                continue
-            step = self.steps.get(str(over))
-            if step is None or step.output.meta.get("staged"):
-                return None
-            return step.output
-        return None
+        if operation.input is None:
+            return None
+        step = self.steps.get(str(operation.input))
+        if step is None or step.output.meta.get("staged"):
+            return None
+        return step.output
 
     # ── running ──────────────────────────────────────────────────────────
     def pending(self, step_id: str) -> list[str]:
         """The steps *step_id* reads that have not run yet, nearest first."""
         waiting: list[str] = []
-        for modifier in self.steps[step_id].operation.modifiers:
-            over = modifier.params.get("over")
-            if over is None:
-                continue
-            name = str(over)
+        for name in self.steps[step_id].operation.reads:
             upstream = self.steps.get(name)
             if upstream is not None and upstream.output.meta.get("staged"):
                 waiting.extend(self.pending(name))
                 waiting.append(name)
         return waiting
+
+    def _resolve_arguments(self, operation: Operation) -> Operation:
+        """Replace each reference argument with the step's value.
+
+        A one-cell step gives the cell; anything else gives the whole grid. A
+        plain Operation (no reference args) is returned unchanged.
+        """
+        if not any(isinstance(v, StepRef) for v in operation.arguments.values()):
+            return operation
+        resolved = {}
+        for name, value in operation.arguments.items():
+            if isinstance(value, StepRef):
+                data = self.steps[str(value)].output.data
+                resolved[name] = data.iloc[0, 0] if data.shape == (1, 1) else data
+            else:
+                resolved[name] = value
+        return Operation(operation.tool_id, operation.modifiers, resolved,
+                         operation.fn, operation.input)
 
     def run(self, step_id: str, tools: dict[str, Callable] | None = None) -> Step:
         """Execute one step and replace its staged Output with the real one.
@@ -2850,7 +2882,7 @@ class Workflow:
                     or BUILTIN_TOOLS.get(step.operation.tool_id))
             if not is_identity(tool):
                 # A tool source computes its grid from a no-input tool.
-                step.output = step.operation.run(None, tools)
+                step.output = self._resolve_arguments(step.operation).run(None, tools)
                 self._restage_after(step_id)
                 return step
             # A literal source holds its data, so running one is a no-op — unless
@@ -2870,7 +2902,8 @@ class Workflow:
                 f"Run {' then '.join(repr(w) for w in dict.fromkeys(waiting))} "
                 f"first, or call run_all()."
             )
-        step.output = step.operation.run(self._input_for(step.operation), tools)
+        resolved = self._resolve_arguments(step.operation)
+        step.output = resolved.run(self._input_for(resolved), tools)
         self._restage_after(step_id)
         return step
 
@@ -2911,8 +2944,7 @@ class Workflow:
                     continue
                 if not other.output.meta.get("staged"):
                     continue                       # already has real data
-                if not any(str(m.params.get("over")) in changed
-                           for m in other.operation.modifiers):
+                if not any(name in changed for name in other.operation.reads):
                     continue
                 before = other.output.meta.get("expected")
                 other.output = stage(other.operation, self, other.problems)
@@ -2926,11 +2958,7 @@ class Workflow:
         step = self.steps.get(step_id)
         if step is None:
             return seen
-        for modifier in step.operation.modifiers:
-            over = modifier.params.get("over")
-            if over is None:
-                continue
-            name = str(over)
+        for name in step.operation.reads:
             if name in seen:
                 continue
             seen.add(name)
