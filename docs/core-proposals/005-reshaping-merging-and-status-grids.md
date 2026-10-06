@@ -154,6 +154,19 @@ A `join` output row records *both* origins in the ledger's `unit` (a pair);
 `stack` → `zip` → `join`. `join` last, chosen against a real pipeline so `how=`
 and the collision rule are decided by a case, not guessed.
 
+### B5. Parked idea — a pure-structure `reshape` container (later)
+
+The "one shape verb per step" rule exists so a unit that *fails* at an
+intermediate shape still has a cell address. But the no-tool verbs
+(`select` / `drop` / `slice` / `sort` / `distinct` / `rename`) **never** fail —
+they apply no tool — so several of them could safely compose in a single
+`reshape(...)` step without the addressable-unit problem. That would give
+single-step block selection (the K9 literal-block case) cleanly. Scope would be
+strict: a step may hold more than one shape verb **only if all of them apply no
+tool**; anything that computes (`map`/`filter`/`expand`/`collapse`/`group`/
+`sweep`/`widen`) still gets exactly one. Deferred — captured so it isn't
+rediscovered.
+
 ---
 
 ## 4. Decision C — the warning / severity tier

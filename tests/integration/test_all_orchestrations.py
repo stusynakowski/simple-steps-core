@@ -160,9 +160,23 @@ def test_chained_map_over_a_map(wf):
     assert wf.step("again").output.values == [10, 20, 30, 20]
 
 
+# ── combine verbs — read more than one grid (operation constructors) ──
+def test_combine_verbs_read_more_than_one_grid(wf):
+    # join: a lookup on a shared key, left-preserving
+    enriched = wf.step("enriched").output.data
+    assert list(enriched.columns) == ["city", "n", "region"]
+    assert list(enriched["region"]) == ["west", "east", "west", "west"]
+    # stack: rows appended — the sum of both inputs
+    assert list(wf.step("all_readings").output.data["n"]) == [1, 2, 3, 2, 5, 6]
+    # zip: two grids aligned by position, columns unioned
+    zipped = wf.step("zipped").output.data
+    assert list(zipped.columns) == ["n", "score"]
+    assert zipped.to_dict("list") == {"n": [1, 2, 3, 2], "score": [10, 20, 30, 20]}
+
+
 def test_positional_access_and_catalog(wf):
     assert wf[0].id == "readings"          # first step, by position
-    assert wf[-1].id == "again"            # last step
+    assert wf[-1].id == "zipped"           # last step
     cat = pipeline.grid.catalog()
     assert "scale" in cat and cat["count"]["origin"] == "builtin"
 

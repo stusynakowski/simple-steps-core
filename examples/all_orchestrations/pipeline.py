@@ -23,7 +23,7 @@ from __future__ import annotations
 import pandas as pd
 
 from simple_steps_core import grid
-from simple_steps_core.grid import mod, op, tool
+from simple_steps_core.grid import join, mod, op, stack, tool, zip_
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -180,6 +180,17 @@ def build() -> grid.Workflow:
 
     # ── chained fan-out: map over a map step ──
     wf["again"] = scale[mod.map(over=wf["scored"], name="again")]
+
+    # ── combine verbs — read more than one grid (operation constructors) ──
+    # These are not modifiers: a combine is a function of its grids, so it is
+    # written `join(a, b, ...)`, not `op[mod.join(...)]`. Each applies no tool.
+    wf["city_info"] = pd.DataFrame({"city": ["SF", "NYC", "LA"],
+                                    "region": ["west", "east", "west"]})
+    wf["more"] = pd.DataFrame({"city": ["BOS", "SEA"], "n": [5, 6]})
+    wf["enriched"] = join(wf["readings"], wf["city_info"], on="city", how="left")
+    wf["all_readings"] = stack(wf["readings"], wf["more"])       # 4 + 2 = 6 rows
+    wf["scores_only"] = mod.select(over=wf["scored"], columns=["score"])
+    wf["zipped"] = zip_(wf["ns"], wf["scores_only"])            # n + score, by position
 
     return wf
 

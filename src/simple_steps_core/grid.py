@@ -48,6 +48,7 @@ __all__ = [
     "modifier_catalog",
     "TOOLS",
     "op", "Modifier", "Operation",
+    "join", "stack", "zip_", "COMBINE", "is_combine",
     "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "warn", "stage",
     "STRICT_TYPES", "annotation_problems", "declaration_problems",
     "PARAM_TYPES", "PARAM_TYPES_BY_VERB",
@@ -1531,11 +1532,22 @@ class Operation:
     #: Its own slot so no reference ever hides inside a modifier: modifiers say
     #: only *how* to orchestrate, never *what* data. A StepRef, or None (source).
     input: Any = None
+    #: Every grid a **combine** verb reads (`join`/`stack`/`zip`), primary first
+    #: — `()` for an ordinary single-input step, where :attr:`input` is the one
+    #: grid. A combine sets both: ``inputs`` holds them all, ``input`` the first.
+    inputs: tuple = ()
+
+    @property
+    def grids(self) -> tuple:
+        """The grid inputs, primary first — `inputs` for a combine, else `input`."""
+        if self.inputs:
+            return self.inputs
+        return (self.input,) if self.input is not None else ()
 
     @property
     def reads(self) -> list[str]:
-        """Every step id this reads — the input grid plus any reference arguments."""
-        ids = [str(self.input)] if self.input is not None else []
+        """Every step id this reads — the grid input(s) plus any reference arguments."""
+        ids = [str(g) for g in self.grids]
         ids += [str(v) for v in self.arguments.values() if isinstance(v, StepRef)]
         return ids
 
@@ -1609,7 +1621,7 @@ class Operation:
         definition is a few strings and numbers, so exporting a workflow costs
         nothing and does not drag payloads along.
         """
-        return {
+        blob = {
             "tool_id": self.tool_id,
             "input": _encode_ref(self.input),          # {"$ref": id} or null — the data
             "arguments": {k: (_encode_ref(v) if isinstance(v, StepRef) else v)
@@ -1617,6 +1629,9 @@ class Operation:
             "modifiers": [{"kind": m.kind, "params": _deref(m.params)}
                           for m in self.modifiers],     # literal-only
         }
+        if self.inputs:                                 # a combine reads many grids
+            blob["inputs"] = [_encode_ref(g) for g in self.inputs]
+        return blob
 
     @classmethod
     def from_dict(cls, blob: dict, tools: dict[str, Callable] | None = None
@@ -1634,12 +1649,14 @@ class Operation:
             modifiers.append(Modifier(m["kind"], params))
         arguments = {k: (_decode_ref(v) if _is_ref(v) else v)
                      for k, v in (blob.get("arguments") or {}).items()}
+        inputs = tuple(_decode_ref(g) for g in blob.get("inputs") or ())
         return cls(
             tool_id=blob["tool_id"],
             modifiers=tuple(modifiers),
             arguments=arguments,
             fn=fn.fn if isinstance(fn, ToolHandle) else fn,
             input=_decode_ref(blob.get("input", hoisted)),
+            inputs=inputs,
         )
 
     # ── the other half: hand the decorated tool some data ────────────────
@@ -2067,10 +2084,11 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     """
     problems: list[str] = []
 
-    # 1. the tool has to exist
+    # 1. the tool has to exist — unless this is a combine verb, which names no
+    #    tool (join/stack/zip apply none; their id is the verb itself).
     fn = operation.fn or TOOLS.get(operation.tool_id) \
         or BUILTIN_TOOLS.get(operation.tool_id)
-    if fn is None:
+    if fn is None and not is_combine(operation):
         problems.append(f"unknown tool {operation.tool_id!r}")
 
     # 2. every modifier kind has to be in the vocabulary
@@ -2130,11 +2148,25 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                     f"so a step without it cannot run"
                 )
 
-    # The references this operation reads: the input grid, plus any argument
-    # bound to a step. Both are validated the same way.
+    # 2e. a combine (join/stack/zip) reads several grids and merges on literal
+    #     config; it has no tool, so its only extra declaration checks are its
+    #     arity and, for a join, its key.
+    if is_combine(operation):
+        spec = COMBINE[operation.tool_id]
+        if len(operation.grids) < spec["min_inputs"]:
+            problems.append(
+                f"{operation.tool_id} needs at least {spec['min_inputs']} grids "
+                f"to combine, got {len(operation.grids)}"
+            )
+        if operation.tool_id == "join" and not operation.arguments.get("on"):
+            problems.append("join needs on= — the key column(s) to merge on")
+
+    # The references this operation reads: the grid input(s), plus any argument
+    # bound to a step. All are validated the same way.
     references: list[tuple[str, Any]] = []
-    if operation.input is not None:
-        references.append(("input", operation.input))
+    grids = operation.grids
+    for i, g in enumerate(grids):
+        references.append(("input" if len(grids) <= 1 else f"input {i + 1}", g))
     references += [(f"argument {name!r}", value)
                    for name, value in operation.arguments.items()
                    if isinstance(value, StepRef)]
@@ -2527,6 +2559,151 @@ def infer_verb(fn: Callable, upstream: Any, literals: dict) -> tuple[str, str]:
     return "map", "applying it per row"
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Combine verbs — join / stack / zip, operations in their own right (005 B)
+# ─────────────────────────────────────────────────────────────────────────
+# A combine reads more than one grid and applies no tool, so it is not a
+# modifier: it is built by a constructor (`join(a, b, on=...)`) and stored as
+# its own tool_id with the grids in `Operation.inputs`. The config is literal;
+# the grids are references in `inputs`, never in modifiers.
+
+def _combine_stack(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
+    return pd.concat(frames, axis=0, join=config.get("join", "outer"),
+                     ignore_index=True)
+
+
+def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
+    sizes = [len(f) for f in frames]
+    if len(set(sizes)) > 1:
+        raise ValueError(f"zip needs grids of equal length, got {sizes}")
+    data = pd.concat([f.reset_index(drop=True) for f in frames], axis=1)
+    # A shared column name would appear twice; keep the first (union, first
+    # wins) so the result matches the staged prediction.
+    return data.loc[:, ~data.columns.duplicated()]
+
+
+def _combine_join(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
+    left, right = frames
+    suffixes = tuple(config.get("suffixes") or ("_left", "_right"))
+    return pd.merge(left, right, on=config.get("on"),
+                    how=config.get("how", "inner"),
+                    suffixes=suffixes).reset_index(drop=True)
+
+
+#: Each combine verb: how it folds row counts (for staging), the minimum grids
+#: it reads, and the function that performs it. Keyed by the tool_id a combine
+#: Operation carries.
+COMBINE: dict[str, dict] = {
+    "stack": {"rows": "sum", "min_inputs": 1, "apply": _combine_stack},
+    "zip":   {"rows": "same", "min_inputs": 2, "apply": _combine_zip},
+    "join":  {"rows": "unknown", "min_inputs": 2, "apply": _combine_join},
+}
+
+
+def is_combine(operation: Operation) -> bool:
+    """True for a ``join``/``stack``/``zip`` — a multi-grid operation."""
+    return operation.tool_id in COMBINE
+
+
+def _combine_op(kind: str, grids: tuple, config: dict) -> Operation:
+    refs = tuple(g if isinstance(g, StepRef) else StepRef(str(g)) for g in grids)
+    return Operation(tool_id=kind, arguments=config,
+                     input=refs[0] if refs else None, inputs=refs)
+
+
+def stack(*grids: Any, join: str = "outer") -> Operation:
+    """Append the rows of several grids — a vertical concat. The row count is the
+    **sum**; columns are the union (``join="inner"`` keeps only shared ones)."""
+    return _combine_op("stack", grids, {"join": join})
+
+
+def zip_(*grids: Any) -> Operation:
+    """Join grids **by position**, row *i* with row *i* — a horizontal concat.
+    Refuses grids of unequal length. Named ``zip_`` so it does not shadow the
+    builtin ``zip``."""
+    return _combine_op("zip", grids, {})
+
+
+def join(left: Any, right: Any, *, on: Any = None, how: str = "inner",
+         suffixes: Any = ("_left", "_right")) -> Operation:
+    """Merge two grids on a shared key, like ``pd.merge``. The row count is
+    **unknown** until it runs (1:1, 1:many, many:many); columns are the union,
+    with ``suffixes`` applied to any non-key collision."""
+    return _combine_op("join", (left, right),
+                       {"on": on, "how": how, "suffixes": list(suffixes)})
+
+
+def _combine_columns(operation: Operation, schemas: list[list[str]]) -> list[str]:
+    """Predicted output columns of a combine, folded from its inputs' schemas."""
+    if operation.tool_id == "join":
+        on = operation.arguments.get("on")
+        keys = [on] if isinstance(on, str) else list(on or [])
+        suffixes = operation.arguments.get("suffixes") or ["_left", "_right"]
+        left, right = schemas
+        out = list(left)
+        for c in right:
+            if c in keys:
+                continue
+            if c in left:                       # collision — pandas suffixes both
+                if c in out:
+                    out[out.index(c)] = f"{c}{suffixes[0]}"
+                out.append(f"{c}{suffixes[1]}")
+            else:
+                out.append(c)
+        return out
+    out: list[str] = []                         # stack / zip: union, first wins
+    for schema in schemas:
+        for c in schema:
+            if c not in out:
+                out.append(c)
+    return out
+
+
+def _stage_combine(operation: Operation, workflow: "Workflow | None") -> Output:
+    """Stage a combine from its inputs' predicted schemas and row counts."""
+    spec = COMBINE[operation.tool_id]
+    steps = ([] if workflow is None
+             else [workflow.steps.get(str(g)) for g in operation.inputs])
+    schemas: list[list[str]] = []
+    counts: list[Any] = []
+    for st in steps:
+        if st is None:
+            schemas.append([]); counts.append(None); continue
+        schemas.append(predicted_columns(st.output))
+        counts.append(st.output.meta.get("expected")
+                      if st.output.meta.get("staged") else len(st.output.data))
+    columns = _combine_columns(operation, schemas)
+    rule, expected = spec["rows"], None
+    known = bool(counts) and all(c is not None for c in counts)
+    if rule == "sum" and known:
+        expected = sum(counts)
+    elif rule == "same" and known and len(set(counts)) == 1:
+        expected = counts[0]
+    index = list(range(expected)) if expected is not None else []
+    records = [{"status": "staged", "error": None, "attempts": 0, "seconds": 0.0}
+               for _ in index]
+    return Output(
+        data=pd.DataFrame({c: [None] * len(index) for c in columns or [PAYLOAD]},
+                          index=index),
+        ledger=_ledger(records, index),
+        meta={"verb": operation.tool_id, "form": "column", "payload": None,
+              "staged": True, "problems": (), "n_in": None, "expected": expected,
+              "rows_rule": rule, "columns": columns},
+    )
+
+
+def _run_combine(operation: Operation, frames: list[pd.DataFrame]) -> Output:
+    """Apply a combine to its (already-run) input grids — no tool, so every
+    output row is trivially complete."""
+    data = COMBINE[operation.tool_id]["apply"](frames, operation.arguments)
+    records = [{"status": "completed", "error": None, "attempts": 0,
+                "seconds": 0.0} for _ in range(len(data))]
+    return Output(data=data, ledger=_ledger(records, data.index),
+                  meta={"verb": operation.tool_id, "form": "column",
+                        "payload": None, "n_in": None,
+                        "columns": list(data.columns)})
+
+
 def stage(operation: Operation, workflow: "Workflow | None" = None,
           problems: tuple[str, ...] = ()) -> Output:
     """The Output a step has before it runs — the slot, with what we know in it.
@@ -2540,10 +2717,8 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     ledger is materialized only when the addresses are actually known (§7's
     level 3) — an empty ledger is the honest answer for the rest.
     """
-    verb = operation.shape_verb
-    kind = verb.kind if verb else None
-
     if problems:
+        kind = operation.shape_verb.kind if operation.shape_verb else None
         return Output(
             data=pd.DataFrame({PAYLOAD: [None]}, index=[0]),
             ledger=_ledger([{"status": "invalid", "error": problems[0],
@@ -2552,6 +2727,10 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
                   "staged": True, "problems": problems, "n_in": None,
                   "expected": None, "rows_rule": None, "columns": [PAYLOAD]},
         )
+    if is_combine(operation):
+        return _stage_combine(operation, workflow)
+    verb = operation.shape_verb
+    kind = verb.kind if verb else None
 
     known = workflow._known_index(operation) if workflow is not None else None
     n_in = None if known is None else len(known)
@@ -2685,6 +2864,15 @@ class Step:
         """
         if not self.valid:
             return f"invalid · {self.problems[0]}"
+        if is_combine(self.operation):
+            kind = self.operation.tool_id
+            if not self.output.meta.get("staged"):
+                n = len(self.output.data)
+                return f"{kind} · {n} cell{'' if n == 1 else 's'}"
+            expected = self.output.meta.get("expected")
+            if expected is not None:
+                return f"{kind} · {expected} cells"
+            return f"{kind} · unknown count from {len(self.operation.inputs)} grids"
         verb = self.output.meta.get("verb")
         tool = self.operation.tool_id
         if not self.output.meta.get("staged"):
@@ -2984,6 +3172,12 @@ class Workflow:
                 f"Run {' then '.join(repr(w) for w in dict.fromkeys(waiting))} "
                 f"first, or call run_all()."
             )
+        if is_combine(step.operation):
+            frames = [rows(self.steps[str(g)].output)
+                      for g in step.operation.inputs]
+            step.output = _run_combine(step.operation, frames)
+            self._restage_after(step_id)
+            return step
         resolved = self._resolve_arguments(step.operation)
         step.output = resolved.run(self._input_for(resolved), tools)
         self._restage_after(step_id)
