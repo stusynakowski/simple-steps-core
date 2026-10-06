@@ -1,430 +1,194 @@
-# Integration Guide
+# Integration guide — the grid model
 
-> **Status: describes the engine as it is today.** The object model is converging
-> on a single modifier stack — see [object-model.md](object-model.md) for what is
-> changing and [shape-algebra.md](shape-algebra.md) for why. The engine has not
-> moved yet, so everything here remains accurate.
+> **Status: the grid model is the integration surface.** This guide is how an
+> application embeds `simple-steps-core` today. The older engine runtime
+> (`CoreEngine`, `SessionManager`, `Server`) is **legacy** and being retired
+> onto this model ([migration-plan.md](migration-plan.md)); do not build new
+> integrations against it.
 
-How to embed `simple-steps-core` into a backend service (e.g. behind a React
-API) where end users author and run their own workflows.
-
-This guide is task-oriented. For the conceptual overview see the
-[README](../README.md).
+How to embed the grid core into a backend where end users author and run their
+own workflows — e.g. behind a React API ([react-api.md](react-api.md) is the
+proposed HTTP shape). The runnable reference is
+[examples/all_orchestrations/](../examples/all_orchestrations/).
 
 ---
 
 ## 1. Install
 
 ```bash
-python -m pip install simple-steps-core
+python -m pip install simple-steps-core      # runtime deps: pandas, pydantic
 ```
-
-The only runtime dependency is `pydantic>=2.6`. Everything below imports from
-the single stable entrypoint:
 
 ```python
-from simple_steps_core import (
-    CoreEngine, ToolRegistry, Workflow,
-    register_orchestrators, make_session_id, SessionManager,
-    SessionSnapshot, CodecRegistry, ToolCall, MapResult,
-)
+from simple_steps_core import grid
+from simple_steps_core.grid import tool, op, mod
 ```
 
-> Import only from `simple_steps_core`. Submodule paths are internal and may
-> change.
+Import the **module** — `grid.Workflow`/`Operation`/`Step` disambiguate from the
+legacy engine's same-named classes.
 
 ---
 
 ## 2. Mental model
 
 The backend owns the only Python callables. The frontend never executes
-anything — it **authors structured tool calls** (JSON like
-`{"operation_id": "load_csv", "arguments": {"filepath": "x.csv"}}`) and reads
-back step status/results.
+anything — it **authors a workflow as JSON** (a list of operations) and reads
+back staged shapes and, after a run, the output grids.
 
 ```
-React UI  ──(JSON: steps as tool calls)──▶  Backend API
+React UI  ──(JSON: steps as operations)──▶  Backend
    ▲                                          │
-   │                                          ├─ REGISTRY.list_definitions()  → operation palette
-   └──(status + results)──────────────────────┤─ Workflow.export_session()    → persist run
-                                              └─ engine.arun()                → execute
+   │                                          ├─ grid.catalog()        → the tool palette
+   └──(staged shapes, then data+ledger)───────┤─ Workflow.from_json()  → build + validate (declare)
+                                              ├─ wf.run_all()          → execute
+                                              └─ wf.to_session_json()  → persist the run
 ```
+
+The one idea the client must absorb: **declaring a step is not running it.**
+A declared step already knows its shape and cell count and carries any
+`problems`, having computed nothing — so a 40-step workflow can be laid out and
+validated before any expensive call runs.
 
 Three roles:
 
-| Concept | Role |
-| --- | --- |
-| **Operation** | A registered Python function (the unit of work). |
-| **Workflow** | An ordered list of steps; each step is a structured tool call. |
-| **SessionContext** | Per-run payload store, isolated by `session_id`. |
+| concept | role |
+|---|---|
+| **tool** | a Python function the backend registers with `@tool` |
+| **operation** | a tool + a modifier stack + bound literals — the JSON a client authors |
+| **workflow** | ordered steps, run against the data a source step carries |
 
 ---
 
-## 3. Startup: register operations once, then freeze
+## 3. Expose the tool palette
 
-Register every operation (and the built-in orchestrators) during application
-startup, **before** serving requests, then freeze the registry. A frozen
-registry is read-only, which makes concurrent reads safe across requests
-without locks.
+A *tools file* is a plain module that `@tool`-decorates functions; importing it
+registers them into `grid.TOOLS`.
 
 ```python
-from simple_steps_core import ToolRegistry, register_orchestrators
+# tools.py
+from simple_steps_core.grid import tool
 
-registry = ToolRegistry()
-
-def load_csv(filepath: str) -> list[dict]:
-    ...
-
-def filter_rows(data: list[dict], min_value: int = 0) -> list[dict]:
-    ...
-
-registry.register("load_csv", load_csv, description="Load a CSV file")
-registry.register("filter_rows", filter_rows, description="Keep rows >= min_value")
-
-# Add map / filter / expand / collapse
-register_orchestrators(registry)
-
-# Lock it for the lifetime of the process.
-registry.freeze()
-```
-
-Registering after `freeze()` raises `RegistryFrozenError`.
-
-### Shipping operations as "packs"
-
-Group related operations in a module and load it on boot:
-
-```python
-# my_app/ops/csv_ops.py
-from simple_steps_core import register_tool
-
-@register_tool("load_csv", description="Load a CSV file")
-def load_csv(filepath: str) -> list[dict]:
-    ...
+@tool
+def scale(n, weight=1) -> int:
+    return n * 10 * weight
 ```
 
 ```python
-from simple_steps_core.packs.loader import load_pack_module
-load_pack_module("my_app.ops.csv_ops")  # self-registers into the global REGISTRY
+import tools                      # running the module registers its tools
+palette = grid.catalog()          # {tool_id: {description, params, returns, origin, ...}}
 ```
+
+Serve `palette` as your `GET /tools`. `origin` separates `"declared"` tools from
+`"builtin"` ones (`count`, `gather`, …), so a UI can group or hide the builtins.
 
 ---
 
-## 4. Expose the operation palette to the frontend
+## 4. The workflow JSON contract
 
-```python
-def list_operations() -> list[dict]:
-    return [d.model_dump() for d in registry.list_definitions()]
-```
-
-Each entry is JSON-ready:
+An operation serializes to exactly this (`Operation.to_dict()`):
 
 ```json
 {
-  "operation_id": "filter_rows",
-  "description": "Keep rows >= min_value",
-  "params": [
-    {"name": "data", "type_name": "list", "required": true, "default": null},
-    {"name": "min_value", "type_name": "int", "required": false, "default": 0}
-  ]
+  "tool_id": "scale",
+  "arguments": {"weight": 2},
+  "modifiers": [{"kind": "map", "params": {"over": "readings", "name": "score"}}]
 }
 ```
 
-The frontend renders these as form fields or graph nodes. `required` and
-`default` drive validation in the UI.
+A workflow is `{"version": 1, "steps": [{"step_id": "...", "operation": {...}}]}`.
+References between steps are the plain **step id** in a modifier's `over`
+param. The vocabulary of `kind` values is the 14 shape verbs plus `retry` /
+`timeout` ([api-reference.md](api-reference.md)); a client builds the modifier
+UI from them.
+
+A **source step** carries data rather than an operation — assign a frame, list
+or value, and it is born completed.
 
 ---
 
-## 5. Build and validate a workflow from user input
-
-The frontend sends steps as `{step_id, operation_id, arguments}`. Validate each
-call at the API boundary before persisting:
+## 5. Build and validate (declare)
 
 ```python
-from simple_steps_core import (
-    CoreEngine, Workflow, ToolCall, validate_tool_call, ValidationError,
-)
-
-engine = CoreEngine(registry)
-
-def build_workflow(session_id: str, steps: list[dict]) -> Workflow:
-    wf = Workflow(engine, session_id=session_id)
-    for step in steps:
-        call = ToolCall(operation_id=step["operation_id"], arguments=step["arguments"])
-        validate_tool_call(call, registry)   # raises ValidationError on bad input
-        wf[step["step_id"]] = call
-    return wf
+wf = grid.Workflow.from_json(workflow_json, grid.TOOLS)   # structure only; stages every step
+problems = wf.validate()                                   # {step_id: problems}, empty = valid
 ```
 
-### Reference rules (important)
+Every step goes through the same `check` + staging the incremental path uses, so
+loading cannot smuggle in a step that declaring would reject. For the UI:
 
-A step output is referenced by **another step's id**, but the reference grammar
-requires the token to **start with `step`** and be written as a **string**
-value in the arguments:
-
-```python
-wf["step_load"]   = ToolCall(operation_id="load_csv", arguments={"filepath": "data.csv"})
-wf["step_filter"] = ToolCall(operation_id="filter_rows",
-                             arguments={"data": "step_load", "min_value": 100})
-#                                                ^^^^^^^^^^^ string reference to step_load
-```
-
-- Valid references: `"step_load"`, `"step_load.field"`, `"step_load.rows[0]"`.
-- A step id that does **not** start with `step` cannot be referenced by other
-  steps. Name any referenceable step `step_*`.
+- an **invalid** step is still a step (carrying `problems`) — render it, do not
+  reject the request; it is a `200`, not a `422`.
+- a **staged** step already knows its shape: `wf.step(sid).describe()` →
+  `"map scale · 4 cells"`, and `wf.step(sid).status` is `"staged"`.
 
 ---
 
-## 6. Run the workflow
-
-### Synchronous (simple/scripts)
+## 6. Run
 
 ```python
-steps = wf.run()
-for s in steps:
-    print(s.step_id, s.status, s.output.value)
+wf.run_all()                 # every valid step, each after the steps it reads
+# or one at a time, which the client drives:
+wf.run("scored")             # refuses if an input has not run
 ```
 
-### Asynchronous (recommended for a web backend)
-
-Async lets orchestrator steps fan out concurrently and keeps the event loop
-free. Steps still run in order (a later step may depend on an earlier one);
-concurrency happens *inside* orchestrator steps.
-
-```python
-steps = await wf.arun()
-```
-
-Read a result by step id:
-
-```python
-value = wf.context.value_for_step("step_filter")
-```
+Running is **explicit** — nothing recomputes on its own. `run_all` only saves
+you from ordering the calls by hand.
 
 ---
 
-## 7. Iterative processing with orchestrators
-
-Orchestrators apply an existing operation across a collection produced by a
-prior step, isolating per-item failures.
+## 7. Read results
 
 ```python
-wf["step_ids"]   = ToolCall(operation_id="load_ids", arguments={})       # -> [1, 2, 3, ...]
-wf["step_fetch"] = ToolCall(operation_id="map",
-                            arguments={"over": "step_ids", "op": "fetch_record",
-                                       "concurrency": 8, "retries": 2})
-await wf.arun()
-
-result = wf.context.value_for_step("step_fetch")   # MapResult
-result.ok            # list of successful values
-result.failed        # list of ItemOutcome (index, error)
-result.ok_count
-result.failed_count
+out = wf.step("scored").output
+out.view()        # data + ledger, the one table to render
+out.data          # the payload grid (what downstream consumes)
+out.ledger        # status, error, attempts, seconds, unit — per unit of work
+out.failed        # the re-drive set: rows that failed, with their errors
 ```
 
-| Orchestrator | Shape | Default `on_error` |
-| --- | --- | --- |
-| `map` | N → N outcomes (`MapResult`) | `collect` |
-| `filter` | keep truthy items | `skip` |
-| `expand` | flat-map (1 → many, flattened) | `collect` |
-| `collapse` | reduce N → 1 via a 2-arg op | n/a |
-
-Common parameters: `over` (string reference), `op` (sub-operation id),
-`concurrency`, `retries`, `on_error` (`collect` | `fail_fast` | `skip`),
-`arg` (override which sub-op param receives each item).
-
-`result.ok` / `result.failed` are themselves referenceable, so you can re-drive
-only the failures or feed successes onward:
-
-```python
-wf["step_total"] = ToolCall(operation_id="collapse",
-                            arguments={"over": "step_fetch.ok", "op": "sum_amounts", "initial": 0})
-```
+A tool that fails on some rows does not raise — every unit is recorded, and
+`out.failed` is exactly the set a UI can re-drive. The ledger columns are fixed
+(`LEDGER_COLUMNS`), so progress and error views always render.
 
 ---
 
-## 8. Persistence: save and resume an entire run
+## 8. Persist and restore
 
-`to_json()` saves **structure only** (tool calls/status), not the data. To
-persist a run *with its computed payloads*, use the session snapshot.
+| call | carries | when |
+|---|---|---|
+| `wf.to_json()` | structure only (light) | store the recipe; cheap, no payloads |
+| `wf.to_session_json()` | structure **+ every payload** (full) | persist a completed run |
+| `grid.Workflow.from_json(data, grid.TOOLS)` | rebuilds either | restore; pass the registry so functions re-attach |
 
-```python
-# Save full session (structure + payloads) to your DB
-snapshot_json: str = wf.export_session_json()
-db.save(workflow_id, snapshot_json)
-
-# Later / another worker: restore and continue
-wf2 = Workflow.import_session_json(snapshot_json, engine)
-value = wf2.context.value_for_step("step_filter")   # payload is back
-```
-
-Structure-only persistence (re-runs from scratch) remains available:
+A light reload lands at "shapes known, counts not" — counts came from the data,
+which the light export does not carry. A full reload reproduces the exact
+outputs:
 
 ```python
-wf_json = wf.to_json()
-wf = Workflow.from_json(wf_json, engine, session_id="run-2")
+original = wf.to_session_json()
+restored = grid.Workflow.from_json(original, grid.TOOLS)   # same data + ledgers
 ```
 
-### Custom payload types (DataFrames, domain objects)
-
-The snapshot codec handles JSON-native values and Pydantic models
-automatically. For other types, register a codec **before** exporting. Pickle
-is intentionally *not* used (it is an arbitrary-code-execution risk on load);
-unencodable values raise `SnapshotError`.
-
-```python
-import pandas as pd
-from simple_steps_core import CodecRegistry
-
-codecs = CodecRegistry()
-codecs.register(
-    "dataframe",
-    pd.DataFrame,
-    encode=lambda df: df.to_dict(orient="records"),
-    decode=lambda rows: pd.DataFrame(rows),
-)
-
-snapshot_json = wf.export_session_json(codecs)
-wf2 = Workflow.import_session_json(snapshot_json, engine, codecs)
-```
+(`roundtrip()` in the example asserts this.)
 
 ---
 
-## 9. Per-user isolation and concurrency
+## 9. What you supply yourself
 
-Nothing in the execution layer is implicitly shared, so isolation is a matter
-of giving each run its own `SessionContext`.
+The grid core is the authoring + execution + serialization engine. Until the
+migration lands them ([migration-plan.md](migration-plan.md)), the backend owns:
 
-- **Namespace sessions per user** so refs never collide:
+| concern | today |
+|---|---|
+| **transport** (HTTP, auth, routing) | yours — the core is in-process Python |
+| **multi-user sessions / isolation** | yours — one `Workflow` per user area |
+| **resources** (db/LLM clients, config) | not injectable into grid tools yet; pass values as data or close over them |
+| **media, lazy sources** | not in the grid core yet |
+| **guardrails / UI schema** | not on grid tools yet |
+| **async / concurrency / caching** | sync only; `timeout` records intent but does not enforce |
 
-  ```python
-  session_id = make_session_id(user_id, workflow_id, run_id)  # "u1:wf9:run3"
-  wf = Workflow(engine, session_id=session_id)
-  ```
-
-- **One `SessionContext` per run — never shared across users.**
-
-- **Serialize writes within a session** using `SessionManager`:
-
-  ```python
-  manager = SessionManager()
-
-  async def run_for_user(user_id, workflow_id, run_id, steps):
-      sid = make_session_id(user_id, workflow_id, run_id)
-      await manager.get_or_create(sid)
-      async with manager.lock(sid):           # serialize this session's writes
-          wf = build_workflow(sid, steps)
-          return await wf.arun()
-  ```
-
-| Component | Sharing rule |
-| --- | --- |
-| `ToolRegistry` | One per process; `freeze()` after startup; read-only thereafter. |
-| `CoreEngine` | Stateless; safe to share (takes context as an argument). |
-| `SessionContext` | One per run; never shared. |
-| `SessionManager` | One per process; in-memory (single process — see below). |
-
----
-
-## 10. Multi-worker / task-queue deployment
-
-An in-memory `SessionManager` is single-process. To scale across workers, make
-the **snapshot** the unit of hand-off:
-
-1. API builds the workflow, persists `export_session_json()` to the DB.
-2. A task-queue worker (Celery / RQ / arq) loads it with
-   `import_session_json()`, runs `await wf.arun()`, and writes the new snapshot
-   back.
-3. The API polls step status for the frontend.
-
-```python
-# worker.py
-async def execute_run(workflow_id: str):
-    snapshot_json = db.load(workflow_id)
-    wf = Workflow.import_session_json(snapshot_json, engine, codecs)
-    await wf.arun()
-    db.save(workflow_id, wf.export_session_json(codecs))
-```
-
----
-
-## 11. Suggested HTTP endpoints
-
-> Building a React client? [react-api.md](react-api.md) proposes the contract
-> for the **grid model** — declaring without running, staged cell counts,
-> the modifier stack as a reorderable list, and grids sent as `data` + `ledger`.
-> The endpoints below are for the engine as it is today.
-
-
-| Method & path | Purpose | Core call |
-| --- | --- | --- |
-| `GET /operations` | Palette for the UI | `registry.list_definitions()` |
-| `POST /workflows` | Create/save a workflow | `build_workflow()` → `export_session_json()` |
-| `POST /workflows/{id}/run` | Execute (enqueue) | `import_session_json()` → `arun()` |
-| `GET /workflows/{id}` | Status + results | read `Step.status`, `context.value_for_step()` |
-
-Minimal FastAPI sketch:
-```python
-from fastapi import FastAPI, HTTPException
-from simple_steps_core import ValidationError
-
-app = FastAPI()
-
-@app.get("/operations")
-def operations():
-    return [d.model_dump() for d in registry.list_definitions()]
-
-@app.post("/workflows")
-def create_workflow(payload: dict):
-    sid = make_session_id(payload["user_id"], payload["workflow_id"], "draft")
-    try:
-        wf = build_workflow(sid, payload["steps"])
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    snapshot = wf.export_session_json()
-    db.save(payload["workflow_id"], snapshot)
-    return {"workflow_id": payload["workflow_id"]}
-```
-
-> A complete, **runnable** version of this server — with `/operations`,
-> `/workflows`, `/workflows/{id}/run`, `/workflows/{id}` and a
-> `/workflows/{id}/dag` endpoint, plus CORS for a local React dev server —
-> lives in [../examples/api_server](../examples/api_server). Install with
-> `pip install -e ".[api]"` and run
-> `uvicorn examples.api_server.app:app --reload`.
-
----
-
-## 12. Optional: agent/planner layer
-
-To let an LLM suggest the next step, implement the `Planner` protocol and route
-through `AgentService`. It only *suggests* a `ToolCall`; execution stays with
-the engine.
-
-```python
-from simple_steps_core.agent.service import AgentService
-from simple_steps_core.agent.types import AgentRequest, AgentResponse
-
-class MyPlanner:
-    def plan(self, request: AgentRequest) -> AgentResponse:
-        # call your LLM with request.message + request.available_operations
-        return AgentResponse(message="...", suggested_tool_call=None)
-
-agent = AgentService(MyPlanner())
-reply = agent.invoke(AgentRequest(
-    message="summarize the failures",
-    available_operations=[d.model_dump() for d in registry.list_definitions()],
-))
-```
-
----
-
-## 13. Gotchas checklist
-
-- [ ] Referenceable steps are named `step_*` and references are **quoted strings**.
-- [ ] `registry.freeze()` is called after all `register(...)` calls.
-- [ ] Each run uses its own `session_id` via `make_session_id(...)`.
-- [ ] `to_json()` drops payloads; use `export_session_json()` to keep data.
-- [ ] Custom payload types have a registered codec before export.
-- [ ] Don't call `engine.execute()` from inside a running event loop — use
-      `await wf.arun()` / `await engine.aexecute()` there.
+A minimal backend is therefore: import a tools module, serve `catalog()`, accept
+workflow JSON, `from_json` → `validate` → `run_all`, return `to_session_json()`
+or per-step `view()`. See [react-api.md](react-api.md) for the proposed endpoint
+shapes and [examples/all_orchestrations/](../examples/all_orchestrations/) for
+the whole flow in Python.

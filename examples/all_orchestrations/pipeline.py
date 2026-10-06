@@ -38,7 +38,7 @@ def scale(n, weight=1):
 
 
 @tool
-def is_big(n):
+def is_big(n) -> bool:
     """filter: a predicate — keep rows whose n is greater than one."""
     return n > 1
 
@@ -56,7 +56,7 @@ def add_n(acc, n):
 
 
 @tool
-def fan_out(n):
+def fan_out(n) -> list:
     """expand: each row yields a list — n copies of n."""
     return [n] * n
 
@@ -147,6 +147,13 @@ def build() -> grid.Workflow:
     wf["robust"] = scale[mod.map(over=wf["readings"], name="score"),
                          mod.retry(times=2), mod.timeout(seconds=5)]
 
+    # ── verb inference — pass a reference, no verb; the shape is chosen ──
+    # The stored verb is concrete and replaceable, not hidden (see infer_verb).
+    wf["auto_map"] = scale(wf["readings"])          # ordinary tool    → map
+    wf["auto_filter"] = is_big(wf["readings"])      # returns bool     → filter
+    wf["auto_collapse"] = add_n(wf["readings"])     # (acc, x) reducer → collapse
+    wf["auto_expand"] = fan_out(wf["readings"])     # returns list     → expand
+
     return wf
 
 
@@ -214,6 +221,11 @@ def main() -> None:
 
     print("\nsweep (grid_search):")
     print(wf.step("grid_search").output.data.to_string(index=False))
+
+    print("\nverb inference (pass a reference, no verb — the shape is chosen):")
+    for sid in ("auto_map", "auto_filter", "auto_collapse", "auto_expand"):
+        kind = wf.step(sid).operation.to_dict()["modifiers"][0]["kind"]
+        print(f"  {sid:14} → {kind}")
 
     fail = failure()
     print("\nfailure (out) — the failed re-drive set:")

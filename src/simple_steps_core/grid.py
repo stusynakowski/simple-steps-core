@@ -827,6 +827,51 @@ def drop_(source: Any, fn: Callable = identity, *,
     return _column_output("drop", frame, frame.drop(columns=list(columns)))
 
 
+def _widen_columns(cells: list[Any], records: list[dict]) -> list[str] | None:
+    """Column names when none were declared.
+
+    A **sequence** cell (tuple/list) has no field names, so it is named
+    positionally ``c0, c1, …`` — the width is the longest completed row. A
+    **mapping** cell's fields are *not* guessed: returning ``None`` makes the
+    caller raise, because discovering a record's keys at run time is exactly the
+    unvalidatable-until-run case ``columns=`` exists to rule out.
+    """
+    completed = [c for c, r in zip(cells, records) if r["status"] == "completed"]
+    if completed and all(isinstance(c, (list, tuple)) for c in completed):
+        width = max(len(c) for c in completed)
+        return [f"c{i}" for i in range(width)]
+    return None
+
+
+def _widen_cell(cell: Any, wanted: Sequence[str], explicit: bool) -> tuple[dict, str | None]:
+    """Lift one cell into the wanted columns, with a per-unit error or None.
+
+    A **mapping** is matched by key, a **sequence** by position. Only an
+    *explicitly declared* column that the cell cannot supply is a failure — an
+    auto-named ragged row just gets ``None``, since its own width defined the
+    columns.
+    """
+    if isinstance(cell, Mapping):
+        values = {c: cell.get(c) for c in wanted}
+        missing = [c for c in wanted if c not in cell]
+        if explicit and missing:
+            have = ", ".join(map(str, cell)) or "nothing"
+            return values, (f"KeyError: the record has no "
+                            f"{', '.join(map(repr, missing))} (it has {have})")
+        return values, None
+    if isinstance(cell, (list, tuple)):
+        values = {c: (cell[i] if i < len(cell) else None)
+                  for i, c in enumerate(wanted)}
+        if explicit and len(cell) < len(wanted):
+            return values, (f"IndexError: the sequence has {len(cell)} item(s), "
+                            f"too few for {len(wanted)} column(s) "
+                            f"({', '.join(map(repr, wanted))})")
+        return values, None
+    return ({c: None for c in wanted},
+            f"TypeError: widen needs a mapping per row (or a sequence), "
+            f"got {type(cell).__name__}")
+
+
 def widen_(source: Any, fn: Callable = identity, *,
            columns: Sequence[str] | None = None, retries: int = 0,
            axis: str = "rows") -> Output:
@@ -839,54 +884,53 @@ def widen_(source: Any, fn: Callable = identity, *,
         value                          ->  city   temp
         {"city": "SF", "temp": 18}         SF     18
 
-    **``columns=`` is required, and that is the design, not a limitation.** The
-    fields live in the data, so discovering them at run time would make this the
-    one verb whose *column set* is unknowable before it runs — and unlike
-    ``expand``'s unknown row count, unknown columns are not survivable: `check`
-    validates every downstream step against column *names*
-    (:func:`_missing_columns`), so each would become unvalidatable until this ran,
-    and :func:`predicted_columns` would have nothing to predict. Declaring them
-    keeps staging exact.
+    Two kinds of cell widen, by two matching rules:
 
-    Applies **no tool**, like ``select`` and ``drop`` — ``identity`` resolves
-    which cell holds the record, by the usual convention (an explicit
-    ``column=``, else ``value``, else the only column). Unlike those two it does
-    execute per row, so it has a real ledger: a cell that is not a mapping, or is
-    missing a declared field, is a **per-unit failure** that leaves `None` in the
-    row and an error beside it — inspectable and re-drivable like any other.
+    - a **mapping** is matched **by key**, and ``columns=`` is **required** — a
+      record's fields live in the data, so guessing them at run time would make
+      this the one verb whose column set is unknowable before it runs, which
+      `check` and staging both depend on knowing.
+    - a **sequence** (tuple/list) is matched **by position**. With ``columns=``
+      it names the positions; **without it the columns default to** ``c0, c1,
+      …`` (width = the longest row), so a column of tuples widens instead of
+      failing. Positional names are unambiguous where a record's keys are not,
+      which is why only this case is auto-named.
+
+    Applies **no tool** — ``identity`` resolves which cell holds the record
+    (an explicit ``column=``, else ``value``, else the only column). It runs per
+    row, so it has a real ledger: a cell that is neither a mapping nor a
+    sequence, or an explicitly declared field a cell cannot supply, is a
+    **per-unit failure** — inspectable and re-drivable like any other.
     """
     _no_tool("widen", fn)
-    if not columns:
-        raise ValueError(
-            "widen needs columns= — the fields to lift out of the record. They "
-            "cannot be discovered at run time: a step's column set has to be "
-            "known at declaration, or nothing downstream can be validated."
-        )
     frame = rows(source, axis=axis)
-    wanted = list(columns)
 
-    lifted: list[dict] = []
-    records = []
+    cells: list[Any] = []
+    records: list[dict] = []
     for _index, row in frame.iterrows():
         cell, record = _call(fn, _as_arg(row), retries)
+        cells.append(cell)
+        records.append(record)
+
+    explicit = bool(columns)
+    wanted = list(columns) if explicit else _widen_columns(cells, records)
+    if wanted is None:
+        raise ValueError(
+            "widen needs columns= — the fields to lift out of the record. A "
+            "record's fields are not guessed; only a tuple/list cell is "
+            "auto-named c0, c1, …. Declare the columns, or return a sequence."
+        )
+
+    lifted: list[dict] = []
+    for cell, record in zip(cells, records):
         if record["status"] != "completed":
             lifted.append({column: None for column in wanted})
-            records.append(record)
             continue
-        if not isinstance(cell, Mapping):
-            lifted.append({column: None for column in wanted})
-            records.append({**record, "status": "failed",
-                            "error": f"TypeError: widen needs a mapping per row, "
-                                     f"got {type(cell).__name__}"})
-            continue
-        missing = [column for column in wanted if column not in cell]
-        lifted.append({column: cell.get(column) for column in wanted})
-        records.append(record if not missing else {
-            **record, "status": "failed",
-            "error": f"KeyError: the record has no "
-                     f"{', '.join(map(repr, missing))} "
-                     f"(it has {', '.join(map(str, cell)) or 'nothing'})",
-        })
+        values, error = _widen_cell(cell, wanted, explicit)
+        lifted.append(values)
+        if error:
+            record["status"] = "failed"
+            record["error"] = error
 
     # Carried columns first, then the fields — the order `map` uses, and the
     # order a reader sees. A field that shadows a carried column wins, because
@@ -2221,9 +2265,19 @@ def infer_verb(fn: Callable, upstream: Any, literals: dict) -> tuple[str, str]:
                             "so this reads as a reducer")
 
     returns = inspect.signature(fn).return_annotation
-    if returns is bool:
+    # Normalize to a bare type name so a string annotation (PEP 563 /
+    # ``from __future__ import annotations``) infers the same verb a real type
+    # does — otherwise a tools file with future annotations silently loses
+    # filter/expand inference and everything falls back to map.
+    returns_name = (returns if isinstance(returns, str)
+                    else getattr(returns, "__name__", "")) or ""
+    base = returns_name.split("[", 1)[0]          # "list[int]" -> "list"
+    if returns is bool or base == "bool":
         return "filter", "it returns a bool per row, so keep the rows that pass"
-    if returns in (list, tuple, set) or typing.get_origin(returns) in (list, tuple, set):
+    sequence = {"list", "tuple", "set"}
+    if (returns in (list, tuple, set)
+            or typing.get_origin(returns) in (list, tuple, set)
+            or base in sequence):
         return "expand", ("it returns many values per row, so unnest them into "
                           "their own rows")
 

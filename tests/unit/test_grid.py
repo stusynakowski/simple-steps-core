@@ -639,6 +639,22 @@ def test_inference_reads_a_list_return_as_expand():
     assert wf.step("word").output.values == ["clear", "sky", "heavy", "rain", "today"]
 
 
+def test_inference_handles_string_annotations():
+    """`from __future__ import annotations` makes annotations strings; inference
+    must read "bool"/"list" the same as the real types, or a tools file with
+    future annotations silently loses filter/expand inference."""
+    @tool
+    def is_big(n) -> "bool":
+        return n > 1
+
+    @tool
+    def split_it(note) -> "list[str]":
+        return note.split()
+
+    assert infer_verb(is_big.fn, grid(pd.DataFrame({"n": [1, 2]})), {})[0] == "filter"
+    assert infer_verb(split_it.fn, grid(pd.DataFrame({"note": ["a b"]})), {})[0] == "expand"
+
+
 def test_an_explicit_verb_overrides_what_would_be_inferred():
     @tool
     def words(note) -> list[str]:
@@ -1646,6 +1662,55 @@ def test_widen_is_one_shape_verb_like_the_rest(records):
     wf["both"] = op("identity")[mod.widen(columns=["city"], over=wf["raw"]),
                                 mod.map()]
     assert "at most one is allowed" in wf.step("both").problems[0]
+
+
+def test_widen_a_tuple_cell_auto_names_c0_c1():
+    """A column of tuples widens instead of failing — positional names."""
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"value": [(10, 1), (20, 4)]})
+    wf["wide"] = mod.widen(over=wf["raw"])          # no columns=
+    wf.run_all()
+    out = wf.step("wide").output
+    assert list(out.data.columns) == ["value", "c0", "c1"]
+    assert list(out.data["c0"]) == [10, 20] and list(out.data["c1"]) == [1, 4]
+    assert set(out.ledger["status"]) == {"completed"}
+
+
+def test_widen_a_tuple_with_explicit_columns_matches_by_position():
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"value": [(10, 1), (20, 4)]})
+    wf["wide"] = mod.widen(columns=["a", "b"], over=wf["raw"])
+    wf.run_all()
+    out = wf.step("wide").output.data
+    assert list(out["a"]) == [10, 20] and list(out["b"]) == [1, 4]
+
+
+def test_widen_ragged_tuples_auto_pad_with_none():
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"value": [(1, 2, 3), (9,)]})
+    wf["wide"] = mod.widen(over=wf["raw"])          # width = 3
+    wf.run_all()
+    out = wf.step("wide").output
+    assert list(out.data.columns) == ["value", "c0", "c1", "c2"]
+    assert out.data["c0"].tolist() == [1, 9]
+    assert out.data["c2"].iloc[0] == 3 and pd.isna(out.data["c2"].iloc[1])
+    assert set(out.ledger["status"]) == {"completed"}, "ragged is not a failure"
+
+
+def test_widen_explicit_columns_too_many_for_a_short_tuple_is_a_failure():
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"value": [(10, 1), (20,)]})
+    wf["wide"] = mod.widen(columns=["a", "b"], over=wf["raw"])
+    wf.run_all()
+    ledger = wf.step("wide").output.ledger
+    assert list(ledger["status"]) == ["completed", "failed"]
+    assert "too few" in ledger["error"].iloc[1]
+
+
+def test_widen_a_mapping_still_needs_columns():
+    """Only sequences are auto-named; a record's fields are not guessed."""
+    with pytest.raises(ValueError, match="widen needs columns="):
+        widen_(pd.DataFrame({"value": [{"a": 1}]}))
 
 
 # ─────────────────────────────────────────────────────────────────────────

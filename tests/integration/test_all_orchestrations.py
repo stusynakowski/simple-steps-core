@@ -111,6 +111,25 @@ def test_execution_modifiers_do_not_change_the_result(wf):
     assert wf.step("robust").output.values == [10, 20, 30, 20]
 
 
+# ── verb inference: passing a reference picks the shape verb ─────────────
+def _inferred_kind(wf, sid):
+    return wf.step(sid).operation.to_dict()["modifiers"][0]["kind"]
+
+
+def test_passing_a_reference_infers_the_verb(wf):
+    assert _inferred_kind(wf, "auto_map") == "map"
+    assert _inferred_kind(wf, "auto_filter") == "filter"
+    assert _inferred_kind(wf, "auto_collapse") == "collapse"
+    assert _inferred_kind(wf, "auto_expand") == "expand"
+
+
+def test_inferred_steps_produce_the_same_results_as_explicit_ones(wf):
+    assert wf.step("auto_map").output.values == [10, 20, 30, 20]        # like scored
+    assert wf.step("auto_filter").output.data["n"].tolist() == [2, 3, 2]  # like kept
+    assert wf.step("auto_collapse").output.item() == 8                  # like sum_n
+    assert len(wf.step("auto_expand").output.data) == 8                 # like bursts
+
+
 # ── every declared step is valid and completed ──────────────────────────
 def test_the_whole_workflow_is_valid_and_done(wf):
     assert all(not p for p in wf.validate().values())
