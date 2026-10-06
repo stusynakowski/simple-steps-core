@@ -47,8 +47,16 @@ need no registration — the no-tool reshapers (`select`, `drop`, `rename`,
   `expand` → `widen` (longer then wider).
 - **Execution modifiers**: `retry`, `timeout` (shape-preserving; order is
   semantics).
+- **Verb inference**: passing a reference (`scale(wf["readings"])`) picks the
+  verb — `map` / `filter` / `collapse` / `expand`.
+- **Standard-type sources**: a `list` / `dict` / scalar / tuple is **one cell**,
+  reshaped by a verb (`expand` a list, `widen` a dict or tuple → `c0, c1`);
+  only a DataFrame carries its own structure.
+- **Builtin reducers**: `gather`, `total`, `first`, `last`, `count`.
+- **Chained fan-out**: `map` over a `map`.
 - **Serialization**: full-session `to_json` / `from_json` round-trip.
-- **Staging & validation**: `describe()` and `validate()` before anything runs.
+- **Staging & validation**: `describe()`, `validate()`, positional access
+  (`wf[0]` / `wf[-1]`), and `catalog()` before anything runs.
 - **Failure**: a tool that fails on some rows → the ledger keeps every unit and
   `.failed` is the re-drive set.
 

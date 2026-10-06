@@ -130,6 +130,43 @@ def test_inferred_steps_produce_the_same_results_as_explicit_ones(wf):
     assert len(wf.step("auto_expand").output.data) == 8                 # like bursts
 
 
+# ── standard Python types as sources: each is one cell, reshaped by a verb ──
+def test_standard_types_are_one_cell(wf):
+    assert wf.step("a_list").output.shape == (1, 1)
+    assert wf.step("a_list").output.data["value"].iloc[0] == [1, 2, 3, 4]
+    assert wf.step("a_dict").output.shape == (1, 1)
+    assert wf.step("a_scalar").output.shape == (1, 1)
+
+
+def test_a_list_cell_expands_and_a_dict_cell_widens(wf):
+    assert wf.step("from_list").output.values == [1, 2, 3, 4]
+    row = wf.step("from_dict").output.data.iloc[0]
+    assert row["x"] == 10 and row["y"] == 20
+
+
+def test_a_tuple_column_widens_positionally(wf):
+    cols = list(wf.step("split").output.data.columns)
+    assert "c0" in cols and "c1" in cols
+
+
+def test_builtin_reducers(wf):
+    assert wf.step("gathered").output.item() == [1, 2, 3, 2]
+    assert wf.step("total_n").output.item() == 8
+    assert wf.step("first_n").output.item() == 1
+    assert wf.step("last_n").output.item() == 2
+
+
+def test_chained_map_over_a_map(wf):
+    assert wf.step("again").output.values == [10, 20, 30, 20]
+
+
+def test_positional_access_and_catalog(wf):
+    assert wf[0].id == "readings"          # first step, by position
+    assert wf[-1].id == "again"            # last step
+    cat = pipeline.grid.catalog()
+    assert "scale" in cat and cat["count"]["origin"] == "builtin"
+
+
 # ── every declared step is valid and completed ──────────────────────────
 def test_the_whole_workflow_is_valid_and_done(wf):
     assert all(not p for p in wf.validate().values())

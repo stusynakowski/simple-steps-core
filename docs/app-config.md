@@ -2,17 +2,19 @@
 
 > **Status: settled design, not yet built.** The grid model's target
 > configuration for running this library as a backend. See
-> [shape-algebra.md](shape-algebra.md) for the model,
-> [react-api.md](react-api.md) for what the server exposes, and
-> [config-isolation.md](config-isolation.md) for the rule §2 below preserves.
+> [shape-algebra.md](shape-algebra.md) for the model and
+> [react-api.md](react-api.md) for what the server exposes. The isolation rule
+> §2 preserves is the modifier-class split in
+> [shape-algebra.md §1.1](shape-algebra.md).
 
 ---
 
 ## 1. The boundary that decides everything
 
 The existing model has **four** config objects and one hard-won rule: they are
-isolated, nothing cascades, and there is no `resolved_config()`
-([config-isolation.md](config-isolation.md)). Three of them —
+isolated, nothing cascades, and there is no `resolved_config()` (the
+shape/conduct split, now the modifier classes of
+[shape-algebra.md §1.1](shape-algebra.md)). Three of them —
 `StepExecutionConfig`, `StageExecutionConfig`, `WorkflowExecutionConfig` —
 dissolve into the modifier stack, where behaviour is per-step and local.
 

@@ -1066,7 +1066,27 @@ def test_any_bare_value_becomes_a_source_step():
     wf = Workflow()
     wf["xs"] = [1, 2, 3]
     assert wf.step("xs").status == "completed"
-    assert len(wf.step("xs").output.data) == 3
+    # A list is one cell, not one row per element — reshape with expand.
+    assert len(wf.step("xs").output.data) == 1
+    assert wf.step("xs").output.data["value"].iloc[0] == [1, 2, 3]
+
+
+def test_a_list_source_expands_into_rows():
+    wf = Workflow()
+    wf["xs"] = [1, 2, 3]                       # one cell holding the list
+    wf["rows"] = mod.expand(over=wf["xs"])     # the explicit reshape
+    wf.run_all()
+    assert wf.step("rows").output.values == [1, 2, 3]
+
+
+def test_a_dict_source_is_one_cell_widen_spreads_it():
+    wf = Workflow()
+    wf["d"] = {"a": 1, "b": 2}                 # one cell holding the dict
+    assert len(wf.step("d").output.data) == 1
+    wf["wide"] = mod.widen(over=wf["d"], columns=["a", "b"])
+    wf.run_all()
+    assert wf.step("wide").output.data["a"].iloc[0] == 1
+    assert wf.step("wide").output.data["b"].iloc[0] == 2
 
 
 # ─────────────────────────────────────────────────────────────────────────

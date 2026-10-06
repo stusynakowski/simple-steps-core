@@ -476,15 +476,17 @@ def catalog(tools: dict[str, Callable] | None = None) -> dict[str, dict]:
 # Input coercion — "what is a row?"
 # ─────────────────────────────────────────────────────────────────────────
 def rows(value: Any, *, axis: str = "rows") -> pd.DataFrame:
-    """Coerce any step input into a frame of rows.
+    """Coerce a step input into a frame of rows.
 
-    Rows, specifically — not "units of work". Which slice serves as the unit is
-    the verb's choice (docs/shape-algebra.md §1.0); every verb built so far
-    picks the row, but the coercion here is only about producing a frame.
+    **Only a DataFrame carries its own row/column structure.** A ``Series``
+    becomes a one-column frame. **Everything else — a list, a dict, a tuple, a
+    scalar, a string — is one cell**, holding the value whole. Reshaping a
+    collection into rows or columns is an explicit verb (``expand`` makes it
+    longer, ``widen`` makes it wider), never something a source silently coerces:
+    a tool that returns ``[1, 2, 3]`` for a default should stay one value until a
+    verb says what its elements mean (docs/shape-algebra.md §2.1).
 
-    A DataFrame yields its rows (or its columns with ``axis="columns"``);
-    an Output yields its payload grid; a mapping yields one row per entry with
-    the key kept; anything else iterable yields one row per element.
+    An ``Output`` yields its payload grid (what an upstream step hands a verb).
     """
     if isinstance(value, Output):
         return value.data
@@ -504,17 +506,9 @@ def rows(value: Any, *, axis: str = "rows") -> pd.DataFrame:
         return value
     if isinstance(value, pd.Series):
         return value.to_frame(name=PAYLOAD)
-    if isinstance(value, dict):
-        # Keys are kept as the index — a named set of tables stays named.
-        return pd.DataFrame({PAYLOAD: list(value.values())},
-                            index=list(value.keys()))
-    if isinstance(value, (str, bytes)):
-        raise TypeError(
-            f"Cannot fan out over the string {value!r}: a string is not a "
-            "collection."
-        )
-    if isinstance(value, Iterable):
-        return pd.DataFrame({PAYLOAD: list(value)})
+    # One cell. `[value]` wraps the whole value — a list lands in a single cell,
+    # not one row per element — so `rows([1, 2, 3])` is a 1x1 grid holding the
+    # list. `expand` is how you turn that cell into rows.
     return pd.DataFrame({PAYLOAD: [value]})
 
 

@@ -1,680 +1,247 @@
-# Simple Steps — Object Model (top-down)
+# Object model — the grid model (top-down)
 
-> **Status: describes the engine as it is today.** Where an object is changing,
-> the change is marked inline as **→ converging to**. The four documents and
-> their tenses:
+> **Status: describes `grid.py` as it is today.** This is the canonical
+> vocabulary, read from the top (a whole workflow) down to the smallest unit (a
+> cell). The companion documents and their tenses:
 >
 > | document | tense | authority on |
 > |---|---|---|
-> | **object-model.md** (this) | **present** — the engine | what the code holds today |
-> | [shape-algebra.md](shape-algebra.md) | **target** | *why* the model is changing |
-> | [grid-model.md](grid-model.md) | **present** — the prototype | what is built of the target |
-> | [config-isolation.md](config-isolation.md) | present, being superseded | the shape/conduct split |
->
-> The engine has not moved yet. `grid.py` is standalone, so nothing here is
-> broken by what is built there.
+> | **object-model.md** (this) | **present** | the objects the code holds and how they nest |
+> | [grid-model.md](grid-model.md) | present | how those objects are arranged in `grid.py` |
+> | [shape-algebra.md](shape-algebra.md) | intent | *why* the model is shaped this way |
+> | [status.md](status.md) | present | what is built and what is open |
 
-This is the canonical vocabulary for the library, read from the top (the whole
-running system) down to the smallest unit (a tool's parameter). Every object a
-user is expected to hold and inspect exposes two things:
-
-- `__repr__` — one dense line, safe for logs (no payloads).
-- `info()` — a rich, tabular `SummaryTable` (renders as a table in notebooks via
-  `_repr_html_`, prints as aligned text via `__str__`). Never dumps payloads —
-  only shapes, counts, and status.
-
-> **Naming note (Option A).** "Tool" is the registered capability. "Operation"
-> is a Tool *equipped* — the body of a Step. So a **Step = Operation + Data**
-> literally.
->
-> **→ Converging to:** an Operation is **one Tool plus an ordered stack of
-> modifiers**, and orchestration and execution are not two config objects but
-> **two classes of modifier in that one stack** — shape verbs (`map`, `filter`,
-> `expand`, `collapse`, `group`, `sweep`, `source`) and execution modifiers
-> (`retry`, `timeout`, `cache`). Order is semantics: `retry(map(f))` retries the
-> whole fan-out, `map(retry(f))` retries each item. The pair's *concerns* stay
-> disjoint — that rule survives as the modifier's `cls` field — but the two
-> classes stop being two objects. And `Data` becomes `Output`
-> (§9). See [shape-algebra.md §1.1](shape-algebra.md).
+Every object a user holds has a dense `__repr__` (safe for logs, no payloads);
+a `Step` also has `describe()` (what it is, in words) and an `Output` has
+`view()` (the grid joined with its ledger). Nothing dumps payloads in a repr.
 
 ---
 
 ## The hierarchy at a glance
 
 ```
-App                         the whole system (one process)
-├─ AppConfig                system/app details (title, host, storage, session policy)
-├─ ToolRegistry             the palette of registered Tools
-│   └─ Tool                 one registered capability
-│       ├─ ToolDefinition   its public contract (id, description, schema)
-│       │   └─ ToolParam    one parameter of the contract
-│       └─ Guardrails       usage policy + per-argument constraints
-├─ Resources                runtime dependencies injected into tools (db, llm, ...)
-├─ Server                   STATELESS HTTP launcher (exposes tools/sessions over HTTP)
-└─ SessionManager           owns all live Sessions (state lives here)
-    └─ Session              one user's isolated working area
-        ├─ Resources        resources available to this session
-        └─ Workflow*        one or more workflows (a session can hold many)
-            ├─ WorkflowExecutionConfig   how STAGES run (ordering, on_stage_error, gate)
-            ├─ stage_config  {stage_id → StageExecutionConfig}   how a stage's STEPS run
-            └─ Step*        ordered steps (the "columns" of the workflow)
-                ├─ stage        tag → membership in a Stage (a groupby view)
-                ├─ Operation    what to run  (Tool + how)
-                │   ├─ Tool            which capability (by id)
-                │   ├─ arguments       literal values / references to earlier steps
-                │   ├─ OrchestrationConfig     breadth: single | map | filter | expand | collapse
-                │   └─ StepExecutionConfig     how THIS call runs (timeout, retries, cache, gate)
-                └─ Data         current status of the step's output
-                    ├─ StepStatus     pending | running | completed | failed
-                    ├─ StepOutput     ref + optional inline value + kind
-                    └─ StepError      structured failure (message, type, traceback)
+Tool registry (module-level)       the palette of callable tools
+├─ TOOLS                           tools you declared with @tool
+└─ BUILTIN_TOOLS                   identity · gather · count · total · first · last
+    each introspected into a catalog() entry — its public contract
+
+Workflow                           ordered Steps, run against one in-process store
+└─ Step*                           one node of the graph: Operation + Output
+    ├─ Operation                   WHAT to run (pure data)
+    │   ├─ tool_id                 which tool, by id
+    │   ├─ arguments               bound literals
+    │   └─ modifiers[]             an ORDERED stack, innermost-first
+    │       ├─ shape verb          at most one: map | filter | expand | collapse
+    │       │                      | group | sweep | source | select | drop
+    │       │                      | rename | widen | slice | sort | distinct
+    │       └─ execution mods      retry | timeout   (shape-preserving)
+    └─ Output                      WHAT it produced
+        ├─ data                    the payload grid (a DataFrame)
+        ├─ ledger                  per-unit execution state (a DataFrame)
+        └─ meta                    verb, payload column, counts, staged flag
 ```
 
-**→ Converging to** (the two leaves above; everything else is unchanged):
+`*` = repeatable. A `StepRef` (a reference to a step, by id) is what one step
+passes to another through a modifier's `over=`.
 
-```
-                ├─ Operation    ONE tool + an ordered modifier stack
-                │   ├─ tool_id         which capability
-                │   ├─ arguments       literals bound when the step was wired
-                │   └─ modifiers[]     ORDERED, innermost-first — order is semantics
-                │       ├─ cls="shape"      map | filter | expand | collapse
-                │       │                   | group | sweep | source
-                │       └─ cls="execution"  retry | timeout | cache
-                └─ Output       what it produced
-                    ├─ ref         key into the session store (unchanged indirection)
-                    ├─ data        the payload grid (immutable)
-                    ├─ ledger      per-unit execution state (status, error, attempts, unit)
-                    └─ meta        form, tool id, run id, timings
-```
-
-`StepStatus` becomes a **rollup of the ledger** rather than a field, and
-`StepError` becomes a ledger column — a step where 3 of 100 rows failed is
-neither "completed" nor "failed".
-
-`*` = repeatable (a SessionManager has many Sessions, a Session has many
-Workflows, a Workflow has many Steps).
+> **Not in the grid core yet.** `App`, `Session`, `Server`, resources, and media
+> — the application layer the legacy engine had — are not built on the grid
+> model. A `Workflow` is in-process, and payloads live inline on each `Step`
+> (there is no payload store / `Output.ref` yet). See
+> [migration-plan.md](migration-plan.md) and [status.md](status.md).
 
 ---
 
-## Visual model
+## Tool → Operation → compiled call
 
-### A. Containment — who owns what
+The three easy-to-confuse things:
 
 ```mermaid
-flowchart TD
-    App["App (one process)"]
-    App --> Config["AppConfig"]
-    App --> Registry["ToolRegistry — the Tool palette"]
-    App --> Server["Server (stateless HTTP)"]
-    App --> SM["SessionManager (holds state)"]
-
-    Registry --> Tool["Tool*"]
-
-    SM --> S1["Session (user A)"]
-    SM --> S2["Session (user B)"]
-
-    S1 --> R1["Resources (this session's)"]
-    S1 --> WF1["Workflow*"]
-    WF1 --> ST1["Step*"]
-
-    ST1 --> Op["Operation — what to run"]
-    ST1 --> Data["Data — current status"]
+flowchart LR
+    Tool["Tool<br/>a plain function + its id<br/>(the recipe)"]
+    Operation["Operation<br/>a tool + modifiers + bound args<br/>(the recipe, equipped for this step)"]
+    Compiled["compiled callable<br/>compile_operation(op, tools)<br/>(what actually runs)"]
+    Tool -->|"decorate: tool[mod.map(...)]"| Operation
+    Operation -->|"run / run_all"| Compiled
 ```
 
-### B. A Step is exactly `Operation + Data`
+> You *author* Operations (pure data); the engine *compiles and runs* them. A
+> Tool is the reusable function both refer to. Unlike the legacy engine there is
+> no separate `ToolCall` object — an Operation **is** the durable record, and
+> `Operation.to_dict()` is its JSON form.
+
+---
+
+## 1. Tool — a registered capability
+
+A tool is a plain Python function that declares the **values** it needs by name.
+`@tool` returns a **`ToolHandle`** (the function plus an id) and registers it in
+the module-level `TOOLS`; it stays callable as an ordinary function.
+
+```python
+@tool
+def scale(n, weight=1):        # declares the columns it wants
+    return n * 10 * weight
+
+scale(3)            # 30 — still an ordinary function
+scale.fn            # the raw function
+scale[mod.map()]    # an Operation (brackets decorate)
+scale(wf["raw"])    # an Operation (a reference wires + infers a verb)
+```
+
+`BUILTIN_TOOLS` — `identity`, `gather`, `count`, `total`, `first`, `last` — need
+no registration; they are the pass-throughs and reducers the verbs apply when no
+tool is named. A tool's **contract** is its `catalog()` entry:
+
+| field | is |
+|---|---|
+| `tool_id` · `description` · `origin` | id, first docstring line, `"declared"` / `"builtin"` |
+| `params` | `[{name, required, default, type}]` |
+| `returns` · `typed` · `takes_whole_row` | return type, whether fully annotated, whether it takes `**row` |
+
+---
+
+## 2. Modifier — one entry in the stack
+
+A **`Modifier`** is a descriptor: a `kind` and its `params` — **data, never a
+closure**, which is what lets a step serialize and stage before it runs. Its
+class comes from the **`ModifierKind`** vocabulary (`MODIFIERS`), the one place a
+kind is declared:
+
+| field | is |
+|---|---|
+| `kind` | `"map"`, `"widen"`, `"retry"`, … |
+| `params` | the verb's own arguments (`over`, `name`, `columns`, `by`, `times`, …) |
+| `cls` (via `ModifierKind`) | `"shape"` (changes rows/columns) or `"execution"` (shape-preserving) |
+
+Build one with `mod.<kind>(...)`; it does nothing until applied to a tool.
+
+---
+
+## 3. Operation — one tool, an ordered stack of modifiers
+
+An **`Operation`** is **data**: a `tool_id`, bound `arguments`, and an ordered
+tuple of `modifiers`. **Order is semantics** — the stack is stored
+innermost-first (closest to the tool runs first), so `[retry, map]` retries each
+item and `[map, retry]` retries the whole fan-out.
+
+| member | is |
+|---|---|
+| `tool_id` · `arguments` · `modifiers` | which tool, bound literals, the stack |
+| `.bind(**literals)` | fix arguments without running |
+| `op[mod.…]` | append modifiers (decorate) — returns a new Operation |
+| `.shape_verb` / `.shape_verbs` | the (at most one) shape verb in the stack |
+| `.layers` | the stack as written (outermost-first), the reverse of `modifiers` |
+| `.to_dict()` / `from_dict()` | `{tool_id, arguments, modifiers:[{kind, params}]}` |
+| `op(data)` / `op(ref)` | **run** on data, or **wire** when given a `StepRef` |
+
+At most **one shape verb** per Operation (enforced): two shape changes in one
+step would make an intermediate grid with no cell address.
+
+---
+
+## 4. Output — one grid, two frames
+
+An **`Output`** is what a Step produced: a payload grid beside a row-aligned
+ledger that share an index, so `view()` is a clean join.
+
+| member | is |
+|---|---|
+| `data` | the payload `DataFrame` — what downstream steps consume (immutable) |
+| `ledger` | per-unit state — `status, error, attempts, seconds, unit` (`LEDGER_COLUMNS`) |
+| `meta` | `verb`, `payload` column, `n_in`, `staged`, shape info |
+| `view()` | `data` joined with `ledger` — the one table to render |
+| `values` | the payload column as a list · `item()` the single payload of a 1-row grid |
+| `ok` / `failed` | completed rows · the failed re-drive set, with errors |
+| `shape` / `form` / `progress()` | `(rows, cols)` · `scalar`/`column`/`grid` · `"3/4"` |
+
+The split is deliberate: real tables already have `value`/`status` columns
+(collisions), the ledger changes while a step runs (mutability) while the payload
+must not, and a scalar-only ledger always renders natively (Arrow).
+
+> Today `data` is held **inline** on the Step. `Output.ref` (a key into a payload
+> store) is designed but not built — [status.md](status.md) D5.
+
+---
+
+## 5. Step — Operation + Output
+
+A **`Step`** is one node of a workflow and always holds **both** halves: the
+`Operation` (what to run) and an `Output` (the slot), present from declaration
+and *replaced* — never mutated — when the step runs.
 
 ```mermaid
 flowchart LR
     subgraph Step
       direction LR
-      subgraph Operation["Operation (what to run + how)"]
-        T["Tool (by id)"]
-        A["arguments (values / refs)"]
-        O["OrchestrationConfig (breadth)"]
-        E["StepExecutionConfig (this call)"]
+      subgraph Operation["Operation (what to run)"]
+        T["tool_id"]
+        A["arguments"]
+        M["modifiers[] (ordered)"]
       end
-      subgraph Data["Data (current output status)"]
-        SS["StepStatus"]
-        SO["StepOutput (ref/value/kind)"]
-        SE["StepError?"]
+      subgraph Output["Output (what it produced)"]
+        D["data (grid)"]
+        L["ledger (per unit)"]
+        E["meta"]
       end
     end
-    Operation -. "runs, produces" .-> Data
+    Operation -. "runs, produces" .-> Output
 ```
 
-### C. Tool → Operation → ToolCall (the three easy-to-confuse things)
-
-```mermaid
-flowchart LR
-    Tool["Tool<br/>registered capability<br/>(the recipe)"]
-    Operation["Operation<br/>a Tool + args + orchestration + execution<br/>(the recipe, filled in for this step)"]
-    ToolCall["ToolCall<br/>the compiled, executable call<br/>(what the engine actually runs)"]
-    Tool -->|"pick it, configure it"| Operation
-    Operation -->|"compile ( to_tool_call )"| ToolCall
-```
-
-> **Rule of thumb:** you *author* Operations; the engine *runs* ToolCalls. A
-> Tool is the reusable thing both refer to.
-
-### D. Step status — the lifecycle of `Data`
+`Step.status` is a **rollup of the ledger**, not a stored field — a step where 3
+of 100 rows failed is neither simply "completed" nor "failed":
 
 ```mermaid
 stateDiagram-v2
-    [*] --> pending
-    pending --> running : run_step()
-    running --> completed : success
-    running --> failed : raised
-    completed --> [*]
-    failed --> pending : edit & retry
+    [*] --> staged : declared
+    staged --> running : run()
+    running --> completed : all units ok
+    running --> failed : a unit raised
+    staged --> invalid : check() found a problem
+    completed --> staged : reassign the step
 ```
 
-### E. Resource lifecycle — declare → load → check → use
+`describe()` says what a step is in words — a **staged** step reports what
+staging can *promise* (`"map scale · 4 cells"`, or "at most n", or "unknown"
+for `expand`), while a run step reports what it actually holds.
 
-```mermaid
-stateDiagram-v2
-    [*] --> declared : register(factory, check?)
-    declared --> loaded : first use (lazy) / load_all()
-    loaded --> checked : check() runs the hello-world
-    checked --> used : a tool injects it
-    loaded --> used : (no check) a tool injects it
-    declared --> error : factory failed
-    checked --> error : hello-world failed
-```
-
-### F. References & the payload store (why big data isn't on the model)
-
-```mermaid
-flowchart LR
-    subgraph Models["Steps (small, serializable)"]
-      s1["step1.output.ref = r1"]
-      s2["step2 args: data = 'step1'"]
-    end
-    subgraph Store["SessionContext payload store (heavy data)"]
-      r1[("r1 → DataFrame(10k rows)")]
-    end
-    s1 --> r1
-    s2 -. "resolves 'step1' → r1 at run time" .-> r1
-```
-
-> Steps stay tiny (just a reference); the real DataFrame/list lives in the
-> session store, addressed by `ref`. Later steps point at earlier steps by a
-> **string token** (`"step1"`, `"step1.field"`), which forms the DAG.
-
-### G. Orchestration — one Operation, applied across a collection
-
-```mermaid
-flowchart LR
-    over["step1 → [a, b, c]"] --> M{"Operation<br/>mode = map<br/>tool = scale"}
-    M --> i0["scale(a)"]
-    M --> i1["scale(b)"]
-    M --> i2["scale(c)"]
-    i0 --> MR["MapResult"]
-    i1 --> MR
-    i2 --> MR
-    MR --> ok[".ok / .failed / .values"]
-```
-
-**→ Converging to:** the same fan-out, but `mode = map` is a *modifier* on the
-Operation rather than a config, and the result is a grid plus a row-aligned
-ledger rather than a `MapResult`:
-
-```mermaid
-flowchart LR
-    over["step1 → 3 rows"] --> M{"Operation<br/>tool = scale<br/>modifiers = [map]"}
-    M --> i0["scale(row 0)"]
-    M --> i1["scale(row 1)"]
-    M --> i2["scale(row 2)"]
-    i0 --> G["Output"]
-    i1 --> G
-    i2 --> G
-    G --> d["data — input columns + payload"]
-    G --> l["ledger — status, error, attempts, unit"]
-```
+> There is **no automatic staleness**: changing an upstream step does not revert
+> a completed one — it stays `completed` until you reassign it. Nothing
+> recomputes on its own ([status.md](status.md) §5).
 
 ---
 
-## 1. `App` — the whole system
+## 6. Workflow — ordered steps
 
-The top-level facade for one process. It owns the static configuration and the
-tool palette, and it composes the two runtime halves:
+A **`Workflow`** is an insertion-ordered dict of Steps and nothing else.
 
-- a **stateless** `Server` (turns tools/sessions into an HTTP API), and
-- a **stateful** `SessionManager` (holds every live `Session`).
-
-**Holds:** `AppConfig`, `ToolRegistry` (tools), `Resources`, `Server`,
-`SessionManager`.
-
-`app.info()` → four sections:
-
-| AppConfig | Tools | Resources | Sessions |
-|---|---|---|---|
-| title, host, port, storage, session policy | count + ids/categories | names + bound/unbound | id, user, #workflows, activity |
-
----
-
-## 2. `AppConfig` — system & app details
-
-Plain, serializable settings: `title`, `host`, `port`, storage/mount options,
-session-management policy, and load flags (`orchestrators`, `freeze`). No
-behavior — read by `App`/`Server` at startup.
-
----
-
-## 3. `Server` — stateless HTTP launcher
-
-Exposes the app over HTTP. Holds **no** state itself; every request is handed a
-fresh working area from the `SessionManager`. Endpoints (current):
-
-- `GET /tools` — the palette (id, description, JSON Schema)
-- `POST /call` — run one tool once
-- `POST /run` — run a workflow of steps
-
----
-
-## 4. `SessionManager` — owns the state
-
-Hands out one isolated `Session` per `session_id` (recommended id:
-`make_session_id(user_id, workflow_id, run_id)`), plus a per-session lock so one
-user's writes serialize while other users run concurrently. This is where all
-mutable runtime state lives.
-
-`session_manager` holds many **Sessions** (e.g. one per user).
-
----
-
-## 5. `Session` — one user's isolated area
-
-A per-user, per-run working area. Owns the payload store (produced values live
-here, addressed by reference) and the session's `Resources`. A session can hold
-**many Workflows**.
-
-`session.info()` →
-
-| Session details | Tools / Resources | Workflows |
-|---|---|---|
-| id, user, created, activity | what's available to this session | id, #steps, status rollup |
-
----
-
-## 5.1 Resources — lifecycle: declare → load → check → use
-
-A **Resource** is a connection to the outside world that a tool needs but that
-is not part of the data flow: a database connection, an LLM/API client, a config
-object. Tools declare them with a `Resource()` default; the engine injects them
-at run time and hides them from the tool's schema.
-
-Resources move through up to four phases:
-
-| Phase | What it does | Cost | When |
-|---|---|---|---|
-| **Declare** | write down *how* to build it (a factory) | instant | at session setup |
-| **Load** | actually build it / open the connection | maybe slow | lazily on first use (default), or eagerly via `load_all()` |
-| **Check** *(optional)* | run a tiny "hello world" to prove it works | a real call | manually, before a big batch |
-| **Use** | tools call it for real | — | during `run()` |
-
-**Declare** (a factory), with an **optional** `check`:
-
-```python
-session.resources.register("llm", factory=lambda: OpenAIClient())          # no check
-session.resources.register(
-    "db",
-    factory=lambda: connect(DSN),
-    check=lambda db: db.execute("SELECT 1"),                               # opt-in hello-world
-)
-```
-
-**Load** — lazy by default (built on first use); `session.resources.load_all()`
-forces eager construction for fail-fast setups.
-
-**Check** — entirely optional. The library can't guess a valid trivial call for
-an arbitrary resource, so the user supplies it via `check=`:
-
-- `session.resources.check("llm")` — runs the hello-world, returns a result.
-- `session.resources.check_all()` — smoke-tests every resource; **tests all and
-  reports** (does not stop at the first failure).
-- If a resource was registered **without** a `check`, `check()` falls back to a
-  weaker test — "can it load without error?" — and reports `skipped`/`ok`
-  accordingly rather than failing.
-
-Each check returns a small, inspectable result: `status` (`ok` | `failed` |
-`skipped`), `latency`, optional `sample` (what the call returned), and `error`.
-
-```
-llm   ✓ ok       0.42s   reply="Hi!"
-db    ✓ ok       0.01s
-cache ⊘ skipped          (no check provided)
-```
-
-**Preflight** (automatic, on `workflow.run()`) is separate and cheap: it only
-verifies every resource a workflow's tools require is **registered**, and hard-
-fails early with one clear message ("Missing resources: db, llm") before any
-step executes. It never *loads* or *checks* — that stays opt-in.
-
-Ownership is two-tier: `App` declares default resource factories; each `Session`
-gets its **own** container seeded from them, so per-user overrides never mutate
-the shared defaults. Resources are never serialized into snapshots — they are
-rebuilt from their factories on load — and are closed via `aclose()` when the
-session is discarded.
-
-**`ResourceInfo`** (for `info()` / `__repr__`) carries: `name`, `type`,
-`source` (`factory` | `value`), `status` (`declared` | `loaded` | `checked` |
-`error`), `required_by` (tools that need it), and the last check result.
-
----
-
-## 6. `Workflow` — an ordered list of Steps
-
-The main authoring object: a dict-like, insertion-ordered collection of steps
-that run against the session. Steps may be grouped into **stages** for staged
-execution. Later steps reference earlier steps' outputs by token (`"step1"`,
-`"step1.field"`).
-
-`workflow.info()` → the spreadsheet view (columns = steps):
-
-| | Step 1 | Step 2 | … | Step N |
-|---|---|---|---|---|
-| **Operation** | make_list | scale (map) | … | summarize |
-| **Data** | done · list[5] | running | … | pending |
-
----
-
-## 6.1 Stages — placement & configuration
-
-A **Stage** groups a sequence of Steps so users can manage and run them as one
-phase. It works like `df.groupby("stage")`: the **Workflow owns the flat, ordered
-list of Steps**, each Step carries a `stage` tag, and a **`Stage` is a computed
-view** over the steps sharing that tag — steps are never *moved into* a stage.
-
-Two pieces, kept separate on purpose:
-
-- **Membership** — the `stage` tag on the Step is the single source of truth for
-  *which* steps belong. Steps in a stage need not be adjacent.
-- **Configuration** — a `StageExecutionConfig` lives in a map on the Workflow
-  keyed by stage id: `workflow.stage_config: {stage_id → StageExecutionConfig}`.
-  A step with no stage, or a stage with no config, both work (defaults apply).
-
-```mermaid
-flowchart TD
-    WF["Workflow (owns flat, ordered Steps)"]
-    WF --> s1["Step.stage = 'load'"]
-    WF --> s2["Step.stage = 'model'"]
-    WF --> SC["stage_config: {stage_id → StageExecutionConfig}"]
-    WF --> V["workflow.stage('model') → Stage VIEW"]
-    V -.-> s2
-    V -.-> SC
-```
-
-### Execution configs are **orthogonal and isolated** (no overriding)
-
-There is **no cascade, no inheritance, and no overriding** between levels. Each
-execution config owns the execution of exactly **one scope** and is enforced
-independently. A missing value simply means *that scope imposes no such control*
-— it is never filled in from another level.
-
-| Config | Governs (its scope) | Owns | Enforced by |
-|---|---|---|---|
-| `WorkflowExecutionConfig` | how **stages** run | `stages` (sequential), `on_stage_error` (stop/continue), `run` (gate the workflow) | the Workflow runner |
-| `StageExecutionConfig` | how a stage's **steps** run | `steps` (sequential/parallel), `concurrency`, `on_step_error` (stop/continue), `run` (gate the phase) | the Stage runner |
-| `StepExecutionConfig` | how **one tool call** runs | `timeout`, `retries`, `cache`, `run` (gate the step) | the Engine |
-
-Each config manages the level **directly below it** (or, for a Step, its own
-call). Fields do **not** repeat across levels — except `run`, which is an
-independent **gate per scope** (approve the workflow / a phase / a step). Gates
-**compose** (all must pass); they never overwrite one another. Because the
-scopes are disjoint there is **no precedence rule and no `resolved_config()`** to
-remember — each config does exactly one job.
-
-**Parallel safety:** `steps: parallel` (in `StageExecutionConfig`) is only valid
-when the stage's steps do **not** reference each other (references resolve
-lazily against already-run steps). The Workflow auto-checks for intra-stage
-references and raises a clear error rather than silently racing.
-
-> **Within-step parallelism is a different axis.** A single Step can still fan
-> its Tool across a collection in parallel via `OrchestrationConfig(mode="map",
-> concurrency=N)` — a parallel for-loop over *items*, living on the Operation,
-> not on the stage. Stage parallelism = many *steps* at once; orchestration
-> concurrency = many *items* at once. Two independent knobs.
-
-### Future (deferred): `ExecutionPreset` / `OrchestrationPreset`
-
-Optional authoring helpers to avoid retyping the same config on every step —
-**deferred** until repetition actually hurts. Crucially these **stamp** (copy a
-config's values onto each new step/stage at authoring time) rather than
-**inherit** (look a value up at run time), so they add *zero* runtime cascade and
-leave the isolated model above fully intact:
-
-- `ExecutionPreset` — default `Step`/`Stage`/`Workflow` execution configs to
-  stamp onto new steps/stages as they're added.
-- `OrchestrationPreset` — default `OrchestrationConfig` (e.g. `mode="map"`,
-  `concurrency=8`, `on_error="collect"`) to stamp onto new steps.
-
-Because a preset copies values (they become concrete and local on each step),
-there is still no inheritance, no precedence, and no `resolved_config()`. Build
-only if hand-repetition becomes a pain in real use.
-
-### The `Stage` view object ("manage a sequence as one thing")
-
-`workflow.stage(id)` / `workflow.stages()` return lightweight views:
-
-- `stage.steps` — its steps, in order
-- `stage.config` — its `StageExecutionConfig` (defaults if unset)
-- `stage.run()` — run just this phase (honors `StageExecutionConfig`)
-- `stage.info()` — status rollup (n steps · x done / y pending / z failed)
-- `stage.__repr__` → `<Stage 'model' · 2 steps · 1 done, 1 pending>`
-
----
-
-## 7. `Step` — one column: **Operation + Data**
-
-The atomic unit of a workflow. It pairs the thing to run with the current state
-of what it produced:
-
-- **Operation** — what to run and how (see §8).
-- **Data** — the live status/output (see §9).
-
-`step.info()` shows both halves side by side.
-
-**→ Converging to:** `Step = Operation + Output`, and **both halves exist from
-declaration**. Declaring a step *is* staging: it has a spec (the template) and
-an Output (the slot, with whatever is already knowable in it). Running does not
-create the Output, it replaces it. A step whose Operation cannot work still
-exists, carrying its problems, and stages as a single cell — reactive editing
-needs to *show* a bad step, not refuse to build one.
-
----
-
-## 8. `Operation` — a Tool, equipped
-
-A **Tool** plus everything needed to run it as a step. (This is the object
-formerly called `StepSpec`.) It compiles to the executable call the engine runs.
-
-Holds:
-
-- **Tool** — which capability to run (by id).
-- **arguments** — literal values or references to earlier steps.
-- **`OrchestrationConfig`** — *breadth*: run once (`single`) or fan the tool
-  across a collection (`map` / `filter` / `expand` / `collapse`), with `over`,
-  `item_arg`, `concurrency`, `on_error`, `retries`, `initial`.
-- **`StepExecutionConfig`** — governs **this single call** only: `timeout`,
-  `retries`, `cache`, `run` (auto/manual gate). (`mode` sync/async is derived
-  from the Tool, not configured.)
-
-Orchestration (breadth) and step execution (this call) are orthogonal — and
-neither cascades to or from the stage/workflow configs (see §6.1).
-
-### → Converging to: one tool, one ordered modifier stack
-
-The two configs become **two classes of modifier in a single ordered list**:
-
-```python
-score[mod.map(over="step1", concurrency=8), mod.retry(times=2)]
-#      └─ cls="shape" ─────────────────────┘  └─ cls="execution" ─┘
-```
-
-| | shape verbs | execution modifiers |
-|---|---|---|
-| which | `map` `filter` `expand` `collapse` `group` `sweep` `source` | `retry` `timeout` `cache` |
-| effect on the signature | **lifts** it: `(row → b)` becomes `(source → Output)` | **preserves** it |
-| effect on shape | changes rows/columns | shape-preserving |
-| staging | must fold it | ignores it entirely |
-
-`cls` is not taxonomy — it is what lets staging compute a step's shape *without
-running anything*, since only shape verbs can change it. That is the whole
-reactive story, and it is why the isolation rule from
-[config-isolation.md](config-isolation.md) survives the collapse: the concerns
-stay disjoint, they just stop being two objects.
-
-**Why the stack rather than two configs.** Order is semantics, and the flat pair
-cannot express half the combinations:
-
-| composition | means | sayable today? |
-|---|---|---|
-| `map(retry(f))` | retry **each item** | yes |
-| `retry(map(f))` | retry **the whole fan-out** | **no** |
-| `map(timeout(f, 60))` | 60s **per item** | yes |
-| `timeout(map(f), 60)` | 60s for **the entire step** | **no** |
-
-The reason is mechanical: `to_tool_call` compiles an orchestrated step into one
-call to `orchestration-map` with your tool as a string argument and `retries` as
-another argument — so retry is structurally *inside* map, and an argument cannot
-sit outside its own function. Fixing that means the orchestrator stops being the
-tool and your function starts being it. See
-[shape-algebra.md §11](shape-algebra.md).
-
-**Modifiers stay data, never closures** — `{"kind": "retry", "params": {"times": 2}}`
-— because reactive staging, `to_json`, dashboard-built steps and fingerprinting
-all die with closures.
-
----
-
-## 9. `Data` — the current status of a Step's output
-
-A live, payload-free view of what the step has produced *so far*:
-
-- **`StepStatus`** — `pending` → `running` → `completed` | `failed`.
-- **`StepOutput`** — `ref` (key into the session store), optional inline
-  `value` for small results, and `kind` ("dataframe", "list", …).
-- **`StepError`** — structured failure (message, type, traceback) when failed.
-
-The heavy payload never lives on the model; it stays in the session store,
-addressed by `ref`.
-
-### → Converging to: `Output` — one grid, two frames
-
-`Data`, `StepOutput` and `StepError` collapse into a single **`Output`**,
-because per-row state needs somewhere to live:
-
-| today | becomes |
+| operation | does |
 |---|---|
-| `Data` (the concept) | **`Output`** — an object, not just a concept |
-| `StepOutput` (`ref`, `value`, `kind`) | `Output.ref`, `Output.data`, `Output.meta` |
-| `StepStatus` (one per step) | `Output.status` — a **rollup** of the ledger |
-| `StepError` (one per step) | a **column** in `Output.ledger`, one per row |
+| `wf[sid] = <Operation \| value>` | declare a step (a bare value is a source step, born completed) |
+| `wf[sid]` / `wf[0]` | a `StepRef` by **name** or **position** (a position resolves to the id at once) |
+| `wf.step(sid)` | the `Step` itself |
+| `wf.run(sid)` / `wf.run_all()` | execute — explicit; nothing recomputes on its own |
+| `wf.validate()` | `{sid: problems}` for every step, without running |
+| `wf.to_json()` / `to_session_json()` | light (structure) / full (structure + payloads) export |
+| `Workflow.from_json(data, tools)` | rebuild either, re-attaching functions |
 
-`data` is the payload grid (immutable, what downstream steps read); `ledger` is
-per-unit execution state (mutable, never read as data); they share an index, so
-`view()` is a clean join. They are split rather than merged for three reasons:
-real tables already have columns named `value` and `status`; status changes
-*while* the step runs and the payload must not; and the ledger is all scalar
-columns, so progress and error views always render.
-
-The two-layer indirection survives unchanged — `ref` points into the session
-store, `data` is the inline copy. An unorchestrated step has `data` holding a
-single value and no ledger.
-
-Lifecycle gains one state and renames another: `PENDING` → `STAGED`, plus
-**`STALE`** (an upstream changed; the old value is still there to look at).
-Declaring a step *is* staging, so the Output exists from declaration and running
-**replaces** it.
+A **`StepRef`** (id + the workflow it belongs to) is how one step names another;
+it serializes to the plain id and is what a modifier's `over=` holds. Staleness
+and fingerprints are not built — nothing recomputes automatically ([status.md](status.md) §5).
 
 ---
 
-## 10. `Tool` — a registered capability
+## 7. References & the payload
 
-A stable, human-authored Python function registered via `@register_tool`. It is
-dual-mode: calling it defers (builds the call for a workflow); `.run(...)`
-executes immediately.
+```mermaid
+flowchart LR
+    s1["step1.output.data (a grid)"]
+    s2["step2.operation.modifiers[0].params.over = StepRef('step1')"]
+    s2 -. "resolved at run time" .-> s1
+```
 
-- **`ToolDefinition`** — the public contract: `tool_id`, `description`,
-  `category`, `type`, `params`, `input_schema`, `output_schema`,
-  `dependencies` (resource params), `ui`, `guardrails`.
-- **`ToolParam`** — one parameter: `name`, `type_name`, `required`, `default`,
-  `kind` (`data` | `resource`).
-- **`Guardrails`** — usage policy + per-argument constraints (`ArgGuardrail`).
-
----
-
-## 11. Orchestrator outcomes (partial-failure results)
-
-When a Step orchestrates a Tool over a collection, its Data is a structured,
-per-item result:
-
-- **`MapResult`** — aggregate: `.ok`, `.failed`, `.values`, `.ok_count`,
-  `.failed_count`.
-- **`ItemOutcome`** — one item: `index`, `status`, `value` | `error`.
-
-### → Converging to: the grid and the ledger
-
-Both are **retired**. `MapResult` splits into the grid (values) and the ledger
-(status/error); `ItemOutcome` is demoted to an in-flight record during a run,
-materialized into the ledger at the end. `Group` and `Groups` go too — `group`
-marks rows with a key column and keeps n rows, and reduction happens in
-`collapse(by=...)`, so the "column of columns" problem disappears rather than
-being solved.
-
-`.ok` and `.failed` survive as views on the Output.
-
----
-
-## What your model doesn't name yet (gaps to be aware of)
-
-Your top-down hierarchy is about the **nouns you hold and inspect**. A few
-concepts exist in the machinery but aren't named in it — worth knowing so the
-model stays airtight:
-
-- **The Engine (the verb).** Something has to *execute* an Operation: resolve
-  references → validate arguments → inject resources → run the function → store
-  the payload. That's the `CoreEngine`. It isn't part of the ownership tree
-  (you rarely hold it directly), but it's the "run" behind `run_step()`. Its
-  objects are a **separate component** — see [execution-model.md](execution-model.md).
-
-- **The reference graph (DAG) is *not* built.** There is no `Graph` object and
-  the engine does **not** construct one. References are resolved **lazily, per
-  step, at run time** (each `"step1"` token is looked up in the session store
-  when that step runs). Execution order is just **insertion order**; the DAG is
-  only *derivable* by scanning tokens. If you ever want an explicit graph (for
-  validation or drawing), that's a new, optional component.
-
-- **Stages (kept — a Step tag, not an object).** A Step carries a `stage` tag so
-  a Workflow can run in grouped phases (`run_stage`, `run_by_stages`). It's a
-  light abstraction that lets several fiddly "steps that belong together" be
-  managed as one phase. Steps in a stage need not be adjacent.
-
-- **Run identity (deferred).** A Session is `user x workflow x run`
-  (`make_session_id`). No named `Run` object for now; it would only earn its
-  keep for append/incremental processes or re-running failed steps. Noted so the
-  seam stays visible.
-
-- **Who authors what.** **Developers** define **Tools**. **Users and/or the
-  agent** author **Operations** (by hand in a notebook/UI, or proposed from a
-  natural-language goal). Same `Operation` object either way.
-
-- **`AppConfig` is still a dict today.** Everything else is a real, inspectable
-  object; the app config is currently a plain dict. The plan is to make it a
-  typed `AppConfig` model (so `app.info()`'s AppConfig column is structured, not
-  free-form).
-
----
-
-## Naming migration (Option A)
-
-| Old name | New name | Meaning |
-|---|---|---|
-| `Operation` (registry wrapper) | `Tool` | a registered capability |
-| `OperationDefinition` | `ToolDefinition` | the tool's contract |
-| `OperationParam` | `ToolParam` | one contract parameter |
-| `OperationRegistry` | `ToolRegistry` | the palette of tools |
-| `register_operation` | `register_tool` | the decorator |
-| `StepSpec` | `Operation` | a Tool equipped to run as a step |
-
-The old names are being **removed** (early development — no back-compat aliases).
+A later step reads an earlier one through `over=wf["step1"]`. Accessor paths
+resolve on a reference — `step1.ok`, `step1.failed`, `step1[0]`, `step1["col"]`.
+Because payloads are inline today, two steps reading one grid each hold a copy;
+moving them behind `Output.ref` into a store is the next structural step
+([migration-plan.md](migration-plan.md)).

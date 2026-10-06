@@ -36,8 +36,9 @@ pass them through.
   `select`, `drop`, `rename`, `widen`, `slice`, `sort`, `distinct`.
 - **Reset** to a positional `RangeIndex`: `expand` (rows outnumber inputs — origin
   recorded in the ledger's `unit` column) and `collapse` (new rows).
-- **From the value** on a `source`: a list → positional `0,1,2…`; a dict → its
-  **keys** as the index.
+- **One cell** on a `source` for a list, dict or scalar (index `[0]`) — a bare
+  literal is one cell. A **DataFrame** keeps its own rows, columns and index.
+  Reshape a list with `expand`, a dict with `widen`.
 
 ## If I expand a list → rows, in the `value` column
 

@@ -26,6 +26,15 @@ line evidence and a one-line streamlining recommendation.
 > the two shape-verb classes with an added **index (row-identity)** column.
 > Items annotated **✓ fixed** / **◑ partial** / **○ open** below.
 
+> **Progress (later, 2026-10-05).** The examples were consolidated into one grid
+> example (`examples/all_orchestrations/`, replacing the engine backends);
+> `README.md`, `api-reference.md` and `integration.md` were rewritten to the grid
+> model; and the stale engine docs were **removed** — `object-model.md`,
+> `execution-model.md`, `how-it-works.md`, `config-isolation.md`, `tool-ui.md`,
+> `simple-steps-integration.md`. That resolves **C7** and **C15**, the doc half of
+> **C5**, and the `object-model.md` part of **C2**. References below to those files
+> are historical — kept so the audit still reads as a point-in-time snapshot.
+
 ---
 
 ## 0. The one root cause

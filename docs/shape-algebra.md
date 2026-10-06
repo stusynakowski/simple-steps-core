@@ -1,11 +1,9 @@
 # Shape algebra — the target model
 
-**Status: agreed design; partly built in the prototype, not in the engine.**
-[object-model.md](object-model.md) describes what the engine holds today and
-marks each object that is changing; [grid-model.md](grid-model.md) describes
-what is built of this design in `grid.py`. Where they disagree, this document is
-the intent, object-model is the engine's present, and grid-model is the
-prototype's present.
+**Status: the design the grid model implements.** This document is the *intent*;
+[grid-model.md](grid-model.md) describes what is built of it in `grid.py` and
+[status.md](status.md) tracks what is open. Where they disagree, this is the
+intent and grid-model is the present.
 
 The goal in one sentence: **a spreadsheet for expensive, impure, failable
 Python functions.** Excel can recompute on every keystroke because its
@@ -70,9 +68,9 @@ distinct unit if grids become genuinely 2-D, which §11 leaves open.
 
 ### 1.1 Tool, Operation, Step, Output
 
-These four were already defined in [object-model.md](object-model.md) §7–§9 and
-[how-it-works.md](how-it-works.md). **Nothing here changes their meaning** —
-this spec only changes what *Output* contains. Restated so we are aligned:
+These four are the model's core nouns ([grid-model.md §1](grid-model.md)).
+**Nothing here changes their meaning** — this spec only changes what *Output*
+contains. Restated so we are aligned:
 
 | term | is | lifetime |
 |---|---|---|
@@ -216,11 +214,15 @@ No exceptions, including `collapse`, which returns a one-row grid. A bare
 `int` from an unorchestrated step stays a bare `int` — an integer should not
 cost a DataFrame.
 
-This is what makes the UI simple: **shape comes from the step's mode, never
-from the payload.** A user-uploaded table is always *one cell*, however many
-rows it has; it becomes many rows only when a verb explicitly fans out over it.
-No component ever has to ask "is this one cell or many?" — it reads the mode,
-which is written on the step before anything runs.
+This is what makes the UI simple: **for a computed step, shape comes from the
+step's mode, never from the payload** — a `map` is one cell per input row,
+whatever each cell holds. A **source** is the one step with no mode, so it takes
+its shape from the data you hand it: a **DataFrame** lifts in as its own rows and
+columns, and **every other literal — a list, a dict, a scalar — is one cell**
+until a verb fans out over it. So a tool returning `[1, 2, 3]` for a default
+stays one value; it becomes rows only when you `expand` it. No component ever has
+to ask "is this one cell or many?" — it reads the mode (or, for a source, whether
+the data is a frame), which is known before anything runs.
 
 ---
 
@@ -290,11 +292,12 @@ Three rules make this intuitive instead of guessy:
   "n rows are" column, stated as intent.
 
 A fourth, deliberate limit: the only thing that *starts* a grid from raw data is
-`source`. It lifts a literal (a list, a dict, a frame) into the first grid using
-the same coercion — a list becomes rows, a dict becomes rows keyed by its keys,
-a scalar becomes one cell. `source` is `expand`'s counterpart at the head of a
-chain: `expand` unnests an **upstream** step's cell, `source` unnests a
-**literal** you hand it.
+`source`. **Only a DataFrame carries its own structure** — it lifts into the grid
+as its rows and columns. **Every other literal — a list, a dict, a scalar — is
+one cell**, held whole; a collection becomes rows or columns only when you say
+how (`expand` makes it longer, `widen` makes it wider). `source` is `expand`'s
+counterpart at the head of a chain: `expand` unnests an **upstream** step's cell,
+`source` unnests a **literal** you hand it.
 
 ---
 
@@ -309,9 +312,8 @@ Every orchestration first coerces its input to **n rows**:
 | input | n rows are |
 |---|---|
 | an upstream grid | its rows |
-| a table | the table's rows |
-| a list / `Collection` | its elements |
-| a single object | 1 row |
+| a DataFrame | its rows |
+| anything else — a scalar, list or dict | **1** (one cell; `expand` to fan out) |
 
 Then the verb transforms. Output **columns are a function of input columns** —
 that is the "shape of the output depends on the shape of the input" part. There
@@ -416,7 +418,7 @@ collapse(over=step2, by="topic", …)   → one row per topic                 (k
 
 ### 4.0 The hierarchy, revised
 
-Same notation as [object-model.md](object-model.md). **Bold** = new or changed.
+**Bold** = new or changed from what `grid.py` holds today.
 
 ```
 App                         unchanged

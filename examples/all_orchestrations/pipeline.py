@@ -81,6 +81,12 @@ def risky(n):
     return n * 100
 
 
+@tool
+def make_pair(n):
+    """tuple return — widen auto-names the positions c0, c1."""
+    return (n * 10, n * n)
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # The data — deliberately tiny and tabular.
 # ─────────────────────────────────────────────────────────────────────────
@@ -154,6 +160,27 @@ def build() -> grid.Workflow:
     wf["auto_collapse"] = add_n(wf["readings"])     # (acc, x) reducer → collapse
     wf["auto_expand"] = fan_out(wf["readings"])     # returns list     → expand
 
+    # ── standard Python types as sources — each is ONE cell, then reshaped ──
+    wf["a_list"] = [1, 2, 3, 4]                     # list   → one cell
+    wf["a_dict"] = {"x": 10, "y": 20}              # dict   → one cell
+    wf["a_scalar"] = 7                              # scalar → one cell
+    wf["from_list"] = mod.expand(over=wf["a_list"])            # list cell → rows
+    wf["from_dict"] = mod.widen(over=wf["a_dict"], columns=["x", "y"])  # dict → cols
+
+    # ── a column of tuples widens positionally (auto c0, c1) ──
+    wf["pairs"] = make_pair[mod.map(over=wf["readings"], name="value")]
+    wf["split"] = mod.widen(over=wf["pairs"])       # no columns= → c0, c1
+
+    # ── builtin reducers over a single-column grid ──
+    wf["ns"] = mod.select(over=wf["readings"], columns=["n"])
+    wf["gathered"] = op("gather")[mod.collapse(over=wf["ns"])]   # [1, 2, 3, 2]
+    wf["total_n"] = op("total")[mod.collapse(over=wf["ns"])]     # 8
+    wf["first_n"] = op("first")[mod.collapse(over=wf["ns"])]     # 1
+    wf["last_n"] = op("last")[mod.collapse(over=wf["ns"])]       # 2
+
+    # ── chained fan-out: map over a map step ──
+    wf["again"] = scale[mod.map(over=wf["scored"], name="again")]
+
     return wf
 
 
@@ -226,6 +253,14 @@ def main() -> None:
     for sid in ("auto_map", "auto_filter", "auto_collapse", "auto_expand"):
         kind = wf.step(sid).operation.to_dict()["modifiers"][0]["kind"]
         print(f"  {sid:14} → {kind}")
+
+    print("\nstandard types as sources (each one cell):")
+    for sid in ("a_list", "a_dict", "a_scalar"):
+        print(f"  {sid:10} {wf.step(sid).output.data.iloc[0, 0]!r}")
+    print("  from_list (expand) →", wf.step("from_list").output.values)
+    print("  split tuple (widen) →", list(wf.step("split").output.data.columns))
+
+    print("\ntool palette (catalog):", ", ".join(sorted(grid.catalog())))
 
     fail = failure()
     print("\nfailure (out) — the failed re-drive set:")

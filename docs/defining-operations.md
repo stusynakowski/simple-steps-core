@@ -1128,26 +1128,24 @@ a number, all the same to it.
 
 ### 12.2 What a raw value becomes as a source
 
-`rows()` coerces whatever you assign. The payload column is always `value`;
-the differences are in the **index**.
+`rows()` coerces whatever you assign. **Only a DataFrame carries its own
+structure; every other value is one cell** (payload column `value`, index `[0]`).
 
 | assigned | columns | index | rows |
 |---|---|---|---|
 | `42`, `None`, any scalar | `value` | `[0]` | 1 |
-| `[1, 2, 3]`, tuple, set, `range` | `value` | `0…n-1` | one per element |
-| `{"a": 1, "b": 2}` | `value` | **`['a', 'b']`** — the keys | one per entry |
+| `[1, 2, 3]`, tuple, set | `value` | `[0]` | **1 — one cell (`expand` to fan out)** |
+| `{"a": 1, "b": 2}` | `value` | `[0]` | **1 — one cell (`widen` to spread)** |
+| `"hi"`, bytes | `value` | `[0]` | 1 — one cell |
 | `pd.Series([7, 8])` | `value` | the Series' index | one per element |
 | `pd.DataFrame(...)` | **its own columns** | its own index | as-is |
-| `"hi"` | — | — | **`TypeError`** |
 
 Three things worth knowing:
 
-- **A dict keeps its keys as the index.** This is how a named set of tables stays
-  named: `wf["tables"] = {"q1": df1, "q2": df2}` gives you two rows indexed `q1`
-  and `q2`, each cell a frame.
-- **A string is refused**, rather than fanning out into characters:
-  `Cannot fan out over the string 'hi': a string is not a collection.` Wrap it —
-  `["hi"]` — if you meant one row.
+- **A list or dict is one cell, not coerced.** `wf["xs"] = [1, 2, 3]` is a single
+  cell holding the list; `expand` turns it into rows and `widen` turns a dict
+  into columns. Only a DataFrame carries its own row/column structure.
+- **A string is one cell too** — it is not fanned out into characters.
 - **A Series' own name is discarded.** `pd.Series([7, 8], name="temp")` becomes a
   column called `value`, not `temp`. Pass a one-column DataFrame if you want the
   name kept.

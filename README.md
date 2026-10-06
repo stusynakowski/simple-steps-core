@@ -1,251 +1,111 @@
 # simple-steps-core
 
-A lightweight backend workflow runtime that makes tool-based execution and intermediate data references easy to manage.
+**A spreadsheet for expensive, impure, failable Python functions.** You write
+plain functions; the library turns each call into serializable data, runs it
+against a tabular grid, and keeps a per-row ledger of what happened — so a
+workflow of transcription, LLM, or model-inference steps can be authored,
+staged, validated, and re-driven a row at a time.
 
-It is designed for services that need:
-
-- Deterministic step execution
-- Clear operation contracts
-- Session-scoped data references
-- Serializable, structured tool calls
-
-## Design goals
-
-- Tool-first runtime: operations are the only executable units.
-- Structured-call persistence: workflows store tool calls as structured data.
-- Session isolation: each run context is scoped by session ID.
-- Optional agent layer: planner can suggest tool calls without owning execution.
+It is a **backend library — it ships no UI** and pulls in exactly two packages,
+`pandas` and `pydantic`.
 
 ## Install
 
-For library users:
-
 ```bash
 python -m pip install simple-steps-core
-```
 
-For local development:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip
+# local dev
+python -m venv .venv && source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
 
-For notebook examples:
-
-```bash
-python -m pip install -e ".[examples]"
-```
-
-### As a git submodule
-
-This is a **backend library — it ships no UI.** Core install pulls in exactly
-two packages, `pandas` and `pydantic`; the HTTP server, notebooks and the agent
-layer are all extras, so a parent repo that embeds this gets neither a web
-framework nor Jupyter unless it asks.
-
-```bash
-git submodule add <url> backend/simple-steps-core
-python -m pip install -e "./backend/simple-steps-core[api]"
-```
-
-A frontend talks to it over HTTP — see [docs/react-api.md](docs/react-api.md)
-for the contract and [docs/writing-tools.md](docs/writing-tools.md) for the
-tools it exposes. To declare the steps that drive those tools, see
-[docs/defining-operations.md](docs/defining-operations.md).
-
-**One import gotcha.** Two models live in the package during the migration, and
-`Workflow`, `Operation` and `Step` mean different things in each. Import the
-module rather than the names:
+## The model in one minute
 
 ```python
-from simple_steps_core import grid      # the grid model — docs/grid-model.md
+import pandas as pd
+from simple_steps_core import grid
+from simple_steps_core.grid import tool, mod
+
+@tool
+def scale(n, weight=1):
+    return n * 10 * weight
+
 wf = grid.Workflow()
+wf["readings"] = pd.DataFrame({"n": [1, 2, 3]})   # a source step
+wf["scored"]   = scale(wf["readings"])            # pass a reference → inferred map
+wf.run_all()
+
+wf.step("scored").output.values        # [10, 20, 30]
+wf.step("scored").output.view()        # the grid joined with its per-row ledger
 ```
 
-Importing the package pulls in no web framework and no Jupyter; it exposes
-`__version__` and ships `py.typed`, so a parent repo type-checks against it.
+Three ideas carry the whole model:
 
-## Why this helps backend workflow management
+- **A value is one cell.** A tool invocation produces exactly one cell; turning
+  it into rows and columns is a separate declaration — a **shape verb**.
+- **Shape comes from the verb, not the payload.** `map` / `filter` / `expand` /
+  `widen` / `collapse` / `group` / `sweep` / `select` / … reshape the grid;
+  passing a reference infers the right one (`scale(ref)` → `map`), and you can
+  always write it explicitly: `scale[mod.map(over=wf["readings"])]`.
+- **Every output is a DataFrame plus a ledger.** `output.data` is the payload
+  grid downstream steps consume; `output.ledger` records status/error per unit,
+  so a failure stays pinned to the one row it belongs to and is re-drivable.
 
-- Operations are explicit and typed, so execution is predictable.
-- Deferred calls let you author workflows before execution.
-- Session context isolates run data and references.
-- Engine validation and reference resolution reduce glue-code complexity.
+## The one example
 
-## Quick example
-
-```python
-from simple_steps_core import CoreEngine, ToolRegistry, ToolCall, Workflow
-
-registry = ToolRegistry()
-
-
-def make_list(n: int) -> list[int]:
-    return list(range(n))
-
-
-def total(data: list[int]) -> int:
-    return sum(data)
-
-
-make_list_op = registry.register("make_list", make_list, description="Create [0..n-1]")
-registry.register("total", total, description="Sum a list of ints")
-engine = CoreEngine(registry)
-workflow = Workflow(engine, session_id="demo")
-workflow["step1"] = make_list_op(n=5)
-
-steps = workflow.run()
-ref_id, value = engine.execute(
-    ToolCall(operation_id="total", arguments={"data": steps[0].output.value}),
-    workflow.context,
-)
-
-print(ref_id, value)
-```
-
-## Run checks
+[examples/all_orchestrations/](examples/all_orchestrations/) is a single
+workflow over one registry of tools that exercises **every shape verb**, both
+fan-out chains (`group`→`collapse`, `expand`→`widen`), execution modifiers,
+serialization, staging/validation, failure handling, and verb inference.
 
 ```bash
-./scripts/run_checks.sh
+python examples/all_orchestrations/pipeline.py        # prints every step
+pytest tests/integration/test_all_orchestrations.py   # the same, asserted
 ```
 
-## Integrating into a backend
+## Documentation
 
-See the [Integration Guide](docs/integration.md) for a task-oriented walkthrough:
-registering operations, exposing the operation palette to a frontend, building and
-validating workflows from user input, async execution, orchestrators
-(`map`/`filter`/`expand`/`collapse`), full-session snapshot persistence, per-user
-isolation, and a suggested HTTP API surface.
+| doc | what |
+|---|---|
+| [shape-algebra.md](docs/shape-algebra.md) | the concept — verbs, tidy intent, row/column conventions |
+| [object-model.md](docs/object-model.md) | the objects and how they nest (Tool → Operation → Step → Output) |
+| [grid-model.md](docs/grid-model.md) | how `grid.py` is built |
+| [defining-operations.md](docs/defining-operations.md) | the authoring grammar |
+| [writing-tools.md](docs/writing-tools.md) | writing functions the grid can drive |
+| [api-reference.md](docs/api-reference.md) | the Python import surface |
+| [integration.md](docs/integration.md) | embedding the grid core in a backend |
+| [react-api.md](docs/react-api.md) | the proposed HTTP/React contract |
+| [status.md](docs/status.md) | what is built, what is open |
+| [migration-plan.md](docs/migration-plan.md) | retiring the legacy engine onto the grid |
 
-For a top-to-bottom explanation of how the pieces fit together, see
-[How simple-steps-core works](docs/how-it-works.md).
+> **A note on the two models.** A legacy *engine* runtime (`CoreEngine`,
+> `OrchestrationConfig`, `MapResult`, `Server`) still ships alongside the grid
+> model and is being retired onto it ([migration-plan.md](docs/migration-plan.md)).
+> Build new work against the **grid** model, and import it as a module —
+> `Workflow`, `Operation` and `Step` mean different things in each:
+>
+> ```python
+> from simple_steps_core import grid      # the grid model
+> wf = grid.Workflow()
+> ```
 
-Building the `simple-steps` app (React + a LangGraph agent) on top of this? See
-the [simple-steps integration guide](docs/simple-steps-integration.md) and the
-runnable reference backend in
-[examples/simple_steps_backend](examples/simple_steps_backend).
+## Not in the grid core yet
 
-A complete, runnable FastAPI server is in [examples/api_server](examples/api_server):
+The grid core is authoring + execution + serialization. Resources (dependency
+injection), media assets, guardrails/UI, an HTTP server, multi-user sessions,
+and async/concurrency are **not in it yet** — you bring the transport. See
+[migration-plan.md](docs/migration-plan.md) for the plan to land them.
+
+## Develop
 
 ```bash
-python -m pip install -e ".[api]"
-uvicorn examples.api_server.app:app --reload   # http://127.0.0.1:8000/docs
+./scripts/run_checks.sh          # lint + tests
+pytest -q                        # the suite
 ```
-
-## One-command tool server
-
-Write a script that declares tools and runs the server from the same file —
-no server boilerplate:
-
-```python
-# mytools.py
-from simple_steps_core import register_tool
-from simple_steps_core.serving import Server
-
-@register_tool("add", description="Add two numbers.")
-def add(a: int, b: int) -> int:
-    return a + b
-
-CONFIG = {"title": "My Tools", "port": 8000}   # optional
-
-if __name__ == "__main__":
-    Server().run()
-```
-
-```bash
-python -m pip install -e ".[api]"
-python mytools.py                              # http://127.0.0.1:8000/docs
-```
-
-`Server().run()` adds the built-in orchestrators and serves `GET /tools`,
-`POST /call` (run one tool), and `POST /run` (run a workflow of steps). A
-runnable script is in [example_server.py](example_server.py). Optional script
-settings: `CONFIG` (`title`/`host`/`port`/`orchestrators`/`freeze`) and
-`RESOURCES` (name → factory) for tools that declare `Resource()` parameters.
-
-## Tool UI contract (for a frontend)
-
-A tool's **contract** is a generic UI schema, rendered independently by whatever
-frontend consumes it. `ui` is a `ToolUI` holding per-surface declarations keyed
-by target, so one tool can carry several at once. The recommended declaration
-separates the pre-execution `input` view from the interactive post-execution
-`result` view; an advanced `full` view can own the whole experience instead. A
-serializable `prefab` input is always present when no prefab declaration is
-supplied.
-
-```python
-@register_tool("pick_region", ui={
-    "prefab": my_prefab_protocol,     # generated/serializable, for any client
-    "react": _pick_region_component,  # a target-specific declaration
-})
-def pick_region(region: str) -> str:
-    return region
-```
-
-Use `operation.ui.input(target)`, `operation.ui.result(target)` or
-`operation.ui.full(target)` for lifecycle-aware access; `get(target)` is a
-compatibility alias for the input or full primary view. See the
-[Tool UI developer contract](docs/tool-ui.md) before implementing a full UI, and
-[docs/react-api.md](docs/react-api.md) for the HTTP shape a React client
-consumes.
-
-## Roadmap: tool decoration, orchestration & agents
-
-We are extending the core so that a single decorated function can drive both an
-**MCP server** and an **agentic workflow UI** — fusing MCP tool-calling with
-LangGraph-style session management. Full design in
-[specs/011](specs/011-tool-orchestration-and-agent-workflows.md).
-
-What we are adding:
-
-- **Real JSON Schema tool definitions** — decoration derives an `input_schema`
-  (and `output_schema`) from type annotations, consumable as-is by MCP, OpenAI
-  function-calling, and the UI.
-- **Two-layer model** — a static **tool definition** (the contract) vs. a
-  per-call **step config** (`StepSpec`) that carries its own orchestration and
-  execution settings.
-- **Three-kind parameters** — `data` (a value the caller/agent supplies),
-  `reference` (a data slot wired to a prior step's output via `{"$ref": ...}`),
-  and `resource` (an injected runtime object like a db connection, hidden from
-  the schema).
-- **Orchestration & execution config** — per-step `map`/`filter`/`expand`/
-  `collapse` with concurrency and per-item error policy, plus sync/async,
-  manual/auto run, timeouts, whole-step retries, and caching.
-- **Data-centric session** — `SessionContext` reorganized into a `DataStore` of
-  self-describing `DataEntry` records plus a separate `ResourceContainer`.
-- **Integration adapters** — thin, optional, bidirectional adapters for MCP,
-  LangGraph, and OpenAI; the core stays Pydantic-only.
-- **Agent planner** — proposes and modifies a validated list of steps that users
-  trace, edit, and run under their own control.
-
-## Publish to PyPI
-
-1. Build distributions:
-
-   ```bash
-   python -m build
-   ```
-
-2. Validate metadata and artifacts:
-
-   ```bash
-   python -m twine check dist/*
-   ```
-
-3. Upload:
-
-   ```bash
-   python -m twine upload dist/*
-   ```
 
 ## Project structure
 
-- `pyproject.toml`: package metadata and dev extras.
-- `src/simple_steps_core`: library source package.
-- `tests`: unit and integration test suite.
-- `scripts/run_checks.sh`: quick local validation command.
-- `runme.py`: end-to-end smoke flow.
-- `examples/simple_steps_core_walkthrough.ipynb`: interactive walkthrough notebook.
+- `src/simple_steps_core` — the library (`grid.py` is the grid model).
+- `examples/all_orchestrations` — the one runnable example.
+- `tests` — unit (`test_grid.py`) and integration suites.
+- `docs` — the documents above.
