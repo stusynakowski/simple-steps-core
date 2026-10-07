@@ -57,8 +57,48 @@ need no registration — the no-tool reshapers (`select`, `drop`, `rename`,
 - **Serialization**: full-session `to_json` / `from_json` round-trip.
 - **Staging & validation**: `describe()`, `validate()`, positional access
   (`wf[0]` / `wf[-1]`), and `catalog()` before anything runs.
+- **Resources**: a dummy DB and LLM with bound (`@bound_tool`) and unbound
+  (`@tool` + `res["…"]`) tools, declared with `wf.define`, run with
+  `resources=`, saved as declarations.
 - **Failure**: a tool that fails on some rows → the ledger keeps every unit and
   `.failed` is the re-drive set.
+
+## Resources (`build_resources()`)
+
+A second workflow that uses a dummy database and a dummy LLM, for the resource
+model in [docs/core-proposals/007](../../docs/core-proposals/007-mvp-resources.md).
+Both dummies are deterministic and count their calls.
+
+**The notation:**
+
+| mark | on | meaning | written in a step |
+|---|---|---|---|
+| `@resource` | a class | a resource type, built from literal settings | `wf.define("db", FakeDB)` |
+| `@bound_tool` | a method | **bound** tool: runs on one named instance; stays an ordinary method | `res["db"].lookup[mod.map()](wf["keys"])` |
+| `@tool` | a free function with a resource-typed parameter | **unbound** tool: needs a resource, doesn't belong to one | `enrich[mod.map()](wf["readings"], db=res["db"])` |
+| (none) | a method | never a tool; tool code may still call it | — |
+
+| name | kind |
+|---|---|
+| `FakeDB.lookup(key)` | bound |
+| `FakeLLM.complete(prompt)` | bound |
+| `enrich(city, db: FakeDB)` | unbound |
+| `summarize(text, llm: FakeLLM)` | unbound |
+| `lookup_fresh(city, db: FakeDB)` | unbound, calls the unmarked `reset()` |
+| `FakeDB.reset()` | not a tool |
+
+The workflow declares resources, never objects. The caller passes the live
+objects to `run`:
+
+```python
+wf = build_resources()                    # wf.define("llm", FakeLLM, model="fake-1"), ...
+wf.run_all(resources=live_resources())    # {"db": FakeDB(), "llm": FakeLLM(), ...}
+```
+
+`resource_problems()` shows each refusal at declaration: wrong type, unknown
+name, unmarked method, and a resource left unbound. `resource_roundtrip()`
+saves and reloads it; the save holds `{"$res": "llm"}` and a `resources`
+section, never an object.
 
 ## The data
 

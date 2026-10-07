@@ -213,3 +213,153 @@ def test_full_session_roundtrip_reproduces_results():
     assert reloaded.step("per_city").output.data.equals(
         original.step("per_city").output.data
     )
+
+
+
+# ── resources: FakeDB / FakeLLM, bound and unbound tools (core-proposals/007) ──
+# Test ids (T1.x slice 1, T2.x slice 2) match the tables in 007-mvp-resources.md.
+@pytest.fixture()
+def res_run():
+    return pipeline.run_resources()
+
+
+def test_T1_1_unbound_tool_takes_one_db_instance(res_run):
+    wf, live = res_run
+    assert wf.step("regions").output.values == ["west", "east", "west", "west"]
+    # regions, regions_bound and inferred each read 4 rows — one instance served all
+    assert live["db"].reads == 12
+
+
+def test_T1_2_unbound_tool_takes_the_llm(res_run):
+    wf, live = res_run
+    assert wf.step("summaries").output.values == ["[fake-1] A", "[fake-1] B"]
+    assert live["llm"].calls == 3            # 2 summaries + the bound `hello`
+
+
+def test_T1_3_T1_4_a_resource_is_not_a_column_and_declares_without_the_object():
+    wf = pipeline.build_resources()          # nothing loaded, nothing run
+    assert all(p == () for p in wf.validate().values())
+    assert pipeline.grid.predicted_columns(wf.step("summaries").output) == ["text", "value"]
+
+
+def test_T1_5_running_without_the_resource_is_a_clear_problem():
+    wf = pipeline.build_resources()
+    with pytest.raises(pipeline.grid.ResourceNotLoaded, match="resource 'llm' is not loaded"):
+        wf.run("summaries")
+    live = pipeline.live_resources()
+    del live["llm"]
+    with pytest.raises(pipeline.grid.ResourceNotLoaded, match="'llm'"):
+        wf.run("summaries", resources=live)
+    assert wf.step("summaries").status == "staged"   # the tool never ran
+
+
+def test_T1_6_T1_8_wrong_type_unknown_name_unmarked_method_are_refused():
+    problems = pipeline.resource_problems().validate()
+    assert problems["wrong_type"] == (
+        "summarize() declares llm: FakeLLM, but it is bound to resource 'db' (FakeDB)",)
+    assert "no resource named 'nope'" in problems["unknown"][0]
+    assert problems["unmarked"] == ("reset is not a tool of FakeDB; its tools are: lookup",)
+    assert "is a resource (FakeLLM), not a column" in problems["not_a_column"][0]
+
+
+def test_T1_7_a_subclass_fits_its_base(res_run):
+    wf, live = res_run
+    assert wf.validate()["tiny_summaries"] == ()
+    assert wf.step("tiny_summaries").output.values == ["[tiny-1] A", "[tiny-1] B"]
+    assert live["tiny"].calls == 2
+
+
+def test_T1_9_saves_the_declaration_never_the_object():
+    import json
+    blob = pipeline.build_resources().to_dict()
+    ops = {e["step_id"]: e["operation"] for e in blob["steps"]}
+    assert ops["summaries"]["arguments"] == {"llm": {"$res": "llm"}}
+    assert blob["resources"]["llm"] == {"source": "defined", "type": "FakeLLM",
+                                        "settings": {"model": "fake-1"}}
+    json.dumps(blob)                         # no object anywhere
+
+
+def test_T1_10_T2_4_reloads_and_runs(res_run):
+    original, reloaded = pipeline.resource_roundtrip()
+    assert reloaded.to_dict() == original.to_dict()
+    assert all(p == () for p in reloaded.validate().values())
+    reloaded.run_all(resources=pipeline.live_resources())
+    ran, _ = res_run
+    for sid in ("summaries", "regions", "regions_bound", "hello"):
+        assert reloaded.step(sid).output.data.equals(ran.step(sid).output.data)
+
+
+def test_T1_11_redefining_a_resource_marks_its_readers_stale(res_run):
+    wf, live = res_run
+    wf.define("llm", pipeline.FakeLLM, model="fake-2")
+    assert wf.step("summaries").status == "stale"
+    assert wf.step("regions").status == "completed"      # does not use llm
+    live["llm"] = pipeline.FakeLLM(model="fake-2")
+    wf.run("summaries", resources=live)
+    assert wf.step("summaries").output.values == ["[fake-2] A", "[fake-2] B"]
+
+
+def test_T2_1_T2_2_bound_tools_run_on_their_instance(res_run):
+    wf, _ = res_run
+    assert wf.step("regions_bound").operation.tool_id == "FakeDB.lookup"
+    assert wf.step("regions_bound").output.values == ["west", "east", "west", "west"]
+    assert wf.step("inferred").output.values == ["west", "east", "west", "west"]
+    assert wf.step("hello").output.data.iloc[0, 0] == "[fake-1] HI"
+
+
+def test_T2_3_catalog_lists_types_settings_and_marked_tools_only():
+    cat = pipeline.grid.resource_catalog()
+    db, llm = cat["FakeDB"], cat["FakeLLM"]
+    assert [s["name"] for s in db["settings"]] == ["table"]
+    assert list(db["tools"]) == ["FakeDB.lookup"]          # not reset
+    assert db["tools"]["FakeDB.lookup"]["description"] == "The region stored for a key, or None."
+    assert [p["name"] for p in db["tools"]["FakeDB.lookup"]["params"]] == ["key"]
+    assert [s["name"] for s in llm["settings"]] == ["model"]
+    assert list(llm["tools"]) == ["FakeLLM.complete"]
+    assert cat["TinyLLM"]["bases"] == ["TinyLLM", "FakeLLM"]
+
+
+def test_T2_6_tool_code_may_call_unmarked_methods():
+    wf = pipeline.build_resources()
+    wf["fresh"] = pipeline.lookup_fresh[pipeline.mod.map()](
+        wf["readings"], db=pipeline.res["db"])
+    live = pipeline.live_resources()
+    wf.run("fresh", resources=live)
+    assert wf.step("fresh").output.values == ["west", "east", "west", "west"]
+    assert live["db"].reads == 1             # each row reset, then read
+
+
+def test_marked_methods_stay_ordinary_and_unregistered():
+    db = pipeline.FakeDB()
+    assert db.lookup("SF") == "west" and db.reads == 1
+    db.reset()
+    assert db.reads == 0
+    tools = pipeline.grid.TOOLS
+    assert "lookup" not in tools and "complete" not in tools
+    assert "enrich" in tools and "summarize" in tools     # unbound tools are ordinary
+
+
+def test_tool_on_a_method_is_refused_with_a_pointer_to_bound_tool():
+    with pytest.raises(TypeError, match="@bound_tool"):
+        class Bad:
+            @pipeline.tool
+            def lookup(self, key: str) -> str:
+                return key
+
+
+def test_the_live_object_must_match_the_declared_type():
+    wf = pipeline.build_resources()
+    live = pipeline.live_resources()
+    live["llm"] = pipeline.FakeDB()
+    with pytest.raises(TypeError, match="declared FakeLLM"):
+        wf.run("summaries", resources=live)
+
+
+def test_settings_must_be_literals():
+    class Warehouse:
+        def __init__(self, seed: pipeline.pd.DataFrame):
+            self.seed = seed
+    with pytest.raises(TypeError, match="literal settings only"):
+        pipeline.grid.Workflow().define("wh", Warehouse, seed=None)
+    with pytest.raises(TypeError, match="no setting 'modle'"):
+        pipeline.grid.Workflow().define("llm", pipeline.FakeLLM, modle="x")

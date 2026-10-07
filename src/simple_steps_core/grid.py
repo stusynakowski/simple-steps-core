@@ -32,8 +32,9 @@ import itertools
 import warnings
 import time
 import traceback
+import types
 import typing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from collections.abc import Mapping
 from typing import Any, Callable, Iterable, Sequence
 
@@ -50,6 +51,8 @@ __all__ = [
     "op", "Modifier", "Operation",
     "join", "stack", "zip_", "COMBINE", "is_combine",
     "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "warn", "stage",
+    "res", "ResRef", "bound_tool", "resource", "RESOURCE_TYPES",
+    "resource_entry", "resource_catalog", "ResourceNotLoaded",
     "STRICT_TYPES", "annotation_problems", "declaration_problems",
     "PARAM_TYPES", "PARAM_TYPES_BY_VERB",
     "ROWS_RULE", "DEFAULT_PAYLOAD", "CARRIES_COLUMNS", "PayloadError",
@@ -1509,6 +1512,10 @@ class Modifier:
         return f"{self.kind}({args})"
 
 
+#: Marks "no input given" to ``Operation.__call__``, distinct from ``None``.
+_NO_SOURCE = object()
+
+
 @dataclass(frozen=True)
 class Operation:
     """One tool plus an ordered stack of modifiers — **data, not closures**.
@@ -1536,6 +1543,11 @@ class Operation:
     #: — `()` for an ordinary single-input step, where :attr:`input` is the one
     #: grid. A combine sets both: ``inputs`` holds them all, ``input`` the first.
     inputs: tuple = ()
+    #: For a **bound tool** (a ``@bound_tool`` method), the resource whose
+    #: instance it runs on — a :class:`ResRef`, resolved at run like any other
+    #: ``$res``. ``None`` for an ordinary tool. The method's name is the last
+    #: segment of :attr:`tool_id` (``"FakeDB.lookup"``).
+    bound_to: Any = None
 
     @property
     def grids(self) -> tuple:
@@ -1551,6 +1563,13 @@ class Operation:
         ids += [str(v) for v in self.arguments.values() if isinstance(v, StepRef)]
         return ids
 
+    @property
+    def resources(self) -> list[str]:
+        """Every resource this uses — the instance it is bound to, then arguments."""
+        names = [self.bound_to.name] if isinstance(self.bound_to, ResRef) else []
+        names += [v.name for v in self.arguments.values() if isinstance(v, ResRef)]
+        return names
+
     def _add(self, kind: str, **params) -> "Operation":
         # `over=` is accepted as authoring sugar but never stored in a modifier:
         # it is the data input, so it is hoisted to its own slot. Modifiers stay
@@ -1560,7 +1579,8 @@ class Operation:
             over if isinstance(over, StepRef) else StepRef(over))
         return Operation(self.tool_id,
                          self.modifiers + (Modifier(kind, params),),
-                         self.arguments, self.fn, new_input)
+                         self.arguments, self.fn, new_input,
+                         bound_to=self.bound_to)
 
     def __getitem__(self, modifiers: Any) -> "Operation":
         """``score[mod.map(over=videos), mod.retry(times=2)]`` — decorate.
@@ -1611,7 +1631,8 @@ class Operation:
     def bind(self, **literals) -> "Operation":
         """Add bound arguments — literals, or a StepRef to read another step's value."""
         return Operation(self.tool_id, self.modifiers,
-                         {**self.arguments, **literals}, self.fn, self.input)
+                         {**self.arguments, **literals}, self.fn, self.input,
+                         bound_to=self.bound_to)
 
     # ── as plain data (what the light export carries) ────────────────────
     def to_dict(self) -> dict:
@@ -1624,13 +1645,14 @@ class Operation:
         blob = {
             "tool_id": self.tool_id,
             "input": _encode_ref(self.input),          # {"$ref": id} or null — the data
-            "arguments": {k: (_encode_ref(v) if isinstance(v, StepRef) else v)
-                          for k, v in self.arguments.items()},
+            "arguments": {k: _encode_argument(v) for k, v in self.arguments.items()},
             "modifiers": [{"kind": m.kind, "params": _deref(m.params)}
                           for m in self.modifiers],     # literal-only
         }
         if self.inputs:                                 # a combine reads many grids
             blob["inputs"] = [_encode_ref(g) for g in self.inputs]
+        if self.bound_to is not None:                   # a bound tool's instance
+            blob["bound_to"] = _encode_argument(self.bound_to)
         return blob
 
     @classmethod
@@ -1647,20 +1669,25 @@ class Operation:
             if over is not None:
                 hoisted = over
             modifiers.append(Modifier(m["kind"], params))
-        arguments = {k: (_decode_ref(v) if _is_ref(v) else v)
+        arguments = {k: _decode_argument(v)
                      for k, v in (blob.get("arguments") or {}).items()}
         inputs = tuple(_decode_ref(g) for g in blob.get("inputs") or ())
+        bound_to = _decode_argument(blob.get("bound_to"))
         return cls(
             tool_id=blob["tool_id"],
             modifiers=tuple(modifiers),
             arguments=arguments,
-            fn=fn.fn if isinstance(fn, ToolHandle) else fn,
+            # A bound tool's function comes from its resource type, never from
+            # TOOLS; the workflow attaches it once it knows the type.
+            fn=None if bound_to is not None
+            else (fn.fn if isinstance(fn, ToolHandle) else fn),
             input=_decode_ref(blob.get("input", hoisted)),
             inputs=inputs,
+            bound_to=bound_to,
         )
 
     # ── the other half: hand the decorated tool some data ────────────────
-    def __call__(self, source: Any, /, **literals) -> Any:
+    def __call__(self, source: Any = _NO_SOURCE, /, **literals) -> Any:
         """Apply the decorated tool to its input.
 
         Keyword arguments here are **bound literals**, exactly as
@@ -1690,12 +1717,24 @@ class Operation:
         operation = self.bind(**literals) if literals else self
         if isinstance(source, StepRef):
             return operation._wire(source)
+        if source is _NO_SOURCE:
+            if operation.shape_verb is not None \
+                    and operation.shape_verb.kind in ("source", "sweep"):
+                # Nothing to read: `tool[mod.source()](prompt="hi")` only binds.
+                return operation
+            raise TypeError(f"{self.tool_id}: pass the data to apply it to, "
+                            "or a step reference to wire it")
         return operation.run(source)
 
     def _wire(self, ref: "StepRef") -> "Operation":
         """Record that this step reads *ref* as its input, inferring a verb if none is set."""
         based = Operation(self.tool_id, self.modifiers,
-                          self.arguments, self.fn, ref)
+                          self.arguments, self.fn, ref, bound_to=self.bound_to)
+        if based.bound_to is not None and based.fn is None \
+                and ref.workflow is not None:
+            # The reference knows its workflow, which knows the resource's
+            # declared type — enough to find the method and infer from it.
+            based = _attach_bound(based, ref.workflow.resources)
         if based.shape_verb is not None:
             return based
         upstream = None
@@ -1718,6 +1757,12 @@ class Operation:
         when this Operation names its tool by id (``op("score")``) rather than
         carrying it (``score[...]`` from a ``@tool`` handle).
         """
+        if self.resources:
+            raise TypeError(
+                f"{self.tool_id} uses resource(s) "
+                f"{', '.join(map(repr, self.resources))}, which only a workflow "
+                "can supply: wf.run(step_id, resources={name: object})."
+            )
         if isinstance(source, StepRef):
             raise TypeError(
                 f"cannot run against the reference {source.id!r} — a reference "
@@ -1813,6 +1858,384 @@ def _decode_ref(value: Any) -> Any:
     return value
 
 
+def _encode_argument(value: Any) -> Any:
+    """A bound argument as JSON: ``{"$ref": step}``, ``{"$res": name}`` or the literal."""
+    if isinstance(value, StepRef):
+        return _encode_ref(value)
+    if isinstance(value, ResRef):
+        return {"$res": value.name}
+    return value
+
+
+def _decode_argument(value: Any) -> Any:
+    """The inverse of :func:`_encode_argument`."""
+    if _is_ref(value):
+        return StepRef(value["$ref"])
+    if isinstance(value, dict) and set(value) == {"$res"}:
+        return ResRef(value["$res"])
+    return value
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Resources — objects a workflow uses that are not data (core-proposals/007)
+# ─────────────────────────────────────────────────────────────────────────
+# `wf["…"]` is a table, `res["…"]` is a resource, everything else is a literal.
+# A resource is declared on the workflow (`wf.define`) from literal settings
+# only, saved as that declaration, and supplied live by the caller at run
+# (`wf.run(..., resources={name: object})`). Two ways a tool uses one:
+#
+#   * an **unbound** tool is an ordinary ``@tool`` function with a parameter
+#     typed as the resource: ``enrich(city, db: FakeDB)``, bound per step as
+#     ``db=res["db"]``;
+#   * a **bound** tool is a method of the resource class marked
+#     ``@bound_tool``, used on one named instance: ``res["db"].lookup``.
+
+
+class ResourceNotLoaded(LookupError):
+    """A step needs a resource the caller did not pass to ``run``."""
+
+
+@dataclass(frozen=True)
+class ResRef:
+    """A reference to a declared resource — ``res["db"]``, saved as ``{"$res": "db"}``.
+
+    Like :class:`StepRef`, it is a name, never the object: the workflow stays
+    portable and the live object is supplied at run. ``res["db"].lookup`` is
+    the resource's bound tool ``lookup``, ready to decorate.
+    """
+
+    name: str
+
+    def __getattr__(self, method: str) -> "BoundToolHandle":
+        if method.startswith("_"):
+            raise AttributeError(method)
+        return BoundToolHandle(self, method)
+
+    def __str__(self) -> str:
+        return self.name
+
+    def __repr__(self) -> str:
+        return f"res[{self.name!r}]"
+
+
+class _Res:
+    """``res["db"]`` — the resource counterpart of ``wf["step"]``."""
+
+    def __getitem__(self, name: str) -> ResRef:
+        if not isinstance(name, str) or not name.isidentifier():
+            raise KeyError(f"a resource name must be an identifier, got {name!r}")
+        return ResRef(name)
+
+    def __repr__(self) -> str:
+        return "res"
+
+
+#: ``res["db"]`` names a resource declared with ``wf.define("db", …)``.
+res = _Res()
+
+
+class BoundToolHandle:
+    """``res["db"].lookup`` — a bound tool waiting for its brackets.
+
+    The method is found on the resource's **declared type** once the step is in
+    a workflow; until then its tool id is ``"?.lookup"``. Brackets and parens
+    work exactly as on a :class:`ToolHandle`.
+    """
+
+    def __init__(self, ref: ResRef, method: str):
+        self.ref, self.method = ref, method
+        self.id = f"?.{method}"
+
+    def _start(self) -> "Operation":
+        return Operation(tool_id=self.id, bound_to=self.ref)
+
+    def bind(self, **literals) -> "Operation":
+        return self._start().bind(**literals)
+
+    def __getitem__(self, modifiers: Any) -> "Operation":
+        return self._start()[modifiers]
+
+    def __call__(self, *args, **kwargs) -> Any:
+        if args and isinstance(args[0], StepRef):
+            if len(args) > 1:
+                raise TypeError("wire one reference at a time: a step reads one input.")
+            return self._start().bind(**kwargs)(args[0])
+        raise TypeError(
+            f"res[{self.ref.name!r}].{self.method} has no instance until the "
+            "workflow runs. Wire it into a step: "
+            f"wf[...] = res[{self.ref.name!r}].{self.method}[mod.map()](wf[...])."
+        )
+
+    def __repr__(self) -> str:
+        return f"<bound tool {self.ref!r}.{self.method}>"
+
+
+#: The attribute ``@bound_tool`` sets on a method. The method is otherwise untouched.
+_BOUND_MARK = "__simple_steps_bound_tool__"
+
+
+def bound_tool(fn: Callable) -> Callable:
+    """Mark a **method** of a resource class as a tool that runs on one instance.
+
+    The method stays an ordinary method — ``FakeDB().lookup("SF")`` still works —
+    and nothing is registered in :data:`TOOLS`. The mark only records that the
+    type offers it, so ``res["db"].lookup[mod.map()](…)`` can use it and the
+    catalog can list it. Unmarked methods are never tools, though tool code may
+    still call them::
+
+        class FakeDB:
+            @bound_tool
+            def lookup(self, key: str) -> str | None: ...
+
+            def reset(self) -> None: ...      # not a tool
+    """
+    try:
+        first = next(iter(inspect.signature(fn).parameters), None)
+    except (TypeError, ValueError):
+        first = None
+    if first != "self":
+        raise TypeError(
+            f"@bound_tool marks a method (first parameter `self`); "
+            f"{getattr(fn, '__qualname__', fn)!r} is not one. "
+            "Use @tool for a free function."
+        )
+    setattr(fn, _BOUND_MARK, True)
+    return fn
+
+
+def _looks_like_method(fn: Callable) -> bool:
+    """A function defined in a class body whose first parameter is ``self``."""
+    parts = getattr(fn, "__qualname__", "").split(".")
+    if len(parts) < 2 or parts[-2] == "<locals>":
+        return False
+    try:
+        return next(iter(inspect.signature(fn).parameters), None) == "self"
+    except (TypeError, ValueError):
+        return False
+
+
+def _signature(fn: Callable) -> inspect.Signature:
+    """The signature with string annotations (PEP 563) resolved where possible."""
+    try:
+        return inspect.signature(fn, eval_str=True)
+    except Exception:
+        return inspect.signature(fn)
+
+
+#: Every resource type a workflow has declared or ``@resource`` registered, by name.
+#: ``Workflow.from_dict`` resolves a saved ``"type"`` through it.
+RESOURCE_TYPES: dict[str, type] = {}
+
+_LITERAL_TYPES = (str, int, float, bool, type(None), list, dict, tuple)
+
+
+def _literal_annotation(annotation: Any) -> bool:
+    """Can a setting with this annotation hold only literals?"""
+    if annotation is inspect.Parameter.empty or annotation is Any \
+            or isinstance(annotation, str):
+        return True                       # undeclared or unresolvable: allowed
+    origin = typing.get_origin(annotation)
+    if origin in (typing.Union, types.UnionType):
+        return all(_literal_annotation(a) for a in typing.get_args(annotation))
+    if origin is typing.Literal:
+        return True
+    base = origin or annotation
+    return isinstance(base, type) and issubclass(base, _LITERAL_TYPES)
+
+
+def _settings(cls: type) -> list[inspect.Parameter]:
+    """A resource type's settings: its constructor's named parameters."""
+    try:
+        parameters = list(_signature(cls.__init__).parameters.values())[1:]
+    except (TypeError, ValueError):
+        return []
+    return [p for p in parameters
+            if p.kind not in (inspect.Parameter.VAR_POSITIONAL,
+                              inspect.Parameter.VAR_KEYWORD)]
+
+
+def _bound_tools(cls: type) -> dict[str, Callable]:
+    """The ``@bound_tool`` methods of *cls*, by name, base classes included.
+
+    An unmarked override of a marked method is not a tool: the subclass chose
+    to withdraw it.
+    """
+    found: dict[str, Callable] = {}
+    for klass in reversed(cls.__mro__):
+        for name, value in vars(klass).items():
+            if callable(value) and getattr(value, _BOUND_MARK, False):
+                found[name] = value
+            elif name in found:
+                del found[name]
+    return found
+
+
+_VIEWS: dict[tuple[type, str], Callable] = {}
+
+
+def _method_view(cls: type, name: str) -> Callable:
+    """The bound tool *name* of *cls*, as a function **without** ``self``.
+
+    It carries the signature and docstring, which is everything ``check``,
+    staging, verb inference and the catalog read. It cannot run — the real
+    instance's method replaces it at run time.
+    """
+    key = (cls, name)
+    if key not in _VIEWS:
+        method = _bound_tools(cls)[name]
+        signature = _signature(method)
+
+        def view(*args, **kwargs):
+            raise TypeError(f"{cls.__name__}.{name} is a bound tool; it runs on "
+                            "a resource instance supplied to Workflow.run")
+        view.__signature__ = signature.replace(
+            parameters=list(signature.parameters.values())[1:])
+        view.__name__ = name
+        view.__qualname__ = f"{cls.__name__}.{name}"
+        view.__doc__ = method.__doc__
+        view.__module__ = getattr(method, "__module__", None)
+        _VIEWS[key] = view
+    return _VIEWS[key]
+
+
+def resource_problems(cls: type) -> list[str]:
+    """Why *cls* cannot be a resource type — empty when it can."""
+    problems = []
+    for parameter in _settings(cls):
+        if not _literal_annotation(parameter.annotation):
+            problems.append(
+                f"setting {parameter.name!r} is {_type_name(parameter.annotation)}; "
+                "a resource is built from literal settings only (str, number, "
+                "bool, list, dict), so it can always be rebuilt from its declaration"
+            )
+    return problems
+
+
+def resource(cls: type) -> type:
+    """Register a class as a resource type, checking its settings are literals.
+
+    Optional — ``wf.define`` registers a type the first time it is used — but
+    declaring it puts the type and its bound tools in :func:`resource_catalog`
+    at import, before any workflow exists.
+    """
+    problems = resource_problems(cls)
+    if problems:
+        raise TypeError(f"cannot declare resource type {cls.__name__!r}: "
+                        + "; ".join(problems) + ".")
+    existing = RESOURCE_TYPES.get(cls.__name__)
+    if existing is not None and existing is not cls \
+            and existing.__qualname__ != cls.__qualname__:
+        warnings.warn(
+            f"resource type {cls.__name__!r} is already declared and is being "
+            "replaced — a workflow loaded from JSON resolves the name to "
+            "whichever was declared last.", stacklevel=2)
+    RESOURCE_TYPES[cls.__name__] = cls
+    return cls
+
+
+def resource_entry(cls: type) -> dict:
+    """One resource type for a palette: its settings, bound tools and bases."""
+    doc = (inspect.getdoc(cls) or "").strip()
+    settings = []
+    for parameter in _settings(cls):
+        required = parameter.default is inspect.Parameter.empty
+        settings.append({
+            "name": parameter.name,
+            "type": _type_name(parameter.annotation),
+            "required": required,
+            "default": None if required else parameter.default,
+        })
+    return {
+        "type": cls.__name__,
+        "description": doc.split("\n", 1)[0] if doc else "",
+        "settings": settings,
+        "tools": {f"{cls.__name__}.{name}":
+                  tool_entry(f"{cls.__name__}.{name}", _method_view(cls, name), "bound")
+                  for name in sorted(_bound_tools(cls))},
+        #: Every type this one is, so a client can show which resources fit a
+        #: parameter declared as a base (`llm: LLM`).
+        "bases": [k.__name__ for k in cls.__mro__ if k is not object],
+    }
+
+
+def resource_catalog(types_: dict[str, type] | None = None) -> dict[str, dict]:
+    """Every registered resource type, name → :func:`resource_entry`."""
+    return {name: resource_entry(cls)
+            for name, cls in sorted({**RESOURCE_TYPES, **(types_ or {})}.items())}
+
+
+@dataclass
+class ResourceDecl:
+    """How a workflow declared a resource — what is saved, never the object."""
+
+    name: str
+    #: The class, or ``None`` when a loaded workflow names a type this process
+    #: does not have. Declaring still works; type checks are skipped.
+    type: type | None
+    settings: dict
+    type_name: str
+    source: str = "defined"
+
+    def to_dict(self) -> dict:
+        return {"source": self.source, "type": self.type_name,
+                "settings": dict(self.settings)}
+
+
+def _type_fits(cls: type, annotation: Any) -> bool | None:
+    """Does an instance of *cls* fit *annotation*? ``None`` when undecidable."""
+    if annotation is inspect.Parameter.empty or isinstance(annotation, str):
+        return None
+    origin = typing.get_origin(annotation)
+    if origin in (typing.Union, types.UnionType):
+        answers = [_type_fits(cls, a) for a in typing.get_args(annotation)]
+        if any(a is True for a in answers):
+            return True
+        return False if all(a is False for a in answers) else None
+    base = origin or annotation
+    if not isinstance(base, type) or base is object:
+        return None
+    return issubclass(cls, base)
+
+
+def _attach_bound(operation: "Operation", resources: dict) -> "Operation":
+    """Give a bound-tool Operation its type-qualified id and its method view.
+
+    Left as is when the resource or the method cannot be found — :func:`check`
+    then says which.
+    """
+    if operation.bound_to is None:
+        return operation
+    decl = resources.get(operation.bound_to.name)
+    method = operation.tool_id.rsplit(".", 1)[-1]
+    if decl is None or decl.type is None or method not in _bound_tools(decl.type):
+        return replace(operation, fn=None)
+    return replace(operation, tool_id=f"{decl.type.__name__}.{method}",
+                   fn=_method_view(decl.type, method))
+
+
+def _no_resource(name: str, workflow: "Workflow") -> str:
+    declared = ", ".join(map(repr, workflow.resources)) or "none"
+    return (f"no resource named {name!r} (declared: {declared}). "
+            f"Declare it first: wf.define({name!r}, <Type>, ...)")
+
+
+def _bound_problem(operation: "Operation", workflow: "Workflow | None") -> str:
+    """Why a bound tool's method could not be found."""
+    name = operation.bound_to.name
+    method = operation.tool_id.rsplit(".", 1)[-1]
+    if workflow is None:
+        return (f"{method} is bound to resource {name!r}, which only a workflow "
+                "can declare")
+    decl = workflow.resources.get(name)
+    if decl is None:
+        return _no_resource(name, workflow)
+    if decl.type is None:
+        return (f"resource {name!r} has type {decl.type_name!r}, which is not "
+                "available here — pass resource_types= when loading")
+    tools = ", ".join(sorted(_bound_tools(decl.type))) or "(none)"
+    return f"{method} is not a tool of {decl.type.__name__}; its tools are: {tools}"
+
+
 
 class ToolHandle:
     """What ``@tool`` returns: the plain function, plus a name and brackets.
@@ -1899,6 +2322,15 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
     them as the tool's boundary.
     """
     def make(f: Callable, tool_id: str | None) -> ToolHandle:
+        if _looks_like_method(f):
+            # @tool on a method used to replace it with a handle that never
+            # receives `self`, breaking the method and registering a global
+            # tool `lookup(self, key)`. A method belongs to a resource.
+            raise TypeError(
+                f"{f.__qualname__} is a method. Mark it @bound_tool so it runs "
+                "on a resource instance (res[\"name\"]." + f.__name__ + "); "
+                "@tool is for free functions."
+            )
         handle = ToolHandle(f, tool_id)
         found = declaration_problems(f, handle.id)
         if found:
@@ -2085,11 +2517,25 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     problems: list[str] = []
 
     # 1. the tool has to exist — unless this is a combine verb, which names no
-    #    tool (join/stack/zip apply none; their id is the verb itself).
-    fn = operation.fn or TOOLS.get(operation.tool_id) \
-        or BUILTIN_TOOLS.get(operation.tool_id)
-    if fn is None and not is_combine(operation):
-        problems.append(f"unknown tool {operation.tool_id!r}")
+    #    tool (join/stack/zip apply none; their id is the verb itself). A bound
+    #    tool comes from its resource's declared type, never from TOOLS.
+    if operation.bound_to is not None:
+        fn = operation.fn
+        if fn is None:
+            problems.append(_bound_problem(operation, workflow))
+    else:
+        fn = operation.fn or TOOLS.get(operation.tool_id) \
+            or BUILTIN_TOOLS.get(operation.tool_id)
+        if fn is None and not is_combine(operation):
+            problems.append(f"unknown tool {operation.tool_id!r}")
+
+    # 1b. every resource argument has to name a declared resource. Whether it
+    #     is *loaded* is a run-time question: a workflow is portable, its
+    #     resources are environment.
+    if workflow is not None:
+        for value in operation.arguments.values():
+            if isinstance(value, ResRef) and value.name not in workflow.resources:
+                problems.append(_no_resource(value.name, workflow))
 
     # 2. every modifier kind has to be in the vocabulary
     for modifier in operation.modifiers:
@@ -2359,10 +2805,23 @@ def _missing_columns(operation: Operation, fn: Callable,
                and p.name not in available]
     if not missing:
         return []
+    # A parameter typed as a resource is never a column — say how to bind it.
+    hint = ""
+    try:
+        annotations = {k: p.annotation for k, p in _signature(fn).parameters.items()}
+    except (TypeError, ValueError):
+        annotations = {}
+    for name in missing:
+        kind = annotations.get(name)
+        if isinstance(kind, type) and any(isinstance(t, type) and issubclass(t, kind)
+                                          for t in RESOURCE_TYPES.values()):
+            hint = (f". {name!r} is a resource ({kind.__name__}), not a column: "
+                    f"bind it with {name}=res[\"<name>\"]")
+            break
     return [
         f"{operation.tool_id}() needs {', '.join(repr(m) for m in missing)}, "
         f"which {str(operation.input) if operation.input is not None else 'the input'!r} does not have "
-        f"(it has {', '.join(sorted(available)) or 'no columns'})"
+        f"(it has {', '.join(sorted(available)) or 'no columns'}){hint}"
     ]
 
 
@@ -2380,7 +2839,9 @@ def _type_mismatches(operation: Operation, fn: Callable,
     positive here would refuse a step that runs.
     """
     try:
-        parameters = inspect.signature(fn).parameters
+        # Resolved, so `from __future__ import annotations` (a string
+        # "FakeLLM") is checked like the real type rather than skipped.
+        parameters = _signature(fn).parameters
     except (TypeError, ValueError):
         return []
 
@@ -2391,6 +2852,18 @@ def _type_mismatches(operation: Operation, fn: Callable,
             continue
         if isinstance(value, StepRef):
             continue                     # a value reference, resolved at run
+        if isinstance(value, ResRef):
+            # Checked against the *declared* type, so it works before anything
+            # is loaded. A subclass fits its base.
+            decl = workflow.resources.get(value.name) if workflow else None
+            if decl is not None and decl.type is not None and \
+                    _type_fits(decl.type, parameter.annotation) is False:
+                problems.append(
+                    f"{operation.tool_id}() declares {name}: "
+                    f"{_type_name(parameter.annotation)}, but it is bound to "
+                    f"resource {value.name!r} ({decl.type.__name__})"
+                )
+            continue
         if _value_fits(value, parameter.annotation) is False:
             problems.append(
                 f"{operation.tool_id}() declares {name}: "
@@ -2912,6 +3385,88 @@ class Workflow:
 
     def __init__(self) -> None:
         self.steps: dict[str, Step] = {}
+        #: Declared resources, by name — the declarations, never the objects.
+        self.resources: dict[str, ResourceDecl] = {}
+
+    # ── resources ────────────────────────────────────────────────────────
+    def define(self, name: str, type_: type, /, **settings: Any) -> ResRef:
+        """Declare resource *name*: an instance of *type_* built from *settings*.
+
+        ``wf.define("llm", FakeLLM, model="fake-1")``. Nothing is built here — the
+        caller owns the live object and passes it to :meth:`run`. What is
+        recorded is enough to check every step that uses it and to save it.
+        Settings must be literals the constructor accepts. Redefining a
+        resource re-checks the steps that use it and marks the ones that ran
+        ``stale``. Returns ``res[name]``.
+        """
+        if not isinstance(name, str) or not name.isidentifier():
+            raise ValueError(f"a resource name must be an identifier, got {name!r}")
+        if not isinstance(type_, type):
+            raise TypeError(f"define({name!r}, …) needs a class, got {type_!r}")
+        problems = resource_problems(type_)
+        accepted = {p.name: p for p in _settings(type_)}
+        for key, value in settings.items():
+            if key not in accepted:
+                problems.append(
+                    f"{type_.__name__} has no setting {key!r}; its settings are: "
+                    f"{', '.join(accepted) or '(none)'}")
+            elif not _json_safe(value):
+                problems.append(
+                    f"setting {key!r} must be a literal (str, number, bool, list, "
+                    f"dict), got {type(value).__name__}")
+            elif _value_fits(value, accepted[key].annotation) is False:
+                problems.append(
+                    f"setting {key!r} is declared "
+                    f"{_type_name(accepted[key].annotation)}, got {value!r}")
+        missing = [k for k, p in accepted.items()
+                   if p.default is inspect.Parameter.empty and k not in settings]
+        if missing:
+            problems.append(f"{type_.__name__} needs {', '.join(map(repr, missing))}")
+        if problems:
+            raise TypeError(f"cannot define resource {name!r}: "
+                            + "; ".join(problems) + ".")
+        resource(type_)
+        existed = name in self.resources
+        self.resources[name] = ResourceDecl(name, type_, dict(settings),
+                                            type_.__name__)
+        self._recheck_users(name, stale=existed)
+        return ResRef(name)
+
+    def _recheck_users(self, name: str, *, stale: bool) -> None:
+        """Re-check every step that uses resource *name* after it (re)declared."""
+        for sid, st in self.steps.items():
+            if name not in st.operation.resources:
+                continue
+            operation = _attach_bound(st.operation, self.resources)
+            problems = check(operation, self, sid)
+            ran = not st.output.meta.get("staged")
+            st.operation = operation
+            if problems != st.problems or not ran:
+                st.problems = problems
+                st.output = stage(operation, self, problems)
+                st.warnings = warn(operation, self)
+                self._restage_after(sid)
+            elif stale:
+                # Same as a changed `$ref` upstream: the data is now outdated.
+                st.output.meta["stale"] = True
+                self._mark_stale_dependents(sid)
+
+    def _live(self, name: str, resources: Mapping[str, Any] | None) -> Any:
+        """The caller's object for resource *name*, checked against its declaration."""
+        if resources is None or name not in resources:
+            decl = self.resources.get(name)
+            kind = decl.type_name if decl else "object"
+            raise ResourceNotLoaded(
+                f"resource {name!r} is not loaded. Pass it to run: "
+                f"wf.run(..., resources={{{name!r}: <{kind}>}})")
+        live = resources[name]
+        decl = self.resources.get(name)
+        if decl is not None and decl.type is not None \
+                and not isinstance(live, decl.type):
+            raise TypeError(
+                f"resource {name!r} is declared {decl.type.__name__}, but the "
+                f"object passed for it is {type(live).__name__}")
+        return live
 
     # ── declaring ────────────────────────────────────────────────────────
     def __setitem__(self, step_id: str, operation: Any) -> None:
@@ -2956,6 +3511,7 @@ class Workflow:
             if existed:
                 self._mark_stale_dependents(step_id)
             return
+        operation = _attach_bound(operation, self.resources)
         problems = check(operation, self, step_id)
         self.steps[step_id] = Step(
             step_id, operation, stage(operation, self, problems), problems,
@@ -3053,7 +3609,7 @@ class Workflow:
                     new_args[key] = value
             if changed:
                 st.operation = Operation(op.tool_id, op.modifiers, new_args,
-                                         op.fn, new_input)
+                                         op.fn, new_input, bound_to=op.bound_to)
 
     def _mark_stale_dependents(self, step_id: str) -> None:
         """Mark every transitive reader that has already run as ``stale``.
@@ -3116,26 +3672,42 @@ class Workflow:
                 waiting.append(name)
         return waiting
 
-    def _resolve_arguments(self, operation: Operation) -> Operation:
-        """Replace each reference argument with the step's value.
+    def _resolve_arguments(self, operation: Operation,
+                           resources: Mapping[str, Any] | None = None) -> Operation:
+        """Replace each reference argument with its value, and each resource with its object.
 
-        A one-cell step gives the cell; anything else gives the whole grid. A
-        plain Operation (no reference args) is returned unchanged.
+        A ``$ref`` to a one-cell step gives the cell; anything else gives the
+        whole grid. A ``$res`` gives the caller's live object, and a bound tool
+        gets that instance's method. A missing resource raises
+        :class:`ResourceNotLoaded` before anything runs. A plain Operation is
+        returned unchanged.
         """
-        if not any(isinstance(v, StepRef) for v in operation.arguments.values()):
+        if operation.bound_to is None and not any(
+                isinstance(v, (StepRef, ResRef)) for v in operation.arguments.values()):
             return operation
         resolved = {}
         for name, value in operation.arguments.items():
             if isinstance(value, StepRef):
                 data = self.steps[str(value)].output.data
                 resolved[name] = data.iloc[0, 0] if data.shape == (1, 1) else data
+            elif isinstance(value, ResRef):
+                resolved[name] = self._live(value.name, resources)
             else:
                 resolved[name] = value
+        fn = operation.fn
+        if operation.bound_to is not None:
+            instance = self._live(operation.bound_to.name, resources)
+            fn = getattr(instance, operation.tool_id.rsplit(".", 1)[-1])
         return Operation(operation.tool_id, operation.modifiers, resolved,
-                         operation.fn, operation.input)
+                         fn, operation.input)
 
-    def run(self, step_id: str, tools: dict[str, Callable] | None = None) -> Step:
+    def run(self, step_id: str, tools: dict[str, Callable] | None = None,
+            resources: Mapping[str, Any] | None = None) -> Step:
         """Execute one step and replace its staged Output with the real one.
+
+        *resources* is the caller's live objects, name → object, for every
+        ``res["…"]`` the step uses. A step that needs one that is missing
+        raises :class:`ResourceNotLoaded` and does not run.
 
         Refuses a step whose inputs are not there yet. Silently running against
         a staged upstream produced a grid of ``None`` — plausible-looking and
@@ -3152,7 +3724,8 @@ class Workflow:
                     or BUILTIN_TOOLS.get(step.operation.tool_id))
             if not is_identity(tool):
                 # A tool source computes its grid from a no-input tool.
-                step.output = self._resolve_arguments(step.operation).run(None, tools)
+                step.output = self._resolve_arguments(
+                    step.operation, resources).run(None, tools)
                 self._restage_after(step_id)
                 return step
             # A literal source holds its data, so running one is a no-op — unless
@@ -3178,12 +3751,13 @@ class Workflow:
             step.output = _run_combine(step.operation, frames)
             self._restage_after(step_id)
             return step
-        resolved = self._resolve_arguments(step.operation)
+        resolved = self._resolve_arguments(step.operation, resources)
         step.output = resolved.run(self._input_for(resolved), tools)
         self._restage_after(step_id)
         return step
 
-    def run_all(self, tools: dict[str, Callable] | None = None) -> "Workflow":
+    def run_all(self, tools: dict[str, Callable] | None = None,
+                resources: Mapping[str, Any] | None = None) -> "Workflow":
         """Run every valid step, each after the steps it reads.
 
         Still explicit — nothing recomputes on its own (§7's push/pull rule).
@@ -3199,7 +3773,7 @@ class Workflow:
                     f"cannot order {remaining!r}: something reads a step that never runs"
                 )
             for step_id in ready:
-                self.run(step_id, tools)
+                self.run(step_id, tools, resources)
                 done.add(step_id)
             remaining = [sid for sid in remaining if sid not in done]
         return self
@@ -3250,9 +3824,14 @@ class Workflow:
         cannot reproduce is *cardinality*, which came from the data: a light
         round-trip lands at §7's level 1 (shape known, counts not), by design.
         """
-        return {"version": 1,
+        blob = {"version": 1,
                 "steps": [{"step_id": sid, "operation": st.operation.to_dict()}
                           for sid, st in self.steps.items()]}
+        if self.resources:
+            # The declarations, never the objects — the caller supplies those.
+            blob["resources"] = {name: decl.to_dict()
+                                 for name, decl in self.resources.items()}
+        return blob
 
     def to_json(self) -> str:
         import json
@@ -3278,34 +3857,45 @@ class Workflow:
         return json.dumps(self.to_session_dict())
 
     @classmethod
-    def from_dict(cls, blob: dict, tools: dict[str, Callable] | None = None
-                  ) -> "Workflow":
+    def from_dict(cls, blob: dict, tools: dict[str, Callable] | None = None,
+                  resource_types: dict[str, type] | None = None) -> "Workflow":
         """Rebuild a Workflow from either export — all at once.
 
         Every step goes through the same :func:`check` and :func:`stage` the
         incremental path uses, so loading cannot smuggle in a step that
-        declaring would have rejected.
+        declaring would have rejected. *resource_types* maps a saved resource
+        type name to its class, as *tools* does for tools; types registered with
+        :func:`resource` (or used by ``define``) are found without it.
         """
         workflow = cls()
+        known = {**RESOURCE_TYPES, **(resource_types or {})}
+        for name, entry in (blob.get("resources") or {}).items():
+            workflow.resources[name] = ResourceDecl(
+                name, known.get(entry["type"]), dict(entry.get("settings") or {}),
+                entry["type"], entry.get("source", "defined"))
         for entry in blob["steps"]:
             sid = entry["step_id"]
-            operation = Operation.from_dict(entry["operation"], tools)
+            operation = _attach_bound(
+                Operation.from_dict(entry["operation"], tools), workflow.resources)
             problems = check(operation, workflow, sid)
             workflow.steps[sid] = Step(sid, operation,
                                        stage(operation, workflow, problems),
                                        problems, warn(operation, workflow))
-        for sid, encoded in (blob.get("outputs") or {}).items():
-            if sid in workflow.steps:
+            # Restore this step's payload before checking the steps after it,
+            # as declaring does: a later `select` is checked against the real
+            # columns, not a staged guess that would refuse a valid step.
+            encoded = (blob.get("outputs") or {}).get(sid)
+            if encoded is not None:
                 workflow.steps[sid].output = _decode_output(encoded)
         for sid in (blob.get("outputs") or {}):
             workflow._restage_after(sid)
         return workflow
 
     @classmethod
-    def from_json(cls, data: str, tools: dict[str, Callable] | None = None
-                  ) -> "Workflow":
+    def from_json(cls, data: str, tools: dict[str, Callable] | None = None,
+                  resource_types: dict[str, type] | None = None) -> "Workflow":
         import json
-        return cls.from_dict(json.loads(data), tools)
+        return cls.from_dict(json.loads(data), tools, resource_types)
 
     def validate(self) -> dict[str, tuple[str, ...]]:
         """Every step's problems, keyed by step id — empty tuples for the good ones."""

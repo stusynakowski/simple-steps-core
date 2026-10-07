@@ -900,7 +900,8 @@ def test_a_workflow_is_only_steps(three):
     wf = Workflow()
     wf["raw"] = three
     assert not hasattr(wf, "inputs")
-    assert list(vars(wf)) == ["steps"]
+    # `resources` holds declarations (type + literal settings), never payloads.
+    assert list(vars(wf)) == ["steps", "resources"]
 
 
 def test_running_a_source_step_is_a_no_op(three):

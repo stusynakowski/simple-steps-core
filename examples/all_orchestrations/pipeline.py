@@ -3,7 +3,9 @@
 This is the single canonical example for the library. It defines **one** set of
 tools (the registry below) and one small tabular dataset, then wires a workflow
 that exercises **every shape verb**, both fan-out chains, the execution
-modifiers, serialization, staging/validation and per-row failure.
+modifiers, serialization, staging/validation and per-row failure — and a second
+workflow that uses **resources**: a dummy database and a dummy LLM, each with
+bound and unbound tools.
 
 Run it directly to print each step:
 
@@ -23,7 +25,8 @@ from __future__ import annotations
 import pandas as pd
 
 from simple_steps_core import grid
-from simple_steps_core.grid import join, mod, op, stack, tool, zip_
+from simple_steps_core.grid import (bound_tool, join, mod, op, res, resource,
+                                    stack, tool, zip_)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -242,6 +245,156 @@ def roundtrip() -> tuple[grid.Workflow, grid.Workflow]:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Resources — objects a workflow uses that are not data (core-proposals/007).
+#
+# The notation, three marks:
+#
+#   @resource      on a class: a resource type, built from literal settings.
+#   @bound_tool    on a method: a BOUND tool — it runs on one named instance,
+#                  written  res["db"].lookup[mod.map()](wf["keys"]).
+#                  The method stays an ordinary method.
+#   @tool          on a free function with a resource-typed parameter: an
+#                  UNBOUND tool — it needs a resource but does not belong to
+#                  one, written  enrich[mod.map()](wf["readings"], db=res["db"]).
+#
+# An unmarked method (FakeDB.reset) is never a tool, though tool code may call it.
+# Both dummies are deterministic and count their calls, so a test can check
+# that one instance served every row.
+# ─────────────────────────────────────────────────────────────────────────
+@resource
+class FakeDB:
+    """An in-memory table: city -> region."""
+
+    def __init__(self, table: dict | None = None):
+        self.table = dict(table or {"SF": "west", "NYC": "east", "LA": "west"})
+        self.reads = 0
+
+    @bound_tool
+    def lookup(self, key: str) -> str | None:
+        """The region stored for a key, or None."""
+        self.reads += 1
+        return self.table.get(key)
+
+    def reset(self) -> None:                      # unmarked: never a tool
+        self.reads = 0
+
+
+@resource
+class FakeLLM:
+    """Answers deterministically: the model name, then the prompt upper-cased."""
+
+    def __init__(self, model: str = "fake-1"):
+        self.model = model
+        self.calls = 0
+
+    @bound_tool
+    def complete(self, prompt: str) -> str:
+        """One completion for a prompt."""
+        self.calls += 1
+        return f"[{self.model}] {prompt.upper()}"
+
+
+@resource
+class TinyLLM(FakeLLM):
+    """A smaller FakeLLM — fits anywhere a FakeLLM is asked for."""
+
+
+@tool
+def enrich(city: str, db: FakeDB) -> str:
+    """unbound: the region for a city, read from the database."""
+    return db.lookup(city) or "unknown"
+
+
+@tool
+def summarize(text: str, llm: FakeLLM) -> str:
+    """unbound: one line from the model."""
+    return llm.complete(text)
+
+
+@tool
+def lookup_fresh(city: str, db: FakeDB) -> str:
+    """unbound: resets the read counter, then looks up — tool code may call anything."""
+    db.reset()
+    return db.lookup(city) or "unknown"
+
+
+def notes() -> pd.DataFrame:
+    """Two short texts for the LLM to summarize."""
+    return pd.DataFrame({"text": ["a", "b"]})
+
+
+def live_resources() -> dict:
+    """What the caller owns and passes to ``run`` — the workflow never builds these."""
+    return {"db": FakeDB(), "llm": FakeLLM(model="fake-1"),
+            "tiny": TinyLLM(model="tiny-1")}
+
+
+def build_resources() -> grid.Workflow:
+    """Declare (but do not run) the resource workflow.
+
+    Resources are declared once with ``wf.define`` — a type and literal
+    settings, no object — and every step names the one it uses with ``res[…]``.
+    Declaring needs only the declared types, so every step validates here.
+    """
+    wf = grid.Workflow()
+    wf.define("db", FakeDB)
+    wf.define("llm", FakeLLM, model="fake-1")
+    wf.define("tiny", TinyLLM, model="tiny-1")
+
+    wf["readings"] = readings()
+    wf["notes"] = notes()
+    wf["keys"] = mod.rename(over=wf["readings"], columns={"city": "key"})
+
+    # ── unbound tools: a resource is an argument, chosen per step ────────
+    wf["regions"] = enrich[mod.map()](wf["readings"], db=res["db"])
+    wf["summaries"] = summarize[mod.map()](wf["notes"], llm=res["llm"])
+    wf["tiny_summaries"] = summarize[mod.map()](wf["notes"], llm=res["tiny"])  # subclass fits
+
+    # ── bound tools: a marked method of one named instance ───────────────
+    wf["regions_bound"] = res["db"].lookup[mod.map()](wf["keys"])
+    wf["hello"] = res["llm"].complete[mod.source()](prompt="hi")
+    wf["inferred"] = res["db"].lookup(wf["keys"])           # verb inferred: map
+
+    # ── a resource step's output feeds later steps like any other ────────
+    wf["region_table"] = mod.select(over=wf["regions"], columns=["city", "value"])
+    return wf
+
+
+def run_resources() -> tuple[grid.Workflow, dict]:
+    """Build and run the resource workflow against the caller's objects."""
+    live = live_resources()
+    return build_resources().run_all(resources=live), live
+
+
+def resource_problems() -> grid.Workflow:
+    """Every way a resource step is refused at declaration — nothing runs."""
+    wf = grid.Workflow()
+    wf.define("db", FakeDB)
+    wf.define("llm", FakeLLM)
+    wf["notes"] = notes()
+    wf["wrong_type"] = summarize[mod.map()](wf["notes"], llm=res["db"])
+    wf["unknown"] = summarize[mod.map()](wf["notes"], llm=res["nope"])
+    wf["unmarked"] = res["db"].reset[mod.source()]()
+    wf["not_a_column"] = summarize[mod.map()](wf["notes"])   # llm left unbound
+    return wf
+
+
+def resource_roundtrip() -> tuple[grid.Workflow, grid.Workflow]:
+    """Save the resource workflow and reload it — declarations only, no objects.
+
+    The session export, like :func:`roundtrip`, so the source tables come
+    along. The resources section is the same in either export: a type and its
+    settings, never the live object.
+    """
+    original = build_resources()
+    reloaded = grid.Workflow.from_json(original.to_session_json(), grid.TOOLS,
+                                       resource_types={"FakeDB": FakeDB,
+                                                       "FakeLLM": FakeLLM,
+                                                       "TinyLLM": TinyLLM})
+    return original, reloaded
+
+
+# ─────────────────────────────────────────────────────────────────────────
 def main() -> None:
     wf = run()
     print(wf, "\n")
@@ -282,6 +435,28 @@ def main() -> None:
     for sid, problems in checks.validate().items():
         print(f"  {sid:12} {problems or 'ok'}")
 
+    res_wf, live = run_resources()
+    print("\nresources — FakeDB and FakeLLM, bound and unbound tools:")
+    for name, decl in res_wf.resources.items():
+        print(f"  res[{name!r}] = {decl.type_name}({decl.settings})")
+    for sid in ("regions", "summaries", "tiny_summaries", "regions_bound",
+                "inferred"):
+        print(f"  {sid:15} {res_wf.step(sid).operation.tool_id:14} "
+              f"{res_wf.step(sid).output.values}")
+    print(f"  {'hello':15} {'FakeLLM.complete':14} "
+          f"{res_wf.step('hello').output.data.iloc[0, 0]!r}  (a source: one cell)")
+    print(f"  one instance each: db.reads={live['db'].reads}, "
+          f"llm.calls={live['llm'].calls}, tiny.calls={live['tiny'].calls}")
+    blob = res_wf.to_dict()
+    saved = {e["step_id"]: e["operation"] for e in blob["steps"]}
+    print("  saved: summaries →", saved["summaries"]["arguments"],
+          "| regions_bound →", saved["regions_bound"]["tool_id"],
+          saved["regions_bound"]["bound_to"],
+          "| res['llm'] →", blob["resources"]["llm"])
+
+    print("\nresource problems — refused at declaration:")
+    for sid, problems in resource_problems().validate().items():
+        print(f"  {sid:13} {problems[0] if problems else 'ok'}")
 
 if __name__ == "__main__":
     main()
