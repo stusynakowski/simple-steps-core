@@ -249,8 +249,17 @@ def k16_results_store():
 
 
 def k17_json_version():
+    # (core) the app's probe could only say "check by hand"; this checks it:
+    # the new format is written, v1 still loads, a newer file is refused.
     blob = json.loads(_wf().to_json())
-    return False, f"to_json version = {blob.get('version')!r} (check by hand once P0 lands: v1 files must still load)"
+    v1 = {"version": 1, "steps": [{"step_id": "r", "operation": {
+        "tool_id": "scale", "input": None, "arguments": {"weight": 2},
+        "modifiers": [{"kind": "map", "params": {}}]}}]}
+    _, v1_err = _try(lambda: grid.Workflow.from_dict(v1))
+    _, v3_err = _try(lambda: grid.Workflow.from_dict({**v1, "version": 99}))
+    done = blob.get("version", 1) > 1 and v1_err is None and v3_err is not None
+    return done, (f"to_json version = {blob.get('version')!r}; v1 loads: {v1_err is None}; "
+                  f"newer refused: {v3_err is not None}")
 
 
 def k18_timeout_enforced():
@@ -289,9 +298,10 @@ def n2_literal_beats_column():
     wf["x"] = built
     if wf.step("x").problems:
         return True, f"declaration problem: {wf.step('x').problems[0][:110]}"
+    warned = any("overrides" in w for w in wf.step("x").warnings)
     wf.run("x")
     got = wf.step("x").output.values
-    return got == ["NYC"] * 4, f"-> {got}"
+    return got == ["NYC"] * 4 and warned, f"-> {got}; warned: {warned}"
 
 
 def c13_output_replaces_input():
@@ -326,6 +336,132 @@ def c6_unbound_wf():
     return got == ([10, 20], [70, 80]), f"-> {got}"
 
 
+def c10_failure_flows_downstream():
+    calls = {"n": 0}
+
+    @tool
+    def risky(n: int) -> int:
+        if n == 2:
+            raise ValueError("boom")
+        return n * 100
+
+    @tool
+    def plus1(value: int) -> int:
+        calls["n"] += 1
+        return value + 1
+
+    wf = grid.Workflow()
+    wf["r"] = pd.DataFrame({"n": [1, 2, 3]})
+    built, err = _try(lambda: scale[mod.map()](wf["nope"]))
+    if err:
+        return False, f"wf['nope'] -> {err[:100]}"
+    wf["bad"] = built
+    wf["a"] = risky[mod.map()](wf["r"])
+    wf["b"] = plus1[mod.map()](wf["a"])
+    wf.run_all()
+    cause = wf.step("b").output.ledger["cause"].iloc[1] if "cause" in wf.step("b").output.ledger else None
+    dtype = str(wf.step("a").output.data["value"].dtype)
+    done = (not wf.step("bad").valid and calls["n"] == 2 and dtype == "Int64"
+            and cause == "a[1]: ValueError: boom")
+    return done, f"bad ref -> {wf.step('bad').status}; a: {dtype}; plus1 calls {calls['n']}; cause {cause!r}"
+
+
+def c14_missing_is_none():
+    @tool
+    def inc_opt(n: int | None) -> int:
+        return 1 if n is None else n + 1
+
+    @tool
+    def inc(n: int) -> int:
+        return n + 1
+
+    wf = grid.Workflow()
+    wf["r"] = pd.DataFrame({"n": [1, None, 3]})
+    wf["o"] = inc_opt[mod.map()](wf["r"])
+    wf["i"] = inc[mod.map()](wf["r"])
+    wf.run_all()
+    got = wf.step("o").output.values
+    worded = any("can be None" in p for p in wf.step("i").problems)
+    return got == [2, 1, 4] and worded, f"inc_opt -> {got}; inc problems -> {wf.step('i').problems}"
+
+
+def r8_failed_rows_keep_int():
+    @tool
+    def risky(n: int) -> int:
+        if n == 2:
+            raise ValueError("boom")
+        return n * 100
+
+    wf = _wf()
+    wf["out"] = risky[mod.map()](wf["readings"])
+    wf.run("out")
+    dtype = str(wf.step("out").output.data["value"].dtype)
+    return dtype != "float64", f"out: {dtype} {wf.step('out').output.values}"
+
+
+def c11_literals_round_trip():
+    import datetime
+    wf = _wf()
+    values = [(1, 2), {1: "one"}, {1, 2}]
+    wrong = []
+    for v in values:
+        wf["s"] = scale.bind(weight=v)[mod.map()](wf["readings"])
+        back = grid.Workflow.from_json(wf.to_session_json(), grid.TOOLS).step("s").operation.arguments["weight"]
+        if back != v or type(back) is not type(v):
+            wrong.append(f"{v!r} -> {back!r}")
+    wf["d"] = scale.bind(weight=datetime.date(2024, 1, 1))[mod.map()](wf["readings"])
+    refused = bool(wf.step("d").problems)
+    return not wrong and refused, f"lossy: {wrong or 'none'}; date refused at declaration: {refused}"
+
+
+def c1_refs_in_every_slot():
+    wf = _wf()
+    wf["cols"] = ["city"]
+    wf["w"] = 2
+    built, err = _try(lambda: I[mod.select(columns=wf["cols"])](wf["readings"]))
+    if err:
+        return False, f"select(columns=wf['cols']) -> {err[:100]}"
+    wf["s"] = built
+    pos, err = _try(lambda: scale(wf["readings"], wf["w"]))
+    if err:
+        return False, f"scale(wf['r'], wf['w']) -> {err[:100]}"
+    wf.run_all()
+    got = wf.step("s").output.data.to_dict("list")
+    same = pos == scale(wf["readings"], weight=wf["w"])
+    return got == {"city": ["SF", "NYC", "SF", "LA"]} and same, f"select -> {got}; positional == keyword: {same}"
+
+
+def c2_tool_settings():
+    @tool
+    def neg_n(n):
+        return -n
+
+    wf = _wf()
+    built, err = _try(lambda: I[mod.sort(by=neg_n)](wf["readings"]))
+    if err:
+        return False, f"sort(by=tool) -> {err[:100]}"
+    wf["s"] = built
+    back = grid.Workflow.from_json(wf.to_session_json(), grid.TOOLS)
+    back.run("s")
+    got = list(back.step("s").output.data["n"])
+    return got == [3, 2, 2, 1], f"sort(by=neg_n) after a round trip -> {got}"
+
+
+def c7_selection():
+    wf = grid.Workflow()
+    wf["p"] = pd.DataFrame({"name": list("abcde"), "qty": [1, 2, 3, 4, 5],
+                            "price": [10.0, 20.0, 30.0, 40.0, 50.0]})
+    if not hasattr(grid, "cols"):
+        return False, "grid.cols does not exist"
+    c = grid.cols
+    wf["block"] = wf["p"][1:3][c["name":"price"]]
+    wf.run("block")
+    got = wf.step("block").output.data.to_dict("list")
+    _, err = _try(lambda: wf["p"]["price"])
+    return (got == {"name": ["b", "c"], "qty": [2, 3], "price": [20.0, 30.0]} and err is not None,
+            f"block -> {got}; wf['p']['price'] -> {(err or 'accepted')[:70]}")
+
+
 ASKS = [
     ("K1", "Unrun source: columns unknown, re-check later", k1_unrun_source_columns),
     ("K2", "Verb inference independent of run state", k2_inference_run_state),
@@ -346,10 +482,17 @@ ASKS = [
     ("K17", "Stable JSON version across P0", k17_json_version),
     ("K18", "timeout is enforced", k18_timeout_enforced),
     ("N1", "(core) dict | None resource setting accepts values", n1_dict_or_none_setting),
-    ("N2", "(core) an explicit literal beats a same-named column", n2_literal_beats_column),
+    ("N2", "(core) an explicit literal beats a same-named column, with a warning", n2_literal_beats_column),
     ("C13", "(core) an output never silently replaces an input column", c13_output_replaces_input),
     ("O", "(core) a missing required setting is a declaration problem", o_missing_required_setting),
     ("C6", "(core) grid.wf: an unbound step reference", c6_unbound_wf),
+    ("C10", "(core) failure is a state that flows downstream", c10_failure_flows_downstream),
+    ("C14", "(core) missing is None; nullability is checked", c14_missing_is_none),
+    ("R8", "(core) failed rows keep an int column int", r8_failed_rows_keep_int),
+    ("C11", "(core) literals round-trip exactly; others refused", c11_literals_round_trip),
+    ("C1", "(core) a reference in every slot, positional args", c1_refs_in_every_slot),
+    ("C2", "(core) a tool as a shape setting", c2_tool_settings),
+    ("C7", "(core) Excel-style selection", c7_selection),
 ]
 
 

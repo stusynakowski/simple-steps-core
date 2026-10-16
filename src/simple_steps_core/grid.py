@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import inspect
 import itertools
+import math
+import numbers
 import warnings
 import time
 import traceback
@@ -51,7 +53,8 @@ __all__ = [
     "op", "Modifier", "Operation",
     "join", "stack", "zip_", "COMBINE", "is_combine",
     "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "warn", "stage",
-    "wf", "res", "ResRef", "bound_tool", "resource", "RESOURCE_TYPES",
+    "wf", "res", "ResRef", "bound_tool", "cols", "Rows", "Cols", "SelectionError",
+    "RESERVED_NAMES", "FORMAT_VERSION", "ToolRef", "resource", "RESOURCE_TYPES",
     "resource_entry", "resource_catalog", "ResourceNotLoaded",
     "STRICT_TYPES", "annotation_problems", "declaration_problems",
     "PARAM_TYPES", "PARAM_TYPES_BY_VERB",
@@ -69,7 +72,7 @@ __all__ = [
 PAYLOAD = "value"
 
 #: Every ledger has exactly these columns, so the UI can rely on them.
-LEDGER_COLUMNS = ("status", "error", "attempts", "seconds", "unit")
+LEDGER_COLUMNS = ("status", "error", "attempts", "seconds", "unit", "cause")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -109,7 +112,10 @@ class Output:
     def values(self) -> list[Any]:
         """The payload column as a plain list, for the common case."""
         column = self.meta.get("payload")
-        return [] if column is None else list(self.data[column])
+        if column is None:
+            return []
+        # 008 C14: a missing value reads back as None — never NaN or pd.NA.
+        return [None if _is_missing(v) else v for v in self.data[column]]
 
     def item(self) -> Any:
         """The single payload of a one-row grid (``collapse`` and friends)."""
@@ -147,6 +153,130 @@ class Output:
         tail = f", {failed} failed" if failed else ""
         return (f"<Output {verb} · {len(self.data)} row(s) × "
                 f"{len(self.data.columns)} col(s){tail}>")
+
+
+def _is_missing(value: Any) -> bool:
+    """None, pandas' NA, or a float NaN — every spelling of "no value" (008 C14)."""
+    if value is None or value is pd.NA:
+        return True
+    return isinstance(value, float) and math.isnan(value)
+
+
+def _typed(values: list, index: Any) -> Any:
+    """A payload column that keeps its type when some cells have no value.
+
+    008 R8/C14: a failed or missing cell used to land as ``NaN``, turning an
+    ``int`` column into ``float64`` (``100.0, NaN, 300.0``) and refusing every
+    ``n: int`` tool downstream. With a missing cell, ints become nullable
+    ``Int64``, floats ``Float64``, bools ``boolean``, anything else ``object``
+    holding ``None``. A column with no missing cell is left to pandas, as before.
+    """
+    present = [v for v in values if not _is_missing(v)]
+    if len(present) == len(values):
+        return values
+    cleaned = [None if _is_missing(v) else v for v in values]
+    if present and all(isinstance(v, bool) for v in present):
+        dtype = "boolean"
+    elif present and all(isinstance(v, numbers.Integral) and not isinstance(v, bool)
+                         for v in present):
+        dtype = "Int64"
+    elif present and all(isinstance(v, numbers.Real) and not isinstance(v, bool)
+                         for v in present):
+        dtype = "Float64"
+    else:
+        return pd.Series(cleaned, index=index, dtype=object)
+    return pd.array(cleaned, dtype=dtype)
+
+
+def _normalize_missing(frame: pd.DataFrame) -> pd.DataFrame:
+    """Give a source's columns with missing values a type that can hold None.
+
+    ``pd.DataFrame({"n": [1, None, 3]})`` is ``float64`` with ``NaN`` — pandas'
+    spelling of "ints with a gap". It becomes nullable ``Int64`` (the rule
+    pandas' own ``convert_dtypes`` uses: every present value is whole), so a
+    tool reading it gets ``None`` and ints (008 C14). Columns with no missing
+    value are untouched.
+    """
+    out = None
+    for column in frame.columns:
+        series = frame[column]
+        try:
+            missing = series.isna()
+        except (TypeError, ValueError):
+            continue
+        if not missing.any():
+            continue
+        out = frame.copy() if out is None else out
+        present = series[~missing]
+        if series.dtype.kind == "f" and len(present) and (present % 1 == 0).all():
+            out[column] = series.astype("Int64")
+        elif series.dtype == object:
+            out[column] = series.where(~missing, None)
+    return frame if out is None else out
+
+
+def _str_columns(frame: pd.DataFrame, step_id: str = "the step") -> pd.DataFrame:
+    """Every column name a string (008 C7: names are str, rows are int).
+
+    ``2023`` becomes ``"2023"``. Two names that collide once converted fail.
+    """
+    if all(isinstance(c, str) for c in frame.columns):
+        return frame
+    names = [str(c) for c in frame.columns]
+    seen: dict[str, Any] = {}
+    for original, name in zip(frame.columns, names):
+        if name in seen:
+            raise SelectionError(
+                f"columns {seen[name]!r} and {original!r} of {step_id!r} both "
+                f"become {name!r}; rename one")
+        seen[name] = original
+    out = frame.copy()
+    out.columns = names
+    return out
+
+
+def _failed_output(operation: Any, error: str) -> "Output":
+    """A step that could not produce a grid: one failed cell saying why."""
+    kind = operation.shape_verb.kind if operation.shape_verb else None
+    return Output(
+        data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
+        ledger=_ledger([{"status": "failed", "error": error, "attempts": 0,
+                         "seconds": 0.0}], [0]),
+        meta={"verb": kind, "form": "scalar", "payload": PAYLOAD})
+
+
+def _upstream_failures(source: Any) -> dict:
+    """Rows of *source* that failed upstream: index → (error, root cause).
+
+    008 C10: such a row is failed again **without calling the tool**. The root
+    cause is carried from the upstream ledger's ``cause``, or is the upstream
+    cell itself (``a[1]: ValueError: boom``). ``meta["blocked_all"]`` marks
+    every row — set when an *argument* the step reads holds a failed cell.
+    """
+    if not isinstance(source, Output):
+        return {}
+    if source.meta.get("blocked_all"):
+        return {index: source.meta["blocked_all"] for index in source.data.index}
+    ledger = source.ledger
+    if not len(ledger) or "status" not in ledger.columns:
+        return {}
+    sid = source.meta.get("step_id") or "input"
+    out = {}
+    failed = ledger[ledger["status"] == "failed"]
+    for index, record in failed.iterrows():
+        if index not in source.data.index:
+            continue                         # e.g. a filtered-out unit
+        cause = record.get("cause") if "cause" in failed.columns else None
+        out[index] = (f"upstream cell {sid}[{index}] failed",
+                      cause if isinstance(cause, str) and cause
+                      else f"{sid}[{index}]: {record.get('error')}")
+    return out
+
+
+def _blocked(error: str, cause: str) -> dict:
+    """The ledger record of a unit that was not run because its input failed."""
+    return {"status": "failed", "error": error, "attempts": 0, "seconds": 0.0,
+            "cause": cause}
 
 
 def _ledger(records: list[dict], index: Sequence[Any]) -> pd.DataFrame:
@@ -391,6 +521,104 @@ def _value_fits(value: Any, annotation: Any) -> bool | None:
     return isinstance(value, origin)
 
 
+def _shape_kind(frame: pd.DataFrame) -> str:
+    """``cell``, ``column``, ``row`` or ``block`` — what a referenced grid is."""
+    n_rows, n_cols = frame.shape
+    if (n_rows, n_cols) == (1, 1):
+        return "cell"
+    if n_cols == 1:
+        return "column"
+    if n_rows == 1:
+        return "row"
+    return "block"
+
+
+def _wants(annotation: Any) -> str | None:
+    """Which form a parameter asks for: list, dict, series, frame, scalar, or None (untyped)."""
+    if annotation is inspect.Parameter.empty or annotation is Any \
+            or isinstance(annotation, str):
+        return None
+    _, base = _optional_parts(annotation)
+    origin = typing.get_origin(base) or base
+    if origin in (list, tuple, set):
+        return "list"
+    if origin is dict:
+        return "dict"
+    if origin is pd.Series:
+        return "series"
+    if origin is pd.DataFrame:
+        return "frame"
+    if isinstance(origin, type):
+        return "scalar"
+    return None
+
+
+#: 008 C1/C7's conversion table: (shape, wanted form) → allowed.
+_CONVERTS = {
+    ("cell", "scalar"), ("cell", "list"),
+    ("column", "list"), ("column", "series"), ("column", "frame"),
+    ("row", "list"), ("row", "series"), ("row", "dict"), ("row", "frame"),
+    ("block", "frame"), ("cell", "frame"),
+}
+
+
+def _shape_problem(kind: str, annotation: Any, name: str, step_id: str) -> str | None:
+    """Why a *kind* of grid can't be passed as *annotation*, or None when it can."""
+    wanted = _wants(annotation)
+    if wanted is None or (kind, wanted) in _CONVERTS:
+        return None
+    if kind == "column" and wanted == "scalar":
+        why = "a column; to pair its rows with the input's, join first"
+    else:
+        why = f"a {kind}"
+    return (f"{name}: {_type_name(annotation)}, but {step_id!r} is {why} "
+            f"— an argument is passed whole, not one value per row")
+
+
+def _ref_value(frame: pd.DataFrame, annotation: Any, step_id: str) -> Any:
+    """What a ``$ref`` argument or setting receives, by the parameter's type (008 C1).
+
+    A cell gives its value; a column a list (or Series); a row a dict (or
+    list/Series); anything else the DataFrame. Untyped, the natural form.
+    """
+    kind = _shape_kind(frame)
+    problem = _shape_problem(kind, annotation, "argument", step_id)
+    if problem:
+        raise TypeError(problem)
+    wanted = _wants(annotation)
+    clean = lambda values: [None if _is_missing(v) else v for v in values]  # noqa: E731
+    if wanted == "frame":
+        return frame
+    if kind == "cell" and wanted != "list":
+        value = frame.iloc[0, 0]
+        return None if _is_missing(value) else value
+    if kind == "cell":
+        return clean([frame.iloc[0, 0]])
+    if kind == "column":
+        return frame.iloc[:, 0] if wanted == "series" else clean(frame.iloc[:, 0])
+    if kind == "row":
+        row = frame.iloc[0]
+        if wanted == "series":
+            return row
+        if wanted == "list":
+            return clean(row)
+        return {k: (None if _is_missing(v) else v) for k, v in row.items()}
+    return frame
+
+
+def _optional_parts(annotation: Any) -> tuple[bool, Any]:
+    """(does it admit None?, the annotation without None) — ``int | None`` → (True, int)."""
+    if annotation is Any or isinstance(annotation, str):
+        return True, annotation
+    if typing.get_origin(annotation) in (typing.Union, types.UnionType):
+        members = [a for a in typing.get_args(annotation) if a is not type(None)]
+        admits = len(members) < len(typing.get_args(annotation))
+        if len(members) == 1:
+            return admits, members[0]
+        return admits, typing.Union[tuple(members)] if members else annotation
+    return annotation is type(None), annotation
+
+
 def _column_fits(series: pd.Series, annotation: Any) -> bool | None:
     """Does a column's dtype fit an annotation? ``None`` when undecidable.
 
@@ -561,7 +789,7 @@ def catalog(tools: dict[str, Callable] | None = None) -> dict[str, dict]:
 # ─────────────────────────────────────────────────────────────────────────
 # Input coercion — "what is a row?"
 # ─────────────────────────────────────────────────────────────────────────
-def rows(value: Any, *, axis: str = "rows") -> pd.DataFrame:
+def _rows_frame(value: Any, *, axis: str = "rows") -> pd.DataFrame:
     """Coerce a step input into a frame of rows.
 
     **Only a DataFrame carries its own row/column structure.** A ``Series``
@@ -598,9 +826,36 @@ def rows(value: Any, *, axis: str = "rows") -> pd.DataFrame:
     return pd.DataFrame({PAYLOAD: [value]})
 
 
+def _row_key(key: Callable) -> Callable:
+    """A tool given as a setting, applied to one row by column binding (008 C2)."""
+    apply = _d_apply(key)
+    return lambda row: apply(row)
+
+
+def _key_column(frame: pd.DataFrame, key: Callable) -> list:
+    """The key a tool setting gives each row, in row order."""
+    apply = _row_key(key)
+    return [apply(row) for _index, row in _units(frame)]
+
+
+def _units(frame: pd.DataFrame):
+    """``(index, row dict)`` per row, each value as the tool should get it.
+
+    Not ``iterrows``: that builds one Series per row with a single common dtype,
+    so a nullable ``Int64`` row arrives as floats (``1.0``). ``to_dict`` keeps
+    each column's own type; a missing value becomes ``None`` (008 C14).
+    """
+    for index, record in zip(frame.index, frame.to_dict("records")):
+        yield index, {k: (None if _is_missing(v) else v) for k, v in record.items()}
+
+
 def _as_arg(row: pd.Series) -> dict:
-    """What a tool receives for one row: a plain dict, never a Series."""
-    return row.to_dict()
+    """What a tool receives for one row: a plain dict, never a Series.
+
+    A missing value arrives as ``None`` (008 C14) — never ``NaN`` or ``pd.NA``,
+    so a tool written for ``int | None`` gets what it was written for.
+    """
+    return {k: (None if _is_missing(v) else v) for k, v in row.to_dict().items()}
 
 
 def _call(fn: Callable, arg: dict, retries: int) -> tuple[Any, dict]:
@@ -634,14 +889,18 @@ def map_(source: Any, fn: Callable, *, name: str = PAYLOAD,
     table gives you the table plus a score, not a bare list of scores.
     """
     frame = rows(source, axis=axis)
+    blocked = _upstream_failures(source)
     values, records = [], []
-    for _index, row in frame.iterrows():
-        value, record = _call(fn, _as_arg(row), retries)
+    for index, row in _units(frame):
+        if index in blocked:
+            value, record = None, _blocked(*blocked[index])
+        else:
+            value, record = _call(fn, row, retries)
         values.append(value)
         records.append(record)
 
     data = frame.copy()
-    data[name] = values
+    data[name] = _typed(values, frame.index)
     return Output(data=data, ledger=_ledger(records, frame.index),
                   meta={"verb": "map", "form": "column", "payload": name,
                         "n_in": len(frame)})
@@ -655,9 +914,17 @@ def filter_(source: Any, fn: Callable, *, retries: int = 0,
     predicate raised) is still visible and re-drivable; ``kept`` says which.
     """
     frame = rows(source, axis=axis)
+    blocked = _upstream_failures(source)
     keep, records = [], []
-    for _index, row in frame.iterrows():
-        value, record = _call(fn, _as_arg(row), retries)
+    for index, row in _units(frame):
+        if index in blocked:
+            # 008 C10: a failed row is carried through, still failed, so the
+            # failure stays visible downstream instead of being filtered away.
+            record = {**_blocked(*blocked[index]), "kept": True}
+            keep.append(True)
+            records.append(record)
+            continue
+        value, record = _call(fn, row, retries)
         passed = bool(value) and record["status"] == "completed"
         record["kept"] = passed
         keep.append(passed)
@@ -673,20 +940,28 @@ def filter_(source: Any, fn: Callable, *, retries: int = 0,
 
 
 def group_(source: Any, fn: Callable, *, name: str = "group",
-           retries: int = 0, axis: str = "rows", replace: bool = False) -> Output:
+           retries: int = 0, axis: str = "rows", replace: bool = False,
+           by: Callable | None = None) -> Output:
     """``group_by`` — mark each row with a key. n rows in, n rows out.
 
-    No nesting: reduction is :func:`collapse_` with ``by=name``.
+    No nesting: reduction is :func:`collapse_` with ``by=name``. ``by=`` a
+    registered tool computes the key instead of the step's own tool (008 C2).
     """
+    if by is not None:
+        fn = _d_apply(by)
     frame = rows(source, axis=axis)
+    blocked = _upstream_failures(source)
     keys, records = [], []
-    for _index, row in frame.iterrows():
-        value, record = _call(fn, _as_arg(row), retries)
+    for index, row in _units(frame):
+        if index in blocked:
+            value, record = None, _blocked(*blocked[index])
+        else:
+            value, record = _call(fn, row, retries)
         keys.append(value)
         records.append(record)
 
     data = frame.copy()
-    data[name] = keys
+    data[name] = _typed(keys, frame.index)
     return Output(data=data, ledger=_ledger(records, frame.index),
                   meta={"verb": "group", "form": "column", "payload": name,
                         "key": name, "n_in": len(frame)})
@@ -700,33 +975,50 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
     the result carries the group key as a column.
     """
     frame = rows(source)
-    groups = ([(None, frame)] if by is None
-              else list(frame.groupby(by, sort=False)))
+    blocked = _upstream_failures(source)
+    if callable(by):
+        # 008 C2: group by a tool's value per row; the key column is named
+        # after the tool.
+        key_name = getattr(by, "__name__", "key")
+        keyed = frame.assign(**{key_name: _key_column(frame, by)})
+        groups = list(keyed.groupby(key_name, sort=False))
+        groups = [(k, frame.loc[chunk.index]) for k, chunk in groups]
+        by = key_name
+    elif by is None:
+        groups = [(None, frame)]
+    else:
+        groups = list(frame.groupby(by, sort=False))
 
-    out_rows, records, index = [], [], []
+    results, keys, records, index = [], [], [], []
     for position, (key, chunk) in enumerate(groups):
         started = time.perf_counter()
-        accumulator, error = initial, None
-        try:
-            for _index, row in chunk.iterrows():
-                accumulator = fn(accumulator, _as_arg(row))
-            status = "completed"
-        except Exception as exc:
-            status, accumulator = "failed", None
-            error = f"{type(exc).__name__}: {exc}"
-
-        row_out = {name: accumulator}
-        if by is not None:
-            row_out[by] = key
-        out_rows.append(row_out)
-        records.append({"status": status, "error": error, "attempts": 1,
-                        "seconds": round(time.perf_counter() - started, 6),
-                        "unit": list(chunk.index)})
+        failed_in = [i for i in chunk.index if i in blocked]
+        if failed_in:
+            # 008 C10: one failed cell makes the summary a failed cell — a
+            # total over rows that did not all arrive would be a wrong answer.
+            accumulator = None
+            records.append({**_blocked(*blocked[failed_in[0]]),
+                            "unit": list(chunk.index)})
+        else:
+            accumulator, error = initial, None
+            try:
+                for _index, row in _units(chunk):
+                    accumulator = fn(accumulator, row)
+                status = "completed"
+            except Exception as exc:
+                status, accumulator = "failed", None
+                error = f"{type(exc).__name__}: {exc}"
+            records.append({"status": status, "error": error, "attempts": 1,
+                            "seconds": round(time.perf_counter() - started, 6),
+                            "unit": list(chunk.index)})
+        results.append(accumulator)
+        keys.append(key)
         index.append(position)
 
-    data = pd.DataFrame(out_rows, index=index)
+    data = pd.DataFrame(index=index)
     if by is not None:                       # key first reads better
-        data = data[[by, name]]
+        data[by] = keys
+    data[name] = _typed(results, data.index)
     return Output(data=data, ledger=_ledger(records, index),
                   meta={"verb": "collapse", "form": "scalar" if by is None
                         else "column", "payload": name, "by": by,
@@ -741,9 +1033,14 @@ def expand_(source: Any, fn: Callable, *, name: str = PAYLOAD,
     row records which unit produced it in the ledger's ``source`` column.
     """
     frame = rows(source, axis=axis)
+    blocked = _upstream_failures(source)
     out_rows, records = [], []
-    for index, row in frame.iterrows():
-        arg = _as_arg(row)
+    for index, row in _units(frame):
+        arg = row
+        if index in blocked:
+            records.append({**_blocked(*blocked[index]), "unit": index})
+            out_rows.append({**arg, name: None})
+            continue
         produced, record = _call(fn, arg, retries)
         if record["status"] != "completed":
             records.append({**record, "unit": index})
@@ -768,7 +1065,12 @@ def expand_(source: Any, fn: Callable, *, name: str = PAYLOAD,
             out_rows.append({**arg, name: item})
             records.append({**record, "unit": index})
 
-    data = pd.DataFrame(out_rows).reset_index(drop=True)
+    # Column by column, so a carried int column and the payload both keep their
+    # type when a failed unit leaves a gap (008 R8) — `DataFrame(rows)` would
+    # turn every int column with a None into float64.
+    data = pd.DataFrame(index=range(len(out_rows)))
+    for column in (list(out_rows[0]) if out_rows else []):
+        data[column] = _typed([r.get(column) for r in out_rows], data.index)
     if not len(data.columns):
         # Every unit expanded to nothing. `DataFrame([])` has no columns at all,
         # which would make a downstream step report "it has no columns" rather
@@ -835,7 +1137,7 @@ def grid(value: Any) -> Output:
 
     ``score[mod.map()](grid(df))`` — how a chain begins.
     """
-    frame = rows(value)
+    frame = _normalize_missing(_str_columns(rows(value), "the source"))
     return Output(
         data=frame,
         ledger=_ledger([{"status": "completed", "error": None, "attempts": 1,
@@ -865,7 +1167,7 @@ def _require_columns(verb: str, frame: pd.DataFrame, names: Sequence[str]) -> No
 
 
 def select_(source: Any, fn: Callable = identity, *,
-            columns: Sequence[str] | None = None) -> Output:
+            columns: Any = None, rows: Any = None) -> Output:
     """``select`` — keep these columns, **in this order**. n rows in, n rows out.
 
     The column-axis mirror of :func:`filter_`: filter chooses rows, select
@@ -884,11 +1186,21 @@ def select_(source: Any, fn: Callable = identity, *,
     downstream sees.
     """
     _no_tool("select", fn)
-    if not columns:
-        raise ValueError("select needs columns= — the columns to keep")
-    frame = rows(source)
+    row_sel = rows
+    if not columns and row_sel is None:
+        raise ValueError("select needs columns= or rows=")
+    frame = _rows_frame(source)
+    if callable(columns):
+        # 008 C2: a tool is a predicate on column names.
+        columns = [c for c in frame.columns if columns(c)]
+    if isinstance(columns, dict) or row_sel is not None:
+        # 008 C7/K9: every selection form; kept rows keep their ids.
+        data = _apply_selection(frame, row_sel, columns or None,
+                                (source.meta.get("step_id") if isinstance(source, Output)
+                                 else None) or "the input")
+        return _column_output("select", frame, data, index=data.index, source=source)
     _require_columns("select", frame, columns)
-    return _column_output("select", frame, frame[list(columns)])
+    return _column_output("select", frame, frame[list(columns)], source=source)
 
 
 def drop_(source: Any, fn: Callable = identity, *,
@@ -904,7 +1216,8 @@ def drop_(source: Any, fn: Callable = identity, *,
         raise ValueError("drop needs columns= — the columns to remove")
     frame = rows(source)
     _require_columns("drop", frame, columns)
-    return _column_output("drop", frame, frame.drop(columns=list(columns)))
+    return _column_output("drop", frame, frame.drop(columns=list(columns)),
+                          source=source)
 
 
 def _widen_columns(cells: list[Any], records: list[dict]) -> list[str] | None:
@@ -984,11 +1297,16 @@ def widen_(source: Any, fn: Callable = identity, *,
     """
     _no_tool("widen", fn)
     frame = rows(source, axis=axis)
+    blocked = _upstream_failures(source)
 
     cells: list[Any] = []
     records: list[dict] = []
-    for _index, row in frame.iterrows():
-        cell, record = _call(fn, _as_arg(row), retries)
+    for index, row in _units(frame):
+        if index in blocked:
+            cells.append(None)
+            records.append(_blocked(*blocked[index]))
+            continue
+        cell, record = _call(fn, row, retries)
         cells.append(cell)
         records.append(record)
 
@@ -1064,7 +1382,7 @@ def slice_(source: Any, fn: Callable = identity, *, start: int = 0,
         data = frame.iloc[list(at)]
     else:
         data = frame.iloc[start:stop]
-    return _column_output("slice", frame, data, index=data.index)
+    return _column_output("slice", frame, data, index=data.index, source=source)
 
 
 def rename_(source: Any, fn: Callable = identity, *,
@@ -1083,6 +1401,11 @@ def rename_(source: Any, fn: Callable = identity, *,
     if not columns:
         raise ValueError("rename needs columns={old: new}")
     frame = rows(source)
+    if callable(columns):
+        # 008 C2: a tool maps each column name to its new one.
+        columns = {c: columns(c) for c in frame.columns if columns(c) != c}
+        if not columns:
+            return _column_output("rename", frame, frame, source=source)
     _require_columns("rename", frame, list(columns))
     clashes = [new for new in columns.values()
                if new in frame.columns and new not in columns]
@@ -1092,7 +1415,8 @@ def rename_(source: Any, fn: Callable = identity, *,
             f"{', '.join(map(repr, clashes))}. Drop them first, or pick other "
             f"names — silently replacing a column loses it."
         )
-    return _column_output("rename", frame, frame.rename(columns=dict(columns)))
+    return _column_output("rename", frame, frame.rename(columns=dict(columns)),
+                          source=source)
 
 
 def sort_(source: Any, fn: Callable = identity, *, by: Sequence[str] | None = None,
@@ -1106,11 +1430,16 @@ def sort_(source: Any, fn: Callable = identity, *, by: Sequence[str] | None = No
     _no_tool("sort", fn)
     if not by:
         raise ValueError("sort needs by= — the column(s) to order on")
-    order = [by] if isinstance(by, str) else list(by)
     frame = rows(source)
+    if callable(by):
+        # 008 C2: order by a tool's value per row.
+        keys = pd.Series(_key_column(frame, by), index=frame.index)
+        data = frame.loc[keys.sort_values(ascending=ascending, kind="stable").index]
+        return _column_output("sort", frame, data, index=data.index, source=source)
+    order = [by] if isinstance(by, str) else list(by)
     _require_columns("sort", frame, order)
     data = frame.sort_values(order, ascending=ascending, kind="stable")
-    return _column_output("sort", frame, data, index=data.index)
+    return _column_output("sort", frame, data, index=data.index, source=source)
 
 
 def distinct_(source: Any, fn: Callable = identity, *,
@@ -1123,15 +1452,22 @@ def distinct_(source: Any, fn: Callable = identity, *,
     """
     _no_tool("distinct", fn)
     frame = rows(source)
+    if callable(columns):
+        # 008 C2: two rows are duplicates when the tool gives them the same key.
+        keys = pd.Series(_key_column(frame, columns), index=frame.index)
+        data = frame.loc[~keys.duplicated(keep="first")]
+        return _column_output("distinct", frame, data, index=data.index,
+                              source=source)
     if columns:
         _require_columns("distinct", frame, list(columns))
     data = frame.drop_duplicates(subset=list(columns) if columns else None,
                                  keep="first")
-    return _column_output("distinct", frame, data, index=data.index)
+    return _column_output("distinct", frame, data, index=data.index,
+                          source=source)
 
 
 def _column_output(verb: str, frame: pd.DataFrame, data: pd.DataFrame,
-                   index: Any = None) -> Output:
+                   index: Any = None, source: Any = None) -> Output:
     """The Output shared by every verb that rearranges without computing.
 
     Nothing ran, so every unit is trivially complete and ``attempts: 0`` says
@@ -1143,8 +1479,12 @@ def _column_output(verb: str, frame: pd.DataFrame, data: pd.DataFrame,
     and keep one entry per input row.
     """
     ledger_index = frame.index if index is None else index
-    records = [{"status": "completed", "error": None, "attempts": 0,
-                "seconds": 0.0} for _ in range(len(ledger_index))]
+    # 008 C10: a row that failed upstream is carried through still failed —
+    # rearranging it does not make it a value.
+    blocked = _upstream_failures(source)
+    records = [_blocked(*blocked[i]) if i in blocked
+               else {"status": "completed", "error": None, "attempts": 0,
+                     "seconds": 0.0} for i in ledger_index]
     return Output(data=data, ledger=_ledger(records, ledger_index),
                   meta={"verb": verb, "form": "column", "payload": None,
                         "n_in": len(frame), "columns": list(data.columns)})
@@ -1381,6 +1721,7 @@ PARAM_TYPES: dict[str, tuple[type, ...]] = {
     "at": (list, tuple),
     "ascending": (bool,),
     "replace": (bool,),
+    "rows": (int, list, dict),
 }
 
 #: Where one verb means something different by the same parameter name.
@@ -1395,7 +1736,7 @@ PARAM_TYPES_BY_VERB: dict[str, dict[str, tuple[type, ...]]] = {
 #: A2) instead of raised at run. ``widen`` is absent on purpose: a tuple cell
 #: auto-names, so ``columns=`` is optional there.
 REQUIRED_PARAMS: dict[str, tuple[str, ...]] = {
-    "select": ("columns",),
+    "select": (),                      # columns= or rows= — checked in `check`
     "drop": ("columns",),
     "rename": ("columns",),
     "sort": ("by",),
@@ -1447,9 +1788,10 @@ DECORATORS: dict[str, Callable] = {n: k.apply for n, k in MODIFIERS.items()}
 def _setting_type(verb: str, param: str) -> str | None:
     """A readable type name for a verb's setting, from the PARAM_TYPES tables."""
     types = PARAM_TYPES_BY_VERB.get(verb, {}).get(param) or PARAM_TYPES.get(param)
+    takes_tool = param in TOOL_SETTINGS.get(verb, ())
     if types:
-        return " | ".join(t.__name__ for t in types)
-    return None
+        return " | ".join(t.__name__ for t in types) + (" | tool" if takes_tool else "")
+    return "tool" if takes_tool else None
 
 
 def _modifier_settings(name: str, kind: ModifierKind) -> list[dict]:
@@ -1580,6 +1922,10 @@ class Modifier:
 #: Marks "no input given" to ``Operation.__call__``, distinct from ``None``.
 _NO_SOURCE = object()
 
+#: 008 C7: a selection as a tool's input is two reshapes in one step.
+_SELECTION_INPUT = ("a selection can't be a tool's input: make it its own step "
+                    "(wf[\"part\"] = wf[\"p\"][…]) and pass wf[\"part\"]")
+
 #: 008 K3: an Operation passed where a step's data belongs used to run as a
 #: one-cell source and report `completed` with `{'value': [None]}`.
 _NESTED_OPERATION = ("an operation can't be an input yet; make it its own step "
@@ -1632,6 +1978,9 @@ class Operation:
         """Every step id this reads — the grid input(s) plus any reference arguments."""
         ids = [str(g) for g in self.grids]
         ids += [str(v) for v in self.arguments.values() if isinstance(v, StepRef)]
+        # 008 C1: a setting may read a step too — `select(columns=wf["cols"])`.
+        ids += [str(v) for m in self.modifiers for v in m.params.values()
+                if isinstance(v, StepRef)]
         return ids
 
     @property
@@ -1646,6 +1995,8 @@ class Operation:
         # it is the data input, so it is hoisted to its own slot. Modifiers stay
         # literal-only and the data stays explicit.
         over = params.pop("over", None)
+        if isinstance(over, StepRef) and over.selected:
+            raise TypeError(_SELECTION_INPUT)
         if over is not None and not isinstance(over, (StepRef, str)):
             if isinstance(over, Operation):
                 raise TypeError(_NESTED_OPERATION)
@@ -1723,7 +2074,8 @@ class Operation:
             "tool_id": self.tool_id,
             "input": _encode_ref(self.input),          # {"$ref": id} or null — the data
             "arguments": {k: _encode_argument(v) for k, v in self.arguments.items()},
-            "modifiers": [{"kind": m.kind, "params": _deref(m.params)}
+            "modifiers": [{"kind": m.kind,
+                           "params": {k: _encode_argument(v) for k, v in m.params.items()}}
                           for m in self.modifiers],     # literal-only
         }
         if self.inputs:                                 # a combine reads many grids
@@ -1745,7 +2097,8 @@ class Operation:
             over = params.pop("over", None)
             if over is not None:
                 hoisted = over
-            modifiers.append(Modifier(m["kind"], params))
+            modifiers.append(Modifier(m["kind"], {k: _decode_argument(v)
+                                                  for k, v in params.items()}))
         arguments = {k: _decode_argument(v)
                      for k, v in (blob.get("arguments") or {}).items()}
         inputs = tuple(_decode_ref(g) for g in blob.get("inputs") or ())
@@ -1764,7 +2117,7 @@ class Operation:
         )
 
     # ── the other half: hand the decorated tool some data ────────────────
-    def __call__(self, source: Any = _NO_SOURCE, /, **literals) -> Any:
+    def __call__(self, source: Any = _NO_SOURCE, /, *more: Any, **literals) -> Any:
         """Apply the decorated tool to its input.
 
         Keyword arguments here are **bound literals**, exactly as
@@ -1791,8 +2144,11 @@ class Operation:
         it concretely — so ``wf["scored"] = score(wf["raw"])`` is the whole
         step, and the verb it chose is visible and replaceable.
         """
+        if more:
+            # 008 C1: positional arguments after the input bind like keywords.
+            literals = {**literals, **_bind_positional(self, source, more, literals)}
         operation = self.bind(**literals) if literals else self
-        if isinstance(source, Operation):
+        if isinstance(source, Operation) or any(isinstance(v, Operation) for v in more):
             raise TypeError(_NESTED_OPERATION)
         if isinstance(source, StepRef):
             return operation._wire(source)
@@ -1807,6 +2163,8 @@ class Operation:
 
     def _wire(self, ref: "StepRef") -> "Operation":
         """Record that this step reads *ref* as its input, inferring a verb if none is set."""
+        if ref.selected:
+            raise TypeError(_SELECTION_INPUT)
         if self.input is not None:
             # 008 K4: the call used to win silently over `over=`.
             raise TypeError(
@@ -1891,6 +2249,246 @@ def op(tool_id: str, **arguments) -> Operation:
 # literal at run time, and an editor can autocomplete.
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Selection — wf["p"][1:5][cols["name":"price"]] (008 C7)
+# ─────────────────────────────────────────────────────────────────────────
+# Two type rules: column names are strings, row selectors are integers. And one
+# syntax rule: a plain bracket selects rows, `cols[…]` selects columns. Each
+# part normalizes to its saved form at once, so every spelling of the same
+# selection is the same value — and saves identically.
+
+
+class SelectionError(ValueError):
+    """A selection that can't be made — refused when written, or failed at run."""
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, numbers.Integral) and not isinstance(value, bool)
+
+
+def _row_part(key: Any) -> Any:
+    """A row selector in saved form: an int, a list of ints, or {start, stop}."""
+    if isinstance(key, Rows):
+        return key.sel
+    if isinstance(key, str):
+        raise SelectionError(
+            f"columns are selected with cols: wf[…][cols[{key!r}]] — a plain "
+            "bracket selects rows, by position")
+    if _is_int(key):
+        return int(key)
+    if isinstance(key, slice):
+        if key.step is not None:
+            raise SelectionError("a row range can't have a step (start:stop only)")
+        for end in (key.start, key.stop):
+            if end is not None and not _is_int(end):
+                raise SelectionError(
+                    f"a row range takes int positions, got {type(end).__name__}")
+        return {"start": key.start, "stop": key.stop}
+    if isinstance(key, list):
+        if not key:
+            raise SelectionError("an empty row selection selects nothing")
+        if not all(_is_int(k) for k in key):
+            raise SelectionError("a list of rows takes int positions only")
+        return [int(k) for k in key]
+    raise SelectionError(
+        f"rows are selected by int position, an int range or a list of ints; "
+        f"got {type(key).__name__}")
+
+
+def _col_part(key: Any) -> dict:
+    """A column selector in saved form: {names}, {from, to} or {positions}."""
+    if isinstance(key, str):
+        return {"names": [key]}
+    if _is_int(key):
+        return {"positions": [int(key)]}
+    if isinstance(key, slice):
+        if key.step is not None:
+            raise SelectionError("a column range can't have a step")
+        ends = [e for e in (key.start, key.stop) if e is not None]
+        if all(isinstance(e, str) for e in ends) and ends:
+            return {"from": key.start, "to": key.stop}
+        if all(_is_int(e) for e in ends):
+            return {"positions": {"start": key.start, "stop": key.stop}}
+        raise SelectionError(
+            "a column range is by name (cols['a':'c']) or by position "
+            "(cols[0:3]), not both")
+    if isinstance(key, list):
+        if not key:
+            raise SelectionError("an empty column selection selects nothing")
+        if all(isinstance(k, str) for k in key):
+            return {"names": list(key)}
+        if all(_is_int(k) for k in key):
+            return {"positions": [int(k) for k in key]}
+        raise SelectionError(
+            "cols[…] takes names or positions, not both in one selection")
+    raise SelectionError(
+        f"cols[…] takes a name, a name range, a list of names, a position, a "
+        f"position range or a list of positions; got {type(key).__name__}")
+
+
+@dataclass(frozen=True)
+class Rows:
+    """``rows[1:5]`` — an explicit row part. Optional: a bare int is rows anyway."""
+    sel: Any = field(hash=False)
+
+
+@dataclass(frozen=True)
+class Cols:
+    """``cols["name":"price"]`` — the only way to select columns."""
+    sel: Any = field(hash=False)
+
+
+class _RowsIndexer:
+    """``rows[…]`` selects rows; ``rows(value)`` is the old coercion to a frame."""
+
+    def __getitem__(self, key: Any) -> Rows:
+        return Rows(_row_part(key))
+
+    def __call__(self, value: Any, *, axis: str = "rows") -> pd.DataFrame:
+        return _rows_frame(value, axis=axis)
+
+    def __repr__(self) -> str:
+        return "rows"
+
+
+class _ColsIndexer:
+    def __getitem__(self, key: Any) -> Cols:
+        return Cols(_col_part(key))
+
+    def __repr__(self) -> str:
+        return "cols"
+
+
+#: ``rows[…]`` and ``cols[…]`` (008 C7). Also callable as before: ``rows(df)``.
+rows = _RowsIndexer()
+cols = _ColsIndexer()
+
+#: Names a tool, bound tool or resource type can't take: the formula bar's own
+#: vocabulary (008 C7).
+RESERVED_NAMES = frozenset({"wf", "res", "mod", "rows", "cols", "op", "join",
+                            "stack", "zip_"})
+
+
+def _reserved_problem(name: str, what: str) -> str | None:
+    if name in RESERVED_NAMES:
+        role = {"rows": "row selection", "cols": "column selection"}.get(
+            name, "the formula language")
+        return f"{name!r} is reserved for {role}; choose another {what} name"
+    return None
+
+
+def _check_caller_scope(depth: int = 2) -> None:
+    """Refuse a declaration made where ``rows``/``cols`` mean something else.
+
+    A script's own ``rows = [10, 20, 30]`` replaces the import, and Python
+    evaluates ``rows[1:5]`` on it before core sees anything — a valid-looking,
+    wrong row selection. So the names are checked in the declaring scope.
+    """
+    import sys
+    frame = sys._getframe(depth)
+    for name, core in (("rows", rows), ("cols", cols)):
+        if name in frame.f_locals:
+            value = frame.f_locals[name]
+        elif name in frame.f_globals:
+            value = frame.f_globals[name]
+        else:
+            continue
+        if value is not core and not isinstance(value, (_RowsIndexer, _ColsIndexer)):
+            role = "row" if name == "rows" else "column"
+            raise TypeError(
+                f"{name!r} is reserved for {role} selection, but here it's a "
+                f"{type(value).__name__}. Rename your variable")
+
+
+def _selection_kind(ref: "StepRef") -> str | None:
+    """cell / column / row / block for a selection, known without running."""
+    if ref.rows is None and ref.columns is None:
+        return None
+    one_row = _is_int(ref.rows)
+    columns = ref.columns or {}
+    one_col = (len(columns.get("names") or []) == 1
+               or (isinstance(columns.get("positions"), list)
+                   and len(columns["positions"]) == 1))
+    if one_row and one_col:
+        return "cell"
+    if one_col:
+        return "column"
+    if one_row:
+        return "row"
+    return "block"
+
+
+def _bound(n: int, start: Any, stop: Any, what: str, step_id: str) -> tuple[int, int]:
+    """A half-open range over n items. Past the end fails; it is not trimmed."""
+    lo = 0 if start is None else (start + n if start < 0 else start)
+    hi = n if stop is None else (stop + n if stop < 0 else stop)
+    if not 0 <= lo <= n or not 0 <= hi <= n:
+        last = f" ({0}–{n - 1})" if n else ""
+        raise SelectionError(
+            f"{what} range {start}:{stop} of {step_id!r} goes past the end; it "
+            f"has {n} {what}s{last}. For 'up to n', use a slice step")
+    return lo, max(lo, hi)
+
+
+def _position(n: int, i: int, what: str, step_id: str) -> int:
+    if not -n <= i < n:
+        last = f" (0–{n - 1})" if n else ""
+        raise SelectionError(f"{what} {i} of {step_id!r}, which has {n} {what}s{last}")
+    return i + n if i < 0 else i
+
+
+def _resolve_columns(columns: list, sel: Any, step_id: str) -> list:
+    """The column names a selection picks, in order, from *columns*."""
+    if sel is None:
+        return list(columns)
+    if isinstance(sel, (list, tuple)):                  # select's plain list form
+        sel = {"names": list(sel)}
+    if "names" in sel:
+        missing = [c for c in sel["names"] if c not in columns]
+        if missing:
+            raise SelectionError(
+                f"{step_id!r} has no column {', '.join(map(repr, missing))} "
+                f"(it has {', '.join(map(str, columns))})")
+        return list(sel["names"])
+    if "from" in sel or "to" in sel:
+        for end in (sel.get("from"), sel.get("to")):
+            if end is not None and end not in columns:
+                raise SelectionError(
+                    f"{step_id!r} has no column {end!r} (it has "
+                    f"{', '.join(map(str, columns))})")
+        lo = 0 if sel.get("from") is None else columns.index(sel["from"])
+        hi = len(columns) - 1 if sel.get("to") is None else columns.index(sel["to"])
+        if lo > hi:
+            raise SelectionError(
+                f"cols[{sel.get('from')!r}:{sel.get('to')!r}] runs backwards: "
+                f"{sel.get('to')!r} comes before {sel.get('from')!r} in {step_id!r}")
+        return list(columns[lo:hi + 1])                # names are inclusive
+    positions = sel["positions"]
+    if isinstance(positions, dict):
+        lo, hi = _bound(len(columns), positions.get("start"), positions.get("stop"),
+                        "column", step_id)
+        return list(columns[lo:hi])                    # positions are half-open
+    return [columns[_position(len(columns), i, "column", step_id)] for i in positions]
+
+
+def _apply_selection(frame: pd.DataFrame, row_sel: Any, col_sel: Any,
+                     step_id: str) -> pd.DataFrame:
+    """The block a selection names. Rows keep their ids, so cells stay addressable."""
+    out = frame
+    if col_sel is not None:
+        out = out[_resolve_columns(list(out.columns), col_sel, step_id)]
+    if row_sel is not None:
+        n = len(out)
+        if _is_int(row_sel):
+            out = out.iloc[[_position(n, row_sel, "row", step_id)]]
+        elif isinstance(row_sel, dict):
+            lo, hi = _bound(n, row_sel.get("start"), row_sel.get("stop"), "row", step_id)
+            out = out.iloc[lo:hi]
+        else:
+            out = out.iloc[[_position(n, i, "row", step_id) for i in row_sel]]
+    return out
+
+
 @dataclass(frozen=True)
 class StepRef:
     """A handle to a step, usable wherever a reference string was.
@@ -1905,12 +2503,51 @@ class StepRef:
     #: the upstream. ``compare=False``: a reference is its id, and two refs to
     #: the same step are equal whether or not either is carrying a workflow.
     workflow: Any = field(default=None, compare=False, repr=False)
+    #: A selection of this step (008 C7), in saved form: the row part (an int,
+    #: a list of ints or {start, stop}) and the column part ({names},
+    #: {from, to} or {positions}). None when the whole step is meant.
+    rows: Any = field(default=None, hash=False)
+    columns: Any = field(default=None, hash=False)
 
     def __str__(self) -> str:
         return self.id
 
     def __repr__(self) -> str:
-        return f"<{self.id}>"
+        parts = "".join(f" {k}={v!r}" for k, v in (("rows", self.rows),
+                                                     ("columns", self.columns))
+                        if v is not None)
+        return f"<{self.id}{parts}>"
+
+    @property
+    def selected(self) -> bool:
+        return self.rows is not None or self.columns is not None
+
+    def __getitem__(self, key: Any) -> "StepRef":
+        """``wf["p"][1:5]``, ``[cols["a":"c"]]``, ``[1:5, cols[…]]`` — in any order.
+
+        A plain part is rows (an int, an int range or a list of ints, or
+        ``rows[…]``); ``cols[…]`` is columns. At most one of each, in one
+        bracket or two. Refused as written when it can't be a selection.
+        """
+        parts = key if isinstance(key, tuple) else (key,)
+        if len(parts) > 2:
+            raise SelectionError(
+                "a selection has at most two parts: rows, then cols[…]")
+        row_sel, col_sel = self.rows, self.columns
+        seen: set[str] = set()
+        for part in parts:
+            kind = "columns" if isinstance(part, Cols) else "rows"
+            if kind in seen or (kind == "rows" and row_sel is not None) or \
+                    (kind == "columns" and col_sel is not None):
+                raise SelectionError(
+                    f"this selection already has its {kind}; a selection has "
+                    "one row part and one cols[…] part")
+            seen.add(kind)
+            if kind == "columns":
+                col_sel = part.sel
+            else:
+                row_sel = _row_part(part)
+        return replace(self, rows=row_sel, columns=col_sel)
 
 
 class _Wf:
@@ -1956,12 +2593,21 @@ def _deref(value: Any) -> Any:
 
 def _encode_ref(ref: Any) -> dict | None:
     """A step reference as JSON — ``{"$ref": id}``, distinct from a literal string."""
-    return None if ref is None else {"$ref": str(ref)}
+    if ref is None:
+        return None
+    blob = {"$ref": str(ref)}
+    if isinstance(ref, StepRef):
+        if ref.rows is not None:
+            blob["rows"] = ref.rows
+        if ref.columns is not None:
+            blob["columns"] = ref.columns
+    return blob
 
 
 def _is_ref(value: Any) -> bool:
     """True for a ``{"$ref": id}`` reference envelope."""
-    return isinstance(value, dict) and set(value) == {"$ref"}
+    return (isinstance(value, dict) and "$ref" in value
+            and set(value) <= {"$ref", "rows", "columns"})
 
 
 def _decode_ref(value: Any) -> Any:
@@ -1969,28 +2615,218 @@ def _decode_ref(value: Any) -> Any:
     if value is None:
         return None
     if _is_ref(value):
-        return StepRef(value["$ref"])
+        return StepRef(value["$ref"], rows=value.get("rows"),
+                       columns=value.get("columns"))
     if isinstance(value, str):
         return StepRef(value)
     return value
 
 
+#: Version of the saved operation format. 2 added tagged literals (C11),
+#: references in settings (C1), tools in settings (C2) and selections (C7).
+#: Version 1 files still load (008 K17).
+FORMAT_VERSION = 2
+
+#: The tags a saved value can carry. A literal dict that happens to use one of
+#: these keys (or any `$` key, or a non-string key) is saved as `$dict`, so a
+#: literal can never be read back as a reference.
+_TAGS = ("$ref", "$res", "$tool", "$tuple", "$set", "$dict")
+
+
+def _literal_problem(value: Any) -> str | None:
+    """Why *value* is not a literal (008 C11), or None when it is one.
+
+    A literal is what Python's literal syntax writes: ``int``, ``float``,
+    ``str``, ``bool``, ``None``, and ``list``/``tuple``/``dict``/``set`` of
+    those — ``ast.literal_eval`` minus ``bytes`` and ``complex``. Anything else
+    is refused when the step is declared, not when it is saved.
+    """
+    if value is None or isinstance(value, (bool, str)):
+        return None
+    if isinstance(value, numbers.Real):          # int, float, numpy numbers; not complex
+        return None
+    if isinstance(value, (list, tuple, set, frozenset)):
+        for item in value:
+            problem = _literal_problem(item)
+            if problem:
+                return problem
+        return None
+    if isinstance(value, dict):
+        for key, item in value.items():
+            problem = _literal_problem(key) or _literal_problem(item)
+            if problem:
+                return problem
+        return None
+    kind = type(value).__name__
+    if hasattr(value, "isoformat"):
+        hint = f"pass a str ({value.isoformat()!r})"
+    elif kind == "Decimal":
+        hint = f"pass a float or a str ({str(value)!r})"
+    elif isinstance(value, (bytes, bytearray)):
+        hint = "pass a str"
+    elif callable(value):
+        hint = "a function belongs in a setting that takes a tool, as a registered @tool"
+    else:
+        hint = "pass a str, number, bool, None, list, tuple, dict or set"
+    article = "an" if kind[:1].lower() in "aeiou" else "a"
+    return f"{article} {kind} isn't a literal; {hint}, or make it a step"
+
+
+def _bind_positional(operation: "Operation", source: Any, values: tuple,
+                     given: dict) -> dict:
+    """Name the positional arguments after the input (008 C1).
+
+    ``scale(wf["r"], wf["w"])`` is ``scale(wf["r"], weight=wf["w"])``. Each value
+    takes the tool's next parameter that is still free: not given by keyword,
+    and not supplied by the input — a known input column, or, when the input's
+    columns are not known, the first parameter (the row's own value). A
+    ``res[…]`` takes the first free parameter its declared type fits.
+    """
+    fn = operation.fn or TOOLS.get(operation.tool_id) or BUILTIN_TOOLS.get(operation.tool_id)
+    if fn is None:
+        raise TypeError(f"{operation.tool_id}: pass these arguments by keyword "
+                        "— its parameters are not known here")
+    parameters = [p for p in _signature(fn).parameters.values()
+                  if p.kind in (inspect.Parameter.POSITIONAL_ONLY,
+                                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                inspect.Parameter.KEYWORD_ONLY)]
+    free = [p for p in parameters
+            if p.name not in given and p.name not in operation.arguments]
+    workflow = getattr(source, "workflow", None)
+    step = workflow.steps.get(source.id) if workflow is not None and isinstance(source, StepRef) else None
+    if step is not None:
+        columns = set(predicted_columns(step.output))
+        free_for_values = [p for p in free if p.name not in columns]
+        if columns_unknown(step.output) and free_for_values == free and free:
+            free_for_values = free[1:]
+    else:
+        free_for_values = free[1:]
+    bound: dict = {}
+    for value in values:
+        if isinstance(value, ResRef):
+            decl = workflow.resources.get(value.name) if workflow is not None else None
+            fits = [p for p in free if decl is not None and decl.type is not None
+                    and _type_fits(decl.type, p.annotation)]
+            target = fits[0] if fits else None
+            if target is None:
+                raise TypeError(
+                    f"{operation.tool_id}: no free parameter fits res[{value.name!r}]"
+                    + ("" if decl else " (declare it first with wf.define)")
+                    + "; pass it by keyword")
+        else:
+            target = next((p for p in free_for_values if p in free), None)
+            if target is None:
+                names = ", ".join(p.name for p in parameters) or "(none)"
+                raise TypeError(
+                    f"{operation.tool_id}() has no free parameter left for "
+                    f"{value!r}; it takes {names}. Pass it by keyword.")
+        bound[target.name] = value
+        free.remove(target)
+    return bound
+
+
 def _encode_argument(value: Any) -> Any:
-    """A bound argument as JSON: ``{"$ref": step}``, ``{"$res": name}`` or the literal."""
+    """A bound value as JSON, exactly: a reference, a tool, or a tagged literal.
+
+    ``{"$ref": step}``, ``{"$res": name}``, ``{"$tool": id}``; a literal saves
+    as itself where plain JSON keeps its type, and tagged where it would not
+    (008 C11): ``{"$tuple": [...]}``, ``{"$set": [...]}``, and ``{"$dict":
+    [[k, v], ...]}`` for a dict with non-string (or ``$``) keys.
+    """
     if isinstance(value, StepRef):
         return _encode_ref(value)
     if isinstance(value, ResRef):
         return {"$res": value.name}
-    return value
+    if isinstance(value, ToolRef):
+        return {"$tool": value.id}
+    if isinstance(value, ToolHandle):
+        return {"$tool": value.id}
+    if isinstance(value, bool) or value is None or isinstance(value, str):
+        return value
+    if isinstance(value, numbers.Integral):
+        return int(value)
+    if isinstance(value, numbers.Real):
+        return float(value)
+    if isinstance(value, tuple):
+        return {"$tuple": [_encode_argument(v) for v in value]}
+    if isinstance(value, (set, frozenset)):
+        items = list(value)
+        try:
+            items = sorted(items)
+        except TypeError:
+            pass
+        return {"$set": [_encode_argument(v) for v in items]}
+    if isinstance(value, list):
+        return [_encode_argument(v) for v in value]
+    if isinstance(value, dict):
+        if all(isinstance(k, str) and not k.startswith("$") for k in value):
+            return {k: _encode_argument(v) for k, v in value.items()}
+        return {"$dict": [[_encode_argument(k), _encode_argument(v)]
+                          for k, v in value.items()]}
+    if callable(value):
+        raise PayloadError(
+            f"cannot save {getattr(value, '__name__', value)!r}: a function "
+            "is saved by its tool id, so register it with @tool (a lambda "
+            "can't be saved)")
+    raise PayloadError(f"cannot save a {type(value).__name__}: "
+                       f"{_literal_problem(value)}")
 
 
 def _decode_argument(value: Any) -> Any:
-    """The inverse of :func:`_encode_argument`."""
+    """The inverse of :func:`_encode_argument` — the same value and type back."""
+    if isinstance(value, list):
+        return [_decode_argument(v) for v in value]
+    if not isinstance(value, dict):
+        return value
     if _is_ref(value):
-        return StepRef(value["$ref"])
-    if isinstance(value, dict) and set(value) == {"$res"}:
+        return _decode_ref(value)
+    if set(value) == {"$res"}:
         return ResRef(value["$res"])
-    return value
+    if set(value) == {"$tool"}:
+        return ToolRef(value["$tool"])
+    if set(value) == {"$tuple"}:
+        return tuple(_decode_argument(v) for v in value["$tuple"])
+    if set(value) == {"$set"}:
+        return {_decode_argument(v) for v in value["$set"]}
+    if set(value) == {"$dict"}:
+        return {_freeze(_decode_argument(k)): _decode_argument(v)
+                for k, v in value["$dict"]}
+    return {k: _decode_argument(v) for k, v in value.items()}
+
+
+def _freeze(key: Any) -> Any:
+    """A decoded dict key must be hashable: a list key can only have been a tuple."""
+    return tuple(key) if isinstance(key, list) else key
+
+
+#: "Not known until run" — distinct from None, which is a value.
+_UNKNOWN = object()
+
+
+def _is_tool_value(value: Any) -> bool:
+    """A tool given as a setting (008 C2): a registered tool or a reference to one."""
+    return isinstance(value, (ToolRef, ToolHandle)) or (
+        callable(value) and not isinstance(value, (type, StepRef, ResRef)))
+
+
+#: Settings that may hold a tool instead of column names (008 C2).
+TOOL_SETTINGS: dict[str, tuple[str, ...]] = {
+    "sort": ("by",), "group": ("by",), "collapse": ("by",),
+    "distinct": ("columns",), "select": ("columns",), "rename": ("columns",),
+}
+
+
+@dataclass(frozen=True)
+class ToolRef:
+    """A registered tool named in a **setting** — ``{"$tool": "first_letter"}`` (008 C2).
+
+    Resolved at run from the same tool table the step's own tool comes from.
+    """
+
+    id: str
+
+    def __repr__(self) -> str:
+        return f"<tool {self.id!r}>"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -2074,9 +2910,7 @@ class BoundToolHandle:
 
     def __call__(self, *args, **kwargs) -> Any:
         if args and isinstance(args[0], StepRef):
-            if len(args) > 1:
-                raise TypeError("wire one reference at a time: a step reads one input.")
-            return self._start().bind(**kwargs)(args[0])
+            return self._start()(*args, **kwargs)
         raise TypeError(
             f"res[{self.ref.name!r}].{self.method} has no instance until the "
             "workflow runs. Wire it into a step: "
@@ -2116,6 +2950,9 @@ def bound_tool(fn: Callable) -> Callable:
             f"{getattr(fn, '__qualname__', fn)!r} is not one. "
             "Use @tool for a free function."
         )
+    reserved = _reserved_problem(getattr(fn, "__name__", ""), "bound tool")
+    if reserved:
+        raise ValueError(reserved)
     setattr(fn, _BOUND_MARK, True)
     return fn
 
@@ -2236,6 +3073,9 @@ def resource(cls: type) -> type:
     at import, before any workflow exists.
     """
     problems = resource_problems(cls)
+    reserved = _reserved_problem(cls.__name__, "resource type")
+    if reserved:
+        problems.append(reserved)
     if problems:
         raise TypeError(f"cannot declare resource type {cls.__name__!r}: "
                         + "; ".join(problems) + ".")
@@ -2384,11 +3224,8 @@ class ToolHandle:
         The two cannot be confused: a :class:`StepRef` is never data.
         """
         if args and isinstance(args[0], StepRef):
-            if len(args) > 1:
-                raise TypeError(
-                    "wire one reference at a time: a step reads one input."
-                )
-            return self._start().bind(**kwargs)(args[0])
+            # Anything after the input binds by position (008 C1).
+            return self._start()(*args, **kwargs)
         if any(isinstance(a, Operation) for a in (*args, *kwargs.values())):
             raise TypeError(_NESTED_OPERATION)
         return self.fn(*args, **kwargs)
@@ -2451,6 +3288,9 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
                 "@tool is for free functions."
             )
         handle = ToolHandle(f, tool_id)
+        reserved = _reserved_problem(handle.id, "tool")
+        if reserved:
+            raise ValueError(f"cannot declare tool {handle.id!r}: {reserved}")
         found = declaration_problems(f, handle.id)
         if found:
             raise TypeError(
@@ -2686,6 +3526,22 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             if parameter not in modifier.params:
                 continue
             value = modifier.params[parameter]
+            if isinstance(value, StepRef):
+                # 008 C1: checked against the value once the step holds one;
+                # until then the reference is resolved at run.
+                known = workflow._value_if_known(value) if workflow else _UNKNOWN
+                if known is _UNKNOWN:
+                    continue
+                if isinstance(known, expected) and (
+                        bool in expected or not isinstance(known, bool)):
+                    continue
+                problems.append(
+                    f"{modifier.kind}'s {parameter}= reads {value.id!r}, which "
+                    f"holds {type(known).__name__}; it must be "
+                    f"{' or '.join(t.__name__ for t in expected)}")
+                continue
+            if _is_tool_value(value) and parameter in TOOL_SETTINGS.get(modifier.kind, ()):
+                continue                           # 008 C2: a tool in a setting
             # bool is a subclass of int, so it must not satisfy an int-typed
             # parameter — unless bool is what was asked for.
             if isinstance(value, expected) and (
@@ -2713,6 +3569,12 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                     f"so a step without it cannot run"
                 )
 
+    # 2d'. select chooses rows, columns or both — it needs at least one.
+    for modifier in operation.modifiers:
+        if modifier.kind == "select" and not modifier.params.get("columns") \
+                and modifier.params.get("rows") is None:
+            problems.append("select needs columns= or rows= — what to keep")
+
     # 2e. a combine (join/stack/zip) reads several grids and merges on literal
     #     config; it has no tool, so its only extra declaration checks are its
     #     arity and, for a join, its key.
@@ -2734,6 +3596,10 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         references.append(("input" if len(grids) <= 1 else f"input {i + 1}", g))
     references += [(f"argument {name!r}", value)
                    for name, value in operation.arguments.items()
+                   if isinstance(value, StepRef)]
+    references += [(f"{m.kind}'s {name}=", value)
+                   for m in operation.modifiers
+                   for name, value in m.params.items()
                    if isinstance(value, StepRef)]
 
     # 3. a reference has to have been read from *this* workflow. A step is
@@ -2762,9 +3628,17 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         elif name not in workflow.steps:
             problems.append(f"{label} {name!r}, which is not an earlier step")
         elif not workflow.steps[name].valid:
-            problems.append(f"{label} {name!r}, which is invalid")
+            root, why = workflow.root_cause(name)
+            problems.append(f"{label} {name!r}, which is invalid "
+                            f"(root cause: {root}: {why})")
         elif step_id is not None and step_id in workflow._upstream_ids(name):
             problems.append(f"{label} {name!r} is circular")
+        elif (step_id is not None and step_id in workflow.steps
+              and list(workflow.steps).index(name) > list(workflow.steps).index(step_id)):
+            # 008 C10: re-declaring a step keeps its position, so it could
+            # quietly start reading a step defined after it.
+            problems.append(f"{label} {name!r} comes after {step_id!r}; a step "
+                            "can only read earlier steps")
 
     # 5. at most one shape verb per step (§11). Two shape changes inside one
     #    step make an intermediate grid with no cell address, so a unit that
@@ -2792,6 +3666,10 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                                            "distinct")
             and workflow is not None
             and (verb.params.get("columns") or verb.params.get("by"))
+            and not any(isinstance(verb.params.get(k), StepRef)
+                        or (verb.kind == "select" and isinstance(verb.params.get(k), dict))
+                        or _is_tool_value(verb.params.get(k))
+                        for k in ("columns", "by"))
             # 008 K1: while the input's columns are not known yet (a tool-backed
             # source that has not run, or anything downstream of one), a name
             # missing from the prediction may still arrive. Defer, don't fail;
@@ -2806,7 +3684,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             if missing:
                 problems.append(
                     f"{verb.kind} names {', '.join(map(repr, missing))}, which "
-                    f"the input does not have (it has {', '.join(available)})"
+                    f"the input does not have (it has {', '.join(map(str, available))})"
                 )
 
     # 6c. a payload column must not silently replace an input column (008
@@ -2824,6 +3702,84 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             problems.append(
                 f"{verb.kind} writes {written!r}, which {upstream_name} already "
                 f"has; choose another name (name=…), or say replace=True")
+
+    # 6e. a tool in a setting (008 C2): only where the verb takes one, and it
+    #     must be registered, so the saved `{"$tool": id}` resolves on load.
+    for modifier in operation.modifiers:
+        for name, value in modifier.params.items():
+            if not _is_tool_value(value) or isinstance(value, StepRef):
+                continue
+            if name not in TOOL_SETTINGS.get(modifier.kind, ()):
+                problems.append(f"{modifier.kind}'s {name}= doesn't take a tool")
+            elif isinstance(value, ToolRef) and value.id not in TOOLS \
+                    and value.id not in BUILTIN_TOOLS:
+                problems.append(f"{modifier.kind}'s {name}= names tool "
+                                f"{value.id!r}, which is not registered")
+
+    # 6c'. a reference argument arrives whole, shaped by the parameter's type
+    #      (008 C1) — a shape that can't convert is refused here, not on every row.
+    if fn is not None and workflow is not None:
+        try:
+            annotations = {k: p.annotation for k, p in _signature(fn).parameters.items()}
+        except (TypeError, ValueError):
+            annotations = {}
+        for name, value in operation.arguments.items():
+            if not isinstance(value, StepRef) or name not in annotations:
+                continue
+            # 008 C7: a selection's shape is known from how it is written; a
+            # whole step's only once it holds data.
+            kind = _selection_kind(value)
+            step = workflow.steps.get(value.id)
+            if kind is None and (step is None or step.output.meta.get("staged")):
+                continue
+            if kind is None:
+                kind = _shape_kind(step.output.data)
+            problem = _shape_problem(kind, annotations[name], name, value.id)
+            if problem:
+                problems.append(problem)
+
+    # 6f. a selection is checked against what is already known about its step
+    #     (008 C7.7, C7.11): a column name it lacks, a position past the end.
+    if workflow is not None:
+        selections = [(f"argument {n!r}", v) for n, v in operation.arguments.items()
+                      if isinstance(v, StepRef) and v.selected]
+        if verb is not None and verb.kind == "select" and operation.input is not None \
+                and (isinstance(verb.params.get("columns"), dict)
+                     or verb.params.get("rows") is not None):
+            selections.append(("select", StepRef(
+                str(operation.input), rows=verb.params.get("rows"),
+                columns=verb.params.get("columns"))))
+        for label, ref in selections:
+            step = workflow.steps.get(ref.id)
+            if step is None or not step.valid:
+                continue                      # reported as a reference problem
+            if step.output.meta.get("staged"):
+                if columns_unknown(step.output) or ref.columns is None:
+                    continue
+                frame = pd.DataFrame(columns=predicted_columns(step.output))
+                row_sel = None                # row count not known yet
+            else:
+                frame, row_sel = step.output.data, ref.rows
+            try:
+                _apply_selection(frame, row_sel, ref.columns, ref.id)
+            except SelectionError as exc:
+                problems.append(f"{label}: {exc}")
+
+    # 6d. a bound value is a literal or a reference — anything else is refused
+    #     here, not when the workflow is saved (008 C11).
+    for name, value in operation.arguments.items():
+        if isinstance(value, (StepRef, ResRef, ToolRef, ToolHandle)):
+            continue
+        problem = _literal_problem(value)
+        if problem:
+            problems.append(f"{name}: {problem}")
+    for modifier in operation.modifiers:
+        for name, value in modifier.params.items():
+            if isinstance(value, (StepRef, ResRef, ToolRef, ToolHandle)) or callable(value):
+                continue                   # tools in settings: C2's check
+            problem = _literal_problem(value)
+            if problem:
+                problems.append(f"{modifier.kind}'s {name}=: {problem}")
 
     # 7. bound literals have to be parameters the tool accepts — the reactive
     #    argument check, done against the signature rather than at run time.
@@ -2872,6 +3828,31 @@ def warn(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str,
     if verb is None or verb.kind in ("source", "sweep"):
         return ()
     notes: list[str] = []
+    # 008 C7: a row position reads a different row next run when the step it
+    # reads doesn't fix its row order.
+    for ref in [*operation.arguments.values(),
+                *(StepRef(str(operation.input), rows=verb.params.get("rows"))
+                  if verb.kind == "select" and verb.params.get("rows") is not None
+                  else None,)]:
+        if not isinstance(ref, StepRef) or ref.rows is None:
+            continue
+        read = workflow.steps.get(ref.id)
+        made_by = read.operation.shape_verb.kind if read and read.operation.shape_verb else None
+        if made_by in ("filter", "expand", "group", "distinct", "collapse"):
+            notes.append(f"rows {ref.rows!r} of {ref.id!r} are positions, and "
+                         f"{made_by} doesn't fix row order: they may be "
+                         "different rows next run")
+    # 008 N2: an argument bound on the step beats a same-named input column —
+    # allowed, since pinning a value can be deliberate, but never silent.
+    upstream_columns = workflow._known_columns(operation)
+    for name, value in operation.arguments.items():
+        if name in upstream_columns:
+            shown = (f"wf[{value.id!r}]" if isinstance(value, StepRef)
+                     else repr(value))
+            notes.append(
+                f"{name}={shown} overrides the {name!r} column of "
+                f"{str(operation.input)!r} for every row; drop the argument "
+                f"to use the column")
     if (verb.kind in ("map", "group", "expand") and "name" not in verb.params
             and not verb.params.get("replace")):
         written = DEFAULT_PAYLOAD.get(verb.kind)
@@ -3030,9 +4011,15 @@ def _type_mismatches(operation: Operation, fn: Callable,
         return problems
 
     frame = rows(upstream)
+    # Only rows that completed count: a failed cell is a failure, not a
+    # missing value, and its row is blocked downstream anyway (008 C10).
+    completed = upstream.ledger.index[upstream.ledger["status"] == "completed"] \
+        if len(upstream.ledger) else frame.index
     declared = list(parameters.values())
     if verb.kind == "collapse":
         declared = declared[1:]          # the verb supplies the accumulator
+    upstream_name = (str(operation.input) if operation.input is not None
+                     else "the input")
     for parameter in declared:
         if parameter.name in operation.arguments:
             continue                     # a literal, checked above
@@ -3040,7 +4027,23 @@ def _type_mismatches(operation: Operation, fn: Callable,
             continue                     # missing columns are rule 7's job
         if parameter.annotation is inspect.Parameter.empty:
             continue
-        if _column_fits(frame[parameter.name], parameter.annotation) is False:
+        admits_none, base = _optional_parts(parameter.annotation)
+        series = frame[parameter.name]
+        try:
+            has_none = bool(series.loc[series.index.intersection(completed)].isna().any())
+        except (TypeError, ValueError):
+            has_none = False
+        if has_none and not admits_none:
+            # 008 C14: said in terms of None, not of the float64 that NaN
+            # used to force.
+            problems.append(
+                f"{upstream_name}.{parameter.name} can be None, but "
+                f"{operation.tool_id}() takes {parameter.name}: "
+                f"{_type_name(parameter.annotation)}; accept "
+                f"{_type_name(parameter.annotation)} | None, or filter the "
+                "Nones first")
+            continue
+        if _column_fits(series, base) is False:
             problems.append(
                 f"{operation.tool_id}() declares {parameter.name}: "
                 f"{_type_name(parameter.annotation)}, but "
@@ -3376,6 +4379,13 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         return _stage_combine(operation, workflow)
     verb = operation.shape_verb
     kind = verb.kind if verb else None
+    # 008 C1/C2: a setting that reads a step, or is a tool, has no value until
+    # run. Stage as though it were absent, and say the columns are not known.
+    unsettled = verb is not None and any(
+        isinstance(v, StepRef) or _is_tool_value(v) for v in verb.params.values())
+    if unsettled:
+        verb = Modifier(verb.kind, {k: v for k, v in verb.params.items()
+                                    if not isinstance(v, StepRef) and not _is_tool_value(v)})
 
     known = workflow._known_index(operation) if workflow is not None else None
     n_in = None if known is None else len(known)
@@ -3423,7 +4433,14 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     # appended, which is exactly what the verbs do to the frame.
     ordered: list[str] = []
     if kind == "select":
-        ordered = list(verb.params.get("columns") or [])
+        chosen = verb.params.get("columns")
+        if isinstance(chosen, dict) or chosen is None:
+            try:
+                ordered = _resolve_columns(list(upstream_columns), chosen, "the input")
+            except SelectionError:
+                ordered = []
+        else:
+            ordered = list(chosen)
     elif kind == "drop":
         removed = set(verb.params.get("columns") or [])
         ordered = [c for c in upstream_columns if c not in removed]
@@ -3449,7 +4466,12 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     # 008 K1: are these all the columns, or only the ones known so far? A
     # source computed by a tool cannot know its columns before it runs, and a
     # verb that carries its input's columns through inherits that.
-    if kind == "source":
+    if unsettled and kind in ("select", "drop", "rename", "widen"):
+        columns_open = True
+    elif kind == "select" and not isinstance(verb.params.get("columns"), (list, tuple)):
+        # a range or position selection over columns not known yet
+        columns_open = workflow._columns_open(operation) if workflow is not None else False
+    elif kind == "source":
         fn = operation.fn or TOOLS.get(operation.tool_id) \
             or BUILTIN_TOOLS.get(operation.tool_id)
         columns_open = not is_identity(fn)
@@ -3497,13 +4519,16 @@ class Step:
     def status(self) -> str:
         """A rollup of the ledger — a step is only as done as its rows."""
         states = set(self.output.ledger["status"])
-        for state in ("invalid", "failed", "running", "staged"):
-            if state in states:
-                return state
-        # Completed, but an upstream changed since it ran: the data is outdated
-        # until it is re-run (nothing recomputes on its own).
+        if "invalid" in states:
+            return "invalid"
+        # Ran, but an upstream changed (or re-ran) since: the data — failed
+        # cells included — is outdated until it is re-run (008 C10.5: fixing a
+        # root makes what it blocked stale). Nothing recomputes on its own.
         if self.output.meta.get("stale"):
             return "stale"
+        for state in ("failed", "running", "staged"):
+            if state in states:
+                return state
         if states:
             return "completed"
         # No ledger rows at all is ambiguous, and the ledger cannot settle it:
@@ -3655,7 +4680,23 @@ class Workflow:
 
     # ── declaring ────────────────────────────────────────────────────────
     def __setitem__(self, step_id: str, operation: Any) -> None:
+        _check_caller_scope()
         existed = step_id in self.steps
+        if isinstance(operation, StepRef):
+            # 008 C7 (K9): `wf["block"] = wf["p"][1:5][cols["a":"c"]]` is a
+            # select step — visible, saved and re-runnable. A plain reference
+            # copies the step.
+            selection = {}
+            if operation.rows is not None:
+                selection["rows"] = operation.rows
+            columns = operation.columns
+            if columns is not None:
+                selection["columns"] = (columns["names"] if set(columns) == {"names"}
+                                        else columns)
+            if not selection:
+                selection["columns"] = {"positions": {"start": None, "stop": None}}
+            operation = Operation(tool_id="identity", fn=identity)[
+                mod.select(**selection)](replace(operation, rows=None, columns=None))
         if isinstance(operation, Modifier):
             # A bare shape verb is a complete step: it applies the tool that
             # discards nothing, so `wf["flat"] = mod.expand(over=ref)` needs no
@@ -3695,6 +4736,8 @@ class Workflow:
             )
             if existed:
                 self._mark_stale_dependents(step_id)
+            else:
+                self._recheck_readers(step_id)
             return
         operation = _attach_bound(operation, self.resources)
         problems = check(operation, self, step_id)
@@ -3704,6 +4747,23 @@ class Workflow:
         )
         if existed:
             self._mark_stale_dependents(step_id)
+        else:
+            self._recheck_readers(step_id)
+
+    def _recheck_readers(self, step_id: str) -> None:
+        """Re-check earlier steps that named *step_id* before it existed.
+
+        008 C10: their "not an earlier step" becomes "comes after", which says
+        what to fix — reorder, don't create.
+        """
+        for sid, st in self.steps.items():
+            if sid == step_id or step_id not in st.operation.reads:
+                continue
+            problems = check(st.operation, self, sid)
+            if problems != st.problems:
+                st.problems = problems
+                st.output = stage(st.operation, self, problems)
+                st.warnings = warn(st.operation, self)
 
     def __getitem__(self, step_id: str | int) -> StepRef:
         """A reference to a step, by **name** or by **position**.
@@ -3726,8 +4786,10 @@ class Workflow:
                     f"no step at position {step_id}; the workflow has "
                     f"{len(ids)} step(s): {ids}"
                 ) from None
-        if step_id not in self.steps:
-            raise KeyError(f"no step {step_id!r}; defined so far: {list(self.steps)}")
+        # 008 C10: an unknown name is a reference that does not resolve — the
+        # step that reads it declares with a problem ("not an earlier step")
+        # instead of the line raising, so a workflow with a deleted step can
+        # still be declared, loaded and shown.
         return StepRef(step_id, self)
 
     def __contains__(self, step_id: str) -> bool:
@@ -3789,11 +4851,20 @@ class Workflow:
             new_args = {}
             for key, value in op.arguments.items():
                 if isinstance(value, StepRef) and str(value) == old:
-                    new_args[key], changed = StepRef(new, self), True
+                    new_args[key], changed = replace(value, id=new, workflow=self), True
                 else:
                     new_args[key] = value
+            new_mods = []
+            for m in op.modifiers:
+                params = {}
+                for key, value in m.params.items():
+                    if isinstance(value, StepRef) and str(value) == old:
+                        params[key], changed = replace(value, id=new, workflow=self), True
+                    else:
+                        params[key] = value
+                new_mods.append(Modifier(m.kind, params))
             if changed:
-                st.operation = Operation(op.tool_id, op.modifiers, new_args,
+                st.operation = Operation(op.tool_id, tuple(new_mods), new_args,
                                          op.fn, new_input, bound_to=op.bound_to)
 
     def _mark_stale_dependents(self, step_id: str) -> None:
@@ -3851,7 +4922,59 @@ class Workflow:
         step = self.steps.get(str(operation.input))
         if step is None or step.output.meta.get("staged"):
             return None
+        # So a failure downstream can name the cell it came from (`a[1]`).
+        step.output.meta["step_id"] = step.step_id
         return step.output
+
+    def _value_if_known(self, ref: StepRef) -> Any:
+        """The value a reference will resolve to, if its step holds data now."""
+        step = self.steps.get(ref.id)
+        if step is None or step.output.meta.get("staged"):
+            return _UNKNOWN
+        return _ref_value(step.output.data, None, ref.id)
+
+    def root_cause(self, step_id: str) -> tuple[str, str] | None:
+        """Where an invalid step's problem starts: ``(step_id, problem)``.
+
+        008 C10: following invalid upstreams to the first step that is invalid
+        for its own reason, so the UI can jump there. ``None`` for a valid step.
+        """
+        seen: set[str] = set()
+        current = step_id
+        while current not in seen:
+            seen.add(current)
+            step = self.steps.get(current)
+            if step is None or step.valid:
+                return None if current == step_id else (current, "")
+            upstream = next((r for r in step.operation.reads
+                             if r in self.steps and not self.steps[r].valid), None)
+            if upstream is None:
+                return current, step.problems[0]
+            current = upstream
+        return current, self.steps[current].problems[0]
+
+    def _failed_argument(self, operation: Operation) -> tuple[str, str] | None:
+        """An argument that reads a step with a failed cell: (error, root cause).
+
+        008 C10: an argument is passed whole, so one failed cell in it fails
+        every row that would receive it — without calling the tool.
+        """
+        for name, value in operation.arguments.items():
+            if not isinstance(value, StepRef):
+                continue
+            step = self.steps.get(str(value))
+            if step is None or step.output.meta.get("staged"):
+                continue
+            ledger = step.output.ledger
+            failed = ledger[ledger["status"] == "failed"] if len(ledger) else ledger
+            if len(failed):
+                index = failed.index[0]
+                cause = failed.iloc[0].get("cause")
+                return (f"argument {name!r} reads {step.step_id}, which has a failed "
+                        f"cell {step.step_id}[{index}]",
+                        cause if isinstance(cause, str) and cause
+                        else f"{step.step_id}[{index}]: {failed.iloc[0]['error']}")
+        return None
 
     # ── running ──────────────────────────────────────────────────────────
     def pending(self, step_id: str) -> list[str]:
@@ -3874,14 +4997,28 @@ class Workflow:
         :class:`ResourceNotLoaded` before anything runs. A plain Operation is
         returned unchanged.
         """
-        if operation.bound_to is None and not any(
+        settings_refs = any(isinstance(v, StepRef)
+                            for m in operation.modifiers for v in m.params.values())
+        if operation.bound_to is None and not settings_refs and not any(
                 isinstance(v, (StepRef, ResRef)) for v in operation.arguments.values()):
             return operation
+        fn_for_types = operation.fn or TOOLS.get(operation.tool_id) \
+            or BUILTIN_TOOLS.get(operation.tool_id)
+        try:
+            annotations = {k: p.annotation
+                           for k, p in _signature(fn_for_types).parameters.items()}
+        except (TypeError, ValueError):
+            annotations = {}
         resolved = {}
         for name, value in operation.arguments.items():
             if isinstance(value, StepRef):
-                data = self.steps[str(value)].output.data
-                resolved[name] = data.iloc[0, 0] if data.shape == (1, 1) else data
+                data = _apply_selection(self.steps[str(value)].output.data,
+                                        value.rows, value.columns, value.id)
+                # 008 C1: the parameter's type decides the shape that arrives.
+                try:
+                    resolved[name] = _ref_value(data, annotations.get(name), value.id)
+                except TypeError as exc:
+                    raise SelectionError(str(exc)) from None
             elif isinstance(value, ResRef):
                 resolved[name] = self._live(value.name, resources)
             else:
@@ -3890,7 +5027,14 @@ class Workflow:
         if operation.bound_to is not None:
             instance = self._live(operation.bound_to.name, resources)
             fn = getattr(instance, operation.tool_id.rsplit(".", 1)[-1])
-        return Operation(operation.tool_id, operation.modifiers, resolved,
+        modifiers = tuple(
+            Modifier(m.kind, {k: (_ref_value(_apply_selection(
+                                      self.steps[v.id].output.data, v.rows,
+                                      v.columns, v.id), None, v.id)
+                                  if isinstance(v, StepRef) else v)
+                              for k, v in m.params.items()})
+            for m in operation.modifiers)
+        return Operation(operation.tool_id, modifiers, resolved,
                          fn, operation.input)
 
     def run(self, step_id: str, tools: dict[str, Callable] | None = None,
@@ -3943,9 +5087,29 @@ class Workflow:
             step.output = _run_combine(step.operation, frames)
             self._restage_after(step_id)
             return step
-        resolved = self._resolve_arguments(step.operation, resources)
-        step.output = resolved.run(self._input_for(resolved), tools)
+        try:
+            resolved = self._resolve_arguments(step.operation, resources)
+        except SelectionError as exc:
+            step.output = _failed_output(step.operation, str(exc))
+            self._restage_after(step_id)
+            return step
+        source = self._input_for(resolved)
+        bad_argument = self._failed_argument(step.operation)
+        if bad_argument is not None and source is not None:
+            # Every row is blocked: hand the verb an input that says so.
+            source = Output(source.data, source.ledger,
+                            {**source.meta, "blocked_all": bad_argument})
+        try:
+            step.output = resolved.run(source, tools)
+            step.output.data = _str_columns(step.output.data, step_id)
+        except SelectionError as exc:
+            # 008 C7: a position out of range, a column that is gone — the step
+            # fails with the reason, never None, NaN or an empty grid.
+            step.output = _failed_output(step.operation, str(exc))
         self._restage_after(step_id)
+        # 008 C10.5: re-running a step makes everything that already read it
+        # stale — fixing a root clears what it blocked, by re-running it.
+        self._mark_stale_dependents(step_id)
         return step
 
     def run_all(self, tools: dict[str, Callable] | None = None,
@@ -4031,7 +5195,7 @@ class Workflow:
         cannot reproduce is *cardinality*, which came from the data: a light
         round-trip lands at §7's level 1 (shape known, counts not), by design.
         """
-        blob = {"version": 1,
+        blob = {"version": FORMAT_VERSION,
                 "steps": [{"step_id": sid, "operation": st.operation.to_dict()}
                           for sid, st in self.steps.items()]}
         if self.resources:
@@ -4074,6 +5238,13 @@ class Workflow:
         type name to its class, as *tools* does for tools; types registered with
         :func:`resource` (or used by ``define``) are found without it.
         """
+        version = blob.get("version", 1)
+        if not isinstance(version, int) or version > FORMAT_VERSION:
+            # 008 K17: an older core must refuse a newer file, never strip it.
+            raise ValueError(
+                f"this workflow was saved in format version {version!r}; this "
+                f"core reads versions 1 to {FORMAT_VERSION}. Upgrade "
+                "simple-steps-core to load it.")
         workflow = cls()
         known = {**RESOURCE_TYPES, **(resource_types or {})}
         for name, entry in (blob.get("resources") or {}).items():
@@ -4143,6 +5314,18 @@ class _Mods:
 mod = _Mods()
 
 
+def _resolve_tool_setting(value: Any, table: dict) -> Any:
+    """A ``$tool`` setting as its function; anything else unchanged."""
+    if isinstance(value, ToolHandle):
+        return value.fn
+    if isinstance(value, ToolRef):
+        if value.id not in table:
+            raise KeyError(f"setting names tool {value.id!r}, which is not registered")
+        found = table[value.id]
+        return found.fn if isinstance(found, ToolHandle) else found
+    return value
+
+
 def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Callable:
     """Apply an Operation's stack to its tool, innermost-first.
 
@@ -4159,6 +5342,9 @@ def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Calla
     # every item.
     fn = _d_apply(table[operation.tool_id], **operation.arguments)
     for modifier in operation.modifiers:               # innermost first
+        # 008 C2: a tool named in a setting is resolved from the same table.
+        modifier = Modifier(modifier.kind, {
+            k: _resolve_tool_setting(v, table) for k, v in modifier.params.items()})
         factory = DECORATORS.get(modifier.kind)
         if factory is None:
             raise KeyError(

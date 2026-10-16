@@ -799,12 +799,14 @@ def test_infer_verb_explains_itself(three):
     assert kind == "map" and "columns" in reason
 
 
-def test_wiring_more_than_one_reference_is_refused(three):
+def test_a_second_reference_binds_by_position(three):
+    """008 C1: after the input, a positional binds the next free parameter."""
     wf = Workflow()
     wf["raw"] = three
     wf["other"] = three
-    with pytest.raises(TypeError, match="one reference at a time"):
-        score(wf["raw"], wf["other"])
+    assert score(wf["raw"], wf["other"]) == score(wf["raw"], weight=wf["other"])
+    with pytest.raises(TypeError, match="no free parameter left"):
+        score(wf["raw"], wf["other"], wf["other"])
 
 
 def test_a_declared_tool_resolves_by_id(three):
@@ -1292,7 +1294,7 @@ def test_an_unexportable_payload_says_so(three):
 
 
 def test_exports_are_json(ran):
-    assert json.loads(ran.to_json())["version"] == 1
+    assert json.loads(ran.to_json())["version"] == 2
     full = json.loads(ran.to_session_json())
     assert "inputs" not in full, "one payload map, not two"
     assert full["outputs"]["raw"]["data"]["kind"] == "frame"

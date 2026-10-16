@@ -98,10 +98,16 @@ def test_K4_over_given_twice_is_refused(wf):
         scale_008[mod.map(over=wf["readings"])](wf["other"])
 
 
-def test_N2_an_explicit_argument_beats_a_same_named_column(wf):
+def test_N2_an_explicit_argument_beats_a_same_named_column_with_a_warning(wf):
     wf["x"] = tag_008[mod.map()](wf["readings"], city="NYC")
+    assert wf.step("x").problems == ()              # allowed: it may be deliberate
+    assert wf.step("x").warnings[0] == (
+        "city='NYC' overrides the 'city' column of 'readings' for every row; "
+        "drop the argument to use the column")
     wf.run("x")
     assert wf.step("x").output.values == ["NYC"] * 4
+    wf["y"] = tag_008[mod.map()](wf["readings"])     # no argument, no warning
+    assert not any("overrides" in w for w in wf.step("y").warnings)
 
 
 def test_C13_an_explicit_name_cannot_silently_replace_a_column(wf):
@@ -201,3 +207,315 @@ def test_K13_the_modifier_catalog_says_which_verbs_take_a_tool():
     assert (cat["select"]["takes_tool"], cat["select"]["default_tool"]) == (False, "identity")
     assert (cat["collapse"]["takes_tool"], cat["collapse"]["default_tool"]) == ("optional", "gather")
     assert cat["retry"]["takes_tool"] is None
+
+
+# ── Phase 2: failure as state (C10), missing is None (C14), R8 ─────────
+CALLS = {"plus1": 0, "total": 0}
+
+
+@tool
+def risky_008(n: int) -> int:
+    if n == 2:
+        raise ValueError("boom")
+    return n * 100
+
+
+@tool
+def plus1_008(value: int) -> int:
+    CALLS["plus1"] += 1
+    return value + 1
+
+
+@tool
+def total_008(acc, value):
+    CALLS["total"] += 1
+    return (acc or 0) + value
+
+
+@tool
+def is_pos_008(value: int) -> bool:
+    return value > 0
+
+
+@pytest.fixture()
+def failing():
+    for k in CALLS:
+        CALLS[k] = 0
+    w = Workflow()
+    w["r"] = pd.DataFrame({"n": [1, 2, 3]})
+    w["a"] = risky_008[mod.map()](w["r"])
+    return w
+
+
+def test_C10_a_bad_reference_is_a_declaration_problem_that_names_its_root():
+    w = Workflow()
+    w["a"] = scale_008[mod.map()](w["nope"])          # no KeyError
+    w["c"] = scale_008[mod.map()](w["a"])
+    assert w.step("a").status == "invalid"
+    assert "not an earlier step" in w.step("a").problems[0]
+    assert "root cause: a: input 'nope'" in w.step("c").problems[0]
+    assert w.root_cause("c") == ("a", "input 'nope', which is not an earlier step")
+
+
+def test_C10_a_forward_reference_says_it_comes_after():
+    w = Workflow()
+    w["r"] = pd.DataFrame({"n": [1, 2]})
+    w["a"] = scale_008[mod.map()](w["r"], weight=w["w"])
+    w["w"] = 2
+    assert w.step("a").problems == (
+        "argument 'weight' 'w' comes after 'a'; a step can only read earlier steps",)
+
+
+def test_R8_C10_a_failed_cell_keeps_the_type_and_blocks_its_row(failing):
+    failing["b"] = plus1_008[mod.map()](failing["a"])
+    failing.run_all()
+    a, b = failing.step("a").output, failing.step("b").output
+    assert str(a.data["value"].dtype) == "Int64"          # not float64
+    assert a.values == [100, None, 300]
+    assert failing.step("b").problems == ()               # not refused as float
+    assert b.values == [101, None, 301]
+    assert CALLS["plus1"] == 2                            # never called for row 1
+    row = b.ledger.loc[1]
+    assert (row["status"], row["error"], row["attempts"], row["cause"]) == (
+        "failed", "upstream cell a[1] failed", 0, "a[1]: ValueError: boom")
+
+
+def test_C10_the_root_cause_travels_through_every_verb(failing):
+    failing["kept"] = is_pos_008[mod.filter()](failing["a"])
+    failing["ordered"] = mod.sort(by="n", ascending=False)(failing["a"])
+    failing["sum"] = total_008[mod.collapse(initial=0)](failing["a"])
+    failing["again"] = plus1_008[mod.map()](failing["kept"])
+    failing.run_all()
+    for sid in ("kept", "ordered", "again"):
+        ledger = failing.step(sid).output.ledger
+        assert ledger.loc[1, "status"] == "failed", sid
+        assert ledger.loc[1, "cause"] == "a[1]: ValueError: boom", sid
+    assert 1 in failing.step("kept").output.data.index    # carried, not filtered
+    assert failing.step("sum").output.values == [None]
+    assert CALLS["total"] == 0                            # the reducer never ran
+
+
+def test_C10_an_argument_with_a_failed_cell_blocks_every_row(failing):
+    @tool
+    def use_008(n: int, table=None) -> int:
+        CALLS["plus1"] += 1
+        return n
+    failing["u"] = use_008[mod.map()](failing["r"], table=failing["a"])
+    failing.run_all()
+    assert failing.step("u").output.values == [None, None, None]
+    assert CALLS["plus1"] == 0
+    assert set(failing.step("u").output.ledger["cause"]) == {"a[1]: ValueError: boom"}
+
+
+def test_C10_rerunning_the_root_marks_what_it_blocked_stale(failing):
+    failing["b"] = plus1_008[mod.map()](failing["a"])
+    failing.run_all()
+    failing.run("a")
+    assert failing.step("b").status == "stale"
+
+
+def test_C14_missing_is_none_and_nullability_is_checked():
+    @tool
+    def inc_opt_008(n: int | None) -> int:
+        return 1 if n is None else n + 1
+
+    @tool
+    def inc_008(n: int) -> int:
+        return n + 1
+
+    w = Workflow()
+    w["r"] = pd.DataFrame({"n": [1, None, 3]})
+    w["o"] = inc_opt_008[mod.map()](w["r"])
+    w["i"] = inc_008[mod.map()](w["r"])
+    w.run_all()
+    assert str(w.step("r").output.data["n"].dtype) == "Int64"
+    assert w.step("o").output.values == [2, 1, 4]
+    assert str(w.step("o").output.data["value"].dtype) == "int64"
+    assert w.step("i").problems == (
+        "r.n can be None, but inc_008() takes n: int; accept int | None, or "
+        "filter the Nones first",)
+
+
+# ── Phase 3: saved format v2 — C11, C1, C2, C7 (K9), K17 ────────────────
+import datetime  # noqa: E402
+
+from simple_steps_core.grid import cols, rows  # noqa: E402
+
+
+def _reload(w):
+    return Workflow.from_json(w.to_session_json(), grid.TOOLS)
+
+
+@pytest.mark.parametrize("value", [
+    3, 2.5, "x", True, None, [1, 2], {"k": [1, {"z": None}]},
+    (1, 2), {1: "one"}, {1, 2}, {"$ref": "not a ref"}, ((1, 2), frozenset({3})),
+])
+def test_C11_every_literal_round_trips_with_its_type(wf, value):
+    wf["s"] = scale_008.bind(weight=value)[mod.map()](wf["readings"])
+    back = _reload(wf).step("s").operation.arguments["weight"]
+    assert back == value and type(back) is type(value)
+
+
+def test_C11_a_non_literal_is_refused_at_declaration(wf):
+    wf["d"] = scale_008.bind(weight=datetime.date(2024, 1, 1))[mod.map()](wf["readings"])
+    assert wf.step("d").problems == (
+        "weight: a date isn't a literal; pass a str ('2024-01-01'), or make it a step",)
+
+
+def test_K17_v2_is_written_v1_loads_and_newer_is_refused(wf):
+    assert json.loads(wf.to_json())["version"] == 2
+    v1 = {"version": 1, "steps": [{"step_id": "r", "operation": {
+        "tool_id": "scale_008", "input": None, "arguments": {"weight": 2},
+        "modifiers": [{"kind": "map", "params": {}}]}}]}
+    assert Workflow.from_dict(v1).step("r").operation.arguments == {"weight": 2}
+    with pytest.raises(ValueError, match="reads versions 1 to 2"):
+        Workflow.from_dict({**v1, "version": 3})
+
+
+def test_C1_a_reference_in_a_setting_resolves_and_goes_stale(wf):
+    wf["cols"] = ["city"]
+    wf["s"] = op("identity")[mod.select(columns=wf["cols"])](wf["readings"])
+    wf.run_all()
+    assert wf.step("s").output.data.to_dict("list") == {"city": ["SF", "NYC", "SF", "LA"]}
+    wf["cols"] = ["n"]
+    assert wf.step("s").status == "stale"
+    assert _reload(wf).step("s").operation == wf.step("s").operation
+
+
+def test_C1_positional_arguments_bind_like_keywords(wf):
+    wf["w"] = 2
+    assert scale_008(wf["readings"], wf["w"]) == scale_008(wf["readings"], weight=wf["w"])
+
+
+def test_C1_a_reference_arrives_in_the_shape_its_type_asks_for(wf):
+    @tool
+    def g_008(n, vals: list) -> int:
+        return n + sum(vals)
+
+    @tool
+    def h_008(n, vals: int) -> int:
+        return n
+
+    wf["col"] = pd.DataFrame({"v": [10, 20]})
+    wf["g"] = g_008[mod.map()](wf["readings"], vals=wf["col"])
+    wf["h"] = h_008[mod.map()](wf["readings"], vals=wf["col"])
+    assert "is a column; to pair its rows" in wf.step("h").problems[0]
+    wf.run("g")
+    assert wf.step("g").output.values == [31, 32, 33, 32]
+
+
+def test_C2_a_tool_in_a_setting_runs_and_round_trips(wf):
+    @tool
+    def neg_n_008(n):
+        return -n
+
+    @tool
+    def first_letter_008(city):
+        return city[0]
+
+    wf["s"] = op("identity")[mod.sort(by=neg_n_008)](wf["readings"])
+    wf["c"] = add_008[mod.collapse(by=first_letter_008, initial=0)](wf["readings"])
+    wf.run_all()
+    assert list(wf.step("s").output.data["n"]) == [3, 2, 2, 1]
+    assert wf.step("c").output.data.to_dict("list") == {
+        "first_letter_008": ["S", "N", "L"], "value": [4, 2, 2]}
+    assert json.loads(wf.to_json())["steps"][1]["operation"]["modifiers"][0]["params"] == {
+        "by": {"$tool": "neg_n_008"}}
+    back = _reload(wf)
+    back.run("s")
+    assert list(back.step("s").output.data["n"]) == [3, 2, 2, 1]
+    by = next(x for x in grid.modifier_catalog()["sort"]["settings"] if x["name"] == "by")
+    assert by["type"].endswith("| tool")
+
+
+def test_C2_a_lambda_runs_but_cannot_be_saved(wf):
+    wf["s"] = op("identity")[mod.sort(by=lambda n: -n)](wf["readings"])
+    with pytest.raises(grid.PayloadError, match="register it with @tool"):
+        wf.to_json()
+
+
+@pytest.fixture()
+def prices():
+    w = Workflow()
+    w["p"] = pd.DataFrame({"name": list("abcde"), "qty": [1, 2, 3, 4, 5],
+                           "price": [10.0, 20.0, 30.0, 40.0, 50.0]})
+    w["o"] = pd.DataFrame({"n": [1, 2]})
+    return w
+
+
+def test_C7_selections_as_steps(prices):
+    prices["block"] = prices["p"][1:3][cols["name":"price"]]
+    prices["by_pos"] = prices["p"][1:3][cols[0:2]]
+    prices["cell"] = prices["p"][-1][cols["price"]]
+    prices.run_all()
+    assert prices.step("block").output.data.to_dict("list") == {
+        "name": ["b", "c"], "qty": [2, 3], "price": [20.0, 30.0]}
+    assert list(prices.step("block").output.data.index) == [1, 2]   # ids kept
+    assert prices.step("by_pos").output.data.to_dict("list") == {"name": ["b", "c"], "qty": [2, 3]}
+    assert prices.step("cell").output.data.to_dict("list") == {"price": [50.0]}
+
+
+def test_C7_every_spelling_saves_identically(prices):
+    a = prices["p"][1:3][cols["name":"price"]]
+    b = prices["p"][cols["name":"price"], 1:3]
+    c = prices["p"][rows[1:3], cols["name":"price"]]
+    assert a == b == c
+    assert grid._encode_ref(a) == {"$ref": "p", "rows": {"start": 1, "stop": 3},
+                                   "columns": {"from": "name", "to": "price"}}
+
+
+def test_C7_a_selection_as_an_argument_converts_by_type(prices):
+    @tool
+    def total_l_008(n, prices: list) -> float:
+        return n + sum(prices)
+
+    @tool
+    def total_f_008(n, prices: float) -> float:
+        return n
+
+    prices["l"] = total_l_008[mod.map()](prices["o"], prices=prices["p"][cols["price"]])
+    prices["f"] = total_f_008[mod.map()](prices["o"], prices=prices["p"][cols["price"]])
+    assert "is a column" in prices.step("f").problems[0]
+    prices.run("l")
+    assert prices.step("l").output.values == [151.0, 152.0]
+
+
+def test_C7_refusals(prices):
+    with pytest.raises(grid.SelectionError, match=r"cols\['price'\]"):
+        prices["p"]["price"]
+    with pytest.raises(grid.SelectionError, match="names or positions"):
+        cols[["name", 2]]
+    with pytest.raises(grid.SelectionError, match="already has its rows"):
+        prices["p"][1:5][2]
+    with pytest.raises(grid.SelectionError, match="empty"):
+        prices["p"][[]]
+    with pytest.raises(TypeError, match="can't be a tool's input"):
+        scale_008[mod.map()](prices["p"][1:3])
+    prices["far"] = prices["p"][9]
+    assert prices.step("far").problems == ("select: row 9 of 'p', which has 5 rows (0–4)",)
+
+
+def test_C7_column_names_are_strings():
+    w = Workflow()
+    w["y"] = pd.DataFrame({2023: [1, 2], 2024: [3, 4]})
+    assert list(w.step("y").output.data.columns) == ["2023", "2024"]
+    with pytest.raises(grid.SelectionError, match="both become '1'"):
+        w["clash"] = pd.DataFrame({1: [1], "1": [2]})
+
+
+def test_C7_rows_and_cols_are_reserved():
+    with pytest.raises(ValueError, match="reserved for row selection"):
+        tool(id="rows")(lambda n: n)
+
+    def declare_with_own_rows():
+        rows = [10, 20, 30]  # noqa: F841 — the shadowing being refused
+        Workflow()["x"] = 1
+
+    with pytest.raises(TypeError, match="Rename your variable"):
+        declare_with_own_rows()
+
+
+def test_K9_select_takes_rows_and_columns(wf):
+    wf["x"] = op("identity")[mod.select(columns=["n"], rows=[0, 2])](wf["readings"])
+    wf.run("x")
+    assert wf.step("x").output.data.to_dict("list") == {"n": [1, 3]}
