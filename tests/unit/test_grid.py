@@ -113,9 +113,10 @@ def test_a_tool_can_ask_for_the_whole_row():
     assert widest[mod.map()](grid(frame)).values == [["a", "b"]]
 
 
-def test_a_column_beats_a_bound_literal(three):
-    """The row is the unit of work — the engine's rule in _run_item."""
-    assert score.bind(n=99)[mod.map()](grid(three)).values == [10, 20, 30]
+def test_a_bound_argument_beats_a_column(three):
+    """008 N2: the step said n=99, so the tool gets 99 — a same-named column
+    used to win silently, and the result depended on the input's columns."""
+    assert score.bind(n=99)[mod.map()](grid(three)).values == [990, 990, 990]
 
 
 def test_brackets_decorate_and_return_data():
@@ -1134,7 +1135,7 @@ def test_one_shape_verb_with_execution_modifiers_is_fine(three):
 
 def test_a_dangling_reference_is_caught():
     wf = Workflow()
-    wf["dangling"] = score[mod.map(over="nope")]
+    wf["dangling"] = score[mod.map(over=grid_module.wf["nope"])]
     assert "not an earlier step" in wf.step("dangling").problems[0]
 
 
@@ -1150,7 +1151,7 @@ def test_self_reference_is_caught(three):
     wf = Workflow()
     wf["raw"] = three
     wf["loop"] = score[mod.map(over=wf["raw"])]
-    wf["loop"] = score[mod.map(over="loop")]
+    wf["loop"] = score[mod.map(over=grid_module.wf["loop"])]
     assert "input is itself" in wf.step("loop").problems[0]
 
 
@@ -1159,7 +1160,7 @@ def test_a_cycle_is_caught(three):
     wf["raw"] = three
     wf["a"] = score[mod.map(over=wf["raw"])]
     wf["b"] = score[mod.map(over=wf["a"])]
-    wf["a"] = score[mod.map(over="b")]
+    wf["a"] = score[mod.map(over=grid_module.wf["b"])]
     assert "circular" in wf.step("a").problems[0]
 
 
@@ -1470,7 +1471,7 @@ def test_provenance_is_not_part_of_the_data(two_workflows):
     """Naming a step two ways must not change equality or the export."""
     a, _ = two_workflows
     from_ref = score[mod.map(over=a["raw"])]
-    from_str = score[mod.map(over="raw")]
+    from_str = score[mod.map(over=grid_module.wf["raw"])]
     assert from_ref == from_str
     assert from_ref.to_dict() == from_str.to_dict()
     assert str(from_str.input) == "raw"
@@ -1512,18 +1513,18 @@ def test_provenance_is_diagnosed_before_a_dangling_reference(two_workflows):
     assert "reads a different Workflow" in c.step("x").problems[0]
 
 
-def test_a_string_ref_means_whatever_is_here(two_workflows):
-    """The escape hatch: no origin, so no provenance to violate."""
+def test_an_unbound_ref_means_whatever_is_here(two_workflows):
+    """grid.wf (008 C6): no origin, so no provenance to violate."""
     a, b = two_workflows
-    b["x"] = score[mod.map(over="raw")]
+    b["x"] = score[mod.map(over=grid_module.wf["raw"])]
     assert b.step("x").problems == ()
     b.run("x")
     assert b.step("x").output.values == [1000, 2000], "ran on b's own raw"
 
 
-def test_an_operation_with_a_string_ref_is_reusable(two_workflows):
+def test_an_operation_with_an_unbound_ref_is_reusable(two_workflows):
     a, b = two_workflows
-    template = score[mod.map(over="raw")]
+    template = score[mod.map(over=grid_module.wf["raw"])]
     a["x"] = template
     b["x"] = template
     assert a.step("x").problems == () and b.step("x").problems == ()
@@ -1593,7 +1594,7 @@ def test_an_export_without_dtypes_still_decodes():
 def test_a_repr_does_not_depend_on_how_a_step_was_named(two_workflows):
     """A ref lives in params, so a repr must flatten it like __eq__ does."""
     a, _ = two_workflows
-    assert repr(score[mod.map()](a["raw"])) == repr(score[mod.map(over="raw")])
+    assert repr(score[mod.map()](a["raw"])) == repr(score[mod.map(over=grid_module.wf["raw"])])
     assert "over='raw'" in repr(score[mod.map(over=a["raw"])])
 
 
@@ -1961,7 +1962,7 @@ def test_an_unknown_modifier_parameter_is_caught_at_declaration(three):
     wf["raw"] = three
     wf["t"] = score[mod.map(nmae="s")](wf["raw"])
     assert "map takes no parameter 'nmae'" in wf.step("t").problems[0]
-    assert "it accepts axis, name, retries" in wf.step("t").problems[0]
+    assert "it accepts axis, name, replace, retries" in wf.step("t").problems[0]
 
 
 def test_a_required_setting_is_caught_at_declaration(three):

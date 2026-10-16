@@ -229,7 +229,7 @@ def validation() -> grid.Workflow:
     wf["readings"] = readings()
     wf["scored"] = scale[mod.map(over=wf["readings"], name="score")]   # valid, staged
     wf["bad_arg"] = scale.bind(nope=1)[mod.map(over=wf["readings"])]   # unknown param
-    wf["dangling"] = scale[mod.map(over="nowhere")]                    # missing upstream
+    wf["dangling"] = scale[mod.map(over=grid.wf["nowhere"])]          # missing upstream
     return wf
 
 
