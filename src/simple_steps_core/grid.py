@@ -28,6 +28,7 @@ first; both are easy to optimize later and neither is the bottleneck now.
 from __future__ import annotations
 
 import inspect
+import json
 import itertools
 import math
 import numbers
@@ -54,7 +55,9 @@ __all__ = [
     "join", "stack", "zip_", "COMBINE", "is_combine",
     "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "warn", "stage",
     "wf", "res", "ResRef", "bound_tool", "cols", "Rows", "Cols", "SelectionError",
-    "RESERVED_NAMES", "FORMAT_VERSION", "ToolRef", "StepFailed", "resource", "RESOURCE_TYPES",
+    "RESERVED_NAMES", "FORMAT_VERSION", "ToolRef", "StepFailed",
+    "builtin_tools", "declared_tools", "shape_verbs", "resource_types",
+    "payload_column", "check_modifier", "freeze", "is_frozen", "formula_names", "resource", "RESOURCE_TYPES",
     "resource_entry", "resource_catalog", "ResourceNotLoaded",
     "STRICT_TYPES", "annotation_problems", "declaration_problems",
     "PARAM_TYPES", "PARAM_TYPES_BY_VERB",
@@ -460,9 +463,9 @@ def _type_name(annotation: Any) -> str | None:
 def annotation_problems(fn: Callable) -> list[str]:
     """What is unannotated about *fn*. Empty when it is fully typed.
 
-    ``**kwargs`` and ``*args`` are exempt: a tool that takes the whole row has
-    no per-column parameter to type, and the row's columns are not knowable from
-    the signature.
+    ``**kwargs`` counts as untyped (008 C12): its extra keywords have no names,
+    so they can't be checked, typed or shown in a form. ``*args`` is refused
+    outright by :func:`declaration_problems`.
     """
     try:
         signature = inspect.signature(fn)
@@ -474,6 +477,10 @@ def annotation_problems(fn: Callable) -> list[str]:
                                  inspect.Parameter.VAR_POSITIONAL)
                and p.annotation is inspect.Parameter.empty]
     problems = []
+    open_ = [p.name for p in signature.parameters.values()
+             if p.kind is inspect.Parameter.VAR_KEYWORD]
+    if open_:
+        problems.append(f"**{open_[0]} takes keywords that have no names or types")
     if untyped:
         plural = "s" if len(untyped) > 1 else ""
         problems.append(
@@ -483,6 +490,16 @@ def annotation_problems(fn: Callable) -> list[str]:
     if signature.return_annotation is inspect.Signature.empty:
         problems.append("it has no return annotation")
     return problems
+
+
+def _open_keywords(fn: Callable) -> str | None:
+    """The name of *fn*'s ``**kwargs`` parameter, or None."""
+    try:
+        parameters = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return None
+    return next((p.name for p in parameters
+                 if p.kind is inspect.Parameter.VAR_KEYWORD), None)
 
 
 def declaration_problems(fn: Callable, tool_id: str) -> list[str]:
@@ -768,8 +785,10 @@ def _rows_plan(kind, rule, expected, n_in, expect, label) -> dict:
     because = {
         "source": f"{label} is a source that hasn't run; its rows come from its data",
         "expand": f"expand: how many items {label} returns per row is only known by running",
+        "table": f"table: {label} returns a new grid; its rows come from running it",
     }.get(kind, "its input's row count isn't known yet")
-    resolve = [f"run {label}" if kind in ("source", "expand") else "run the steps before it"]
+    resolve = [f"run {label}" if kind in ("source", "expand", "table")
+               else "run the steps before it"]
     if kind == "expand":
         resolve.append("annotate a fixed length: -> tuple[T, T]")
     resolve.append("state it on the step: mod.expect(rows=…)")
@@ -783,7 +802,7 @@ def _columns_plan(kind, names, columns_open, expect, label, upstream) -> dict:
                 "more": bool(expect.get("more_columns"))}
     if not columns_open:
         return {"certainty": "exact", "names": list(names)}
-    if kind == "source":
+    if kind in ("source", "table"):
         because = f"{label} returns a DataFrame with no declared columns"
         resolve = [f"run {label}",
                    "annotate the return: -> Annotated[pd.DataFrame, YourTypedDict]",
@@ -816,7 +835,7 @@ def _output_mismatch(operation: "Operation", data: pd.DataFrame) -> str | None:
     """
     expect = _expectation(operation)
     verb = operation.shape_verb
-    if verb is not None and verb.kind == "source":
+    if verb is not None and verb.kind in ("source", "table"):
         fn = operation.fn or TOOLS.get(operation.tool_id)
         schema = _declared_schema(fn) if fn is not None else None
         if schema is not None and list(schema) != list(data.columns):
@@ -1019,8 +1038,11 @@ def tool_entry(tool_id: str, fn: Callable, origin: str) -> dict:
         #: The declared return type, or None. With `params` above, this is the
         #: tool's whole boundary: what goes in, what comes out.
         "returns": returns,
-        #: True when every parameter and the return are annotated.
+        #: True when every parameter and the return are annotated (a
+        #: **kwargs tool never is — 008 C12).
         "typed": not annotation_problems(fn),
+        #: True when the tool takes **kwargs: keywords nobody can check.
+        "open": _open_keywords(fn) is not None,
         # True when the tool declares **kwargs, so it receives every column and
         # `check` cannot verify its inputs against the upstream (§4).
         "takes_whole_row": takes_row,
@@ -1037,8 +1059,10 @@ def catalog(tools: dict[str, Callable] | None = None) -> dict[str, dict]:
     entries = {}
     for name, fn in sorted(BUILTIN_TOOLS.items()):
         entries[name] = tool_entry(name, fn, "builtin")
+        entries[name]["tags"] = []
     for name, fn in sorted({**TOOLS, **(tools or {})}.items()):
         entries[name] = tool_entry(name, fn, "declared")
+        entries[name]["tags"] = list(TOOL_TAGS.get(name, ()))
     return entries
 
 
@@ -1380,6 +1404,60 @@ def expand_(source: Any, fn: Callable, *, name: str = PAYLOAD,
     return Output(data=data, ledger=_ledger(records, data.index),
                   meta={"verb": "expand", "form": "column", "payload": name,
                         "n_in": len(frame)})
+
+
+def table_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
+    """``table`` — hand the tool the **whole grid**; what it returns is the step's grid.
+
+    008 K12: the mirror of a tool-backed ``source``, for pivots, unpivots and
+    anything that needs every row at once::
+
+        @tool
+        def piv(df: pd.DataFrame) -> pd.DataFrame:
+            return df.groupby("city", as_index=False)["n"].sum()
+
+        wf["per_city"] = piv[mod.table()](wf["r"])
+
+    One unit of work: it runs once, and the ledger records that run on every
+    output row. A failed cell in the input blocks it without calling the tool.
+    """
+    frame = _rows_frame(source)
+    blocked = _upstream_failures(source)
+    meta = {"verb": "table", "form": "grid", "payload": None, "n_in": len(frame)}
+    if blocked:
+        record = _blocked(*next(iter(blocked.values())))
+        return Output(data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
+                      ledger=_ledger([record], [0]), meta=meta)
+    value, record = _call(fn, frame, retries)
+    if record["status"] != "completed":
+        return Output(data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
+                      ledger=_ledger([record], [0]), meta=meta)
+    if isinstance(value, pd.Series):
+        value = value.to_frame()
+    if not isinstance(value, pd.DataFrame):
+        if record.get("caught"):
+            value = _rows_frame(value)          # a try_except default
+        else:
+            record = {**record, "status": "failed",
+                      "error": f"TypeError: table expects a DataFrame back, got "
+                               f"{type(value).__name__}"}
+            return Output(data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
+                          ledger=_ledger([record], [0]), meta=meta)
+    data = _normalize_missing(_str_columns(value, "the table"))
+    records = [{**record, "unit": "table"} for _ in range(len(data))]
+    return Output(data=data, ledger=_ledger(records, data.index),
+                  meta={**meta, "columns": list(data.columns)})
+
+
+def auto_(source: Any, fn: Callable) -> Output:
+    """``auto`` — pick the verb from the tool and the data, at run (008 N).
+
+    Stored and saved as ``auto``; never run as itself. :func:`compile_operation`
+    and ``Workflow.run`` resolve it with :func:`infer_verb` against the input
+    the step actually gets, and staging shows the verb it would pick now,
+    marked provisional.
+    """
+    raise RuntimeError("auto is resolved to a concrete verb before it runs")
 
 
 def sweep_(fn: Callable, *, name: str = PAYLOAD, retries: int = 0,
@@ -2064,6 +2142,8 @@ MODIFIERS: dict[str, ModifierKind] = {k.name: k for k in (
     _kind("expand",   "shape", _lift(expand_), expand_),
     _kind("collapse", "shape", _lift(collapse_), collapse_),
     _kind("sweep",    "shape", _lift_generated(sweep_), sweep_),
+    _kind("table",    "shape", _lift(table_), table_),
+    _kind("auto",     "shape", _lift(auto_), auto_),
     # execution modifiers — shape-preserving
     _kind("retry",    "execution", _d_retry, _d_retry),
     _kind("timeout",  "execution", _d_timeout, _d_timeout),
@@ -2198,7 +2278,8 @@ def _modifier_settings(name: str, kind: ModifierKind) -> list[dict]:
 #: Which verbs apply a tool (008 K13). The column verbs apply none — `check`
 #: refuses one; `source`, `expand` and `collapse` fall back to a builtin.
 _TAKES_TOOL: dict[str, Any] = {
-    "map": True, "filter": True, "group": True, "sweep": True,
+    "map": True, "filter": True, "group": True, "sweep": True, "table": True,
+    "auto": True,
     "select": False, "drop": False, "widen": False, "slice": False,
     "rename": False, "sort": False, "distinct": False,
     "source": "optional", "expand": "optional", "collapse": "optional",
@@ -2427,6 +2508,47 @@ class Operation:
         """The outermost shape verb — the one that decides the final shape."""
         verbs = self.shape_verbs
         return verbs[-1] if verbs else None
+
+    def to_source(self) -> str:
+        """The formula that builds this operation (008 P).
+
+        ``score[mod.map(name="s"), mod.retry(times=2)](wf["raw"], weight=2)``.
+        One canonical form: modifiers in written order, the input in the call,
+        arguments by keyword, selections rows first then ``cols``. Evaluated
+        with :func:`formula_names`, it gives back an equal Operation.
+        """
+        if is_combine(self):
+            grids = ", ".join(_src(g) for g in self.inputs)
+            name = "zip_" if self.tool_id == "zip" else self.tool_id
+            config = "".join(f", {k}={_src(v)}" for k, v in self.arguments.items())
+            return f"{name}({grids}{config})"
+        if self.bound_to is not None:
+            head = f"res[{_src(self.bound_to.name)}].{self.tool_id.rsplit('.', 1)[-1]}"
+        elif self.tool_id in TOOLS and self.tool_id.isidentifier():
+            head = self.tool_id
+        else:
+            head = f"op({_src(self.tool_id)})"
+        if self.modifiers:
+            head += "[" + ", ".join(
+                f"mod.{m.kind}(" + ", ".join(f"{k}={_src(v)}" for k, v in m.params.items()) + ")"
+                for m in self.layers) + "]"
+        kwargs = [f"{k}={_src(v)}" for k, v in self.arguments.items()]
+        verb = self.shape_verb.kind if self.shape_verb else None
+        if self.input is not None:
+            return f"{head}({', '.join([_src(self.input), *kwargs])})"
+        if verb in ("source", "sweep"):
+            return f"{head}({', '.join(kwargs)})"
+        if kwargs:
+            # No input and no verb that runs without one: bind, then decorate.
+            base = head.split("[", 1)
+            rest = "[" + base[1] if len(base) > 1 else ""
+            return f"{base[0]}.bind({', '.join(kwargs)}){rest}"
+        return head
+
+    def check(self, workflow: "Workflow | None" = None,
+              step_id: str | None = None) -> tuple[str, ...]:
+        """This operation's problems — without a workflow, what is knowable from it alone."""
+        return check(self, workflow, step_id)
 
     def bind(self, **literals) -> "Operation":
         """Add bound arguments — literals, or a StepRef to read another step's value."""
@@ -2955,9 +3077,18 @@ wf = _Wf()
 
 
 def _deref(value: Any) -> Any:
-    """StepRefs become their ids; everything else passes through."""
+    """StepRefs become their ids (with any selection); a tool becomes its id.
+
+    Used for equality and reprs, where how a step or tool was *named* — a
+    bound ``wf["x"]`` or ``grid.wf["x"]``, a handle or a saved ``$tool`` —
+    must not matter.
+    """
     if isinstance(value, StepRef):
+        if value.selected:
+            return f"{value.id}[rows={value.rows!r}, columns={value.columns!r}]"
         return value.id
+    if isinstance(value, ToolHandle):
+        return ToolRef(value.id)
     if isinstance(value, dict):
         return {k: _deref(v) for k, v in value.items()}
     return value
@@ -3444,6 +3575,10 @@ def resource(cls: type) -> type:
     declaring it puts the type and its bound tools in :func:`resource_catalog`
     at import, before any workflow exists.
     """
+    if _FROZEN and RESOURCE_TYPES.get(cls.__name__) is not cls:
+        raise RuntimeError(
+            f"cannot declare resource type {cls.__name__!r}: the registry is "
+            "frozen. Declare resource types before grid.freeze().")
     problems = resource_problems(cls)
     reserved = _reserved_problem(cls.__name__, "resource type")
     if reserved:
@@ -3634,9 +3769,74 @@ class ToolHandle:
 #: are here.
 TOOLS: dict[str, Callable] = {}
 
+#: Free-form labels per tool id (008 C3): the app's own tool "types" (`step`,
+#: `rowmap`, …) without core owning an enum. Published in the catalog.
+TOOL_TAGS: dict[str, tuple[str, ...]] = {}
+
+#: Set by :func:`freeze`: no more tools or resource types may be declared.
+_FROZEN = False
+
+
+def freeze() -> None:
+    """Close the tool and resource-type registries (008 C3).
+
+    After this, ``@tool`` and ``@resource`` raise, so a server can't have its
+    palette change under it mid-session.
+    """
+    global _FROZEN
+    _FROZEN = True
+
+
+def is_frozen() -> bool:
+    """Has :func:`freeze` been called?"""
+    return _FROZEN
+
+
+def builtin_tools() -> dict[str, Callable]:
+    """The tools core always has (identity, gather, count, total, first, last)."""
+    return dict(BUILTIN_TOOLS)
+
+
+def declared_tools() -> dict[str, Callable]:
+    """Every tool declared with ``@tool``, by id — a copy, safe to keep."""
+    return dict(TOOLS)
+
+
+def shape_verbs() -> tuple[str, ...]:
+    """The modifier kinds that change a grid's shape."""
+    return tuple(SHAPE_VERBS)
+
+
+def resource_types() -> dict[str, type]:
+    """Every registered resource type, by name — a copy."""
+    return dict(RESOURCE_TYPES)
+
+
+def payload_column(output: Any) -> str | None:
+    """The column a step (or Output) writes its tool's results to, or None.
+
+    008 C3: read this instead of assuming ``PAYLOAD`` — a step may name its
+    payload (``name=``), and some verbs write none.
+    """
+    if isinstance(output, Step):
+        output = output.output
+    return output.meta.get("payload") if isinstance(output, Output) else None
+
+
+def check_modifier(kind: str, params: dict | None = None) -> tuple[str, ...]:
+    """Problems with one modifier on its own — no tool, no workflow (008 C3/O).
+
+    A misspelt setting, a wrong type, a missing required setting: what a formula
+    bar can say while the modifier is still being typed.
+    """
+    params = dict(params or {})
+    params.pop("over", None)
+    return check(Operation(tool_id="identity", fn=identity,
+                           modifiers=(Modifier(kind, params),)))
+
 
 def tool(fn: Callable | None = None, *, id: str | None = None,
-         strict: bool | None = None):
+         strict: bool | None = None, tags: Sequence[str] = ()):
     """Mark a plain function as a tool. Usable bare or with an id.
 
     Registers it in :data:`TOOLS` so a workflow loaded from JSON can find it
@@ -3649,7 +3849,14 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
     compares them against the upstream's real dtypes, and ``catalog`` publishes
     them as the tool's boundary.
     """
+    if isinstance(tags, str) or not all(isinstance(t, str) for t in tags):
+        raise TypeError("tags= takes a list of strings, e.g. tags=['rowmap']")
+
     def make(f: Callable, tool_id: str | None) -> ToolHandle:
+        if _FROZEN:
+            raise RuntimeError(
+                f"cannot declare tool {tool_id or f.__name__!r}: the tool "
+                "registry is frozen. Declare tools before grid.freeze().")
         if _looks_like_method(f):
             # @tool on a method used to replace it with a handle that never
             # receives `self`, breaking the method and registering a global
@@ -3680,6 +3887,13 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
                 f"whichever was declared last.",
                 stacklevel=3,
             )
+        open_ = _open_keywords(f)
+        if open_ and not (STRICT_TYPES if strict is None else strict):
+            # 008 C12: allowed, but said out loud — strict mode refuses it.
+            warnings.warn(
+                f"{handle.id} accepts **{open_}: its extra keywords can't be "
+                "checked, typed or shown in a form. Name the parameters you "
+                "expect.", stacklevel=3)
         if STRICT_TYPES if strict is None else strict:
             found = annotation_problems(f)
             if found:
@@ -3700,6 +3914,7 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
                 f"). Give yours another name, or pass id= to rename it."
             )
         TOOLS[handle.id] = f
+        TOOL_TAGS[handle.id] = tuple(tags)
         return handle
 
     if fn is not None:
@@ -3845,6 +4060,9 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     typing it, so validity is a property of the Step, not a precondition for
     building one.
     """
+    if _is_auto(operation) and len(operation.shape_verbs) == 1:
+        # 008 N: check the step as the verb it would be now.
+        operation, _, _ = _provisional(operation, workflow)
     problems: list[str] = []
 
     # 1. the tool has to exist — unless this is a combine verb, which names no
@@ -4219,10 +4437,22 @@ def warn(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str,
     """
     if workflow is None or operation.input is None:
         return ()
+    if _is_auto(operation) and len(operation.shape_verbs) == 1:
+        operation, _, _ = _provisional(operation, workflow)
     verb = operation.shape_verb
     if verb is None or verb.kind in ("source", "sweep"):
         return ()
     notes: list[str] = []
+    # 008 C12: a keyword that matches no named parameter lands in **kwargs,
+    # unchecked — a typo there would otherwise pass silently.
+    tool_fn = operation.fn or TOOLS.get(operation.tool_id)
+    open_ = _open_keywords(tool_fn) if tool_fn is not None else None
+    if open_:
+        named = {p for p in inspect.signature(tool_fn).parameters} - {open_}
+        for name in operation.arguments:
+            if name not in named:
+                notes.append(f"{name}= isn't a named parameter of "
+                             f"{operation.tool_id}; it lands in **{open_} unchecked")
     # 008 C7: a row position reads a different row next run when the step it
     # reads doesn't fix its row order.
     for ref in [*operation.arguments.values(),
@@ -4273,8 +4503,8 @@ def warn(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str,
         return tuple(notes)
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
         return tuple(notes)                       # takes the whole row; nothing to expect
-    if verb.kind == "collapse":
-        parameters = parameters[1:]     # the verb supplies the accumulator
+    if verb.kind in ("collapse", "table"):
+        parameters = parameters[1:]     # the verb supplies the accumulator / the grid
     predicted = set(rows(upstream.output).columns) | set(operation.arguments)
     required = [p.name for p in parameters
                 if p.default is inspect.Parameter.empty
@@ -4321,8 +4551,8 @@ def _missing_columns(operation: Operation, fn: Callable,
         return []
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
         return []                       # takes the whole row; nothing to miss
-    if verb.kind == "collapse":
-        parameters = parameters[1:]     # the verb supplies the accumulator
+    if verb.kind in ("collapse", "table"):
+        parameters = parameters[1:]     # the verb supplies the accumulator / the grid
 
     available = set(rows(upstream).columns) | set(operation.arguments)
     missing = [p.name for p in parameters
@@ -4407,7 +4637,7 @@ def _type_mismatches(operation: Operation, fn: Callable,
         # (a source's schema, mod.expect, or a tool's return annotation).
         declared_types = workflow._column_types(operation)
         params = list(parameters.values())
-        if verb.kind == "collapse":
+        if verb.kind in ("collapse", "table"):
             params = params[1:]
         for parameter in params:
             if parameter.name in operation.arguments:
@@ -4429,8 +4659,8 @@ def _type_mismatches(operation: Operation, fn: Callable,
     completed = upstream.ledger.index[upstream.ledger["status"] == "completed"] \
         if len(upstream.ledger) else frame.index
     declared = list(parameters.values())
-    if verb.kind == "collapse":
-        declared = declared[1:]          # the verb supplies the accumulator
+    if verb.kind in ("collapse", "table"):
+        declared = declared[1:]          # the verb supplies the accumulator / the grid
     upstream_name = (str(operation.input) if operation.input is not None
                      else "the input")
     for parameter in declared:
@@ -4478,6 +4708,7 @@ DEFAULT_PAYLOAD: dict[str, str | None] = {
     "slice": None, "rename": None, "sort": None, "distinct": None,
     "group": "group",
     "map": PAYLOAD, "collapse": PAYLOAD, "expand": PAYLOAD, "sweep": PAYLOAD,
+    "table": None,
 }
 
 
@@ -4498,6 +4729,10 @@ ROWS_RULE: dict[str, str] = {
     "slice": "at_most", "distinct": "at_most",
     "collapse": "one",
     "expand": "unknown", "sweep": "generated",
+    # K12: one run of the tool decides the grid — rows and columns both.
+    "table": "generated",
+    # N: whichever verb the data picks — not knowable before it runs.
+    "auto": "unknown",
 }
 
 
@@ -4536,6 +4771,33 @@ def predicted_columns(output: Output) -> list[str]:
     return [payload] if payload else []
 
 
+def _as_tool_function(fn: Any) -> Any:
+    """What a tool looks like to a step — never with ``self`` (008 M).
+
+    Accepts a plain function, a ``ToolHandle``, a resource method taken from
+    its class (``DB.lookup``) or a ``(type, "method")`` pair. A method's
+    ``self`` is the instance, not a column, so it is dropped.
+    """
+    if isinstance(fn, ToolHandle):
+        return fn.fn
+    if isinstance(fn, tuple) and len(fn) == 2 and isinstance(fn[0], type):
+        cls, name = fn
+        if name in _bound_tools(cls):
+            return _method_view(cls, name)
+        fn = getattr(cls, name)
+    if _looks_like_method(fn):
+        signature = _signature(fn)
+
+        def view(*args, **kwargs):
+            return fn(*args, **kwargs)
+        view.__signature__ = signature.replace(
+            parameters=list(signature.parameters.values())[1:])
+        view.__name__ = getattr(fn, "__name__", "method")
+        view.__doc__ = fn.__doc__
+        return view
+    return fn
+
+
 #: First-parameter names that mark a two-argument tool as a reducer by
 #: signature alone (008 K2). Matches the builtin reducers' `acc`.
 _ACCUMULATOR_NAMES = frozenset({"acc", "accumulator", "memo", "carry"})
@@ -4565,6 +4827,7 @@ def infer_verb(fn: Callable, upstream: Any, literals: dict) -> tuple[str, str]:
         frame = rows(upstream)
         columns, n_rows = set(frame.columns), len(frame)
 
+    fn = _as_tool_function(fn)
     try:
         parameters = list(inspect.signature(fn).parameters.values())
     except (TypeError, ValueError):
@@ -4576,6 +4839,17 @@ def infer_verb(fn: Callable, upstream: Any, literals: dict) -> tuple[str, str]:
     needed = [p.name for p in positional
               if p.default is inspect.Parameter.empty
               and p.name not in literals]
+
+    # 008 K12: a tool whose first input is a DataFrame wants the whole grid.
+    first = positional[0] if positional else None
+    if first is not None and first.name not in literals:
+        try:
+            hint = typing.get_type_hints(fn).get(first.name, first.annotation)
+        except Exception:
+            hint = first.annotation
+        if hint is pd.DataFrame or hint == "pd.DataFrame" or hint == "DataFrame":
+            return "table", (f"{first.name!r} is a DataFrame, so the tool gets "
+                             "the whole grid")
 
     # 008 K2: decide from the signature first, so the verb never depends on
     # whether the input has run. A first parameter named like an accumulator
@@ -4778,6 +5052,12 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     ledger is materialized only when the addresses are actually known (§7's
     level 3) — an empty ledger is the honest answer for the rest.
     """
+    if _is_auto(operation) and len(operation.shape_verbs) == 1:
+        # 008 N: stage as the verb it would be now, marked provisional.
+        concrete, kind, why = _provisional(operation, workflow)
+        out = stage(concrete, workflow, problems)
+        out.meta["auto"] = {"verb": kind, "reason": why, "provisional": True}
+        return out
     if problems:
         kind = operation.shape_verb.kind if operation.shape_verb else None
         return Output(
@@ -4888,6 +5168,8 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         fn = operation.fn or TOOLS.get(operation.tool_id) \
             or BUILTIN_TOOLS.get(operation.tool_id)
         columns_open = not is_identity(fn)
+    elif kind == "table":
+        columns_open = True             # what the tool returns — unless declared
     elif kind in ("sweep", "select") or (kind == "collapse"):
         columns_open = False
     else:
@@ -4908,14 +5190,14 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
                 types[new] = upstream_types.get(old)
     if payload and kind not in ("source",):
         types[payload] = _payload_type(kind, fn)
-    if kind == "source" and not is_identity(fn):
+    if kind in ("source", "table") and not is_identity(fn):
         schema = _declared_schema(fn)
         if schema is not None:
             ordered, types, columns_open = list(schema), dict(schema), False
     expect = _expectation(operation)
     if expect.get("columns") is not None:
         names, stated_types = _expected_columns(expect)
-        known = [c for c in ordered if c not in names] if kind != "source" else []
+        known = [c for c in ordered if c not in names] if kind not in ("source", "table") else []
         ordered = list(dict.fromkeys(names + known))
         types = {c: stated_types.get(c, types.get(c)) for c in ordered}
         columns_open = bool(expect.get("more_columns"))
@@ -5004,6 +5286,15 @@ class Step:
         return self.output.meta.get("plan") or {}
 
     def describe(self) -> str:
+        """What this step is, in words — and, for ``auto``, which verb it picked."""
+        text = self._describe()
+        picked = self.output.meta.get("auto")
+        if picked and self.valid:
+            when = "for now" if picked.get("provisional") else "from the data"
+            text += f" (auto, {when}: {picked['reason']})"
+        return text
+
+    def _describe(self) -> str:
         """What this step is, in words.
 
         Two different questions, and they must not be blurred: a **staged**
@@ -5024,8 +5315,8 @@ class Step:
             return f"{kind} · unknown count from {len(self.operation.inputs)} grids"
         verb = self.output.meta.get("verb")
         tool = self.operation.tool_id
-        if verb == "source" and self.output.meta.get("staged"):
-            return f"source {tool} · {_plan_words(self.plan)}"
+        if verb in ("source", "table") and self.output.meta.get("staged"):
+            return f"{verb} {tool} · {_plan_words(self.plan)}"
         if not self.output.meta.get("staged"):
             n = len(self.output.data)
             return (f"{tool} · one cell" if verb is None
@@ -5576,6 +5867,11 @@ class Workflow:
             self._restage_after(step_id)
             return step
         source = self._input_for(resolved)
+        chosen = None
+        if _is_auto(resolved):
+            # 008 N: the verb is picked from the data the step really gets.
+            resolved, kind, why = _resolve_auto(resolved, source)
+            chosen = {"verb": kind, "reason": why, "provisional": False}
         bad_argument = self._failed_argument(step.operation)
         if bad_argument is not None and source is not None:
             # Every row is blocked: hand the verb an input that says so.
@@ -5591,6 +5887,8 @@ class Workflow:
             # 008 C7: a position out of range, a column that is gone — the step
             # fails with the reason, never None, NaN or an empty grid.
             step.output = _failed_output(step.operation, str(exc))
+        if chosen is not None:
+            step.output.meta["auto"] = chosen
         self._restage_after(step_id)
         # 008 C10.5: re-running a step makes everything that already read it
         # stale — fixing a root clears what it blocked, by re-running it.
@@ -5831,6 +6129,113 @@ def _resolve_tool_setting(value: Any, table: dict) -> Any:
     return value
 
 
+def _src(value: Any) -> str:
+    """A value as formula text: a reference, a tool, or a Python literal."""
+    if isinstance(value, StepRef):
+        text = f"wf[{_src(value.id)}]"
+        rows_ = value.rows
+        if rows_ is not None:
+            if isinstance(rows_, dict):
+                lo = "" if rows_.get("start") is None else rows_["start"]
+                hi = "" if rows_.get("stop") is None else rows_["stop"]
+                text += f"[{lo}:{hi}]"
+            else:
+                text += f"[{rows_!r}]"
+        columns = value.columns
+        if columns is not None:
+            if "names" in columns:
+                names = columns["names"]
+                inner = _src(names[0]) if len(names) == 1 else _src(list(names))
+            elif "from" in columns or "to" in columns:
+                lo = "" if columns.get("from") is None else _src(columns["from"])
+                hi = "" if columns.get("to") is None else _src(columns["to"])
+                inner = f"{lo}:{hi}"
+            else:
+                positions = columns["positions"]
+                if isinstance(positions, dict):
+                    lo = "" if positions.get("start") is None else positions["start"]
+                    hi = "" if positions.get("stop") is None else positions["stop"]
+                    inner = f"{lo}:{hi}"
+                else:
+                    inner = repr(positions[0]) if len(positions) == 1 else repr(list(positions))
+            text += f"[cols[{inner}]]"
+        return text
+    if isinstance(value, ResRef):
+        return f"res[{_src(value.name)}]"
+    if isinstance(value, (ToolRef, ToolHandle)):
+        return value.id
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, bool) or value is None:
+        return repr(value)
+    if isinstance(value, numbers.Integral):
+        return repr(int(value))
+    if isinstance(value, numbers.Real):
+        return repr(float(value))
+    if isinstance(value, tuple):
+        inner = ", ".join(_src(v) for v in value)
+        return f"({inner},)" if len(value) == 1 else f"({inner})"
+    if isinstance(value, (set, frozenset)):
+        if not value:
+            return "set()"
+        items = list(value)
+        try:
+            items = sorted(items)
+        except TypeError:
+            pass
+        return "{" + ", ".join(_src(v) for v in items) + "}"
+    if isinstance(value, list):
+        return "[" + ", ".join(_src(v) for v in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ", ".join(f"{_src(k)}: {_src(v)}" for k, v in value.items()) + "}"
+    return repr(value)
+
+
+def formula_names(tools: dict[str, Callable] | None = None) -> dict[str, Any]:
+    """The names a formula may use: ``wf res mod rows cols op join stack zip_``
+    and every declared tool. What :meth:`Operation.to_source` is written against.
+
+    For checking a formula round-trips in Python. A formula bar should parse
+    with its own grammar, never ``eval`` text a user typed.
+    """
+    names: dict[str, Any] = {"wf": wf, "res": res, "mod": mod, "rows": rows,
+                             "cols": cols, "op": op, "join": join,
+                             "stack": stack, "zip_": zip_}
+    for tool_id, fn in {**TOOLS, **(tools or {})}.items():
+        if tool_id.isidentifier():
+            names[tool_id] = fn if isinstance(fn, ToolHandle) else ToolHandle(fn, tool_id)
+    return names
+
+
+def _with_verb(operation: Operation, kind: str) -> Operation:
+    """*operation* with its ``auto`` replaced by the concrete verb *kind*."""
+    modifiers = tuple(Modifier(kind, {}) if m.kind == "auto" else m
+                      for m in operation.modifiers)
+    return replace(operation, modifiers=modifiers)
+
+
+def _resolve_auto(operation: Operation, upstream: Any) -> tuple[Operation, str, str]:
+    """(concrete operation, verb, reason) for an ``auto`` step over *upstream*."""
+    fn = operation.fn or TOOLS.get(operation.tool_id) or BUILTIN_TOOLS.get(operation.tool_id)
+    if fn is None:
+        return _with_verb(operation, "map"), "map", "the tool isn't known; assuming per row"
+    kind, why = infer_verb(fn, upstream, operation.arguments)
+    return _with_verb(operation, kind), kind, why
+
+
+def _is_auto(operation: Operation) -> bool:
+    return any(m.kind == "auto" for m in operation.modifiers)
+
+
+def _provisional(operation: Operation, workflow: "Workflow | None") -> tuple[Operation, str, str]:
+    """Resolve ``auto`` against what is known now — the staged or run input."""
+    upstream = None
+    if workflow is not None and operation.input is not None:
+        step = workflow.steps.get(str(operation.input))
+        upstream = None if step is None else step.output
+    return _resolve_auto(operation, upstream)
+
+
 def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Callable:
     """Apply an Operation's stack to its tool, innermost-first.
 
@@ -5841,6 +6246,12 @@ def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Calla
     table = {**BUILTIN_TOOLS, **TOOLS, **tools}
     if operation.tool_id not in table:
         raise KeyError(f"unknown tool {operation.tool_id!r}; have {sorted(table)}")
+    if _is_auto(operation):
+        # 008 N: the verb is picked from the data this call receives.
+        def run_auto(source: Any) -> Any:
+            concrete, _, _ = _resolve_auto(operation, source)
+            return compile_operation(concrete, tools)(source)
+        return run_auto
     # The adapter is always innermost: it is what turns a plain function into
     # something a verb can drive, and it carries the bound literals inside
     # every modifier, so a retry re-runs the same call and a map passes them to

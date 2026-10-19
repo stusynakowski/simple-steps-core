@@ -9,8 +9,9 @@
 
 ## In short
 
-- **28 of 33 probes pass** (3 at `a799d0e`). Every **priority 1** item is done,
-  and so are most of priority 2.
+- **34 of 38 probes pass** (3 at `a799d0e`). Every **priority 1** item is done,
+  and so is every priority 2 item except C8 and parts of C5/C9. Phase 5 (the
+  boundary: C3, K12, M, P, N, C12) is done too.
 - **The saved format is now version 2.** Version 1 files still load. The
   app's own reader of saved JSON needs to learn the new tags (see
   [Saved format v2](#saved-format-v2)).
@@ -20,7 +21,7 @@
 - **Before bumping the pin,** read [Changes that can break the
   app](#changes-that-can-break-the-app). Eighteen behaviours differ from
   `a799d0e`.
-- 535 tests pass. Each finished ask has a test written from its "Done when"
+- 545 tests pass. Each finished ask has a test written from its "Done when"
   line, in `tests/unit/test_008_asks.py`.
 
 ## Status by ask
@@ -43,11 +44,15 @@
 | **C9** | **partly** | `Step.plan` (certainty, because, resolve) and `mod.expect(...)`. **Not yet:** tuple-length and join bounds, marker rows |
 | **C2** | done | Tools in `sort`/`group`/`collapse`/`distinct`/`select`/`rename` settings, saved as `{"$tool": id}` |
 | **C6** | done | `grid.wf` |
-| **C3** | open | Functions instead of globals; public modifier check; tool `tags` |
+| **C3** | done | `builtin_tools()`, `declared_tools()`, `shape_verbs()`, `resource_types()`, `payload_column()`, `check_modifier()`, `Operation.check()`, `freeze()`, `@tool(tags=…)` |
 | **O** | done | A missing required setting is a declaration problem. `grid.check(op)` needs no workflow |
-| **K12** | open | Whole-table verb |
+| **K12** | done | `mod.table()`: the tool gets the whole grid; its DataFrame is the step's grid. Inferred for a first parameter typed `DataFrame` |
 | **N1** | done | `dict \| None` settings accept their members (also fixes `int \| None` bound literals) |
-| C12, C15, C16, N, P, M | open | Priority 3 |
+| **C12** | done | `**kwargs` tools warn, are `open`/untyped in the catalog, refused in strict mode; a keyword landing in them warns on the step |
+| **N** | done | `mod.auto()`: saved as `auto`, resolved at run; the step reports the verb and why |
+| **P** | done | `Operation.to_source()`; `eval(to_source(op), formula_names()) == op` is tested |
+| **M** | done | `infer_verb` accepts `DB.lookup`, `(DB, "lookup")` or a handle |
+| C15, C16 | open | Priority 3 |
 | **K13** | done | `takes_tool`, `default_tool` in `modifier_catalog()` |
 | **K5** | done | `mod.map(over="x")` raises; use `wf["x"]` |
 | **K8** | done | `mod.select(...)(wf["r"])` works for verbs with a default tool |
@@ -161,6 +166,23 @@ steps"*.
 `invalid`, not `failed` as C10's text suggests. `invalid` means it can't run;
 `failed` means it ran and cells failed.
 
+## Phase 5: what the app can drop
+
+| App shim | Replace with |
+|---|---|
+| reads of `grid.TOOLS`, `BUILTIN_TOOLS`, `SHAPE_VERBS`, `RESOURCE_TYPES`, `PAYLOAD` | `declared_tools()`, `builtin_tools()`, `shape_verbs()`, `resource_types()`, `payload_column(step)` |
+| `check_modifier` (private) / `SHIM(core §O)` | `grid.check_modifier(kind, params)` or `operation.check()` |
+| `REGISTRY.freeze` | `grid.freeze()` |
+| tool "types" kept beside core | `@tool(tags=[…])`, read back as `catalog()[id]["tags"]` |
+| `SHIM(core §K)`, `SHIM(core §A6)` (the legacy dataframe orchestrator) | `tool[mod.table()](wf["r"])` |
+| `SHIM(core §M)`, `core_bridge.inferable_method` | `grid.infer_verb(DB.lookup, …)` |
+| `SHIM(core §N)`: `AUTO`, its catalog wrapper, `resolve_auto` | `mod.auto()`; the chosen verb is `step.output.meta["auto"]` |
+| `operation_formula.format_parts` | `operation.to_source()` (canonical: double-quoted strings, keyword arguments, modifiers in written order) |
+
+**Two behaviour changes in phase 5:** a `**kwargs` tool now warns at
+registration (and strict mode refuses it), and `table`/`auto` are new shape
+verbs in `modifier_catalog()`.
+
 ## Saved format v2
 
 `to_dict` writes `"version": 2`. `from_dict` reads 1 and 2, and refuses newer:
@@ -258,10 +280,9 @@ module level, or it can't be resolved and the source plans as `unknown`.
 
 ## Still open
 
-- **Priority 2:** C3 (functions instead of globals; tool `tags`), K12
-  (whole-table verb), C8 (planned grid), and the rest of C5 (`widen` of record
+- **Priority 2:** C8 (planned grid), and the rest of C5 (`widen` of record
   returns) and C9 (tuple/join bounds, marker rows).
-- **Priority 3:** C12, C15, C16, N, P, M, R3/R4 secrets, R5, K14, K15, K16, C4.
+- **Priority 3:** C15, C16, R3/R4 secrets, R5, K14, K15, K16, C4.
 - **Later:** K18, R7, R9.
 - **Not carried through by combine verbs:** `join`/`stack`/`zip_` don't
   propagate failed cells yet.

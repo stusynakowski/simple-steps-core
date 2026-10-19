@@ -242,6 +242,48 @@ workflow unless the step says it may fail.
 - **To tell the app:** C10's "run_all runs everything else" now needs
   `mod.try_except()` on the steps that may fail.
 
+## Phase 5 — the boundary (C3, K12, M, P, N, C12)
+
+- **C3, public functions.** `builtin_tools()`, `declared_tools()`,
+  `shape_verbs()` and `resource_types()` return copies of the registries.
+  `payload_column(step_or_output)` replaces reading `PAYLOAD`.
+  `check_modifier(kind, params)` and `Operation.check()` work with no
+  workflow. `freeze()` / `is_frozen()` close the tool and resource-type
+  registries (`@tool` and `@resource` raise after it). `@tool(tags=[…])` puts
+  free-form labels in the catalog (`"tags"`; `[]` for builtins). The
+  uppercase globals still exist for compatibility; the functions are the
+  supported surface.
+- **K12, `mod.table()`.** The tool gets the whole input grid as its first
+  parameter, and the DataFrame it returns is the step's grid. It is one unit
+  of work, recorded on every output row. A failed input cell blocks it, and a
+  non-DataFrame return fails (*"table expects a DataFrame back, got int"*).
+  Columns come from `-> Annotated[pd.DataFrame, Schema]`, else unknown. Verb
+  inference picks `table` when the first parameter is a `DataFrame`. Row rule:
+  `generated`.
+- **M.** `infer_verb` accepts a resource method from its class
+  (`DB.lookup`), a `(type, "method")` pair or a `ToolHandle`, and never reads
+  `self` as a column.
+- **P, `Operation.to_source()`.** One canonical form: `head[mod.a(…),
+  mod.b(…)](wf["x"], k=v)`. Modifiers in written order; arguments by keyword;
+  strings in double quotes; selections rows first, then `cols`. Bound tools
+  print as `res["db"].lookup`, combines as `join(…)` / `stack(…)` / `zip_(…)`,
+  builtins as `op("identity")`. A step with no input and no source/sweep
+  prints as `tool.bind(…)[…]`. `formula_names()` gives the names it is
+  written against. **Tested invariant:** `eval(op.to_source(),
+  formula_names()) == op`, for every step of the example's workflows. (A
+  formula bar should parse with its own grammar, never `eval` user text.)
+- **N, `mod.auto()`.** Saved as `auto`. Checking and staging use the verb it
+  would pick now (`meta["auto"]`, `provisional: True`). `run` resolves it
+  against the real input and records the verb and reason (`provisional:
+  False`). `describe()` ends with `(auto, from the data: …)`. Catalog: class
+  `shape`, no settings, row rule `unknown`.
+- **C12.** A `**kwargs` tool registers with a warning and the catalog marks it
+  `open: true, typed: false`. `strict=True` (or `STRICT_TYPES`) refuses it. A
+  keyword that lands in `**kwargs` gets a step warning naming it. This
+  **reverses** the old rule that strict mode exempts whole-row tools.
+- Also: modifier equality now sees a setting's selection, and a tool given
+  as a handle equals the same tool saved as `$tool`.
+
 ## Status
 
 | Ask | Phase | Status |
@@ -251,10 +293,12 @@ workflow unless the step says it may fail.
 | C10, C14, R8 | 2 | **done** (2026-10-15), except combine verbs and C10.6 |
 | C11, C1, C2, C7 (K9), K17 | 3 | **done** (2026-10-15) |
 | C5 (sources), C9 (plans, `mod.expect`) | 4 | **first slice done** (2026-10-19) |
-| C5 (widen), C8, C9 (bounds) | 4 | next |
-| everything else | 5–7 | not started |
+| C5 (widen), C8, C9 (bounds) | 4 | open |
+| C3, K12, M, P, N, C12 | 5 | **done** (2026-10-19) |
+| K14, K15, K16, C4, C15, C16, R3/R4, R5 | 6 | next |
+| K18, R7, R9 | 7 | not started |
 
-`scripts/core_asks.py`: **28 of 33 done** (from 3; C11, C1, C2 and C7 probes
+`scripts/core_asks.py`: **34 of 38 done** (from 3; C11, C1, C2 and C7 probes
 added, K17's made real). Still open among the probed asks: K12 (5),
 K14–K16 (6), K18 (7).
 

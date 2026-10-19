@@ -530,6 +530,59 @@ def stop_on_failure():
                                       f"try_except(default=0) -> {err2 or 'ran'}")
 
 
+def c3_public_functions():
+    wanted = ["builtin_tools", "declared_tools", "shape_verbs", "resource_types",
+              "payload_column", "check_modifier", "freeze"]
+    missing = [n for n in wanted if not hasattr(grid, n)]
+    if missing:
+        return False, f"missing: {missing}"
+    tagged = "tags" in grid.catalog().get("scale", {})
+    problems = grid.check_modifier("retry", {})
+    return tagged and bool(problems), f"functions present; tags in catalog: {tagged}; check_modifier('retry') -> {problems}"
+
+
+def m_infer_bound_method():
+    class DB:
+        def lookup(self, key):
+            return key
+    kind = grid.infer_verb(DB.lookup, grid.grid(pd.DataFrame({"key": ["SF"]})), {})[0]
+    return kind == "map", f"infer_verb(DB.lookup, …) -> {kind}"
+
+
+def n_auto_modifier():
+    if "auto" not in grid.MODIFIERS:
+        return False, "'auto' not in MODIFIERS"
+    wf = _wf()
+    wf["x"] = add_n[mod.auto()](wf["readings"])
+    wf.run("x")
+    picked = wf.step("x").output.meta.get("auto", {}).get("verb")
+    saved = json.loads(wf.to_json())["steps"][-1]["operation"]["modifiers"][-1]["kind"]
+    return picked == "collapse" and saved == "auto", f"ran as {picked}; saved as {saved}"
+
+
+def p_to_source():
+    wf = _wf()
+    operation = scale[mod.map(name="s"), mod.retry(times=2)](wf["readings"], weight=2)
+    if not hasattr(operation, "to_source"):
+        return False, "Operation.to_source does not exist"
+    text = operation.to_source()
+    back = eval(text, {"__builtins__": {}}, grid.formula_names())
+    return back == operation, f"{text} -> equal: {back == operation}"
+
+
+def c12_kwargs_warn():
+    import warnings as w_
+    with w_.catch_warnings(record=True) as caught:
+        w_.simplefilter("always")
+
+        @tool
+        def kw_probe(n: int, **opts) -> int:
+            return n
+    warned = any("accepts **opts" in str(c.message) for c in caught)
+    is_open = grid.catalog()["kw_probe"].get("open")
+    return warned and is_open, f"warned: {warned}; catalog open: {is_open}"
+
+
 ASKS = [
     ("K1", "Unrun source: columns unknown, re-check later", k1_unrun_source_columns),
     ("K2", "Verb inference independent of run state", k2_inference_run_state),
@@ -564,6 +617,11 @@ ASKS = [
     ("C5", "(core) a source's declared columns stage before it runs", c5_typed_source_columns),
     ("C9", "(core) partial plans: certainty, because, resolve; mod.expect", c9_partial_plans),
     ("STOP", "(core) an uncaught failure stops run_all; try_except lets it through", stop_on_failure),
+    ("C3", "(core) a public surface made of functions; tags", c3_public_functions),
+    ("M", "(core) infer_verb accepts a bound method", m_infer_bound_method),
+    ("N", "(core) a written mod.auto(), resolved at run", n_auto_modifier),
+    ("P", "(core) Operation.to_source() round-trips", p_to_source),
+    ("C12", "(core) **kwargs tools warn and are marked open", c12_kwargs_warn),
 ]
 
 

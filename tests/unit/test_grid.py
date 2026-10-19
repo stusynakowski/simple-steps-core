@@ -1321,13 +1321,19 @@ def test_strict_typing_names_every_gap_at_once():
     ]
 
 
-def test_strict_typing_exempts_a_whole_row_tool():
-    """**kwargs has no per-column parameter to annotate; the return still does."""
-    @tool(strict=True)
-    def whole(**row: object) -> int:
-        return len(row)
+def test_strict_typing_refuses_a_whole_row_tool():
+    """008 C12: **kwargs keywords can't be checked or typed — strict refuses it,
+    and outside strict mode the catalog marks it open and untyped."""
+    with pytest.raises(TypeError, match="no names or types"):
+        @tool(strict=True)
+        def whole(**row: object) -> int:
+            return len(row)
 
-    assert catalog()["whole"]["typed"] is True
+    with pytest.warns(UserWarning, match=r"accepts \*\*row"):
+        @tool
+        def loose(**row: object) -> int:
+            return len(row)
+    assert (catalog()["loose"]["typed"], catalog()["loose"]["open"]) == (False, True)
 
 
 def test_strict_types_can_be_turned_on_globally(monkeypatch):

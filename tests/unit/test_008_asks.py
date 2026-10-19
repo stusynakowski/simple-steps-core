@@ -728,3 +728,138 @@ def test_a_failing_source_stops_the_run_or_is_caught():
     w["src"] = broken_008[mod.source(), mod.try_except(default=[])](path="x")
     w.run("src")
     assert w.step("src").status == "completed"
+
+
+# ── Phase 5: the boundary — C3, K12, M, P, N, C12 ───────────────────────
+from simple_steps_core.grid import bound_tool  # noqa: E402
+
+
+def test_C3_functions_instead_of_globals():
+    assert "identity" in grid.builtin_tools()
+    assert "scale_008" in grid.declared_tools()
+    assert "map" in grid.shape_verbs() and "retry" not in grid.shape_verbs()
+    assert isinstance(grid.resource_types(), dict)
+    out = grid.map_(grid.grid(pd.DataFrame({"n": [1]})), scale_008.fn, name="s")
+    assert grid.payload_column(out) == "s"
+
+
+def test_C3_a_modifier_is_checked_on_its_own():
+    assert grid.check_modifier("map", {"nme": "s"}) == (
+        "map takes no parameter 'nme'; it accepts axis, name, replace, retries",)
+    assert grid.check_modifier("retry") == (
+        "retry needs times= — it has no default, so a step without it cannot run",)
+    assert grid.check_modifier("retry", {"times": 2}) == ()
+    assert scale_008[mod.retry()].check() == grid.check_modifier("retry")
+
+
+def test_C3_tags_reach_the_catalog():
+    @tool(tags=["rowmap", "app"])
+    def tagged_008(n: int) -> int:
+        return n
+    assert grid.catalog()["tagged_008"]["tags"] == ["rowmap", "app"]
+    assert grid.catalog()["identity"]["tags"] == []
+
+
+def test_C3_freeze_closes_the_registry(monkeypatch):
+    monkeypatch.setattr(grid, "_FROZEN", False)
+    grid.freeze()
+    assert grid.is_frozen()
+    with pytest.raises(RuntimeError, match="registry is frozen"):
+        @tool
+        def late_008(n: int) -> int:
+            return n
+
+
+def test_K12_a_table_tool_gets_the_whole_grid(wf):
+    @tool
+    def piv_008(df: pd.DataFrame) -> pd.DataFrame:
+        return df.groupby("city", as_index=False)["n"].sum()
+
+    wf["p"] = piv_008[mod.table()](wf["readings"])
+    wf["inferred"] = piv_008(wf["readings"])
+    assert wf.step("inferred").operation.shape_verb.kind == "table"
+    assert wf.step("p").describe() == (
+        "table piv_008 · columns unknown until it runs · rows unknown until it runs")
+    wf.run("p")
+    assert wf.step("p").output.data.to_dict("list") == {
+        "city": ["LA", "NYC", "SF"], "n": [2, 2, 4]}
+
+
+def test_K12_a_table_tool_that_returns_no_frame_fails(wf):
+    @tool
+    def not_a_frame_008(df: pd.DataFrame) -> int:
+        return 3
+    wf["t"] = not_a_frame_008[mod.table()](wf["readings"])
+    wf.run("t")
+    assert wf.step("t").output.ledger["error"].iloc[0] == (
+        "TypeError: table expects a DataFrame back, got int")
+
+
+def test_M_infer_verb_drops_a_methods_self():
+    class DB008:
+        @bound_tool
+        def lookup(self, key: str) -> str:
+            return key
+    upstream = grid.grid(pd.DataFrame({"key": ["SF"]}))
+    assert grid.infer_verb(DB008.lookup, upstream, {})[0] == "map"
+    assert grid.infer_verb((DB008, "lookup"), upstream, {})[0] == "map"
+
+
+@tool
+def is_big_008(n) -> bool:
+    return n > 1
+
+
+@tool
+def fan_008(n) -> list:
+    return [n] * n
+
+
+def test_N_auto_is_saved_as_auto_and_resolved_at_run(wf):
+    wf["f"] = is_big_008[mod.auto()](wf["readings"])
+    wf["e"] = fan_008[mod.auto()](wf["readings"])
+    wf["c"] = add_008[mod.auto()](wf["readings"])
+    wf["s"] = scale_008[mod.auto(), mod.retry(times=1)](wf["readings"])
+    assert wf.step("f").output.meta["auto"] == {
+        "verb": "filter", "provisional": True,
+        "reason": "it returns a bool per row, so keep the rows that pass"}
+    wf.run_all()
+    picked = {sid: wf.step(sid).output.meta["auto"]["verb"] for sid in "fecs"}
+    assert picked == {"f": "filter", "e": "expand", "c": "collapse", "s": "map"}
+    assert [m.kind for m in wf.step("s").operation.modifiers] == ["retry", "auto"]
+    back = Workflow.from_json(wf.to_session_json(), grid.TOOLS)
+    assert back.step("s").operation == wf.step("s").operation
+    assert grid.modifier_catalog()["auto"]["row_rule"] == "unknown"
+
+
+def test_P_to_source_round_trips(wf):
+    wf["cfg"] = ["n"]
+    wf["p"] = pd.DataFrame({"a": [1], "b": [2], "c": [3]})
+    ops = [
+        scale_008[mod.map(name="s"), mod.retry(times=2)](wf["readings"], weight=2),
+        op("identity")[mod.select(columns=wf["cfg"])](wf["readings"]),
+        scale_008.bind(weight=(1, 2))[mod.map(), mod.try_except(default={1: "x"},
+                                                                on=[ValueError])](wf["readings"]),
+        scale_008[mod.map()](wf["readings"], weight=wf["p"][0][cols["a"]]),
+        grid.join(wf["readings"], wf["readings"], on="city", how="left"),
+        add_008[mod.auto()](wf["readings"]),
+        scale_008.bind(weight=2)[mod.retry(times=1)],
+    ]
+    names = grid.formula_names()
+    for operation in ops:
+        text = operation.to_source()
+        assert eval(text, {"__builtins__": {}}, names) == operation, text
+    assert ops[0].to_source() == (
+        'scale_008[mod.map(name="s"), mod.retry(times=2)](wf["readings"], weight=2)')
+
+
+def test_C12_kwargs_tools_warn_and_say_so():
+    with pytest.warns(UserWarning, match=r"kw_008 accepts \*\*opts"):
+        @tool
+        def kw_008(n: int, **opts) -> int:
+            return n
+    assert grid.catalog()["kw_008"]["open"] is True
+    w = Workflow()
+    w["r"] = pd.DataFrame({"n": [1]})
+    w["x"] = kw_008[mod.map()](w["r"], colr="red")
+    assert "colr= isn't a named parameter of kw_008; it lands in **opts unchecked" in w.step("x").warnings
