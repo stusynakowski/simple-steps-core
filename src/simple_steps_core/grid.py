@@ -54,7 +54,7 @@ __all__ = [
     "join", "stack", "zip_", "COMBINE", "is_combine",
     "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "warn", "stage",
     "wf", "res", "ResRef", "bound_tool", "cols", "Rows", "Cols", "SelectionError",
-    "RESERVED_NAMES", "FORMAT_VERSION", "ToolRef", "resource", "RESOURCE_TYPES",
+    "RESERVED_NAMES", "FORMAT_VERSION", "ToolRef", "StepFailed", "resource", "RESOURCE_TYPES",
     "resource_entry", "resource_catalog", "ResourceNotLoaded",
     "STRICT_TYPES", "annotation_problems", "declaration_problems",
     "PARAM_TYPES", "PARAM_TYPES_BY_VERB",
@@ -72,7 +72,7 @@ __all__ = [
 PAYLOAD = "value"
 
 #: Every ledger has exactly these columns, so the UI can rely on them.
-LEDGER_COLUMNS = ("status", "error", "attempts", "seconds", "unit", "cause")
+LEDGER_COLUMNS = ("status", "error", "attempts", "seconds", "unit", "cause", "caught")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -233,6 +233,39 @@ def _str_columns(frame: pd.DataFrame, step_id: str = "the step") -> pd.DataFrame
     out = frame.copy()
     out.columns = names
     return out
+
+
+class StepFailed(RuntimeError):
+    """``run_all`` stopped: a step has a failed cell it didn't catch.
+
+    Steps that already ran keep their results; ``not_run`` lists the rest. Put
+    ``mod.try_except(…)`` on a step to let its failures through.
+    """
+
+    def __init__(self, step_id: str, cell: Any, error: str, not_run: list[str]):
+        self.step_id, self.cell, self.error, self.not_run = step_id, cell, error, not_run
+        later = f" Not run: {', '.join(not_run)}." if not_run else ""
+        super().__init__(
+            f"step {step_id!r} failed at {step_id}[{cell}]: {error}. The run "
+            f"stopped.{later} Add mod.try_except(…) to the step to let this "
+            "failure through.")
+
+
+def _uncaught_failure(output: "Output") -> tuple[Any, str] | None:
+    """The first failed cell that should stop the run: its own failure, not
+    caught by ``mod.try_except``. A row blocked by an upstream failure has a
+    ``cause`` — its root already stopped the run, or was caught."""
+    ledger = output.ledger
+    if not len(ledger) or "status" not in ledger.columns:
+        return None
+    for index, record in ledger[ledger["status"] == "failed"].iterrows():
+        if record.get("caught") is True:
+            continue
+        cause = record.get("cause")
+        if isinstance(cause, str) and cause:
+            continue
+        return index, record.get("error")
+    return None
 
 
 def _failed_output(operation: Any, error: str) -> "Output":
@@ -606,6 +639,229 @@ def _ref_value(frame: pd.DataFrame, annotation: Any, step_id: str) -> Any:
     return frame
 
 
+#: Type names a plan or `mod.expect` may use, and the types they mean.
+_TYPE_NAMES: dict[str, Any] = {"str": str, "int": int, "float": float,
+                               "bool": bool, "list": list, "dict": dict,
+                               "tuple": tuple, "any": Any}
+
+
+def _type_label(t: Any) -> str:
+    """A type as the short name a plan shows: ``int``, ``float | None``, ``any``."""
+    if t is None or t is Any or t is inspect.Parameter.empty:
+        return "any"
+    if isinstance(t, str):
+        return t
+    admits_none, base = _optional_parts(t)
+    name = _type_name(base) or "any"
+    return f"{name} | None" if admits_none and base is not t else name
+
+
+def _dtype_type(series: pd.Series) -> Any:
+    """The Python type a column of real data holds, or None when mixed/unknown."""
+    kind = getattr(series.dtype, "kind", None)
+    if kind == "b":
+        return bool
+    if kind in "iu":
+        return int
+    if kind == "f":
+        return float
+    present = series.dropna() if kind == "O" else series
+    types_ = {type(v) for v in present}
+    return types_.pop() if len(types_) == 1 else None
+
+
+def _return_hint(fn: Any) -> Any:
+    """A tool's resolved return annotation, or None."""
+    if fn is None:
+        return None
+    try:
+        return typing.get_type_hints(fn, include_extras=True).get("return")
+    except Exception:
+        try:
+            ann = _signature(fn).return_annotation
+        except (TypeError, ValueError):
+            return None
+        return None if ann is inspect.Parameter.empty else ann
+
+
+def _record_fields(cls: Any) -> dict | None:
+    """Field name → type for a TypedDict or dataclass, else None."""
+    import dataclasses
+    if isinstance(cls, type) and (dataclasses.is_dataclass(cls)
+                                  or (issubclass(cls, dict) and hasattr(cls, "__annotations__"))):
+        try:
+            return dict(typing.get_type_hints(cls))
+        except Exception:
+            return dict(getattr(cls, "__annotations__", {}))
+    return None
+
+
+def _declared_schema(fn: Any) -> dict | None:
+    """The columns a tool-backed source declares (008 C5), or None.
+
+    ``-> Annotated[pd.DataFrame, Readings]``, where ``Readings`` is a TypedDict
+    or dataclass, names every column and its type.
+    """
+    hint = _return_hint(fn)
+    if typing.get_origin(hint) is typing.Annotated:
+        base, *extras = typing.get_args(hint)
+        if base is pd.DataFrame:
+            for extra in extras:
+                fields = _record_fields(extra)
+                if fields is not None:
+                    return fields
+    return None
+
+
+def _payload_type(kind: str | None, fn: Any) -> Any:
+    """The type a verb's payload column will hold, from the tool's return."""
+    hint = _return_hint(fn)
+    if hint is None or kind in (None, "filter", "source", "widen"):
+        return None
+    if typing.get_origin(hint) is typing.Annotated:
+        hint = typing.get_args(hint)[0]
+    if kind == "expand":
+        args = typing.get_args(hint)
+        if typing.get_origin(hint) in (list, set, frozenset) and args:
+            return args[0]
+        if typing.get_origin(hint) is tuple and args:
+            return args[0] if len(set(args) - {Ellipsis}) == 1 else None
+        return None
+    return hint
+
+
+def _expectation(operation: "Operation") -> dict:
+    """The settings of a step's ``mod.expect(…)`` layers, merged."""
+    out: dict = {}
+    for m in operation.modifiers:
+        if m.kind == "expect":
+            out.update(m.params)
+    return out
+
+
+def _expected_columns(expect: dict) -> tuple[list, dict]:
+    """(names, {name: type}) from an expectation's ``columns``."""
+    columns = expect.get("columns")
+    if isinstance(columns, dict):
+        return list(columns), {k: _TYPE_NAMES.get(v, v) for k, v in columns.items()}
+    return list(columns or []), {}
+
+
+def _rows_plan(kind, rule, expected, n_in, expect, label) -> dict:
+    """The row axis of a plan (008 C9): exact, stated, bounded or unknown."""
+    if any(k in expect for k in ("rows", "min_rows", "max_rows")):
+        plan = {"certainty": "stated"}
+        for key in ("rows", "min_rows", "max_rows"):
+            if key in expect:
+                plan[{"rows": "count", "min_rows": "min", "max_rows": "max"}[key]] = expect[key]
+        return plan
+    if expected is not None:
+        return {"certainty": "exact", "count": expected}
+    if rule == "at_most" and n_in is not None:
+        return {"certainty": "bounded", "min": 0, "max": n_in,
+                "because": f"{kind} keeps at most the {n_in} rows it reads",
+                "resolve": [f"run {label}"]}
+    if rule == "per_group" and n_in is not None:
+        return {"certainty": "bounded", "min": 1 if n_in else 0, "max": n_in,
+                "because": "one row per group; the groups come from the data",
+                "resolve": [f"run {label}"]}
+    because = {
+        "source": f"{label} is a source that hasn't run; its rows come from its data",
+        "expand": f"expand: how many items {label} returns per row is only known by running",
+    }.get(kind, "its input's row count isn't known yet")
+    resolve = [f"run {label}" if kind in ("source", "expand") else "run the steps before it"]
+    if kind == "expand":
+        resolve.append("annotate a fixed length: -> tuple[T, T]")
+    resolve.append("state it on the step: mod.expect(rows=…)")
+    return {"certainty": "unknown", "because": because, "resolve": resolve}
+
+
+def _columns_plan(kind, names, columns_open, expect, label, upstream) -> dict:
+    """The column axis of a plan: exact, stated, bounded (these + more) or unknown."""
+    if expect.get("columns") is not None:
+        return {"certainty": "stated", "names": list(names),
+                "more": bool(expect.get("more_columns"))}
+    if not columns_open:
+        return {"certainty": "exact", "names": list(names)}
+    if kind == "source":
+        because = f"{label} returns a DataFrame with no declared columns"
+        resolve = [f"run {label}",
+                   "annotate the return: -> Annotated[pd.DataFrame, YourTypedDict]",
+                   "state them on the step: mod.expect(columns=[…], more_columns=True)"]
+    else:
+        because = f"its input {upstream!r} doesn't know all its columns yet"
+        resolve = [f"run {upstream!r}", f"declare {upstream!r}'s columns"]
+    return {"certainty": "bounded" if names else "unknown", "names": list(names),
+            "more": True, "because": because, "resolve": resolve}
+
+
+def _declared_fits(column_type: Any, annotation: Any) -> bool | None:
+    """Does a column declared as *column_type* fit a parameter? None when unsure."""
+    _, base = _optional_parts(annotation)
+    origin = typing.get_origin(base) or base
+    col_origin = typing.get_origin(column_type) or column_type
+    if not isinstance(origin, type) or origin is object or not isinstance(col_origin, type):
+        return None
+    if origin is float and col_origin is int:
+        return True                                   # an int fits a float
+    return issubclass(col_origin, origin)
+
+
+def _output_mismatch(operation: "Operation", data: pd.DataFrame) -> str | None:
+    """How a real output breaks what its step declared or stated, or None.
+
+    008 C5/C9: a source's declared schema and ``mod.expect`` are promises the
+    plan was built on — when the data breaks one, the step fails, never
+    silently.
+    """
+    expect = _expectation(operation)
+    verb = operation.shape_verb
+    if verb is not None and verb.kind == "source":
+        fn = operation.fn or TOOLS.get(operation.tool_id)
+        schema = _declared_schema(fn) if fn is not None else None
+        if schema is not None and list(schema) != list(data.columns):
+            return (f"{operation.tool_id} declares columns {', '.join(schema)}; "
+                    f"it returned {', '.join(map(str, data.columns)) or 'none'}")
+    n = len(data)
+    if isinstance(expect.get("rows"), int) and n != expect["rows"]:
+        return f"expected {expect['rows']} rows, got {n}"
+    if isinstance(expect.get("min_rows"), int) and n < expect["min_rows"]:
+        return f"expected at least {expect['min_rows']} rows, got {n}"
+    if isinstance(expect.get("max_rows"), int) and n > expect["max_rows"]:
+        return f"expected at most {expect['max_rows']} rows, got {n}"
+    if expect.get("columns") is not None:
+        names, _ = _expected_columns(expect)
+        have = list(data.columns)
+        missing = [c for c in names if c not in have]
+        extra = [c for c in have if c not in names]
+        if missing or (extra and not expect.get("more_columns")):
+            return (f"expected columns {', '.join(names)}"
+                    f"{' (and maybe more)' if expect.get('more_columns') else ''}; "
+                    f"got {', '.join(map(str, have)) or 'none'}")
+    return None
+
+
+def _plan_words(plan: dict) -> str:
+    """A plan in one line: ``columns city (str), n (int) + maybe more · rows unknown …``."""
+    columns, rows_ = plan.get("columns", {}), plan.get("rows", {})
+    types_ = plan.get("types", {})
+    names = ", ".join(f"{c} ({types_.get(c, 'any')})" for c in columns.get("names", []))
+    if not names:
+        col_text = "columns unknown until it runs"
+    else:
+        col_text = f"columns {names}" + (" + maybe more" if columns.get("more") else "")
+        if columns.get("certainty") == "stated":
+            col_text += " (stated)"
+    certainty = rows_.get("certainty")
+    if certainty in ("exact", "stated") and "count" in rows_:
+        row_text = f"{rows_['count']} rows" + (" (stated)" if certainty == "stated" else "")
+    elif "min" in rows_ or "max" in rows_:
+        row_text = f"{rows_.get('min', 0)}–{rows_.get('max', '?')} rows"
+    else:
+        row_text = "rows unknown until it runs"
+    return f"{col_text} · {row_text}"
+
+
 def _optional_parts(annotation: Any) -> tuple[bool, Any]:
     """(does it admit None?, the annotation without None) — ``int | None`` → (True, int)."""
     if annotation is Any or isinstance(annotation, str):
@@ -858,16 +1114,48 @@ def _as_arg(row: pd.Series) -> dict:
     return {k: (None if _is_missing(v) else v) for k, v in row.to_dict().items()}
 
 
+@dataclass(frozen=True)
+class _Caught:
+    """What ``mod.try_except(default=…)`` returns for a unit whose tool raised."""
+    value: Any
+    error: str
+
+
+class _Tolerated(Exception):
+    """A failure ``mod.try_except()`` caught with no default: the row fails,
+    and the run keeps going."""
+
+
+def _unwrap(value: Any) -> tuple[Any, str | None]:
+    """(value, caught error) — a fallback carries the error it replaced."""
+    if isinstance(value, _Caught):
+        return value.value, value.error
+    return value, None
+
+
 def _call(fn: Callable, arg: dict, retries: int) -> tuple[Any, dict]:
-    """Run *fn* for one unit, returning (value, ledger record)."""
+    """Run *fn* for one unit, returning (value, ledger record).
+
+    A ``mod.try_except`` failure is recorded with ``caught: True``: completed
+    with its fallback value (the error kept), or failed without stopping the run.
+    """
     started = time.perf_counter()
     attempt = 0
     while True:
         try:
-            value = fn(arg)
+            value, caught = _unwrap(fn(arg))
+            if caught is not None:
+                return value, {"status": "completed",
+                               "error": f"caught {caught}; used the default",
+                               "attempts": attempt + 1, "caught": True,
+                               "seconds": round(time.perf_counter() - started, 6)}
             return value, {"status": "completed", "error": None,
                            "attempts": attempt + 1,
                            "seconds": round(time.perf_counter() - started, 6)}
+        except _Tolerated as exc:
+            return None, {"status": "failed", "error": str(exc),
+                          "attempts": attempt + 1, "caught": True,
+                          "seconds": round(time.perf_counter() - started, 6)}
         except Exception as exc:
             if attempt >= retries:
                 return None, {"status": "failed",
@@ -1000,17 +1288,22 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
             records.append({**_blocked(*blocked[failed_in[0]]),
                             "unit": list(chunk.index)})
         else:
-            accumulator, error = initial, None
+            accumulator, error, caught = initial, None, None
             try:
                 for _index, row in _units(chunk):
-                    accumulator = fn(accumulator, row)
+                    accumulator, caught_now = _unwrap(fn(accumulator, row))
+                    if caught_now is not None:
+                        caught = True
+                        error = f"caught {caught_now}; used the default"
                 status = "completed"
+            except _Tolerated as exc:
+                status, accumulator, error, caught = "failed", None, str(exc), True
             except Exception as exc:
                 status, accumulator = "failed", None
                 error = f"{type(exc).__name__}: {exc}"
             records.append({"status": status, "error": error, "attempts": 1,
                             "seconds": round(time.perf_counter() - started, 6),
-                            "unit": list(chunk.index)})
+                            "unit": list(chunk.index), "caught": caught})
         results.append(accumulator)
         keys.append(key)
         index.append(position)
@@ -1504,7 +1797,27 @@ def source_(value: Any, fn: Callable = identity, **_params) -> Output:
     if is_identity(fn):
         return grid(value)
     # A no-input tool: an empty row lets `_d_apply` fill the bound arguments.
-    return grid(fn({}))
+    # A tool that raises is a failed step, like any other unit — it no longer
+    # escapes `run` (the run stops on it unless the step catches it).
+    try:
+        value, caught = _unwrap(fn({}))
+    except _Tolerated as exc:
+        return _source_failure(str(exc), caught=True)
+    except Exception as exc:
+        return _source_failure(f"{type(exc).__name__}: {exc}", caught=None)
+    out = grid(value)
+    if caught is not None:
+        out.ledger["error"] = f"caught {caught}; used the default"
+        out.ledger["caught"] = True
+    return out
+
+
+def _source_failure(error: str, caught: Any) -> Output:
+    return Output(
+        data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
+        ledger=_ledger([{"status": "failed", "error": error, "attempts": 1,
+                         "seconds": 0.0, "caught": caught}], [0]),
+        meta={"verb": "source", "form": "scalar", "payload": None})
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1531,6 +1844,59 @@ def _d_retry(fn: Callable, *, times: int) -> Callable:
         raise last
     run.__name__ = f"retry({getattr(fn, '__name__', 'fn')})"
     return run
+
+
+#: "No default given" to `mod.try_except` — distinct from `default=None`.
+_NO_DEFAULT = object()
+
+
+def _caught_by(exc: BaseException, on: Sequence[str] | None) -> bool:
+    """Is *exc* one of the exception types named in ``on=`` (any, when None)?"""
+    if not on:
+        return True
+    names = {on} if isinstance(on, str) else set(on)
+    return any(k.__name__ in names for k in type(exc).__mro__)
+
+
+def _d_try_except(fn: Callable, *, default: Any = _NO_DEFAULT,
+                  on: Sequence[str] | None = None) -> Callable:
+    """``mod.try_except(default=0, on=[ValueError])`` — let a unit's failure through.
+
+    Without it, a failed row stops ``run_all``. With it, a caught failure
+    either becomes ``default`` (the row completes; the error stays in the
+    ledger) or, with no default, the row stays failed and the run carries on —
+    rows that read it downstream are blocked, not run. ``on=`` limits which
+    exceptions are caught; others still stop the run. Order is semantics:
+    ``[mod.try_except(…), mod.retry(times=2)]`` retries first.
+    """
+    def run(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except _Tolerated:
+            raise
+        except Exception as exc:
+            if not _caught_by(exc, on):
+                raise
+            error = f"{type(exc).__name__}: {exc}"
+            if default is not _NO_DEFAULT:
+                return _Caught(default, error)
+            raise _Tolerated(error) from exc
+    run.__name__ = f"try_except({getattr(fn, '__name__', 'fn')})"
+    return run
+
+
+def _d_expect(fn: Callable, *, rows: int | None = None, min_rows: int | None = None,
+              max_rows: int | None = None, columns: Any = None,
+              more_columns: bool = False) -> Callable:
+    """``mod.expect(…)`` — what the author knows the step's output will be (008 C9).
+
+    It changes nothing about how the tool runs. Staging uses it as the plan
+    (marked ``stated``), declaration refuses it when it contradicts what core
+    already knows, and the run fails the step when the output doesn't match.
+    ``columns`` is a list of names, or ``{name: type}``; ``more_columns=True``
+    says those are some of the columns, not all.
+    """
+    return fn
 
 
 def _d_timeout(fn: Callable, *, seconds: float) -> Callable:
@@ -1701,6 +2067,8 @@ MODIFIERS: dict[str, ModifierKind] = {k.name: k for k in (
     # execution modifiers — shape-preserving
     _kind("retry",    "execution", _d_retry, _d_retry),
     _kind("timeout",  "execution", _d_timeout, _d_timeout),
+    _kind("expect",   "execution", _d_expect, _d_expect),
+    _kind("try_except", "execution", _d_try_except, _d_try_except),
 )}
 
 
@@ -1730,6 +2098,9 @@ PARAM_TYPES: dict[str, tuple[type, ...]] = {
 #: naturally several columns.
 PARAM_TYPES_BY_VERB: dict[str, dict[str, tuple[type, ...]]] = {
     "sort": {"by": (str, list, tuple)},
+    "try_except": {"on": (list, tuple, str)},
+    "expect": {"rows": (int,), "min_rows": (int,), "max_rows": (int,),
+               "columns": (list, tuple, dict), "more_columns": (bool,)},
 }
 
 #: Shape verbs whose literal setting is mandatory — caught at declaration (005
@@ -1812,7 +2183,8 @@ def _modifier_settings(name: str, kind: ModifierKind) -> list[dict]:
             required = p.default is inspect.Parameter.empty
             settings.append({"name": p.name, "type": _setting_type(name, p.name),
                              "required": required,
-                             "default": None if required else p.default})
+                             "default": None if required or p.default is _NO_DEFAULT
+                             else p.default})
     except (TypeError, ValueError):
         pass
     if takes_extra:                       # sweep: extra named params are the data
@@ -1830,7 +2202,7 @@ _TAKES_TOOL: dict[str, Any] = {
     "select": False, "drop": False, "widen": False, "slice": False,
     "rename": False, "sort": False, "distinct": False,
     "source": "optional", "expand": "optional", "collapse": "optional",
-    "retry": None, "timeout": None,
+    "retry": None, "timeout": None, "expect": None, "try_except": None,
 }
 
 
@@ -3575,6 +3947,29 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 and modifier.params.get("rows") is None:
             problems.append("select needs columns= or rows= — what to keep")
 
+    # 2d''. mod.expect states something, and never what core knows is false
+    #       (008 C9.4) — "filter gives at most 3 rows; expect(rows=10) can't hold".
+    expect = _expectation(operation)
+    if any(m.kind == "expect" for m in operation.modifiers):
+        if not any(k in expect for k in ("rows", "min_rows", "max_rows", "columns")):
+            problems.append("expect needs rows=, min_rows=, max_rows= or columns= "
+                            "— what the step will produce")
+        verb_ = operation.shape_verb
+        index = workflow._known_index(operation) if workflow is not None else None
+        n = None if index is None else len(index)
+        rule = ROWS_RULE.get(verb_.kind) if verb_ is not None else None
+        stated = expect.get("rows")
+        if isinstance(stated, int) and verb_ is not None:
+            if rule == "one" and not verb_.params.get("by") and stated != 1:
+                problems.append(f"{verb_.kind} gives exactly 1 row; "
+                                f"expect(rows={stated}) can't hold")
+            elif n is not None and rule == "same" and stated != n:
+                problems.append(f"{verb_.kind} gives exactly {n} rows; "
+                                f"expect(rows={stated}) can't hold")
+            elif n is not None and rule == "at_most" and stated > n:
+                problems.append(f"{verb_.kind} gives at most {n} rows; "
+                                f"expect(rows={stated}) can't hold")
+
     # 2e. a combine (join/stack/zip) reads several grids and merges on literal
     #     config; it has no tool, so its only extra declaration checks are its
     #     arity and, for a join, its key.
@@ -4008,6 +4403,24 @@ def _type_mismatches(operation: Operation, fn: Callable,
         return problems
     upstream = workflow._input_for(operation)
     if upstream is None:
+        # 008 C5: before the input runs, check against the types it declares
+        # (a source's schema, mod.expect, or a tool's return annotation).
+        declared_types = workflow._column_types(operation)
+        params = list(parameters.values())
+        if verb.kind == "collapse":
+            params = params[1:]
+        for parameter in params:
+            if parameter.name in operation.arguments:
+                continue
+            column_type = declared_types.get(parameter.name)
+            if column_type is None or parameter.annotation is inspect.Parameter.empty:
+                continue
+            if _declared_fits(column_type, parameter.annotation) is False:
+                problems.append(
+                    f"{operation.tool_id}() declares {parameter.name}: "
+                    f"{_type_name(parameter.annotation)}, but "
+                    f"{str(operation.input)!r} will have {parameter.name} as "
+                    f"{_type_label(column_type)}")
         return problems
 
     frame = rows(upstream)
@@ -4481,16 +4894,53 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         columns_open = (workflow._columns_open(operation)
                         if workflow is not None else False)
 
+    # 008 C5/C9: what a step will produce, as far as is known — and how sure.
+    # Column types come from the input (carried), the tool's return (payload),
+    # a source's declared schema, or `mod.expect`.
+    fn = operation.fn or TOOLS.get(operation.tool_id) or BUILTIN_TOOLS.get(operation.tool_id)
+    label = operation.tool_id
+    upstream_types = workflow._column_types(operation) if workflow is not None else {}
+    types: dict = {c: upstream_types.get(c) for c in ordered}
+    if kind == "rename":
+        mapping = verb.params.get("columns") or {}
+        if isinstance(mapping, dict):
+            for old, new in mapping.items():
+                types[new] = upstream_types.get(old)
+    if payload and kind not in ("source",):
+        types[payload] = _payload_type(kind, fn)
+    if kind == "source" and not is_identity(fn):
+        schema = _declared_schema(fn)
+        if schema is not None:
+            ordered, types, columns_open = list(schema), dict(schema), False
+    expect = _expectation(operation)
+    if expect.get("columns") is not None:
+        names, stated_types = _expected_columns(expect)
+        known = [c for c in ordered if c not in names] if kind != "source" else []
+        ordered = list(dict.fromkeys(names + known))
+        types = {c: stated_types.get(c, types.get(c)) for c in ordered}
+        columns_open = bool(expect.get("more_columns"))
+    if isinstance(expect.get("rows"), int) and expected is None:
+        index, expected = list(range(expect["rows"])), expect["rows"]
+    upstream_name = str(operation.input) if operation.input is not None else None
+    plan = {
+        "rows": _rows_plan(kind, rule, expected if "rows" not in expect else None,
+                           n_in, expect, label),
+        "columns": _columns_plan(kind, ordered, columns_open, expect, label, upstream_name),
+        "types": {c: _type_label(types.get(c)) for c in ordered},
+    }
+
     records = [{"status": "staged", "error": None, "attempts": 0, "seconds": 0.0}
                for _ in index]
+    index_names = ordered
     return Output(
-        data=pd.DataFrame({c: [None] * len(index) for c in index_names or [PAYLOAD]},
-                          index=index),
+        data=pd.DataFrame({c: pd.Series([None] * len(index), index=index, dtype=object)
+                           for c in index_names or [PAYLOAD]}, index=index),
         ledger=_ledger(records, index),
         meta={"verb": kind, "form": "scalar" if kind is None else "column",
               "payload": payload, "staged": True, "problems": (),
               "n_in": n_in, "expected": expected, "rows_rule": rule,
-              "columns": ordered, "columns_open": columns_open},
+              "columns": ordered, "columns_open": columns_open,
+              "plan": plan, "column_types": types},
     )
 
 
@@ -4537,6 +4987,22 @@ class Step:
         # expanded to zero rows). `meta["staged"]` is what distinguishes them.
         return "staged" if self.output.meta.get("staged") else "completed"
 
+    @property
+    def plan(self) -> dict:
+        """What this step will produce — rows, columns, types — and how sure (008 C9).
+
+        Each axis has a ``certainty``: ``exact`` (core derived it), ``stated``
+        (``mod.expect``), ``bounded`` (a range, or these columns plus more) or
+        ``unknown``. Anything short of exact says ``because`` and how to
+        ``resolve`` it. A step that has run is exact on every axis.
+        """
+        if not self.output.meta.get("staged"):
+            data = self.output.data
+            return {"rows": {"certainty": "exact", "count": len(data)},
+                    "columns": {"certainty": "exact", "names": list(data.columns)},
+                    "types": {c: _type_label(_dtype_type(data[c])) for c in data.columns}}
+        return self.output.meta.get("plan") or {}
+
     def describe(self) -> str:
         """What this step is, in words.
 
@@ -4558,6 +5024,8 @@ class Step:
             return f"{kind} · unknown count from {len(self.operation.inputs)} grids"
         verb = self.output.meta.get("verb")
         tool = self.operation.tool_id
+        if verb == "source" and self.output.meta.get("staged"):
+            return f"source {tool} · {_plan_words(self.plan)}"
         if not self.output.meta.get("staged"):
             n = len(self.output.data)
             return (f"{tool} · one cell" if verb is None
@@ -4900,6 +5368,17 @@ class Workflow:
         step = self.steps.get(str(operation.input))
         return step is not None and columns_unknown(step.output)
 
+    def _column_types(self, operation: Operation) -> dict:
+        """Column → Python type of this operation's input, as far as known."""
+        if operation.input is None:
+            return {}
+        step = self.steps.get(str(operation.input))
+        if step is None:
+            return {}
+        if not step.output.meta.get("staged"):
+            return {c: _dtype_type(step.output.data[c]) for c in step.output.data.columns}
+        return dict(step.output.meta.get("column_types") or {})
+
     def _known_index(self, operation: Operation) -> Sequence[Any] | None:
         """The input's index, when known — enough to stage, short of running.
 
@@ -5062,6 +5541,9 @@ class Workflow:
                 # A tool source computes its grid from a no-input tool.
                 step.output = self._resolve_arguments(
                     step.operation, resources).run(None, tools)
+                mismatch = _output_mismatch(step.operation, step.output.data)
+                if mismatch:
+                    step.output = _failed_output(step.operation, mismatch)
                 self._restage_after(step_id)
                 return step
             # A literal source holds its data, so running one is a no-op — unless
@@ -5102,6 +5584,9 @@ class Workflow:
         try:
             step.output = resolved.run(source, tools)
             step.output.data = _str_columns(step.output.data, step_id)
+            mismatch = _output_mismatch(step.operation, step.output.data)
+            if mismatch:
+                raise SelectionError(mismatch)
         except SelectionError as exc:
             # 008 C7: a position out of range, a column that is gone — the step
             # fails with the reason, never None, NaN or an empty grid.
@@ -5118,6 +5603,11 @@ class Workflow:
 
         Still explicit — nothing recomputes on its own (§7's push/pull rule).
         This only saves you from ordering the calls by hand.
+
+        **Stops at the first failure a step didn't catch**, raising
+        :class:`StepFailed`; what already ran keeps its results. A step with
+        ``mod.try_except(…)`` lets its failures through: a fallback value, or
+        a failed row the steps after it are blocked on.
         """
         done: set[str] = set()
         remaining = [sid for sid, st in self.steps.items() if st.valid]
@@ -5134,6 +5624,12 @@ class Workflow:
                 # problem, not run, and does not stop the rest.
                 if self.steps[step_id].valid:
                     self.run(step_id, tools, resources)
+                    failure = _uncaught_failure(self.steps[step_id].output)
+                    if failure is not None:
+                        # A failure the step didn't catch stops the run.
+                        not_run = [sid for sid in remaining
+                                   if sid not in done and sid != step_id]
+                        raise StepFailed(step_id, failure[0], failure[1], not_run)
                 done.add(step_id)
             remaining = [sid for sid in remaining if sid not in done]
         return self
@@ -5298,6 +5794,15 @@ class _Mods:
             )
 
         def make(**params) -> Modifier:
+            if kind == "try_except" and params.get("on") is not None:
+                # Exception classes are written as classes and saved by name.
+                on = params["on"]
+                on = [on] if isinstance(on, (str, type)) else list(on)
+                params["on"] = [o.__name__ if isinstance(o, type) else o for o in on]
+            if kind == "expect" and isinstance(params.get("columns"), dict):
+                # Types are written as Python types and saved as their names.
+                params["columns"] = {k: _type_label(v)
+                                     for k, v in params["columns"].items()}
             if isinstance(params.get("over"), str):
                 # 008 K5: in Python a string is data everywhere else
                 # (`scale[mod.map()]("readings")`), so it must not be a

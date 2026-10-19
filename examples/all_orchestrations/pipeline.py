@@ -211,10 +211,16 @@ def failure() -> grid.Workflow:
 
     `risky` raises on n == 2. Two of the four readings are 2, so two rows fail
     and two complete — and `.failed` is the exact re-drive set.
+
+    A failed row stops `run_all` (raising `grid.StepFailed`) unless the step
+    lets it through. `mod.try_except()` does: the failed rows stay in the
+    ledger, marked `caught`, and the run carries on. `try_except(default=0)`
+    would complete them with 0 instead.
     """
     wf = grid.Workflow()
     wf["readings"] = readings()
-    wf["out"] = risky[mod.map(over=wf["readings"], name="out"), mod.retry(times=1)]
+    wf["out"] = risky[mod.map(over=wf["readings"], name="out"),
+                      mod.try_except(on=[ValueError]), mod.retry(times=1)]
     return wf.run_all()
 
 

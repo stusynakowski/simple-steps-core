@@ -21,7 +21,7 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
-from typing import Callable
+from typing import Annotated, Callable, TypedDict
 
 import pandas as pd
 from simple_steps_core import grid
@@ -356,7 +356,10 @@ def c10_failure_flows_downstream():
     if err:
         return False, f"wf['nope'] -> {err[:100]}"
     wf["bad"] = built
-    wf["a"] = risky[mod.map()](wf["r"])
+    # The owner's rule (2026-10-19): an uncaught failure stops run_all, so
+    # the failure only flows downstream as state when the step lets it through.
+    wf["a"] = risky[mod.map(), mod.try_except()](wf["r"]) if "try_except" in grid.MODIFIERS \
+        else risky[mod.map()](wf["r"])
     wf["b"] = plus1[mod.map()](wf["a"])
     wf.run_all()
     cause = wf.step("b").output.ledger["cause"].iloc[1] if "cause" in wf.step("b").output.ledger else None
@@ -462,6 +465,71 @@ def c7_selection():
             f"block -> {got}; wf['p']['price'] -> {(err or 'accepted')[:70]}")
 
 
+class _C5Out(TypedDict):
+    city: str
+    n: int
+
+
+@tool
+def c5_load(path: str) -> Annotated[pd.DataFrame, _C5Out]:
+    return pd.DataFrame({"city": ["SF"], "n": [1]})
+
+
+def c5_typed_source_columns():
+    # Module level on purpose: under `from __future__ import annotations` a
+    # return annotation is a string, resolvable only from the module's names.
+    wf = grid.Workflow()
+    wf["r"] = c5_load[mod.source()](path="x")
+    wf["typo"] = I[mod.select(columns=["cty"])](wf["r"])
+    step = wf.step("r")
+    plan = getattr(step, "plan", None) or {}
+    cols_ = plan.get("columns", {}).get("names") if plan else grid.predicted_columns(step.output)
+    caught = bool(wf.step("typo").problems)
+    return cols_ == ["city", "n"] and caught, (
+        f"unrun source columns -> {cols_}; select typo caught at declaration: {caught} "
+        "(source half of C5; TypedDict-to-widen is still open)")
+
+
+def c9_partial_plans():
+    @tool
+    def load_raw(path: str) -> pd.DataFrame:
+        return pd.DataFrame({"city": ["SF"]})
+
+    wf = grid.Workflow()
+    wf["r"] = load_raw[mod.source()](path="x")
+    plan = getattr(wf.step("r"), "plan", None)
+    if not plan:
+        return False, "Step.plan does not exist"
+    rows_, cols_ = plan["rows"], plan["columns"]
+    built, err = _try(lambda: I[mod.filter(), mod.expect(rows=10)](_wf()["readings"]))
+    w2 = _wf()
+    w2["k"] = I[mod.filter(), mod.expect(rows=10)](w2["readings"])
+    contradiction = bool(w2.step("k").problems)
+    done = (rows_["certainty"] == "unknown" and cols_["certainty"] == "unknown"
+            and "resolve" in rows_ and contradiction)
+    return done, (f"rows {rows_['certainty']}, columns {cols_['certainty']} (never []); "
+                  f"filter+expect(rows=10) refused: {contradiction} "
+                  "(tuple-length and join bounds still open)")
+
+
+def stop_on_failure():
+    @tool
+    def risky(n: int) -> int:
+        if n == 2:
+            raise ValueError("boom")
+        return n
+
+    wf = _wf()
+    wf["a"] = risky[mod.map()](wf["readings"])
+    wf["b"] = scale[mod.map()](wf["a"])
+    _, err = _try(wf.run_all)
+    stopped = err is not None and "StepFailed" in err and wf.step("b").status == "staged"
+    wf["a"] = risky[mod.map(), mod.try_except(default=0)](wf["readings"])
+    _, err2 = _try(wf.run_all)
+    return stopped and err2 is None, (f"uncaught -> {(err or 'no stop')[:70]}; "
+                                      f"try_except(default=0) -> {err2 or 'ran'}")
+
+
 ASKS = [
     ("K1", "Unrun source: columns unknown, re-check later", k1_unrun_source_columns),
     ("K2", "Verb inference independent of run state", k2_inference_run_state),
@@ -493,6 +561,9 @@ ASKS = [
     ("C1", "(core) a reference in every slot, positional args", c1_refs_in_every_slot),
     ("C2", "(core) a tool as a shape setting", c2_tool_settings),
     ("C7", "(core) Excel-style selection", c7_selection),
+    ("C5", "(core) a source's declared columns stage before it runs", c5_typed_source_columns),
+    ("C9", "(core) partial plans: certainty, because, resolve; mod.expect", c9_partial_plans),
+    ("STOP", "(core) an uncaught failure stops run_all; try_except lets it through", stop_on_failure),
 ]
 
 

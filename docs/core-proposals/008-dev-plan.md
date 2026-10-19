@@ -171,6 +171,77 @@ from a newer core is refused with *"this core reads versions 1 to 2"* (K17).
   - A row position over a `filter`/`expand`/`group`/`distinct`/`collapse`
     output warns that the rows may differ next run.
 
+## Phase 4 — first slice: what an unrun step will produce
+
+Built for a source that hasn't run, where some or all of the columns are
+known but the rows are not.
+
+- **Saying what a source produces.** Annotate the return,
+  `-> Annotated[pd.DataFrame, Readings]` with a TypedDict or dataclass, for
+  every column and its type (C5). Or state it on the step: `mod.expect(
+  columns=["city"] | {"city": str}, more_columns=True, rows=…, min_rows=…,
+  max_rows=…)` (C9.4). `expect` is an execution modifier: it changes nothing
+  about how the tool runs, and saves column types as their names.
+- **`Step.plan`** gives three axes, each with a `certainty`. `rows`: `exact`
+  (count), `stated`, `bounded` (min/max), or `unknown`. `columns`: `exact`,
+  `stated`, `bounded` (these names plus more), or `unknown`. `types`: a name
+  per column, `any` when not known. Anything short of exact carries `because`
+  and `resolve`. An unknown is never an empty list (K1's bug). A step that has
+  run is exact on every axis. The staged grid has the planned columns, typed
+  `object`, so nothing reads false dtypes from it.
+- **`describe()` for an unrun source** reads from the plan: `source load ·
+  columns city (str), n (int) + maybe more (stated) · rows unknown until it
+  runs`. Other verbs' wording is unchanged.
+- **Types flow downstream:** carried columns keep their types, a payload gets
+  the tool's return type (an expand gets the element type of `list[T]`), and
+  `rename` moves types with names. A tool parameter is checked against a
+  staged input's declared type, so `shout(city: int)` over a source declaring
+  `city: str` is refused at declaration, not after a run.
+- **Promises are checked at run.** A source whose output doesn't match its
+  declared schema fails (*"load declares columns city, n; it returned
+  town"*). So does a step that breaks its `expect` (*"expected 12 rows, got
+  2"*).
+- **Contradictions at declaration:** `expect(rows=…)` against a verb that
+  fixes the count (`collapse` → 1, `map` over n → n, `filter` over n → at most
+  n). `expect()` with nothing in it is refused too.
+- **Limit:** under `from __future__ import annotations`, a schema class must
+  be importable from the tool's module. A class defined inside a function
+  can't be resolved, and the source plans as `unknown`.
+
+Still open in phase 4: C5 for record returns spread by `widen`; C8's planned
+grid with known values and `pending`/`maybe` cell states; C9's tighter bounds
+(`tuple[T, T]` → exactly 2n, join bounds) and the trailing marker row/column.
+
+## Decision (owner, 2026-10-19): a failure stops the run
+
+This **overrides part of C10**. C10 asked that `run_all` "runs everything
+else" past a failure. The owner's rule is that a failed row stops the
+workflow unless the step says it may fail.
+
+- **`run_all` stops** at the first step with a failed cell the step didn't
+  catch, raising `grid.StepFailed` (`step_id`, `cell`, `error`, `not_run`).
+  Steps that already ran keep their results, and nothing after the failure
+  runs, independent branches included. `wf.run(step)` on one step still
+  records the failure without raising, so it can be inspected.
+- **`mod.try_except(default=…, on=[…])`** is an execution modifier.
+  - With `default=`, a caught failure completes the row with that value; the
+    ledger keeps the error (`"caught ValueError: boom; used the default"`) and
+    marks it `caught`. `default=None` is a value, not "no default".
+  - Without `default=`, the row stays failed (`caught`) and the run continues.
+    Rows that read it are blocked with its `cause`, as C10 describes, so
+    C10's model holds for steps that opt in.
+  - `on=` limits which exceptions are caught; it takes classes and saves
+    their names. Others still stop the run.
+  - Order is semantics: `[mod.try_except(…), mod.retry(times=2)]` retries
+    first, then falls back.
+- **A blocked row never stops the run by itself.** Its root either stopped it
+  or was caught.
+- **A failing source** is now a failed step (one failed cell) instead of an
+  exception escaping `run`, so it follows the same rule.
+- The ledger gains a **`caught`** column (seven in all).
+- **To tell the app:** C10's "run_all runs everything else" now needs
+  `mod.try_except()` on the steps that may fail.
+
 ## Status
 
 | Ask | Phase | Status |
@@ -179,10 +250,11 @@ from a newer core is refused with *"this core reads versions 1 to 2"* (K17).
 | K5, K8, K13, C6 | 1b | **done** (2026-10-15) |
 | C10, C14, R8 | 2 | **done** (2026-10-15), except combine verbs and C10.6 |
 | C11, C1, C2, C7 (K9), K17 | 3 | **done** (2026-10-15) |
-| C5, then C8, C9 | 4 | next |
+| C5 (sources), C9 (plans, `mod.expect`) | 4 | **first slice done** (2026-10-19) |
+| C5 (widen), C8, C9 (bounds) | 4 | next |
 | everything else | 5–7 | not started |
 
-`scripts/core_asks.py`: **25 of 30 done** (from 3; C11, C1, C2 and C7 probes
+`scripts/core_asks.py`: **28 of 33 done** (from 3; C11, C1, C2 and C7 probes
 added, K17's made real). Still open among the probed asks: K12 (5),
 K14–K16 (6), K18 (7).
 
@@ -213,6 +285,9 @@ K14–K16 (6), K18 (7).
 - `wf["p"]["price"]` raises (C7); a variable named `rows` or `cols` in the
   declaring scope makes `wf[…] = …` raise.
 - Integer column names become strings (C7).
+- New `Step.plan`, `mod.expect`, and typed source schemas. A tool parameter is
+  now checked against a staged input's declared types (C5). One test that
+  asserted "no type check until the upstream runs" was updated.
 
-Update this table, and the summary in [007-status.md](007-status.md)'s
-successor, as each phase lands.
+Update this table, and [008-status.md](008-status.md) (the app's summary),
+as each phase lands.

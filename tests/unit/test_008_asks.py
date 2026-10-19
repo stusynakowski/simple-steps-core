@@ -243,7 +243,9 @@ def failing():
         CALLS[k] = 0
     w = Workflow()
     w["r"] = pd.DataFrame({"n": [1, 2, 3]})
-    w["a"] = risky_008[mod.map()](w["r"])
+    # try_except: let a's failures through, so they flow downstream as state
+    # (without it, run_all stops at `a` — see the try_except tests below).
+    w["a"] = risky_008[mod.map(), mod.try_except()](w["r"])
     return w
 
 
@@ -519,3 +521,210 @@ def test_K9_select_takes_rows_and_columns(wf):
     wf["x"] = op("identity")[mod.select(columns=["n"], rows=[0, 2])](wf["readings"])
     wf.run("x")
     assert wf.step("x").output.data.to_dict("list") == {"n": [1, 3]}
+
+
+# ── Phase 4 (first slice): an unrun source says what it will produce ────
+from typing import Annotated, TypedDict  # noqa: E402
+
+
+class Readings008(TypedDict):
+    city: str
+    n: int
+
+
+@tool
+def load_typed_008(path: str) -> Annotated[pd.DataFrame, Readings008]:
+    return pd.DataFrame({"city": ["SF", "NYC"], "n": [1, 2]})
+
+
+@tool
+def load_raw_008(path: str) -> pd.DataFrame:
+    return pd.DataFrame({"city": ["SF", "NYC"], "n": [1, 2], "extra": [0, 0]})
+
+
+@tool
+def shout_008(city: int) -> int:
+    return city
+
+
+def test_C5_a_typed_source_stages_its_columns_and_types_but_not_its_rows():
+    w = Workflow()
+    w["r"] = load_typed_008[mod.source()](path="x")
+    plan = w.step("r").plan
+    assert plan["columns"] == {"certainty": "exact", "names": ["city", "n"]}
+    assert plan["types"] == {"city": "str", "n": "int"}
+    assert plan["rows"]["certainty"] == "unknown"
+    assert "run load_typed_008" in plan["rows"]["resolve"]
+    assert w.step("r").describe() == (
+        "source load_typed_008 · columns city (str), n (int) · rows unknown until it runs")
+    assert list(w.step("r").output.data.columns) == ["city", "n"]
+
+
+def test_C5_declared_columns_and_types_are_checked_before_the_source_runs():
+    w = Workflow()
+    w["r"] = load_typed_008[mod.source()](path="x")
+    w["typo"] = mod.select(columns=["cty"])(w["r"])              # columns are known
+    w["typed"] = shout_008[mod.map()](w["r"])                     # city is a str
+    w["fine"] = scale_008[mod.map()](w["r"])
+    assert "names 'cty'" in w.step("typo").problems[0]
+    assert w.step("typed").problems == (
+        "shout_008() declares city: int, but 'r' will have city as str",)
+    assert w.step("fine").plan["types"] == {"city": "str", "n": "int", "value": "any"}
+
+
+def test_C5_a_source_that_breaks_its_declared_columns_fails():
+    @tool
+    def liar_008(path: str) -> Annotated[pd.DataFrame, Readings008]:
+        return pd.DataFrame({"town": ["SF"]})
+    w = Workflow()
+    w["r"] = liar_008[mod.source()](path="x")
+    w.run("r")
+    assert w.step("r").status == "failed"
+    assert w.step("r").output.ledger["error"].iloc[0] == (
+        "liar_008 declares columns city, n; it returned town")
+
+
+def test_C9_some_columns_stated_rows_unknown():
+    w = Workflow()
+    w["r"] = load_raw_008[mod.source(), mod.expect(columns={"city": str},
+                                                   more_columns=True)](path="x")
+    plan = w.step("r").plan
+    assert plan["columns"] == {"certainty": "stated", "names": ["city"], "more": True}
+    assert plan["types"] == {"city": "str"}
+    assert w.step("r").describe() == (
+        "source load_raw_008 · columns city (str) + maybe more (stated) · "
+        "rows unknown until it runs")
+    w["later"] = mod.select(columns=["extra"])(w["r"])           # may still arrive
+    assert w.step("later").problems == ()
+    w.run_all()
+    assert w.step("later").output.data.to_dict("list") == {"extra": [0, 0]}
+    back = Workflow.from_json(w.to_json(), grid.TOOLS)            # saved as names
+    assert back.step("r").plan["types"] == {"city": "str"}
+
+
+def test_C9_an_undeclared_source_says_how_to_resolve_its_columns():
+    w = Workflow()
+    w["r"] = load_raw_008[mod.source()](path="x")
+    columns = w.step("r").plan["columns"]
+    assert columns["certainty"] == "unknown" and columns["names"] == []
+    assert any("Annotated[pd.DataFrame" in r for r in columns["resolve"])
+    assert any("mod.expect(columns=" in r for r in columns["resolve"])
+    assert w.step("r").describe() == (
+        "source load_raw_008 · columns unknown until it runs · rows unknown until it runs")
+
+
+def test_C9_stated_rows_stage_and_are_checked_at_run(wf):
+    w = Workflow()
+    w["r"] = load_typed_008[mod.source(), mod.expect(rows=12)](path="x")
+    assert w.step("r").plan["rows"] == {"certainty": "stated", "count": 12}
+    assert w.step("r").output.meta["expected"] == 12
+    w.run("r")
+    assert w.step("r").output.ledger["error"].iloc[0] == "expected 12 rows, got 2"
+    wf["kept"] = op("identity")[mod.filter(), mod.expect(rows=10)](wf["readings"])
+    assert "at most 4 rows; expect(rows=10) can't hold" in wf.step("kept").problems[0]
+    wf["empty"] = scale_008[mod.map(), mod.expect()](wf["readings"])
+    assert "expect needs rows=" in wf.step("empty").problems[0]
+
+
+def test_C9_a_step_that_ran_has_an_exact_plan(wf):
+    assert wf.step("readings").plan == {
+        "rows": {"certainty": "exact", "count": 4},
+        "columns": {"certainty": "exact", "names": ["city", "n"]},
+        "types": {"city": "str", "n": "int"}}
+
+
+# ── A failure stops the run, unless the step catches it (mod.try_except) ──
+@pytest.fixture()
+def two_branches():
+    for k in CALLS:
+        CALLS[k] = 0
+    w = Workflow()
+    w["r"] = pd.DataFrame({"n": [1, 2, 3]})
+    w["ok"] = scale_008[mod.map()](w["r"])                 # runs before the failure
+    return w
+
+
+def test_an_uncaught_failure_stops_run_all(two_branches):
+    w = two_branches
+    w["a"] = risky_008[mod.map()](w["r"])
+    w["b"] = plus1_008[mod.map()](w["a"])
+    w["other"] = scale_008[mod.map()](w["r"], weight=2)    # independent branch
+    with pytest.raises(grid.StepFailed) as stopped:
+        w.run_all()
+    err = stopped.value
+    assert (err.step_id, err.cell, err.error) == ("a", 1, "ValueError: boom")
+    assert "b" in err.not_run and "The run stopped" in str(err)
+    assert w.step("ok").status == "completed"              # kept
+    assert w.step("b").status == "staged" and CALLS["plus1"] == 0
+
+
+def test_a_single_run_records_the_failure_without_raising(two_branches):
+    w = two_branches
+    w["a"] = risky_008[mod.map()](w["r"])
+    w.run("a")
+    assert w.step("a").status == "failed"
+
+
+def test_try_except_with_a_default_completes_the_row(two_branches):
+    w = two_branches
+    w["a"] = risky_008[mod.map(), mod.try_except(default=0)](w["r"])
+    w["b"] = plus1_008[mod.map()](w["a"])
+    w.run_all()
+    a = w.step("a").output
+    assert a.values == [100, 0, 300] and w.step("a").status == "completed"
+    assert a.ledger.loc[1, "error"] == "caught ValueError: boom; used the default"
+    assert bool(a.ledger.loc[1, "caught"])
+    assert w.step("b").output.values == [101, 1, 301]
+
+
+def test_try_except_without_a_default_lets_the_run_continue(two_branches):
+    w = two_branches
+    w["a"] = risky_008[mod.map(), mod.try_except()](w["r"])
+    w["b"] = plus1_008[mod.map()](w["a"])
+    w.run_all()                                            # does not raise
+    assert w.step("a").status == "failed"
+    assert w.step("b").output.ledger.loc[1, "cause"] == "a[1]: ValueError: boom"
+    assert CALLS["plus1"] == 2
+
+
+def test_try_except_default_none_is_a_value_not_no_default(two_branches):
+    w = two_branches
+    w["a"] = risky_008[mod.map(), mod.try_except(default=None)](w["r"])
+    w.run_all()
+    assert w.step("a").status == "completed"
+    assert w.step("a").output.values == [100, None, 300]
+
+
+def test_try_except_on_catches_only_the_named_exceptions(two_branches):
+    w = two_branches
+    w["a"] = risky_008[mod.map(), mod.try_except(default=0, on=[KeyError])](w["r"])
+    with pytest.raises(grid.StepFailed, match="ValueError: boom"):
+        w.run_all()
+    w["a"] = risky_008[mod.map(), mod.try_except(default=0, on=[ValueError])](w["r"])
+    w.run_all()
+    assert w.step("a").output.values == [100, 0, 300]
+
+
+def test_try_except_saves_its_settings_by_name(two_branches):
+    w = two_branches
+    w["a"] = risky_008[mod.map(), mod.try_except(default=0, on=[ValueError])](w["r"])
+    saved = json.loads(w.to_json())["steps"][-1]["operation"]["modifiers"]
+    assert {"kind": "try_except", "params": {"default": 0, "on": ["ValueError"]}} in saved
+    back = Workflow.from_json(w.to_session_json(), grid.TOOLS)
+    back.run_all()
+    assert back.step("a").output.values == [100, 0, 300]
+
+
+def test_a_failing_source_stops_the_run_or_is_caught():
+    @tool
+    def broken_008(path: str) -> pd.DataFrame:
+        raise OSError("no such file")
+
+    w = Workflow()
+    w["src"] = broken_008[mod.source()](path="x")
+    w["after"] = scale_008[mod.map()](w["src"])
+    with pytest.raises(grid.StepFailed, match="OSError: no such file"):
+        w.run_all()
+    w["src"] = broken_008[mod.source(), mod.try_except(default=[])](path="x")
+    w.run("src")
+    assert w.step("src").status == "completed"

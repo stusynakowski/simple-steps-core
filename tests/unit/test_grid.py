@@ -189,7 +189,7 @@ def test_carried_function_is_not_part_of_the_data():
 # The modifier vocabulary is one table
 # ─────────────────────────────────────────────────────────────────────────
 def test_shape_verbs_and_decorators_derive_from_modifiers():
-    assert set(SHAPE_VERBS) | {"retry", "timeout"} == set(MODIFIERS)
+    assert set(SHAPE_VERBS) | {"retry", "timeout", "expect", "try_except"} == set(MODIFIERS)
     assert set(DECORATORS) == set(MODIFIERS)
 
 
@@ -1388,8 +1388,9 @@ def test_an_undecidable_annotation_is_not_a_problem():
     assert wf.step("ok").problems == ()
 
 
-def test_dtype_checking_waits_for_the_upstream_to_run():
-    """Same timing rule as the missing-column check: a staged Output has no dtypes."""
+def test_dtype_checking_uses_declared_types_before_the_upstream_runs():
+    """008 C5: a staged Output has no dtypes, but its tool's return annotation
+    declares the payload's type — so the mismatch is caught before anything runs."""
     @tool(strict=True)
     def to_f(celsius: float) -> float:
         return celsius * 9 / 5 + 32
@@ -1402,7 +1403,8 @@ def test_dtype_checking_waits_for_the_upstream_to_run():
     wf["raw"] = pd.DataFrame({"celsius": [1.0, 2.0]})
     wf["f"] = to_f[mod.map(over=wf["raw"], name="fahrenheit")]
     wf["bad"] = needs_text[mod.map(over=wf["f"])]
-    assert wf.step("bad").problems == (), "staged upstream: nothing to check yet"
+    assert wf.step("bad").problems == (
+        "needs_text() declares fahrenheit: str, but 'f' will have fahrenheit as float",)
 
     wf.run("f")
     wf["bad"] = needs_text[mod.map(over=wf["f"])]
@@ -1760,7 +1762,7 @@ def test_a_non_mapping_cell_is_a_per_unit_failure():
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [{"a": 1}, 42]})
     wf["wide"] = mod.widen(columns=["a"], over=wf["raw"])
-    wf.run_all()
+    wf.run("wide")          # the failing step itself; run_all would stop here
     ledger = wf.step("wide").output.ledger
     assert list(ledger["status"]) == ["completed", "failed"]
     assert "needs a mapping per row" in ledger["error"].iloc[1]
@@ -1771,7 +1773,7 @@ def test_a_missing_field_is_a_per_unit_failure_not_a_crash():
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [{"a": 1, "b": 2}, {"a": 3}]})
     wf["wide"] = mod.widen(columns=["a", "b"], over=wf["raw"])
-    wf.run_all()
+    wf.run("wide")          # the failing step itself; run_all would stop here
     ledger = wf.step("wide").output.ledger
     assert list(ledger["status"]) == ["completed", "failed"]
     assert "has no 'b'" in ledger["error"].iloc[1]
@@ -1837,7 +1839,7 @@ def test_widen_explicit_columns_too_many_for_a_short_tuple_is_a_failure():
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [(10, 1), (20,)]})
     wf["wide"] = mod.widen(columns=["a", "b"], over=wf["raw"])
-    wf.run_all()
+    wf.run("wide")          # the failing step itself; run_all would stop here
     ledger = wf.step("wide").output.ledger
     assert list(ledger["status"]) == ["completed", "failed"]
     assert "too few" in ledger["error"].iloc[1]
