@@ -7,9 +7,9 @@
 > the full list of changes for the app's backend is
 > [core-proposals/008-status.md](core-proposals/008-status.md).
 >
-> **Version note:** everything from 009 (results-only steps, row ids, strict
-> `zip_`, versions, auto and the breaker) is **uncommitted** on top of
-> `9a86a0d`. Plan against it, but check the pin before building against it.
+> **Version note:** everything here through 009 is in **`b9f66d5`**. The 010
+> additions (complete cell `inputs`, per-cell staleness, `Output.uncaught`)
+> are described in [core-proposals/010-status.md](core-proposals/010-status.md).
 
 ## 1. The model in five rules
 
@@ -159,13 +159,20 @@ unknown row count, some columns known "plus maybe more", a filter that keeps
 | When | Returns |
 |---|---|
 | `s` hasn't run, rows unknown | `{"state": "unknown", "type": "float", "because": "its input 'r' doesn't know its row count yet", "resolve": ["run 'r'", …]}`, i.e. row 1, *if it exists* |
-| after the run | `{"state": "known", "value": 3.0, "type": "float", "id": 1, "inputs": [{"step": "r", "id": 1, "state": "completed"}]}` |
+| after the run | `{"state": "known", "value": 3.0, "type": "float", "id": 1, "inputs": [{"step": "r", "id": 1, "columns": ["n"], "argument": "n", "state": "known", "values": {"n": 2}}]}` |
 | a failed cell | `{"state": "failed", "error": "ValueError: negative", …}` |
 | a blocked cell | `{"state": "blocked", "cause": "s[1]: ValueError: negative", …}` |
 | no such row / column | `{"state": "missing", "because": "row 9 of 's', which has 2 rows (0–1)"}` |
 
-`inputs` names the input cell(s) the result came from, by row id, so the UI
-can highlight them.
+`inputs` names **every input cell** the result came from, one entry per
+binding: the `step`, the row `id` (or `rows` for several), the `columns`
+read, the `argument` they were bound to (`None` when a step copies the cell
+without a tool), the cells' `state` (a cell state, e.g. `known`, `failed`),
+and their `values`. An argument reference appears too
+(`{"step": "w", "id": 0, "columns": ["w"], "argument": "weight"}`), as do
+setting references (`"argument": "select.columns"`) and resources. A `zip_`
+cell lists only the input that supplied its column. Nothing is stored for
+this; it's worked out from row ids and the formula.
 
 ## 4. Step statuses: what to show
 
@@ -229,15 +236,16 @@ expect try_except breaker`.
 
 | Need | Status | Until then |
 |---|---|---|
-| Step status, results, per-cell states and notes, plan, `describe`, auto's choice, versions | **built** (009 parts uncommitted) | — |
+| Step status, results, per-cell states and notes, plan, `describe`, auto's choice, versions | **built** | — |
 | Selections as steps; selections as arguments | **built** | — |
-| `wf.preview(step)`: the grid to draw, with known unknowns as markers | **built** (uncommitted) | — |
-| `wf.cell(step, row, column)`: a cell's value or what's expected, with state, type, error, cause and input cells | **built** (uncommitted) | — |
-| Cell states `known` `stale` `failed` `blocked` `pending` `maybe` `unknown` `missing` | **built** (uncommitted) | — |
+| `wf.preview(step)`: the grid to draw, with known unknowns as markers | **built** | — |
+| `wf.cell(step, row, column)`: a cell's value or what's expected, with state, type, error, cause and every input cell | **built** | — |
+| Cell states `known` `stale` `failed` `blocked` `pending` `maybe` `unknown` `missing` | **built** | — |
+| Whether an output stops a run: `output.uncaught`, `output.stops_run` | **built** (010) | — |
 | A cell of a row that may not exist yet ("row 2, if it exists") | **built** for `wf.cell` (`state: unknown`) | — |
 | Selection *steps* over rows that may not exist yet | planned (009 §3) | the step is checked when it runs |
 | `step.references()`: status of each reference in a formula (`ok`, `stale`, `has failures`, `staged`, `missing`, `not loaded`) | **planned** (009 §5) | `meta["read"]` vs `wf.version(...)` |
-| Per-cell staleness (edit one input row → one cell stale) | **planned**, with re-run of failed/stale rows | per-step staleness |
+| Per-cell staleness (edit one input row → only its cells stale): `wf.stale_rows(step)` | **built** (010) for row-aligned steps; others stale as a whole | — |
 | Re-run only failed rows; progress callback during a run | open (K15, K14) | re-run the step |
 
 ## 9. Gaps the UI will hit today

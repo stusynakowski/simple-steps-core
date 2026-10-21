@@ -6,11 +6,10 @@
 > [009-step-output-model.md](009-step-output-model.md); what to draw is in
 > [../ui-context.md](../ui-context.md).
 >
-> **Where the code is:** steps 1–3 below are in **`da77e07`**. Step 4
-> (`wf.preview` / `wf.cell`) and the **data, states, meta** output are
-> **uncommitted**. Commit them, and pin to that commit, before adopting.
->
-> 576 tests pass; `python scripts/core_asks.py` reports 35 of 39 asks done.
+> **Where the code is:** everything below is in **`b9f66d5`**, the app's
+> current pin. Later changes (the app's 010 asks: strict `zip_` columns,
+> `collapse(by=)` checks, complete cell inputs, per-cell staleness,
+> `Output.uncaught`) are in [010-status.md](010-status.md).
 
 ## In short
 

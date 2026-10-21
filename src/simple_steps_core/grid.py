@@ -209,12 +209,33 @@ class Output:
         rs = self.row_states
         return list(rs.index[rs.isin(states)])
 
+    @property
+    def uncaught(self) -> list:
+        """Row ids whose failure would stop ``run_all`` (010 C21).
+
+        A row stops the run when its own tool failed (state ``failed``), the
+        step didn't let it through (no ``caught``), and it isn't merely
+        blocked by an earlier failure (``blocked``, which has a ``cause``). A
+        breaker stop counts.
+        """
+        return [i for i in self.ids_in("failed")
+                if not (self.notes.get(i) or {}).get("caught")]
+
+    @property
+    def stops_run(self) -> bool:
+        """Would this output stop ``run_all``? (010 C21)"""
+        return bool(self.uncaught)
+
     def view(self) -> pd.DataFrame:
         """``data`` plus each row's ``state`` and, where there is one, its note."""
         out = self.data.copy()
         out["state"] = self.row_states.astype(str)
         if self.meta.get("stale"):
-            out.loc[out["state"] == "known", "state"] = "stale"
+            rows_ = self.meta.get("stale_rows")
+            which = out["state"] == "known"
+            if rows_ is not None:
+                which &= out.index.isin(rows_)
+            out.loc[which, "state"] = "stale"
         if self.notes:
             out["note"] = [_note_text(self.notes.get(i)) for i in out.index]
         return out
@@ -286,7 +307,8 @@ class Output:
             return f"<Output {verb} · staged>"
         failed = len(self.ids_in("failed", "blocked"))
         tail = f", {failed} failed" if failed else ""
-        tail += ", stale" if self.meta.get("stale") else ""
+        if self.meta.get("stale"):
+            tail += f", stale output ({self.meta.get('stale_reason') or 'an earlier step changed'})"
         return (f"<Output {verb} · {len(self.data)} row(s) × "
                 f"{len(self.data.columns)} col(s){tail}>")
 
@@ -391,12 +413,10 @@ def _uncaught_failure(output: "Output") -> tuple[Any, str] | None:
     """The first failed cell that should stop the run: its own failure, not
     caught by ``mod.try_except``. A row blocked by an upstream failure has a
     ``cause`` — its root already stopped the run, or was caught."""
-    for row_id in output.ids_in("failed"):        # blocked rows have a cause
-        note = output.notes.get(row_id, {})
-        if note.get("caught"):
-            continue
-        return row_id, note.get("error")
-    return None
+    if not output.uncaught:
+        return None
+    row_id = output.uncaught[0]
+    return row_id, (output.notes.get(row_id) or {}).get("error")
 
 
 def _data_version(data: pd.DataFrame) -> str:
@@ -1041,6 +1061,73 @@ def _plan_markers(plan: dict, step_id: str) -> list[dict]:
     return markers
 
 
+def _ran_with(operation: Any) -> dict:
+    """What an output is computed with: its formula and each argument as text."""
+    return {"formula": operation.to_source(),
+            "arguments": {k: _src(v) for k, v in operation.arguments.items()}}
+
+
+def _changes_text(changes: list[dict]) -> str:
+    """``weight=1.5 (now 2.0)`` — what a stale output used, against what's set now."""
+    parts = []
+    for c in changes:
+        if c["name"] == "formula":
+            parts.append(f"{c['was']} (now {c['now']})")
+        elif c.get("was_default"):
+            parts.append(f"{c['name']}={c['was']}, the default (now {c['now']})")
+        elif c.get("now_default"):
+            parts.append(f"{c['name']}={c['was']} (now the default, {c['now']})")
+        elif c["was"] is None:
+            parts.append(f"{c['name']} unset (now {c['now']})")
+        elif c["now"] is None:
+            parts.append(f"{c['name']}={c['was']} (now unset)")
+        else:
+            parts.append(f"{c['name']}={c['was']} (now {c['now']})")
+    return ", ".join(parts)
+
+
+#: Verbs whose output rows are their input's rows, one to one (or a subset):
+#: they can tell which output rows a changed input row affects (010 C25).
+ROW_ALIGNED = frozenset({"map", "group", "filter", "select", "drop", "rename",
+                         "sort", "slice", "distinct", "widen"})
+
+
+def _row_fps(frame: pd.DataFrame, columns: list) -> dict:
+    """A short hash of each row's values in *columns*, by row id."""
+    if not columns:
+        return {i: "" for i in frame.index}
+    try:
+        hashes = pd.util.hash_pandas_object(frame[columns], index=False)
+        return {i: format(int(h), "x")[:12] for i, h in zip(frame.index, hashes)}
+    except TypeError:
+        return {i: hashlib.sha1(repr(row).encode()).hexdigest()[:12]
+                for i, row in zip(frame.index, frame[columns].itertuples(index=False))}
+
+
+def _worst(states: set, stale: Any = False) -> str:
+    """The worst of some cell states (``stale`` shown over known)."""
+    order = {s_: i for i, s_ in enumerate(STATES)}
+    worst = max(states, key=lambda s_: order.get(s_, 0)) if states else "known"
+    return "stale" if worst == "known" and stale else worst
+
+
+def _is_tool_verb(kind: Any, op_: Any) -> bool:
+    """Does this verb apply a real tool to each row (rather than copy cells)?"""
+    if kind in ("map", "group", "filter", "expand"):
+        return not is_identity(op_.fn or TOOLS.get(op_.tool_id) or BUILTIN_TOOLS.get(op_.tool_id))
+    return False
+
+
+def _source_column(op_: Any, column: Any) -> Any:
+    """The input column a no-tool step copied *column* from (a rename's old name)."""
+    verb = op_.shape_verb
+    if verb is not None and verb.kind == "rename" and isinstance(verb.params.get("columns"), dict):
+        for old, new in verb.params["columns"].items():
+            if new == column:
+                return old
+    return column
+
+
 def _plan_words(plan: dict) -> str:
     """A plan in one line: ``columns city (str), n (int) + maybe more · rows unknown …``."""
     columns, rows_ = plan.get("columns", {}), plan.get("rows", {})
@@ -1505,6 +1592,12 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
     elif by is None:
         groups = [(None, frame)]
     else:
+        if by not in frame.columns:
+            # 010 C23: a step that fails, with the reason — not a bare KeyError.
+            sid = (source.meta.get("step_id") if isinstance(source, Output) else None) or "the input"
+            raise SelectionError(
+                f"collapse groups by {by!r}, which {sid!r} does not have "
+                f"(it has {', '.join(map(str, frame.columns)) or 'no columns'})")
         groups = list(frame.groupby(by, sort=False))
 
     results, keys, records, index = [], [], [], []
@@ -4480,6 +4573,12 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             )
         if operation.tool_id == "join" and not operation.arguments.get("on"):
             problems.append("join needs on= — the key column(s) to merge on")
+        if operation.tool_id == "zip" and workflow is not None:
+            # 010 C22: a column both grids have would keep one silently.
+            clash = _zip_clash([(str(g), workflow._predicted_of(str(g)))
+                                for g in operation.grids])
+            if clash:
+                problems.append(clash)
 
     # The references this operation reads: the grid input(s), plus any argument
     # bound to a step. All are validated the same way.
@@ -4579,6 +4678,18 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                     f"{verb.kind} names {', '.join(map(repr, missing))}, which "
                     f"the input does not have (it has {', '.join(map(str, available))})"
                 )
+
+    # 6b'. collapse(by=…) groups by a column the input must have (010 C23).
+    if (verb is not None and verb.kind == "collapse" and workflow is not None
+            and isinstance(verb.params.get("by"), str)
+            and not workflow._columns_open(operation)):
+        available = workflow._known_columns(operation)
+        by = verb.params["by"]
+        if available and by not in available:
+            upstream_name = str(operation.input) if operation.input is not None else "the input"
+            problems.append(
+                f"collapse groups by {by!r}, which {upstream_name!r} does not have "
+                f"(it has {', '.join(map(str, available))})")
 
     # 6c. a payload column must not silently replace an input column (008
     #     C13). Checked against the columns predicted *present*, which is sound
@@ -5253,12 +5364,24 @@ def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
         out.index = target
         aligned.append(out)
         picked_ids.append(picked)
+    clash = _zip_clash([(names[i], list(f.columns)) for i, f in enumerate(frames)])
+    if clash:
+        raise ValueError(clash)                  # 010 C22: never keep one silently
     data = pd.concat(aligned, axis=1)
-    # A shared column name would appear twice; keep the first (union, first
-    # wins) so the result matches the staged prediction.
-    data = data.loc[:, ~data.columns.duplicated()]
     data.attrs["zip_picked"] = picked_ids        # for carrying each cell's state
     return data
+
+
+def _zip_clash(named: list[tuple[str, list]]) -> str | None:
+    """The first column two zipped grids share, as a problem — or None (010 C22)."""
+    owner: dict = {}
+    for name, columns in named:
+        for c in columns:
+            if c in owner and owner[c] != name:
+                return (f"zip_: {c!r} is in both {owner[c]!r} and {name!r}; rename "
+                        f"one (mod.map(name=…) or mod.rename)")
+            owner.setdefault(c, name)
+    return None
 
 
 def _rows_text(keys: list[str]) -> str:
@@ -5600,8 +5723,10 @@ class Step:
     @property
     def status(self) -> str:
         """A rollup of the cells' states — a step is only as done as its rows."""
+        if self.problems:
+            return "invalid"
         if self.output.meta.get("staged"):
-            return "invalid" if self.problems else "staged"
+            return "staged"
         states = set(self.output.row_states.astype(str))
         if "invalid" in states:
             return "invalid"
@@ -5848,10 +5973,21 @@ class Workflow:
             return
         operation = _attach_bound(operation, self.resources)
         problems = check(operation, self, step_id)
-        self.steps[step_id] = Step(
-            step_id, operation, stage(operation, self, problems), problems,
-            warn(operation, self),
-        )
+        previous = self.steps.get(step_id)
+        staged = stage(operation, self, problems)
+        output = staged
+        if previous is not None and not previous.output.meta.get("staged"):
+            if previous.operation == operation:
+                output = previous.output            # same formula: nothing changed
+            else:
+                # 009: an edited step keeps its old output, shown as
+                # "stale output (updated args)" until it re-runs. The new
+                # formula is still checked; its plan is kept for display.
+                output = Output(previous.output.data, previous.output.states,
+                                {**previous.output.meta, "edited": True,
+                                 "next_plan": staged.meta.get("plan")})
+        self.steps[step_id] = Step(step_id, operation, output, problems,
+                                   warn(operation, self))
         if existed:
             self._mark_stale_dependents(step_id)
         else:
@@ -6019,37 +6155,131 @@ class Workflow:
             stamps[f"res:{name}"] = self._resource_version(name)
         return stamps
 
-    def _refresh_staleness(self) -> None:
-        """Set every run step's ``stale`` from its ``read`` stamps."""
-        memo: dict[str, bool] = {}
+    def _row_reads(self, step: Step) -> dict | None:
+        """``{"step", "columns", "fp": [[row id, hash], …]}`` for a row-aligned step."""
+        op_ = step.operation
+        if is_combine(op_) or op_.input is None or op_.shape_verb is None:
+            return None
+        kind = op_.shape_verb.kind
+        if kind == "auto":
+            kind = (step.output.meta.get("auto") or {}).get("verb")
+        if kind not in ROW_ALIGNED:
+            return None
+        source = str(op_.input)
+        upstream = self.steps.get(source)
+        if upstream is None or upstream.output.meta.get("staged"):
+            return None
+        if _is_tool_verb(kind, op_):
+            columns = self._columns_bound(op_, source, kind)
+        else:
+            columns = list(dict.fromkeys(_source_column(op_, c) for c in step.output.data.columns))
+        columns = [c for c in columns if c in upstream.output.data.columns]
+        return {"step": source, "columns": columns,
+                "fp": [[_plain(i), h] for i, h in _row_fps(upstream.output.data, columns).items()]}
 
-        def stale(sid: str) -> bool:
+    def stale_rows(self, step_id: str) -> list | None:
+        """The rows of a stale step that are out of date — None when all of them are."""
+        meta = self.steps[step_id].output.meta
+        if not meta.get("stale"):
+            return []
+        rows_ = meta.get("stale_rows")
+        return None if rows_ is None else list(rows_)
+
+    def _refresh_staleness(self) -> None:
+        """Set every run step's ``stale``, and a short ``stale_reason``, from its stamps.
+
+        Reasons, shown as *"stale output (<reason>)"*: ``updated args`` (its own
+        formula changed), ``input r changed`` / ``w changed`` (a step it read
+        has new data), ``resource llm changed``, ``r is stale`` (a step it read
+        is itself stale).
+        """
+        memo: dict[str, str | None] = {}
+        partial: dict[str, set | None] = {}         # stale rows; None means all
+
+        def reason(sid: str) -> str | None:
             if sid in memo:
                 return memo[sid]
-            memo[sid] = False                       # a cycle can't make itself stale
-            output = self.steps[sid].output
+            memo[sid] = None                        # a cycle can't make itself stale
+            partial[sid] = None
+            step = self.steps[sid]
+            output = step.output
             if output.meta.get("staged"):
-                return False
+                return None
+            if output.meta.get("edited"):
+                memo[sid] = "updated args"
+                return memo[sid]
             read = output.meta.get("read")
             if read is None:                       # saved before stamps: keep its flag
-                memo[sid] = bool(output.meta.get("stale"))
+                memo[sid] = "an earlier step changed" if output.meta.get("stale") else None
                 return memo[sid]
-            result = False
+            inputs = {str(g) for g in step.operation.grids}
+            row_reads = output.meta.get("row_reads")
+            found, rows_, everything = None, set(), False
             for name, seen in read.items():
                 if name.startswith("res:"):
-                    current = self._resource_version(name[4:])
-                else:
-                    current = self.version(name) if name in self.steps else None
-                    if name in self.steps and stale(name):
-                        result = True
+                    if self._resource_version(name[4:]) != seen:
+                        found, everything = found or f"resource {name[4:]} changed", True
+                    continue
+                current = self.version(name) if name in self.steps else None
+                tracked = row_reads is not None and row_reads.get("step") == name
                 if current != seen:
-                    result = True
-            memo[sid] = result
-            return result
+                    if tracked:
+                        changed = self._changed_rows(row_reads)
+                        if changed is None:
+                            found, everything = found or f"input {name} changed", True
+                        elif changed:
+                            found = found or f"input {name} changed"
+                            rows_ |= changed
+                        continue                    # unread columns changed: not stale
+                    found = found or (f"input {name} changed" if name in inputs
+                                      else f"{name} changed")
+                    everything = True
+                elif name in self.steps and reason(name):
+                    found = found or f"{name} is stale"
+                    upstream_rows = partial.get(name)
+                    if tracked and upstream_rows is not None:
+                        rows_ |= upstream_rows      # row-aligned: the same rows
+                    else:
+                        everything = True
+            memo[sid] = found
+            if found and not everything:
+                ids = set(output.data.index)
+                partial[sid] = {i for i in rows_ if i in ids}
+                if not partial[sid] and not rows_ <= ids:
+                    partial[sid] = None
+            return found
 
         for sid, st in self.steps.items():
-            if not st.output.meta.get("staged") and st.output.meta.get("read") is not None:
-                st.output.meta["stale"] = stale(sid)
+            meta = st.output.meta
+            if meta.get("staged"):
+                continue
+            if meta.get("read") is not None or meta.get("edited"):
+                why = reason(sid)
+                meta["stale"] = why is not None
+                if why:
+                    meta["stale_reason"] = why
+                else:
+                    meta.pop("stale_reason", None)
+                rows_ = partial.get(sid) if why else None
+                if rows_ is not None:
+                    meta["stale_rows"] = [_plain(i) for i in st.output.data.index if i in rows_]
+                else:
+                    meta.pop("stale_rows", None)
+
+    def _changed_rows(self, row_reads: dict) -> set | None:
+        """Input rows whose read columns changed since the run; None if rows came or went."""
+        upstream = self.steps.get(row_reads["step"])
+        if upstream is None or upstream.output.meta.get("staged"):
+            return None
+        before = {k: h for k, h in row_reads["fp"]}
+        columns = [c for c in row_reads["columns"] if c in upstream.output.data.columns]
+        if len(columns) != len(row_reads["columns"]):
+            return None
+        now = _row_fps(upstream.output.data, columns)
+        if {str(k) for k in now} != {str(k) for k in before}:
+            return None
+        by_str = {str(k): v for k, v in before.items()}
+        return {k for k, h in now.items() if by_str[str(k)] != h}
 
     # ── what a step reads ────────────────────────────────────────────────
     def _known_columns(self, operation: Operation) -> list[str]:
@@ -6065,6 +6295,11 @@ class Workflow:
             return False
         step = self.steps.get(str(operation.input))
         return step is not None and columns_unknown(step.output)
+
+    def _predicted_of(self, step_id: str) -> list:
+        """The columns a step is known to have (or will have), [] when it doesn't exist."""
+        step = self.steps.get(step_id)
+        return [] if step is None or not step.valid else predicted_columns(step.output)
 
     def _column_types(self, operation: Operation) -> dict:
         """Column → Python type of this operation's input, as far as known."""
@@ -6142,6 +6377,15 @@ class Workflow:
         names = list(plan.get("columns", {}).get("names", []))
         columns = [{"name": c, "type": types.get(c, "any")} for c in names]
         markers = _plan_markers(plan, step_id)
+        if out.meta.get("stale"):
+            label = f"stale output ({out.meta.get('stale_reason') or 'an earlier step changed'})"
+            summary["stale"] = label
+            changes = self.arg_changes(step_id)
+            if changes:
+                summary["computed_with"] = f"values below were computed with {_changes_text(changes)}"
+                summary["changed"] = changes
+            markers.insert(0, {"kind": "stale", "text": label,
+                               "because": label, "resolve": [f"run {step_id!r}"]})
         all_rows = self._preview_rows(step, staged, names, types)
         lo, hi = (rows if rows is not None else (0, len(all_rows)))
         return {**summary, "columns": columns, "rows": all_rows[lo:hi],
@@ -6152,10 +6396,13 @@ class Workflow:
     def _preview_rows(self, step: Step, staged: bool, names: list, types: dict) -> list[dict]:
         out = step.output
         if not staged:
-            stale = bool(out.meta.get("stale"))
+            step_stale = bool(out.meta.get("stale"))
+            stale_rows = out.meta.get("stale_rows")
+            stale_set = set(map(str, stale_rows)) if stale_rows is not None else None
             row_states = out.row_states
             result = []
             for position, row_id in enumerate(out.data.index):
+                stale = step_stale and (stale_set is None or str(row_id) in stale_set)
                 note = out.notes.get(row_id, {})
                 cells = {}
                 for c in out.data.columns:
@@ -6217,9 +6464,19 @@ class Workflow:
             entry = rows_[row]
             cell = {**base, "id": entry["id"], **entry["cells"].get(column, {"state": entry["state"]}),
                     "type": type_}
-            cell["inputs"] = self._cell_inputs(step_id, entry["id"])
+            cell["inputs"] = self._cell_inputs(step_id, entry["id"], column)
             if cell["state"] == "stale":
-                cell["because"] = "a step it read has changed since it ran"
+                out_meta = self.steps[step_id].output.meta
+                changes = self.arg_changes(step_id)
+                if changes:
+                    # The value was computed with the old arguments, not the
+                    # ones the formula shows now — say which.
+                    cell["computed_with"] = dict(out_meta["ran_with"].get("arguments", {}))
+                    cell["changed"] = changes
+                    cell["because"] = f"stale output · computed with {_changes_text(changes)}"
+                else:
+                    cell["because"] = (f"stale output "
+                                       f"({out_meta.get('stale_reason') or 'an earlier step changed'})")
             return cell
         row_plan = view["row_count"] or {}
         if row_plan.get("certainty") == "exact" or not self.steps[step_id].output.meta.get("staged"):
@@ -6230,22 +6487,188 @@ class Workflow:
                 "because": row_plan.get("because", "its row count isn't known yet"),
                 "resolve": row_plan.get("resolve", [])}
 
-    def _cell_inputs(self, step_id: str, row_id: Any) -> list[dict]:
-        """The input cells a result row came from: the same id, or its parent's."""
-        op_ = self.steps[step_id].operation
-        found = []
-        for g in op_.grids:
-            upstream = self.steps.get(str(g))
-            if upstream is None or upstream.output.meta.get("staged"):
-                found.append({"step": str(g), "id": None, "state": "staged"})
+    def arg_changes(self, step_id: str) -> list[dict]:
+        """How a step's arguments differ from the ones its output was computed with.
+
+        ``[{"name": "weight", "was": "1.5", "now": "2.0"}]`` — empty when the
+        output is current. A change to the orchestration rather than an
+        argument comes back as ``{"name": "formula", "was": …, "now": …}``. An
+        argument that wasn't given shows the tool's default it ran with
+        (``was_default``); one removed since shows the default it now gets.
+        """
+        step = self.steps[step_id]
+        ran = step.output.meta.get("ran_with")
+        if not ran or not step.output.meta.get("edited"):
+            return []
+        now = _ran_with(step.operation)
+        was_args, now_args = ran.get("arguments", {}), now["arguments"]
+        fn = step.operation.fn or TOOLS.get(step.operation.tool_id)
+        try:
+            defaults = {k: p.default for k, p in _signature(fn).parameters.items()
+                        if p.default is not inspect.Parameter.empty} if fn else {}
+        except (TypeError, ValueError):
+            defaults = {}
+        changes = []
+        for k in dict.fromkeys([*was_args, *now_args]):
+            if was_args.get(k) == now_args.get(k):
                 continue
-            lookup = _row_lookup(upstream.output.data)
-            key = str(row_id)
-            match = key if key in lookup else next(
-                (a for a in _ancestors(key) if a in lookup), None)
-            found.append({"step": str(g), "id": _plain(lookup[match]) if match else None,
-                          "state": upstream.status})
-        return found
+            change = {"name": k, "was": was_args.get(k), "now": now_args.get(k)}
+            # An argument that wasn't given ran with the tool's default: say so.
+            if change["was"] is None and k in defaults:
+                change["was"], change["was_default"] = _src(defaults[k]), True
+            if change["now"] is None and k in defaults:
+                change["now"], change["now_default"] = _src(defaults[k]), True
+            changes.append(change)
+        if not changes and ran.get("formula") != now["formula"]:
+            changes = [{"name": "formula", "was": ran.get("formula"), "now": now["formula"]}]
+        return changes
+
+    #: How many of an input row's values a cell click shows; the rest are counted.
+    INPUT_VALUES_SHOWN = 6
+
+    def _cell_inputs(self, step_id: str, row_id: Any, column: str | None = None) -> list[dict]:
+        """Every input cell a result cell came from, one entry per binding (010 C27).
+
+        Each entry: ``step``, ``id`` (or ``rows`` for several), ``columns`` read,
+        the ``argument`` they were bound to (``None`` when a step copies the
+        cell without a tool), their cell ``state`` (``known``, ``failed``,
+        ``pending``, ``stale`` … — 010 C24) and their ``values``. Nothing is
+        stored for this: it's worked out from row ids and the step's formula.
+        """
+        step = self.steps[step_id]
+        op_ = step.operation
+        kind = op_.shape_verb.kind if op_.shape_verb else None
+        if kind == "auto":
+            kind = (step.output.meta.get("auto") or {}).get("verb", "map")
+        entries: list[dict] = []
+
+        if is_combine(op_):
+            if op_.tool_id == "zip":
+                for g in op_.grids:
+                    if column in self._predicted_of(str(g)):
+                        entries.append(self._input_entry(str(g), row_id, [column], None))
+                        break
+            else:
+                entries += [{"step": str(g), "id": None, "columns": [], "argument": None,
+                             "state": "unknown", "values": {},
+                             "because": f"{op_.tool_id} doesn't keep row links yet"}
+                            for g in op_.grids]
+            return entries
+
+        if op_.input is not None:
+            source = str(op_.input)
+            if kind == "collapse":
+                members = (step.output.notes.get(row_id) or {}).get("unit")
+                rows_ = members if isinstance(members, list) else None
+                for param in self._columns_bound(op_, source, kind):
+                    entries.append(self._input_entry(source, None, [param], param, rows_=rows_))
+            elif kind == "table":
+                entries.append({"step": source, "id": None, "rows": "all", "columns": [],
+                                "argument": self._first_param(op_), "state":
+                                self._grid_state(source), "values": {}})
+            elif _is_tool_verb(kind, op_):
+                for param in self._columns_bound(op_, source, kind):
+                    entries.append(self._input_entry(source, row_id, [param], param))
+            else:
+                # No tool: the cell is a copy of the input's (renamed, perhaps).
+                entries.append(self._input_entry(source, row_id,
+                                                 [_source_column(op_, column)], None))
+
+        for name, value in op_.arguments.items():
+            if isinstance(value, StepRef):
+                entries.append(self._reference_entry(value, name))
+            elif isinstance(value, ResRef):
+                entries.append({"resource": value.name, "argument": name,
+                                "state": "loaded at run"})
+        for m in op_.modifiers:
+            for name, value in m.params.items():
+                if isinstance(value, StepRef):
+                    entries.append(self._reference_entry(value, f"{m.kind}.{name}"))
+        return entries
+
+    def _columns_bound(self, op_: Operation, source: str, kind: str) -> list[str]:
+        """The input columns a tool reads: its parameters the input supplies by name."""
+        fn = op_.fn or TOOLS.get(op_.tool_id) or BUILTIN_TOOLS.get(op_.tool_id)
+        columns = self._predicted_of(source)
+        try:
+            parameters = list(_signature(fn).parameters.values()) if fn else []
+        except (TypeError, ValueError):
+            parameters = []
+        if kind == "collapse":
+            parameters = parameters[1:]              # the accumulator
+        if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
+            return [c for c in columns if c not in op_.arguments]      # the whole row
+        return [p.name for p in parameters
+                if p.name in columns and p.name not in op_.arguments]
+
+    @staticmethod
+    def _first_param(op_: Operation) -> str | None:
+        fn = op_.fn or TOOLS.get(op_.tool_id)
+        try:
+            return next(iter(_signature(fn).parameters), None) if fn else None
+        except (TypeError, ValueError):
+            return None
+
+    def _grid_state(self, step_id: str) -> str:
+        step = self.steps.get(step_id)
+        if step is None:
+            return "missing"
+        if step.output.meta.get("staged"):
+            return "pending"
+        worst = str(step.output.row_states.max()) if len(step.output.data) else "known"
+        return "stale" if worst == "known" and step.output.meta.get("stale") else worst
+
+    def _input_entry(self, source: str, row_id: Any, columns: list, argument: Any,
+                     rows_: list | None = None) -> dict:
+        """One binding to rows of *source*: the row (or its parent), its state, its values."""
+        entry = {"step": source, "id": None, "columns": [c for c in columns if c is not None],
+                 "argument": argument}
+        upstream = self.steps.get(source)
+        if upstream is None or upstream.output.meta.get("staged"):
+            return {**entry, "state": "pending", "values": {}}
+        out = upstream.output
+        if rows_ is not None:
+            ids = [i for i in rows_ if i in out.data.index]
+            states = {str(out.states.at[i, c]) for i in ids for c in entry["columns"]
+                      if c in out.states.columns}
+            return {**entry, "rows": [_plain(i) for i in ids],
+                    "state": _worst(states, out.meta.get("stale")), "values": {}}
+        lookup = _row_lookup(out.data)
+        key = str(row_id)
+        match = key if key in lookup else next((a for a in _ancestors(key) if a in lookup), None)
+        if match is None:
+            return {**entry, "state": "missing", "values": {}}
+        input_id = lookup[match]
+        cols_ = [c for c in entry["columns"] if c in out.data.columns]
+        states = {str(out.states.at[input_id, c]) for c in cols_} or {str(out.row_states[input_id])}
+        shown = cols_[:self.INPUT_VALUES_SHOWN]
+        return {**entry, "id": _plain(input_id), "state": _worst(states, out.meta.get("stale")),
+                "values": {str(c): _plain(out.data.at[input_id, c]) for c in shown},
+                "more": len(cols_) - len(shown)}
+
+    def _reference_entry(self, ref: StepRef, argument: str) -> dict:
+        """A ``$ref`` argument or setting: the cells it selects from its step."""
+        upstream = self.steps.get(ref.id)
+        if upstream is None or upstream.output.meta.get("staged"):
+            return {"step": ref.id, "id": None, "columns": [], "argument": argument,
+                    "state": "pending", "values": {}}
+        out = upstream.output
+        try:
+            block = _apply_selection(out.data, ref.rows, ref.columns, ref.id)
+        except SelectionError as exc:
+            return {"step": ref.id, "id": None, "columns": [], "argument": argument,
+                    "state": "missing", "values": {}, "because": str(exc)}
+        ids, cols_ = list(block.index), [str(c) for c in block.columns]
+        states = {str(out.states.at[i, c]) for i in ids for c in cols_}
+        entry = {"step": ref.id, "columns": cols_, "argument": argument,
+                 "state": _worst(states, out.meta.get("stale"))}
+        if len(ids) == 1:
+            row = ids[0]
+            entry.update({"id": _plain(row),
+                          "values": {c: _plain(block.at[row, c]) for c in cols_[:self.INPUT_VALUES_SHOWN]}})
+        else:
+            entry.update({"id": None, "rows": [_plain(i) for i in ids], "values": {}})
+        return entry
 
     def _carry_zip_states(self, step: Step) -> None:
         """Give a zip's cells the states of the cells they came from (009 §2).
@@ -6400,6 +6823,14 @@ class Workflow:
             if not (step.operation.shape_verb and step.operation.shape_verb.kind == "source"
                     and is_identity(step.operation.fn)):
                 out.meta["read"] = read
+            # What these values were computed with, so a stale value can say so
+            # once the arguments are edited (009): one record per step.
+            out.meta["ran_with"] = _ran_with(step.operation)
+            # 010 C25: for row-aligned steps, a hash of each input row's read
+            # columns, so editing one row makes only its cells stale.
+            row_reads = self._row_reads(step)
+            if row_reads is not None:
+                out.meta["row_reads"] = row_reads
             out.meta.pop("stale", None)
         self._mark_stale_dependents(step_id)
         return result

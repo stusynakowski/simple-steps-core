@@ -926,9 +926,11 @@ def test_009_zip_after_a_sort_pairs_by_id_not_position(r3):
 
 
 def test_009_zip_never_drops_a_row(r3):
-    r3["kept"] = mod.slice(stop=2)(r3["r"])                 # rows 0, 1 of 0, 1, 2
+    r3["head"] = mod.slice(stop=2)(r3["r"])                 # rows 0, 1 of 0, 1, 2
+    r3["kept"] = neg_009[mod.map()](r3["head"])             # its own column: value
     r3["short_first"] = zip_(r3["kept"], r3["r"])
     r3["long_first"] = zip_(r3["r"], r3["kept"])
+    r3.run("head")
     r3.run("kept")
     r3.run("short_first")
     r3.run("long_first")
@@ -1243,7 +1245,9 @@ def test_009_clicking_a_cell_says_what_is_there_or_expected(unrun):
     unrun.run("s")
     known = unrun.cell("s", 1, "value")
     assert (known["state"], known["value"]) == ("known", 3.0)
-    assert known["inputs"] == [{"step": "r", "id": 1, "state": "completed"}]
+    # 010 C27: one entry per binding — the column read and the argument it fed
+    assert known["inputs"] == [{"step": "r", "id": 1, "columns": ["n"], "argument": "n",
+                                "state": "known", "values": {"n": 2}, "more": 0}]
     assert unrun.cell("s", 9, "value")["because"] == "row 9 of 's', which has 2 rows (0–1)"
     assert unrun.cell("s", 0, "nope")["state"] == "missing"
 
@@ -1303,3 +1307,249 @@ def test_009_states_and_notes_survive_a_saved_session(failing):
     out = back.step("a").output
     assert list(out.row_states) == ["known", "failed", "known"]
     assert out.notes == {1: {"error": "ValueError: boom", "caught": True}}   # id stays an int
+
+
+
+def test_009_a_cell_shows_the_input_values_that_produced_it(failing):
+    """009: clicking a cell names its input row and that row's values — looked
+    up from the row id, never stored per cell."""
+    failing.run_all()
+    failed = failing.cell("a", 1, "value")
+    assert failed["inputs"] == [{"step": "r", "id": 1, "columns": ["n"], "argument": "n",
+                                 "state": "known", "values": {"n": 2}, "more": 0}]   # n = 2 raised
+    assert "inputs" not in failing.step("a").output.meta                # nothing stored
+    failing["view"] = zip_(failing["r"], failing["a"])
+    failing.run("view")
+    # a zip cell comes from the one input that supplied its column
+    assert [(i["step"], i["id"], i["state"]) for i in failing.cell("view", 1, "value")["inputs"]] == [
+        ("a", 1, "failed")]
+    assert [(i["step"], i["id"]) for i in failing.cell("view", 1, "n")["inputs"]] == [("r", 1)]
+
+
+def test_009_an_expanded_item_points_to_its_parent_row(r3):
+    r3["items"] = fan_ids_009[mod.expand()](r3["r"])
+    r3.run_all()
+    cell = r3.cell("items", 2, "value")                                   # id "1.1"
+    assert cell["id"] == "1.1"
+    assert cell["inputs"][0]["id"] == 1 and cell["inputs"][0]["values"] == {"n": 2}
+
+
+def test_009_wide_input_rows_show_a_few_values_and_count_the_rest():
+    @tool
+    def width_010(**row) -> int:                  # reads the whole row
+        return len(row)
+
+    w = Workflow()
+    w["r"] = pd.DataFrame({f"c{i}": [i] for i in range(9)})
+    w["s"] = width_010[mod.map()](w["r"])
+    w["one"] = op("identity")[mod.select(columns=["c0"])](w["r"])
+    w.run_all()
+    inputs = w.cell("s", 0, "value")["inputs"]
+    assert len(inputs) == 9                       # one binding per column read
+    copied = w.cell("one", 0, "c0")["inputs"]
+    assert copied == [{"step": "r", "id": 0, "columns": ["c0"], "argument": None,
+                       "state": "known", "values": {"c0": 0}, "more": 0}]
+
+
+
+# ── 009: a stale value says what it was computed with ───────────────────
+@tool
+def weigh_009(n: int, weight: float = 1.0) -> float:
+    return n * weight
+
+
+def test_009_a_stale_value_says_it_was_computed_with_the_old_arguments():
+    w = Workflow()
+    w["r"] = pd.DataFrame({"n": [1, 2]})
+    w["s"] = weigh_009[mod.map()](w["r"], weight=1.5)
+    w.run_all()
+    assert w.arg_changes("s") == []
+    w["s"] = weigh_009[mod.map()](w["r"], weight=2.0)          # edit the argument
+    assert w.arg_changes("s") == [{"name": "weight", "was": "1.5", "now": "2.0"}]
+    cell = w.cell("s", 1, "value")
+    assert (cell["state"], cell["value"]) == ("stale", 3.0)     # 2 × 1.5, the old value
+    assert cell["because"] == "stale output · computed with weight=1.5 (now 2.0)"
+    assert cell["computed_with"] == {"weight": "1.5"}
+    view = w.preview("s")
+    assert view["computed_with"] == "values below were computed with weight=1.5 (now 2.0)"
+    w.run("s")
+    assert w.arg_changes("s") == [] and w.cell("s", 1, "value")["value"] == 4.0
+
+
+def test_009_an_added_argument_and_a_changed_orchestration_are_named():
+    w = Workflow()
+    w["r"] = pd.DataFrame({"n": [1]})
+    w["s"] = weigh_009[mod.map()](w["r"])
+    w.run_all()
+    w["s"] = weigh_009[mod.map()](w["r"], weight=3.0)
+    assert w.arg_changes("s") == [{"name": "weight", "was": "1.0", "now": "3.0",
+                                   "was_default": True}]
+    assert w.cell("s", 0, "value")["because"] == (
+        "stale output · computed with weight=1.0, the default (now 3.0)")
+    w.run("s")
+    w["s"] = weigh_009[mod.map(), mod.retry(times=2)](w["r"], weight=3.0)
+    change = w.arg_changes("s")[0]
+    assert change["name"] == "formula" and "mod.retry(times=2)" in change["now"]
+
+
+def test_009_a_stale_value_from_an_upstream_change_doesnt_claim_new_arguments():
+    w = Workflow()
+    w["r"] = pd.DataFrame({"n": [1]})
+    w["s"] = weigh_009[mod.map()](w["r"], weight=2.0)
+    w.run_all()
+    w["r"] = pd.DataFrame({"n": [5]})
+    cell = w.cell("s", 0, "value")
+    assert cell["because"] == "stale output (input r changed)" and "changed" not in cell
+
+
+
+# ── 010: the app's asks at b9f66d5 ──────────────────────────────────────
+@tool
+def double_n_010(n: int) -> int:
+    return n * 2
+
+
+@tool
+def add_total_010(acc, value: float) -> float:
+    return (acc or 0) + value
+
+
+@tool
+def load_010(path: str) -> pd.DataFrame:
+    return pd.DataFrame({"n": [1, 2]})
+
+
+def test_C22_zip_refuses_a_column_both_grids_have():
+    w = Workflow()
+    w["r"] = pd.DataFrame({"city": ["SF", "NYC", "LA"], "n": [1, 0, 2]})
+    w["d"] = double_n_010[mod.map(name="n")](w["r"])
+    w["z"] = zip_(w["r"], w["d"])
+    assert w.step("z").problems == (
+        "zip_: 'n' is in both 'r' and 'd'; rename one (mod.map(name=…) or mod.rename)",)
+    with pytest.raises(ValueError, match="is invalid and cannot run"):
+        w.run("z")
+
+
+def test_C22_zip_columns_known_only_at_run_are_checked_then():
+    w = Workflow()
+    w["src"] = load_010[mod.source()](path="x")
+    w["d"] = double_n_010[mod.map(name="n")](w["src"])
+    w["z"] = zip_(w["src"], w["d"])
+    assert w.step("z").problems == ()                       # src's columns not known yet
+    w.run("src")
+    assert "'n' is in both 'src' and 'd'" in w.step("z").problems[0]   # re-checked
+    w2 = Workflow()
+    w2["a"] = pd.DataFrame({"n": [1]})
+    w2["b"] = pd.DataFrame({"n": [2]})
+    frames = [w2.step("a").output.data.copy(), w2.step("b").output.data.copy()]
+    frames[0].attrs["step_id"], frames[1].attrs["step_id"] = "a", "b"
+    with pytest.raises(ValueError, match="'n' is in both 'a' and 'b'"):
+        grid._combine_zip(frames, {})                       # the run-time guard
+
+
+def test_C23_collapse_by_a_missing_column_is_refused():
+    w = Workflow()
+    w["r"] = pd.DataFrame({"city": ["SF", "NYC"], "n": [1, 2]})
+    w["s"] = scale_008[mod.map()](w["r"])                   # only `value`
+    w["c"] = add_total_010[mod.collapse(by="city", initial=0)](w["s"])
+    assert w.step("c").problems == (
+        "collapse groups by 'city', which 's' does not have (it has value)",)
+
+
+def test_C23_the_run_time_guard_fails_the_step():
+    with pytest.raises(grid.SelectionError, match="collapse groups by 'city'"):
+        grid.collapse_(grid.grid(pd.DataFrame({"n": [1]})), lambda acc, row: acc, by="city")
+
+
+
+def test_C27_every_input_cell_is_named_with_its_argument():
+    w = Workflow()
+    w["r"] = pd.DataFrame({"city": ["SF", "NYC", "LA"], "n": [1, 2, 3]})
+    w["w"] = pd.DataFrame({"w": [1.5]})
+    w["s"] = scale_008[mod.map()](w["r"], weight=w["w"][0][cols["w"]])
+    w.run("s")
+    assert w.cell("s", 1, "value")["inputs"] == [
+        {"step": "r", "id": 1, "columns": ["n"], "argument": "n", "state": "known",
+         "values": {"n": 2}, "more": 0},
+        {"step": "w", "id": 0, "columns": ["w"], "argument": "weight", "state": "known",
+         "values": {"w": 1.5}},
+    ]
+
+
+def test_C27_settings_resources_and_group_rows_are_named_too(wf):
+    wf["cfg"] = ["n"]
+    wf["sel"] = op("identity")[mod.select(columns=wf["cfg"])](wf["readings"])
+    wf["g"] = mod.rename(columns={"n": "count"})(wf["readings"])
+    wf.run_all()
+    sel = wf.cell("sel", 0, "n")["inputs"]
+    assert [i["argument"] for i in sel] == [None, "select.columns"]
+    assert sel[1]["step"] == "cfg"
+    assert wf.cell("g", 0, "count")["inputs"][0]["columns"] == ["n"]   # renamed from n
+    total = add_008[mod.collapse(initial=0)](wf["readings"])
+    wf["t"] = total
+    wf.run("t")
+    rows_ = wf.cell("t", 0, "value")["inputs"][0]
+    assert rows_["argument"] == "n" and rows_["rows"] == [0, 1, 2, 3]
+
+
+def test_C24_input_states_are_cell_states(failing):
+    failing["b"] = plus1_008[mod.map()](failing["a"])
+    failing.run_all()
+    states = {i["state"] for r in (0, 1, 2) for i in failing.cell("b", r, "value")["inputs"]}
+    assert states <= set(grid.STATES) | {"stale", "pending", "missing", "unknown"}
+    assert failing.cell("b", 1, "value")["inputs"][0]["state"] == "failed"
+
+
+
+def test_C21_whether_an_output_stops_a_run_is_public(failing, spent):
+    failing.run_all()                                   # a has try_except: caught
+    assert failing.step("a").output.uncaught == [] and not failing.step("a").output.stops_run
+    w = Workflow()
+    w["r"] = pd.DataFrame({"n": [1, -1, -1, -1, -1, -1, -1]})
+    w["x"] = flaky_009(w["r"])                          # auto: breaker stops after 5
+    w.run("x")
+    out = w.step("x").output
+    assert out.stops_run and out.uncaught == [1, 2, 3, 4, 5, 6]     # a breaker stop counts
+    w["y"] = op("identity")[mod.select(columns=["value"])](w["x"])
+    w.run("y")
+    assert w.step("y").output.uncaught == []            # blocked, not its own failure
+
+
+@pytest.fixture()
+def rows3():
+    w = Workflow()
+    w["r"] = pd.DataFrame({"city": ["SF", "NYC", "LA"], "n": [1, 2, 3]})
+    w["s"] = scale_008[mod.map()](w["r"])                   # reads n only
+    w["t"] = mod.select(columns=["value"])(w["s"])
+    w.run_all()
+    return w
+
+
+def test_C25_editing_one_input_row_makes_only_its_cells_stale(rows3):
+    rows3["r"] = pd.DataFrame({"city": ["SF", "NYC", "LA"], "n": [1, 20, 3]})
+    assert rows3.step("s").status == "stale"
+    assert rows3.stale_rows("s") == [1] and rows3.stale_rows("t") == [1]    # flows on
+    assert [r["state"] for r in rows3.preview("s")["rows"]] == ["known", "stale", "known"]
+    assert rows3.cell("s", 0, "value")["state"] == "known"
+    assert list(rows3.step("s").output.view()["state"]) == ["known", "stale", "known"]
+
+
+def test_C25_an_unread_column_changing_leaves_it_fresh(rows3):
+    rows3["r"] = pd.DataFrame({"city": ["SF", "BOS", "LA"], "n": [1, 2, 3]})
+    assert rows3.step("s").status == "completed" and rows3.stale_rows("s") == []
+
+
+def test_C25_rows_added_or_an_argument_change_make_every_row_stale(rows3):
+    rows3["r"] = pd.DataFrame({"city": ["SF", "NYC", "LA", "SEA"], "n": [1, 2, 3, 4]})
+    assert rows3.stale_rows("s") is None
+    rows3.run_all()
+    rows3["s"] = scale_008[mod.map()](rows3["r"], weight=2)
+    assert rows3.stale_rows("s") is None
+
+
+def test_C25_row_staleness_survives_a_saved_session(rows3):
+    rows3["r"] = pd.DataFrame({"city": ["SF", "NYC", "LA"], "n": [1, 20, 3]})
+    back = Workflow.from_json(rows3.to_session_json(), grid.TOOLS)
+    assert back.stale_rows("s") == [1]
+    back.run_all()
+    assert back.stale_rows("s") == [] and back.step("s").output.values == [10, 200, 30]

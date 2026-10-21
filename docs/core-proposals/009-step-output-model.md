@@ -1,5 +1,7 @@
 # 009 — The step output model: results, status, and references by index
 
+> **Parked concerns:** see [009-open-concerns.md](009-open-concerns.md) (seeing inputs without distraction, stale values vs. edited arguments, greys, whether a re-run is needed, lazy compute).
+
 > **Status: seven decisions made (§8), four recommended.** Written 2026-10-21 from the owner's
 > notes on the interactive UI and step sessions. Supersedes the open
 > questions in [008-row-ids-issue.md](008-row-ids-issue.md), and builds on
@@ -11,9 +13,9 @@
 - **Committed:** `9a86a0d` ("updated phase 5"). The accidental commit is the
   phase 5 work (C3, K12, M, P, N, C12), complete and tested. The app is
   already pinned to it. Nothing half-done went in.
-- **Uncommitted:** "a step that computes is only its results" (`map`,
-  `group`, `expand`), expand's derived row ids, and `zip_` by id. Whether to
-  keep these is decided by this doc.
+- **Since then:** all of 009 (steps 1–4b below) is committed in `b9f66d5`.
+  The app's follow-up asks are [010-core-asks.md](010-core-asks.md), answered
+  in [010-status.md](010-status.md).
 
 ---
 
@@ -308,11 +310,12 @@ one per row. Undo it per step by removing it, or with `mod.breaker(after=None)`
 
 | Step | What | Status |
 |---|---|---|
-| 1 | Strict `zip_`; results-only steps and expand's derived ids, with tests | **done** (2026-10-21), uncommitted |
-| 2 | Hash versions and `read` stamps | **done** (2026-10-21), uncommitted |
-| 3 | Auto: breaker, implicit `mod.auto()`, direct calls, the setting | **done** (2026-10-21), uncommitted |
-| 4 | `wf.preview` and `wf.cell`: known unknowns shown | **done** (2026-10-21), uncommitted |
-| 4b | **Output = data, states, meta** (owner, 2026-10-21); the ledger removed | **done** (2026-10-21), uncommitted |
+| 1 | Strict `zip_`; results-only steps and expand's derived ids, with tests | **done** (`b9f66d5`) |
+| 2 | Hash versions and `read` stamps | **done** (`b9f66d5`) |
+| 3 | Auto: breaker, implicit `mod.auto()`, direct calls, the setting | **done** (`b9f66d5`) |
+| 4 | `wf.preview` and `wf.cell`: known unknowns shown | **done** (`b9f66d5`) |
+| 4b | **Output = data, states, meta** (owner, 2026-10-21); the ledger removed | **done** (`b9f66d5`) |
+| 7 | Per-cell staleness (010 C25) | **done** for row-aligned steps (uncommitted, see 010-status) |
 | 5–7 | "if present" selection steps, `step.references()`, cell-level fingerprints | next |
 
 **Step 1, as built:**
