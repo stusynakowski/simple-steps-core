@@ -29,10 +29,13 @@ def test_source_is_a_grid_of_rows(wf):
 
 
 # ── map: n -> n, input columns carried through plus a payload ───────────
-def test_map_adds_a_payload_column_and_keeps_the_rest(wf):
-    scored = wf.step("scored").output
-    assert scored.values == [10, 20, 30, 20]
-    assert list(scored.data.columns) == ["city", "n", "score"]
+def test_map_is_only_its_results_and_zip_puts_them_beside_the_input(wf):
+    score = wf.step("score").output
+    assert score.values == [10, 20, 30, 20]
+    assert list(score.data.columns) == ["score"]          # no input columns
+    assert list(score.data.index) == [0, 1, 2, 3]         # the input's row ids
+    scored = wf.step("scored").output.data
+    assert list(scored.columns) == ["city", "n", "score"]
 
 
 # ── row-axis reshapers (no tool) ────────────────────────────────────────
@@ -113,7 +116,9 @@ def test_execution_modifiers_do_not_change_the_result(wf):
 
 # ── verb inference: passing a reference picks the shape verb ─────────────
 def _inferred_kind(wf, sid):
-    return wf.step(sid).operation.to_dict()["modifiers"][0]["kind"]
+    # 009: the step saves mod.auto(); the verb it ran as is recorded on its output
+    assert wf.step(sid).operation.to_dict()["modifiers"][-1]["kind"] == "auto"
+    return wf.step(sid).output.meta["auto"]["verb"]
 
 
 def test_passing_a_reference_infers_the_verb(wf):
@@ -239,7 +244,8 @@ def test_T1_2_unbound_tool_takes_the_llm(res_run):
 def test_T1_3_T1_4_a_resource_is_not_a_column_and_declares_without_the_object():
     wf = pipeline.build_resources()          # nothing loaded, nothing run
     assert all(p == () for p in wf.validate().values())
-    assert pipeline.grid.predicted_columns(wf.step("summaries").output) == ["text", "value"]
+    # a map step is only its results
+    assert pipeline.grid.predicted_columns(wf.step("summaries").output) == ["value"]
 
 
 def test_T1_5_running_without_the_resource_is_a_clear_problem():

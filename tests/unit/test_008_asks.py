@@ -55,14 +55,16 @@ def wf():
 def test_K1_an_unrun_source_defers_column_checks_then_checks_them():
     w = Workflow()
     w["readings"] = to_rows_008.bind(data=DATA)[mod.source()]
-    w["scored"] = scale_008[mod.map(name="score")](w["readings"])
-    w["picked"] = mod.select(over=w["scored"], columns=["city", "score"])
-    w["typo"] = mod.select(over=w["scored"], columns=["cty"])
+    # slice carries its input's columns, so it inherits "not known yet".
+    # (A map step is only its results, so its columns are always known.)
+    w["head"] = mod.slice(stop=4)(w["readings"])
+    w["picked"] = mod.select(over=w["head"], columns=["city", "n"])
+    w["typo"] = mod.select(over=w["head"], columns=["cty"])
     assert w.step("picked").problems == () and w.step("typo").problems == ()
-    assert grid.columns_unknown(w.step("scored").output)
+    assert grid.columns_unknown(w.step("head").output)
     w.run_all()
     assert w.step("picked").output.data.to_dict("list") == {
-        "city": ["SF", "NYC", "SF", "LA"], "score": [10, 20, 30, 20]}
+        "city": ["SF", "NYC", "SF", "LA"], "n": [1, 2, 3, 2]}
     # the deferred check is decided once the source has run — a real typo fails
     assert "names 'cty'" in w.step("typo").problems[0]
 
@@ -78,7 +80,7 @@ def test_K2_inference_does_not_depend_on_run_state(wf):
     unrun = Workflow()
     unrun["readings"] = to_rows_008.bind(data=DATA)[mod.source()]
     unrun["x"] = add_008(unrun["readings"])
-    kinds = [w.step("x").operation.shape_verb.kind for w in (wf, unrun)]
+    kinds = [w.step("x").output.meta["auto"]["verb"] for w in (wf, unrun)]
     assert kinds == ["collapse", "collapse"]
 
 
@@ -110,21 +112,21 @@ def test_N2_an_explicit_argument_beats_a_same_named_column_with_a_warning(wf):
     assert not any("overrides" in w for w in wf.step("y").warnings)
 
 
-def test_C13_an_explicit_name_cannot_silently_replace_a_column(wf):
-    wf["x"] = dbl_008[mod.map(name="n")](wf["readings"])
-    assert wf.step("x").problems == (
-        "map writes 'n', which readings already has; choose another name "
-        "(name=…), or say replace=True",)
-    wf["y"] = dbl_008[mod.map(name="n", replace=True)](wf["readings"])
-    wf.run("y")
-    assert list(wf.step("y").output.data["n"]) == [2, 4, 6, 4]
-
-
-def test_C13_the_default_payload_overwriting_is_a_warning_not_a_problem(wf):
-    wf["a"] = scale_008[mod.map()](wf["readings"])
-    wf["b"] = scale_008[mod.map()](wf["a"])                # a has `value` already
-    assert wf.step("b").problems == ()
-    assert any("writes 'value' over" in w for w in wf.step("b").warnings)
+def test_C13_a_step_that_computes_is_only_its_results(wf):
+    """Owner decision (2026-10-20): map, group and expand output only what the
+    tool produced, so no output can replace an input column — C13's problem
+    can't arise. `replace=` is still accepted (saved files carry it)."""
+    @tool
+    def twice_008(n) -> list:
+        return [n, n]
+    wf["m"] = dbl_008[mod.map(name="n")](wf["readings"])
+    wf["g"] = dbl_008[mod.group(name="n", replace=True)](wf["readings"])
+    wf["e"] = twice_008[mod.expand()](wf["readings"])
+    wf.run_all()
+    for sid, column in (("m", "n"), ("g", "n"), ("e", "value")):
+        assert wf.step(sid).problems == ()
+        assert list(wf.step(sid).output.data.columns) == [column], sid
+    assert list(wf.step("readings").output.data["n"]) == [1, 2, 3, 2]   # untouched
 
 
 # ── Priority 2 / 3 ───────────────────────────────────────────────────────
@@ -284,7 +286,7 @@ def test_R8_C10_a_failed_cell_keeps_the_type_and_blocks_its_row(failing):
 
 def test_C10_the_root_cause_travels_through_every_verb(failing):
     failing["kept"] = is_pos_008[mod.filter()](failing["a"])
-    failing["ordered"] = mod.sort(by="n", ascending=False)(failing["a"])
+    failing["ordered"] = mod.sort(by="value", ascending=False)(failing["a"])
     failing["sum"] = total_008[mod.collapse(initial=0)](failing["a"])
     failing["again"] = plus1_008[mod.map()](failing["kept"])
     failing.run_all()
@@ -309,11 +311,16 @@ def test_C10_an_argument_with_a_failed_cell_blocks_every_row(failing):
     assert set(failing.step("u").output.ledger["cause"]) == {"a[1]: ValueError: boom"}
 
 
-def test_C10_rerunning_the_root_marks_what_it_blocked_stale(failing):
+def test_C10_fixing_the_root_marks_what_it_blocked_stale(failing):
+    """009 decision 3: stale means an input's data really changed."""
     failing["b"] = plus1_008[mod.map()](failing["a"])
     failing.run_all()
-    failing.run("a")
+    failing.run("a")                                   # same result: still fresh
+    assert failing.step("b").status != "stale"
+    failing["a"] = risky_008[mod.map(), mod.try_except(default=0)](failing["r"])
+    failing.run("a")                                   # the fix changes a's data
     assert failing.step("b").status == "stale"
+    assert failing.step("b").output.values == [101, None, 301]   # old data kept
 
 
 def test_C14_missing_is_none_and_nullability_is_checked():
@@ -569,7 +576,7 @@ def test_C5_declared_columns_and_types_are_checked_before_the_source_runs():
     assert "names 'cty'" in w.step("typo").problems[0]
     assert w.step("typed").problems == (
         "shout_008() declares city: int, but 'r' will have city as str",)
-    assert w.step("fine").plan["types"] == {"city": "str", "n": "int", "value": "any"}
+    assert w.step("fine").plan["types"] == {"value": "any"}       # only its results
 
 
 def test_C5_a_source_that_breaks_its_declared_columns_fails():
@@ -777,7 +784,7 @@ def test_K12_a_table_tool_gets_the_whole_grid(wf):
 
     wf["p"] = piv_008[mod.table()](wf["readings"])
     wf["inferred"] = piv_008(wf["readings"])
-    assert wf.step("inferred").operation.shape_verb.kind == "table"
+    assert wf.step("inferred").output.meta["auto"]["verb"] == "table"
     assert wf.step("p").describe() == (
         "table piv_008 · columns unknown until it runs · rows unknown until it runs")
     wf.run("p")
@@ -822,7 +829,8 @@ def test_N_auto_is_saved_as_auto_and_resolved_at_run(wf):
     wf["s"] = scale_008[mod.auto(), mod.retry(times=1)](wf["readings"])
     assert wf.step("f").output.meta["auto"] == {
         "verb": "filter", "provisional": True,
-        "reason": "it returns a bool per row, so keep the rows that pass"}
+        "reason": "it returns a bool per row, so keep the rows that pass; "
+                  "adds breaker(after=5)"}
     wf.run_all()
     picked = {sid: wf.step(sid).output.meta["auto"]["verb"] for sid in "fecs"}
     assert picked == {"f": "filter", "e": "expand", "c": "collapse", "s": "map"}
@@ -863,3 +871,292 @@ def test_C12_kwargs_tools_warn_and_say_so():
     w["r"] = pd.DataFrame({"n": [1]})
     w["x"] = kw_008[mod.map()](w["r"], colr="red")
     assert "colr= isn't a named parameter of kw_008; it lands in **opts unchecked" in w.step("x").warnings
+
+
+# ── 009 step 1: results only, shared row ids, strict zip_ (C16 for expand) ──
+from simple_steps_core.grid import zip_  # noqa: E402
+@tool
+def fan_ids_009(n) -> list:
+    return [n * 10 + k for k in range(n)]
+
+
+@tool
+def neg_009(n: int) -> int:
+    return -n
+
+
+@pytest.fixture()
+def r3():
+    w = Workflow()
+    w["r"] = pd.DataFrame({"city": ["SF", "NYC", "LA"], "n": [1, 2, 0]})
+    return w
+
+
+def test_009_expand_ids_derive_from_the_parent(r3):
+    r3["items"] = fan_ids_009[mod.expand()](r3["r"])
+    r3["as_n"] = mod.rename(columns={"value": "n"})(r3["items"])
+    r3["again"] = fan_ids_009[mod.expand()](r3["as_n"])     # nested: 0.0 → 0.0.k
+    r3.run_all()
+    assert list(r3.step("items").output.data.index) == ["0.0", "1.0", "1.1"]
+    assert list(r3.step("items").output.data.columns) == ["value"]   # results only
+    assert list(r3.step("again").output.data.index)[:2] == ["0.0.0", "0.0.1"]
+
+
+def test_009_zip_gives_each_item_its_parent_row(r3):
+    r3["items"] = fan_ids_009[mod.expand()](r3["r"])
+    r3["with_parent"] = zip_(r3["items"], r3["r"])         # row 2 expanded to nothing
+    r3.run_all()
+    out = r3.step("with_parent").output.data
+    assert list(out.index) == ["0.0", "1.0", "1.1"]
+    assert out.to_dict("list") == {"value": [10, 20, 21], "city": ["SF", "NYC", "NYC"],
+                                   "n": [1, 2, 2]}
+
+
+def test_009_zip_after_a_sort_pairs_by_id_not_position(r3):
+    r3["sorted"] = mod.sort(by="n", ascending=False)(r3["r"])
+    r3["neg"] = neg_009[mod.map()](r3["sorted"])
+    r3["pairs"] = zip_(r3["r"], r3["neg"])
+    r3.run_all()
+    assert r3.step("pairs").output.data.to_dict("list") == {
+        "city": ["SF", "NYC", "LA"], "n": [1, 2, 0], "value": [-1, -2, 0]}
+
+
+def test_009_zip_never_drops_a_row(r3):
+    r3["kept"] = mod.slice(stop=2)(r3["r"])                 # rows 0, 1 of 0, 1, 2
+    r3["short_first"] = zip_(r3["kept"], r3["r"])
+    r3["long_first"] = zip_(r3["r"], r3["kept"])
+    r3.run("kept")
+    r3.run("short_first")
+    r3.run("long_first")
+    assert r3.step("short_first").output.ledger["error"].iloc[0] == (
+        "zip_ pairs rows by id: row 2 of 'r' has no matching row in 'kept'. "
+        "For a partial match, use join")
+    assert r3.step("long_first").output.ledger["error"].iloc[0] == (
+        "zip_ pairs rows by id: row 2 of 'r' has no matching row in 'kept'. "
+        "For a partial match, use join")
+    with pytest.raises(grid.StepFailed, match="use join"):
+        r3.run_all()
+
+
+def test_009_zip_of_unrelated_grids_pairs_by_position_only_when_lengths_agree():
+    w = Workflow()
+    w["a"] = pd.DataFrame({"x": [1, 2]}, index=["p", "q"])
+    w["b"] = pd.DataFrame({"y": [3, 4]})
+    w["c"] = pd.DataFrame({"z": [5, 6, 7]}, index=["u", "v", "w"])
+    w["ab"] = zip_(w["a"], w["b"])
+    w["ac"] = zip_(w["a"], w["c"])
+    w.run("ab")
+    w.run("ac")
+    assert w.step("ab").output.data.to_dict("list") == {"x": [1, 2], "y": [3, 4]}
+    assert "row ids are unrelated and their lengths differ" in \
+        w.step("ac").output.ledger["error"].iloc[0]
+
+
+def test_009_string_row_ids_survive_a_saved_session(r3):
+    r3["items"] = fan_ids_009[mod.expand()](r3["r"])
+    r3.run_all()
+    back = Workflow.from_json(r3.to_session_json(), grid.TOOLS)
+    assert list(back.step("items").output.data.index) == ["0.0", "1.0", "1.1"]
+    assert list(back.step("r").output.data.index) == [0, 1, 2]
+
+
+def test_009_a_failed_parent_keeps_one_placeholder_row_with_its_id(r3):
+    @tool
+    def picky_009(n) -> list:
+        if n == 2:
+            raise ValueError("no")
+        return [n]
+    r3["items"] = picky_009[mod.expand(), mod.try_except()](r3["r"])
+    r3.run_all()
+    ledger = r3.step("items").output.ledger
+    assert ledger.loc["1.0", "status"] == "failed"
+    assert ledger.loc["1.0", "unit"] == 1
+
+
+# ── 009 step 2: versions from data hashes, read stamps, stale from versions ──
+@tool
+def times10_009(n: int) -> int:
+    return n * 10
+
+
+@pytest.fixture()
+def chain():
+    w = Workflow()
+    w["r"] = pd.DataFrame({"n": [1, 2]})
+    w["a"] = times10_009[mod.map()](w["r"])
+    w["b"] = op("identity")[mod.select(columns=["value"])](w["a"])
+    w.run_all()
+    return w
+
+
+def test_009_every_step_with_data_has_a_version_and_its_read_stamps(chain):
+    assert chain.version("r") and chain.version("a")
+    assert chain.step("a").output.meta["read"] == {"r": chain.version("r")}
+    assert chain.step("b").output.meta["read"] == {"a": chain.version("a")}
+
+
+def test_009_equal_data_has_an_equal_version():
+    w = Workflow()
+    w["x"] = pd.DataFrame({"n": [1, 2]})
+    w["y"] = pd.DataFrame({"n": [1, 2]})
+    w["z"] = pd.DataFrame({"n": [1, 3]})
+    assert w.version("x") == w.version("y") != w.version("z")
+
+
+def test_009_an_identical_rerun_leaves_readers_fresh(chain):
+    chain.run("a")
+    assert chain.step("b").status == "completed"
+
+
+def test_009_changed_data_makes_readers_stale_and_keeps_their_data(chain):
+    chain["r"] = pd.DataFrame({"n": [5, 6]})
+    assert chain.step("a").status == "stale"
+    assert chain.step("b").status == "stale"            # stale through a
+    assert chain.step("a").output.values == [10, 20]    # old data still readable
+    chain["r"] = pd.DataFrame({"n": [1, 2]})            # back to what a read
+    assert chain.step("a").status == "completed"
+    assert chain.step("b").status == "completed"
+
+
+def test_009_a_changed_resource_makes_its_readers_stale():
+    class Scaler009:
+        def __init__(self, k: int = 1):
+            self.k = k
+
+    @tool
+    def scaled_009(n: int, s: Scaler009) -> int:
+        return n * s.k
+
+    w = Workflow()
+    w.define("s", Scaler009, k=2)
+    w["r"] = pd.DataFrame({"n": [1]})
+    w["x"] = scaled_009[mod.map()](w["r"], s=grid.res["s"])
+    w.run_all(resources={"s": Scaler009(2)})
+    w.define("s", Scaler009, k=2)                       # same settings: fresh
+    assert w.step("x").status == "completed"
+    w.define("s", Scaler009, k=3)
+    assert w.step("x").status == "stale"
+
+
+def test_009_stamps_and_staleness_survive_a_saved_session(chain):
+    chain["r"] = pd.DataFrame({"n": [5, 6]})
+    back = Workflow.from_json(chain.to_session_json(), grid.TOOLS)
+    assert back.step("a").status == "stale"
+    assert back.step("a").output.meta["read"] == chain.step("a").output.meta["read"]
+    back.run_all()
+    assert back.step("b").status == "completed"
+    assert back.step("a").output.values == [50, 60]
+
+
+def test_009_an_output_saved_without_stamps_keeps_the_old_rule(chain):
+    del chain.step("a").output.meta["read"]
+    chain["r"] = pd.DataFrame({"n": [1, 2]})            # same data
+    assert chain.step("a").status == "stale"            # legacy: any change marks it
+
+
+# ── 009 step 3: auto — its default breaker, implicit auto, direct calls, setting ──
+SPENT = {"calls": 0}
+
+
+@tool
+def flaky_009(n: int) -> int:
+    SPENT["calls"] += 1
+    if n < 0:
+        raise ValueError("bad key")
+    return n
+
+
+@pytest.fixture()
+def spent():
+    SPENT["calls"] = 0
+    return SPENT
+
+
+def _all_fail(n_rows=20):
+    w = Workflow()
+    w["r"] = pd.DataFrame({"n": [-1] * n_rows})
+    return w
+
+
+def test_009_a_systematic_failure_trips_autos_breaker_after_5_calls(spent):
+    w = _all_fail()
+    w["x"] = flaky_009(w["r"])                              # implicit auto
+    w.run("x")
+    ledger = w.step("x").output.ledger
+    assert spent["calls"] == 5                              # not 20
+    assert list(ledger["attempts"])[:6] == [1, 1, 1, 1, 1, 0]
+    assert ledger["error"].iloc[5] == (
+        "not run: stopped after 5 failures in a row (ValueError: bad key)")
+    assert w.step("x").output.meta["auto"]["reason"].endswith("adds breaker(after=5)")
+
+
+def test_009_sporadic_failures_never_trip_it(spent):
+    w = Workflow()
+    w["r"] = pd.DataFrame({"n": [-1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1]})
+    w["x"] = flaky_009(w["r"])
+    w.run("x")
+    assert spent["calls"] == 12
+    assert w.step("x").output.values[1::2] == [1] * 6
+
+
+def test_009_the_breaker_can_be_undone_or_changed(spent):
+    w = _all_fail(10)
+    w["never"] = flaky_009[mod.auto(), mod.breaker(after=None)](w["r"])
+    w["early"] = flaky_009[mod.auto(), mod.breaker(after=2)](w["r"])
+    w["stated"] = flaky_009[mod.map()](w["r"])              # you chose: no defaults
+    w.run("never")
+    assert spent["calls"] == 10
+    spent["calls"] = 0
+    w.run("early")
+    assert spent["calls"] == 2
+    spent["calls"] = 0
+    w.run("stated")
+    assert spent["calls"] == 10
+    assert json.loads(w.to_json())["steps"][1]["operation"]["modifiers"] == [
+        {"kind": "breaker", "params": {"after": None}}, {"kind": "auto", "params": {}}]
+
+
+def test_009_try_except_never_swallows_a_breaker_stop(spent):
+    w = _all_fail(8)
+    w["x"] = flaky_009[mod.auto(), mod.try_except(default=0)](w["r"])
+    w.run("x")
+    # try_except sits outside the breaker: each failure becomes 0, so no
+    # failure reaches the breaker and every row runs — the user's choice.
+    assert w.step("x").output.values == [0] * 8
+    w["y"] = flaky_009[mod.try_except(default=0), mod.auto()](w["r"])
+    spent["calls"] = 0
+    w.run("y")
+    assert spent["calls"] == 5                               # stopped; not turned into 0s
+    assert w.step("y").output.ledger["attempts"].iloc[-1] == 0
+
+
+def test_009_a_direct_call_runs_over_rows_only_when_the_frame_doesnt_fit():
+    @tool
+    def plus_one_009(n: int) -> int:
+        return n + 1
+
+    @tool
+    def width_009(df: pd.DataFrame) -> int:
+        return len(df.columns)
+
+    @tool
+    def untyped_009(n):
+        return n
+
+    frame = pd.DataFrame({"n": [1, 2, 3]})
+    out = plus_one_009(frame)
+    assert isinstance(out, grid.Output) and out.values == [2, 3, 4]
+    assert width_009(frame) == 1                            # fits as-is
+    assert untyped_009(frame) is frame                       # untyped: as-is
+    assert plus_one_009(5) == 6                              # parens still run
+
+
+def test_009_with_implicit_auto_off_the_orchestration_must_be_written(monkeypatch, wf):
+    monkeypatch.setattr(grid.settings, "implicit_auto", False)
+    with pytest.raises(TypeError, match=r"needs an orchestration: write scale_008\[mod.map\(\)\]"):
+        scale_008(wf["readings"])
+    wf["ok"] = scale_008[mod.auto()](wf["readings"])        # stated auto still works
+    wf.run("ok")
+    assert wf.step("ok").output.values == [10, 20, 30, 20]
+    frame = pd.DataFrame({"n": [1, 2]})
+    assert isinstance(times10_009(frame), pd.DataFrame)      # off: the frame is passed as-is

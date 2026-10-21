@@ -26,7 +26,7 @@ One tool per role the verbs need:
 
 | tool | role | used by |
 |---|---|---|
-| `scale(n, weight=1)` | a value per row | `map` |
+| `scale(n, weight=1)` | a value per row | `map` (its output is only that value; `zip_` puts it beside the input) |
 | `is_big(n)` | a predicate | `filter` |
 | `label_city(city)` | a key function | `group` |
 | `add_n(acc, n)` | a two-arg reducer | `collapse` |

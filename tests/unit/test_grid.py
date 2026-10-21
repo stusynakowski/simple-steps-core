@@ -189,7 +189,7 @@ def test_carried_function_is_not_part_of_the_data():
 # The modifier vocabulary is one table
 # ─────────────────────────────────────────────────────────────────────────
 def test_shape_verbs_and_decorators_derive_from_modifiers():
-    assert set(SHAPE_VERBS) | {"retry", "timeout", "expect", "try_except"} == set(MODIFIERS)
+    assert set(SHAPE_VERBS) | {"retry", "timeout", "expect", "try_except", "breaker"} == set(MODIFIERS)
     assert set(DECORATORS) == set(MODIFIERS)
 
 
@@ -626,11 +626,16 @@ def test_run_still_means_run_and_refuses_a_reference(three):
         score[mod.map()].run(wf["raw"])
 
 
+def _auto_verb(operation, wf):
+    """The verb auto would pick for *operation* in *wf*, as things stand (009)."""
+    return grid_module._provisional(operation, wf)[1]
+
+
 def test_a_bare_tool_call_on_a_reference_is_the_whole_step(three):
     wf = Workflow()
     wf["raw"] = three
     wf["scored"] = score(wf["raw"])
-    assert wf.step("scored").operation == score[mod.map(over=wf["raw"])]
+    assert wf.step("scored").operation == score[mod.auto(over=wf["raw"])]   # 009: implicit auto
     wf.run_all()
     assert wf.step("scored").output.values == [10, 20, 30]
 
@@ -640,6 +645,7 @@ def test_wiring_keeps_an_explicit_verb(three):
     wf["raw"] = three
     wf["kept"] = keep[mod.filter()](wf["raw"])
     assert wf.step("kept").operation.shape_verb.kind == "filter"
+    assert "auto" not in wf.step("kept").output.meta        # stated: no auto, no defaults
 
 
 def test_literals_survive_wiring(three):
@@ -655,7 +661,7 @@ def test_inference_reads_a_reducer_as_collapse(three):
     wf = Workflow()
     wf["raw"] = three
     wf["sum"] = sum_up(wf["raw"])          # sum_up(acc, n) — acc is not a column
-    assert wf.step("sum").operation.shape_verb.kind == "collapse"
+    assert wf.step("sum").output.meta["auto"]["verb"] == "collapse"
     wf.run_all()
     assert wf.step("sum").output.item() == 6
 
@@ -668,7 +674,7 @@ def test_inference_reads_a_bool_return_as_filter(three):
     wf = Workflow()
     wf["raw"] = three
     wf["kept"] = big(wf["raw"])
-    assert wf.step("kept").operation.shape_verb.kind == "filter"
+    assert wf.step("kept").output.meta["auto"]["verb"] == "filter"
     wf.run_all()
     assert len(wf.step("kept").output.data) == 2
 
@@ -688,8 +694,8 @@ def test_inference_works_when_the_whole_chain_is_declared_first(three):
     wf["scored"] = score(wf["raw"], weight=2)
     wf["kept"] = big(wf["scored"])          # upstream staged
     wf["sum"] = add_up(wf["kept"])          # upstream staged, still a reducer
-    assert wf.step("kept").operation.shape_verb.kind == "filter"
-    assert wf.step("sum").operation.shape_verb.kind == "collapse"
+    assert wf.step("kept").output.meta["auto"]["verb"] == "filter"
+    assert wf.step("sum").output.meta["auto"]["verb"] == "collapse"
     wf.run_all()
     assert wf.step("sum").output.item() == 120
 
@@ -699,9 +705,9 @@ def test_inference_reads_a_carried_through_column_while_staged(three):
     wf = Workflow()
     wf["raw"] = three
     wf["scored"] = score(wf["raw"])
-    assert sum_up(wf["scored"]).shape_verb.kind == "collapse"   # staged
+    assert _auto_verb(sum_up(wf["scored"]), wf) == "collapse"   # staged
     wf.run_all()
-    assert sum_up(wf["scored"]).shape_verb.kind == "collapse"   # and after
+    assert _auto_verb(sum_up(wf["scored"]), wf) == "collapse"   # and after
 
 
 def test_staged_prediction_matches_what_actually_appears(three):
@@ -723,9 +729,9 @@ def test_naming_the_payload_column_is_predicted_too(three):
     wf = Workflow()
     wf["raw"] = three
     wf["scored"] = score[mod.map(name="score")](wf["raw"])
-    assert predicted_columns(wf.step("scored").output) == ["n", "score"]
+    assert predicted_columns(wf.step("scored").output) == ["score"]
     wf.run_all()
-    assert list(wf.step("scored").output.data.columns) == ["n", "score"]
+    assert list(wf.step("scored").output.data.columns) == ["score"]
 
 
 def test_filter_carries_columns_through_and_writes_none(three):
@@ -744,7 +750,7 @@ def test_inference_reads_a_list_return_as_expand():
     wf = Workflow()
     wf["notes"] = pd.DataFrame({"note": ["clear sky", "heavy rain today"]})
     wf["word"] = words(wf["notes"])
-    assert wf.step("word").operation.shape_verb.kind == "expand"
+    assert wf.step("word").output.meta["auto"]["verb"] == "expand"
     wf.run_all()
     assert wf.step("word").output.values == ["clear", "sky", "heavy", "rain", "today"]
 
@@ -781,17 +787,19 @@ def test_an_explicit_verb_overrides_what_would_be_inferred():
 def test_inference_defaults_to_map(three):
     wf = Workflow()
     wf["raw"] = three
-    assert score(wf["raw"]).shape_verb.kind == "map"
+    assert _auto_verb(score(wf["raw"]), wf) == "map"
 
 
-def test_an_inferred_verb_is_stored_concretely_not_as_auto(three):
-    """Nothing named 'auto' reaches the data — staging would have nothing to fold."""
+def test_an_unstated_orchestration_is_saved_as_auto(three):
+    """009 decision 6: implicit auto saves `mod.auto()`, decided from the data
+    at each run; staging shows the verb it would pick now, and its defaults."""
     wf = Workflow()
     wf["raw"] = three
     wf["scored"] = score(wf["raw"])
     blob = wf.to_dict()["steps"][1]["operation"]
-    assert [m["kind"] for m in blob["modifiers"]] == ["map"]
-    assert wf.step("scored").describe() == "map score · 3 cells"
+    assert [m["kind"] for m in blob["modifiers"]] == ["auto"]
+    assert wf.step("scored").describe().startswith("map score · 3 cells (auto, for now:")
+    assert "adds breaker(after=5)" in wf.step("scored").describe()
 
 
 def test_infer_verb_explains_itself(three):
@@ -856,9 +864,11 @@ def test_shape_is_the_pandas_tuple_and_form_is_the_class(three):
     assert out.form == "column"
 
 
-def test_map_keeps_the_input_columns(three):
+def test_map_is_only_its_results(three):
+    """A map step outputs the tool's result alone, on the input's row ids."""
     out = score[mod.map()](grid(three))
-    assert list(out.data.columns) == ["n", "value"]
+    assert list(out.data.columns) == ["value"]
+    assert list(out.data.index) == list(three.index)
 
 
 def test_ledger_is_row_aligned_and_view_joins_cleanly(three):
@@ -1640,9 +1650,8 @@ def test_an_expand_to_nothing_keeps_its_columns_and_their_dtypes():
 
     out = wf.step("gone").output.data
     assert len(out) == 0
-    assert list(out.columns) == ["n", "city", "value"]
-    # carried dtypes survive, so a downstream annotation is not falsely refused
-    assert out["n"].dtype == wf.step("raw").output.data["n"].dtype
+    # an expand step is only its items: one column, even when there are none
+    assert list(out.columns) == ["value"]
 
 
 def test_a_downstream_step_of_an_empty_expand_still_validates_and_runs():
@@ -1652,9 +1661,9 @@ def test_a_downstream_step_of_an_empty_expand_still_validates_and_runs():
         return []
 
     @tool(strict=True)
-    def dbl(n: int) -> int:
+    def dbl(value: int) -> int:
         """Double."""
-        return n * 2
+        return value * 2
 
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"n": [1, 2]})
@@ -2082,9 +2091,10 @@ def test_collapse_by_stages_as_one_per_group_not_one_cell(three):
 
     wf = Workflow()
     wf["raw"] = three
-    wf["g"] = hemi[mod.group(name="h")](wf["raw"])
+    wf["g"] = hemi[mod.group(name="h")](wf["raw"])          # only the key
+    wf["gz"] = grid_module.zip_(wf["raw"], wf["g"])            # rows + their key
     wf.run_all()
-    wf["c"] = sum_up[mod.collapse(by="h", over=wf["g"])]
+    wf["c"] = sum_up[mod.collapse(by="h", over=wf["gz"])]
     assert "one cell per group" in wf.step("c").describe()
     wf.run("c")
     assert wf.step("c").describe().endswith("2 cells")

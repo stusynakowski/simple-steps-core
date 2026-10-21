@@ -100,9 +100,13 @@ def _try(fn: Callable):
 # ── Probes: each returns (done, observed) ──────────────────────────────────────
 
 def k1_unrun_source_columns():
+    # (core) Changed from the app's probe: a map step is only its results
+    # (owner decision, 2026-10-20), so `city` can't follow `score` through a
+    # map. The same deferral is checked through zip_, which carries both.
     wf = grid.Workflow()
     wf["readings"] = to_rows.bind(data=DATA)[mod.source()]
-    wf["scored"] = scale[mod.map(name="score")](wf["readings"])
+    wf["score"] = scale[mod.map(name="score")](wf["readings"])
+    wf["scored"] = grid.zip_(wf["readings"], wf["score"])
     wf["picked"] = mod.select(over=wf["scored"], columns=["city", "score"])
     declared = wf.step("picked").status
     wf.run_all()
@@ -305,13 +309,16 @@ def n2_literal_beats_column():
 
 
 def c13_output_replaces_input():
+    # (core) Owner decision, 2026-10-20: map, group and expand output only the
+    # tool's result, so no output can replace an input column at all.
     wf = _wf()
-    wf["x"] = dbl[mod.map(name="n")](wf["readings"])
-    refused = bool(wf.step("x").problems)
-    wf["y"] = dbl[mod.map(name="n", replace=True)](wf["readings"])
-    ok = not wf.step("y").problems
-    return refused and ok, (f"name='n' -> {wf.step('x').problems or 'accepted'}; "
-                            f"replace=True -> {wf.step('y').problems or 'ok'}")
+    wf["m"] = dbl[mod.map(name="n")](wf["readings"])
+    wf["g"] = dbl[mod.group(name="n")](wf["readings"])
+    wf.run_all()
+    columns = {sid: list(wf.step(sid).output.data.columns) for sid in ("m", "g")}
+    untouched = list(wf.step("readings").output.data["n"]) == [1, 2, 3, 2]
+    return columns == {"m": ["n"], "g": ["n"]} and untouched, (
+        f"outputs -> {columns}; input n untouched: {untouched}")
 
 
 def o_missing_required_setting():
@@ -521,7 +528,7 @@ def stop_on_failure():
 
     wf = _wf()
     wf["a"] = risky[mod.map()](wf["readings"])
-    wf["b"] = scale[mod.map()](wf["a"])
+    wf["b"] = I[mod.select(columns=["value"])](wf["a"])     # a map step holds only `value`
     _, err = _try(wf.run_all)
     stopped = err is not None and "StepFailed" in err and wf.step("b").status == "staged"
     wf["a"] = risky[mod.map(), mod.try_except(default=0)](wf["readings"])
@@ -583,6 +590,22 @@ def c12_kwargs_warn():
     return warned and is_open, f"warned: {warned}; catalog open: {is_open}"
 
 
+def c16_row_ids():
+    @tool
+    def fan(n) -> list:
+        return [n] * n
+
+    wf = _wf()
+    wf["items"] = fan[mod.expand()](wf["readings"])
+    wf["with_parent"] = grid.zip_(wf["items"], wf["readings"])
+    wf.run_all()
+    ids = list(wf.step("items").output.data.index)
+    cities = list(wf.step("with_parent").output.data["city"])
+    done = ids[:3] == ["0.0", "1.0", "1.1"] and cities[:3] == ["SF", "NYC", "NYC"]
+    return done, (f"expand ids {ids[:4]}…; zip_ to parent -> cities {cities[:3]}… "
+                  "(expand only; collapse/join/stack ids still open)")
+
+
 ASKS = [
     ("K1", "Unrun source: columns unknown, re-check later", k1_unrun_source_columns),
     ("K2", "Verb inference independent of run state", k2_inference_run_state),
@@ -622,6 +645,7 @@ ASKS = [
     ("N", "(core) a written mod.auto(), resolved at run", n_auto_modifier),
     ("P", "(core) Operation.to_source() round-trips", p_to_source),
     ("C12", "(core) **kwargs tools warn and are marked open", c12_kwargs_warn),
+    ("C16", "(core) row ids derive from the parent; zip_ pairs by id", c16_row_ids),
 ]
 
 

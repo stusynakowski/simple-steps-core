@@ -27,10 +27,12 @@ first; both are easy to optimize later and neither is the bottleneck now.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import itertools
 import math
+import os
 import numbers
 import warnings
 import time
@@ -57,7 +59,8 @@ __all__ = [
     "wf", "res", "ResRef", "bound_tool", "cols", "Rows", "Cols", "SelectionError",
     "RESERVED_NAMES", "FORMAT_VERSION", "ToolRef", "StepFailed",
     "builtin_tools", "declared_tools", "shape_verbs", "resource_types",
-    "payload_column", "check_modifier", "freeze", "is_frozen", "formula_names", "resource", "RESOURCE_TYPES",
+    "payload_column", "check_modifier", "freeze", "is_frozen", "formula_names",
+    "settings", "Settings", "resource", "RESOURCE_TYPES",
     "resource_entry", "resource_catalog", "ResourceNotLoaded",
     "STRICT_TYPES", "annotation_problems", "declaration_problems",
     "PARAM_TYPES", "PARAM_TYPES_BY_VERB",
@@ -73,6 +76,31 @@ __all__ = [
 
 #: Default name for the column holding whatever a tool returned.
 PAYLOAD = "value"
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in ("0", "false", "no", "off", "")
+
+
+@dataclass
+class Settings:
+    """Environment settings for how core reads a formula (009 §8).
+
+    ``implicit_auto``: when on (the default), a step written with no
+    orchestration — ``score(wf["r"])`` — gets auto (saved as ``mod.auto()``),
+    and a direct call on a frame that doesn't fit as-is runs over its rows.
+    When off, auto must be written: ``score[mod.auto()](wf["r"])``. Set it
+    here, or with the environment variable ``SIMPLE_STEPS_IMPLICIT_AUTO=0``.
+    """
+
+    implicit_auto: bool = True
+
+
+#: ``grid.settings.implicit_auto = False`` turns implicit auto off.
+settings = Settings(implicit_auto=_env_flag("SIMPLE_STEPS_IMPLICIT_AUTO", True))
 
 #: Every ledger has exactly these columns, so the UI can rely on them.
 LEDGER_COLUMNS = ("status", "error", "attempts", "seconds", "unit", "cause", "caught")
@@ -269,6 +297,21 @@ def _uncaught_failure(output: "Output") -> tuple[Any, str] | None:
             continue
         return index, record.get("error")
     return None
+
+
+def _data_version(data: pd.DataFrame) -> str:
+    """A short hash of a grid's contents — row ids, columns and values (009 §5).
+
+    Equal data, equal version: a step re-run with the same result leaves the
+    steps that read it fresh. Cells pandas can't hash (lists, dicts) are hashed
+    from their JSON.
+    """
+    columns = repr([str(c) for c in data.columns]).encode()
+    try:
+        values = pd.util.hash_pandas_object(data, index=True).values.tobytes()
+    except TypeError:
+        values = data.to_json(orient="split", default_handler=repr).encode()
+    return hashlib.sha1(columns + values).hexdigest()[:12]
 
 
 def _failed_output(operation: Any, error: str) -> "Output":
@@ -906,6 +949,8 @@ def _column_fits(series: pd.Series, annotation: Any) -> bool | None:
     origin = typing.get_origin(annotation) or annotation
     if not isinstance(origin, type) or origin is object:
         return None
+    if len(series) == 0:
+        return None                   # no values: nothing says what it holds
     kind = getattr(series.dtype, "kind", None)
     if kind is None:
         return None
@@ -1118,6 +1163,17 @@ def _key_column(frame: pd.DataFrame, key: Callable) -> list:
     return [apply(row) for _index, row in _units(frame)]
 
 
+def _child_id(parent: Any, k: int) -> str:
+    """Row id of the *k*-th row derived from row *parent*: ``1`` → ``"1.0"``."""
+    return f"{parent}.{k}"
+
+
+def _ancestors(row_id: Any) -> list[str]:
+    """``"1.0.2"`` → ``["1.0", "1"]`` — the rows a derived row came from."""
+    parts = str(row_id).split(".")
+    return [".".join(parts[:i]) for i in range(len(parts) - 1, 0, -1)]
+
+
 def _units(frame: pd.DataFrame):
     """``(index, row dict)`` per row, each value as the tool should get it.
 
@@ -1143,6 +1199,10 @@ class _Caught:
     """What ``mod.try_except(default=…)`` returns for a unit whose tool raised."""
     value: Any
     error: str
+
+
+class _Stopped(Exception):
+    """A unit ``mod.breaker`` didn't run: the step stopped after a run of failures."""
 
 
 class _Tolerated(Exception):
@@ -1180,6 +1240,10 @@ def _call(fn: Callable, arg: dict, retries: int) -> tuple[Any, dict]:
             return None, {"status": "failed", "error": str(exc),
                           "attempts": attempt + 1, "caught": True,
                           "seconds": round(time.perf_counter() - started, 6)}
+        except _Stopped as exc:
+            # The breaker tripped earlier in this step: not run, nothing spent.
+            return None, {"status": "failed", "error": str(exc), "attempts": 0,
+                          "seconds": 0.0}
         except Exception as exc:
             if attempt >= retries:
                 return None, {"status": "failed",
@@ -1195,10 +1259,12 @@ def _call(fn: Callable, arg: dict, retries: int) -> tuple[Any, dict]:
 # ─────────────────────────────────────────────────────────────────────────
 def map_(source: Any, fn: Callable, *, name: str = PAYLOAD,
          retries: int = 0, axis: str = "rows", replace: bool = False) -> Output:
-    """``mutate`` — n rows in, n rows out, with *fn*'s result as a new column.
+    """``map`` — n rows in, n rows out: **only** *fn*'s result, one column.
 
-    The input columns are **kept**, which is the point: mapping a score over a
-    table gives you the table plus a score, not a bare list of scores.
+    The input columns are **not** carried (owner decision, 2026-10-20): a map
+    step is its results. Each row keeps its input row's id, so the results stay
+    aligned with the input — put them side by side with ``zip_(wf["in"],
+    wf["out"])`` or ``join``.
     """
     frame = rows(source, axis=axis)
     blocked = _upstream_failures(source)
@@ -1211,7 +1277,7 @@ def map_(source: Any, fn: Callable, *, name: str = PAYLOAD,
         values.append(value)
         records.append(record)
 
-    data = frame.copy()
+    data = pd.DataFrame(index=frame.index)
     data[name] = _typed(values, frame.index)
     return Output(data=data, ledger=_ledger(records, frame.index),
                   meta={"verb": "map", "form": "column", "payload": name,
@@ -1272,7 +1338,9 @@ def group_(source: Any, fn: Callable, *, name: str = "group",
         keys.append(value)
         records.append(record)
 
-    data = frame.copy()
+    # Only the key, on the input's row ids (owner decision, 2026-10-20): pair
+    # it with the rows it labels by `zip_(wf["in"], wf["keys"])`.
+    data = pd.DataFrame(index=frame.index)
     data[name] = _typed(keys, frame.index)
     return Output(data=data, ledger=_ledger(records, frame.index),
                   meta={"verb": "group", "form": "column", "payload": name,
@@ -1351,17 +1419,22 @@ def expand_(source: Any, fn: Callable, *, name: str = PAYLOAD,
     """
     frame = rows(source, axis=axis)
     blocked = _upstream_failures(source)
-    out_rows, records = [], []
+    out_rows, records, ids = [], [], []
     for index, row in _units(frame):
         arg = row
+        # 008 C16: each item's row id is derived from its parent's — `1.0`,
+        # `1.1` — so `zip_` can line the items back up with the row they came
+        # from. One placeholder row for a failed parent keeps `1.0` too.
         if index in blocked:
             records.append({**_blocked(*blocked[index]), "unit": index})
-            out_rows.append({**arg, name: None})
+            out_rows.append({name: None})
+            ids.append(_child_id(index, 0))
             continue
         produced, record = _call(fn, arg, retries)
         if record["status"] != "completed":
             records.append({**record, "unit": index})
-            out_rows.append({**arg, name: None})
+            out_rows.append({name: None})
+            ids.append(_child_id(index, 0))
             continue
         if isinstance(produced, pd.DataFrame):
             # Iterating a DataFrame yields its column names, so the old
@@ -1372,20 +1445,24 @@ def expand_(source: Any, fn: Callable, *, name: str = PAYLOAD,
                                      "iterating one yields its column names. "
                                      "Return a list of values, widen it into "
                                      "columns, or assign it as a source step."})
-            out_rows.append({**arg, name: None})
+            out_rows.append({name: None})
+            ids.append(_child_id(index, 0))
             continue
         items = (list(produced)
                  if isinstance(produced, Iterable)
                  and not isinstance(produced, (str, bytes, dict))
                  else [produced])
-        for item in items:
-            out_rows.append({**arg, name: item})
+        for k, item in enumerate(items):
+            # Only the item (owner decision, 2026-10-20), on an id derived from
+            # its parent's; the ledger's `unit` names the parent too.
+            out_rows.append({name: item})
             records.append({**record, "unit": index})
+            ids.append(_child_id(index, k))
 
     # Column by column, so a carried int column and the payload both keep their
     # type when a failed unit leaves a gap (008 R8) — `DataFrame(rows)` would
     # turn every int column with a None into float64.
-    data = pd.DataFrame(index=range(len(out_rows)))
+    data = pd.DataFrame(index=pd.Index(ids, dtype=object))
     for column in (list(out_rows[0]) if out_rows else []):
         data[column] = _typed([r.get(column) for r in out_rows], data.index)
     if not len(data.columns):
@@ -1399,8 +1476,7 @@ def expand_(source: Any, fn: Callable, *, name: str = PAYLOAD,
         # float64 and a downstream `n: int` would be reported as a mismatch. The
         # payload is object, which is the honest answer — nothing was produced,
         # so its type is unknown, and an empty column is undecidable anyway.
-        data = frame.iloc[:0].copy().reset_index(drop=True)
-        data[name] = pd.Series([], dtype=object)
+        data = pd.DataFrame({name: pd.Series([], dtype=object)})
     return Output(data=data, ledger=_ledger(records, data.index),
                   meta={"verb": "expand", "form": "column", "payload": name,
                         "n_in": len(frame)})
@@ -1950,7 +2026,7 @@ def _d_try_except(fn: Callable, *, default: Any = _NO_DEFAULT,
     def run(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except _Tolerated:
+        except (_Tolerated, _Stopped):
             raise
         except Exception as exc:
             if not _caught_by(exc, on):
@@ -1960,6 +2036,46 @@ def _d_try_except(fn: Callable, *, default: Any = _NO_DEFAULT,
                 return _Caught(default, error)
             raise _Tolerated(error) from exc
     run.__name__ = f"try_except({getattr(fn, '__name__', 'fn')})"
+    return run
+
+
+#: What auto's breaker stops after (009 decision 4).
+BREAKER_AFTER = 5
+
+
+def _d_breaker(fn: Callable, *, after: int | None = BREAKER_AFTER) -> Callable:
+    """``mod.breaker(after=5)`` — stop a step after *after* failures in a row.
+
+    Cheap failures (009 §7): one bad row never trips it, but a systematic
+    error — a bad API key, a broken tool — costs *after* calls instead of one
+    per row. Once tripped, the rest of the step's units are recorded as *"not
+    run: stopped after 5 failures in a row (…)"* with no call made; work
+    already done is kept. ``after=None`` never stops early. Auto adds
+    ``breaker(after=5)`` to row-wise steps; writing one replaces that default.
+    """
+    if after is None:
+        return fn
+    state = {"streak": 0, "kind": None, "first": None, "tripped": None}
+
+    def run(*args, **kwargs):
+        if state["tripped"]:
+            raise _Stopped(state["tripped"])
+        try:
+            value = fn(*args, **kwargs)
+        except Exception as exc:
+            text = str(exc) if isinstance(exc, _Tolerated) else f"{type(exc).__name__}: {exc}"
+            kind = text.split(":", 1)[0]
+            if kind == state["kind"]:
+                state["streak"] += 1
+            else:
+                state.update(streak=1, kind=kind, first=text)
+            if state["streak"] >= after:
+                state["tripped"] = (f"not run: stopped after {after} failures in a "
+                                    f"row ({state['first']})")
+            raise
+        state.update(streak=0, kind=None)
+        return value
+    run.__name__ = f"breaker({getattr(fn, '__name__', 'fn')})"
     return run
 
 
@@ -2149,6 +2265,7 @@ MODIFIERS: dict[str, ModifierKind] = {k.name: k for k in (
     _kind("timeout",  "execution", _d_timeout, _d_timeout),
     _kind("expect",   "execution", _d_expect, _d_expect),
     _kind("try_except", "execution", _d_try_except, _d_try_except),
+    _kind("breaker",  "execution", _d_breaker, _d_breaker),
 )}
 
 
@@ -2179,6 +2296,7 @@ PARAM_TYPES: dict[str, tuple[type, ...]] = {
 PARAM_TYPES_BY_VERB: dict[str, dict[str, tuple[type, ...]]] = {
     "sort": {"by": (str, list, tuple)},
     "try_except": {"on": (list, tuple, str)},
+    "breaker": {"after": (int, type(None))},
     "expect": {"rows": (int,), "min_rows": (int,), "max_rows": (int,),
                "columns": (list, tuple, dict), "more_columns": (bool,)},
 }
@@ -2284,6 +2402,7 @@ _TAKES_TOOL: dict[str, Any] = {
     "rename": False, "sort": False, "distinct": False,
     "source": "optional", "expand": "optional", "collapse": "optional",
     "retry": None, "timeout": None, "expect": None, "try_except": None,
+    "breaker": None,
 }
 
 
@@ -2674,17 +2793,16 @@ class Operation:
             based = _attach_bound(based, ref.workflow.resources)
         if based.shape_verb is not None:
             return based
-        upstream = None
-        if ref.workflow is not None:
-            step = ref.workflow.steps.get(ref.id)
-            # A staged upstream still predicts its payload column, which is what
-            # lets `total(acc, value)` read as a reducer before anything runs.
-            upstream = None if step is None else step.output
-        fn = self.fn or TOOLS.get(self.tool_id) \
-            or BUILTIN_TOOLS.get(self.tool_id)
-        kind = ("map" if fn is None
-                else infer_verb(fn, upstream, self.arguments)[0])
-        return based._add(kind)               # _add carries based.input forward
+        # The verb is no longer picked here: staging and each run pick it from
+        # the input as it is then (`_provisional`, `_resolve_auto`).
+        if not settings.implicit_auto:
+            raise TypeError(
+                f"{self.tool_id} needs an orchestration: write "
+                f"{self.tool_id}[mod.map()](…) or {self.tool_id}[mod.auto()](…). "
+                "(Implicit auto is off: grid.settings.implicit_auto.)")
+        # 009 decision 6: an unstated orchestration is auto, saved as
+        # `mod.auto()` and decided from the data at each run.
+        return based._add("auto")             # _add carries based.input forward
 
     def run(self, source: Any, tools: dict[str, Callable] | None = None) -> Any:
         """Compile the stack and apply it to *source*.
@@ -3735,6 +3853,9 @@ class ToolHandle:
             return self._start()(*args, **kwargs)
         if any(isinstance(a, Operation) for a in (*args, *kwargs.values())):
             raise TypeError(_NESTED_OPERATION)
+        if len(args) == 1 and settings.implicit_auto and _runs_over_rows(self.fn, args[0], kwargs):
+            # 009 decision 7: a frame whose rows are the arguments runs over them.
+            return self._start().bind(**kwargs)[mod.auto()](args[0])
         return self.fn(*args, **kwargs)
 
     def bind(self, **literals) -> Operation:
@@ -4004,7 +4125,10 @@ def _decode(blob: dict) -> Any:
     kind = blob["kind"]
     if kind == "frame":
         import io
-        frame = pd.read_json(io.StringIO(blob["data"]), orient="split")
+        # convert_axes=False: a row id like "1.0" (008 C16) must come back
+        # as the string it was, not the float 1.0.
+        frame = pd.read_json(io.StringIO(blob["data"]), orient="split",
+                             convert_axes=False)
         # Restore what JSON could not carry. Absent on exports written before
         # dtypes were recorded, which then behave as they always did.
         dtypes = blob.get("dtypes")
@@ -4306,7 +4430,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     #     refused: the default payload overwriting the previous step's default
     #     payload is how `map` over `map` chains, so that is a warning instead
     #     (see `warn`).
-    if (verb is not None and verb.kind in ("map", "group", "expand")
+    if (verb is not None and verb.kind in ()      # 008 C13: no verb carries
             and workflow is not None and not verb.params.get("replace")
             and "name" in verb.params):
         written = verb.params["name"]
@@ -4478,7 +4602,7 @@ def warn(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str,
                 f"{name}={shown} overrides the {name!r} column of "
                 f"{str(operation.input)!r} for every row; drop the argument "
                 f"to use the column")
-    if (verb.kind in ("map", "group", "expand") and "name" not in verb.params
+    if (verb.kind in () and "name" not in verb.params    # 008 C13: none carry
             and not verb.params.get("replace")):
         written = DEFAULT_PAYLOAD.get(verb.kind)
         if written in workflow._known_columns(operation):
@@ -4713,10 +4837,12 @@ DEFAULT_PAYLOAD: dict[str, str | None] = {
 
 
 #: Verbs whose output keeps **all** the input's columns (§3's columns column).
+#: Not ``map``, ``group`` or ``expand``: a step that computes is only its
+#: results (owner decision, 2026-10-20).
 #: ``collapse`` and ``sweep`` build their rows from scratch; ``select`` keeps a
 #: chosen subset, so it predicts its columns exactly and gets its own branch in
 #: :func:`stage`.
-CARRIES_COLUMNS: frozenset[str] = frozenset({"map", "filter", "group", "expand"})
+CARRIES_COLUMNS: frozenset[str] = frozenset({"filter"})
 
 
 #: §3's rows column, as data: what each verb does to the input's row count.
@@ -4906,14 +5032,78 @@ def _combine_stack(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
                      ignore_index=True)
 
 
+def _row_lookup(frame: pd.DataFrame) -> dict:
+    """str(row id) → row id, to match ids across grids whatever their type."""
+    return {str(i): i for i in frame.index}
+
+
 def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
-    sizes = [len(f) for f in frames]
-    if len(set(sizes)) > 1:
-        raise ValueError(f"zip needs grids of equal length, got {sizes}")
-    data = pd.concat([f.reset_index(drop=True) for f in frames], axis=1)
+    """Put grids side by side, **row id to row id** — strictly (009 decision 2).
+
+    Each row of the finest grid (the one whose ids are derived from the
+    others', e.g. ``expand`` items ``1.0``, ``1.1``) is paired with the row of
+    the same id in every other grid, or with the row it was derived from. The
+    result keeps the finest grid's rows and ids; with no finer grid, the first.
+
+    **No row is ever dropped silently.** A row with no match fails the step,
+    and so does a row of a same-level grid that nothing matched — use ``join``
+    for partial matches. Only a parent grid may have rows nothing points to (a
+    row that expanded to nothing). Grids whose ids are unrelated are paired by
+    position when their lengths agree, and refused when they don't.
+    """
+    names = [f.attrs.get("step_id") or f"input {i + 1}" for i, f in enumerate(frames)]
+    depth = [max((len(_ancestors(i)) for i in f.index), default=0) for f in frames]
+    primary = max(range(len(frames)), key=lambda i: (depth[i], -i))
+    target = frames[primary].index
+    keys = [str(t) for t in target]
+    aligned = []
+    for i, frame in enumerate(frames):
+        if i == primary:
+            aligned.append(frame)
+            continue
+        lookup = _row_lookup(frame)
+        related = any(k in lookup or any(a in lookup for a in _ancestors(k)) for k in keys)
+        if not related and len(frame):
+            if len(frame) != len(target):
+                raise ValueError(
+                    f"zip_ can't line up {names[primary]!r} ({len(target)} rows) and "
+                    f"{names[i]!r} ({len(frame)} rows): their row ids are unrelated "
+                    f"and their lengths differ. Use join to match them on a column")
+            aligned.append(frame.set_axis(target))     # unrelated ids: by position
+            continue
+        picked, unmatched, used = [], [], set()
+        for key in keys:
+            match = key if key in lookup else next(
+                (a for a in _ancestors(key) if a in lookup), None)
+            if match is None:
+                unmatched.append(key)
+                continue
+            picked.append(lookup[match])
+            used.add(match)
+        if unmatched:
+            raise ValueError(
+                f"zip_ pairs rows by id: {_rows_text(unmatched)} of {names[primary]!r} "
+                f"{'has' if len(unmatched) == 1 else 'have'} no matching row in "
+                f"{names[i]!r}. For a partial match, use join")
+        if depth[i] == depth[primary]:
+            extra = [k for k in lookup if k not in used]
+            if extra:
+                raise ValueError(
+                    f"zip_ pairs rows by id: {_rows_text(extra)} of {names[i]!r} "
+                    f"{'has' if len(extra) == 1 else 'have'} no matching row in "
+                    f"{names[primary]!r}. For a partial match, use join")
+        out = frame.loc[picked]
+        out.index = target
+        aligned.append(out)
+    data = pd.concat(aligned, axis=1)
     # A shared column name would appear twice; keep the first (union, first
     # wins) so the result matches the staged prediction.
     return data.loc[:, ~data.columns.duplicated()]
+
+
+def _rows_text(keys: list[str]) -> str:
+    shown = ", ".join(keys[:5]) + ("…" if len(keys) > 5 else "")
+    return f"row{'s' if len(keys) > 1 else ''} {shown}"
 
 
 def _combine_join(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
@@ -5170,8 +5360,8 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         columns_open = not is_identity(fn)
     elif kind == "table":
         columns_open = True             # what the tool returns — unless declared
-    elif kind in ("sweep", "select") or (kind == "collapse"):
-        columns_open = False
+    elif kind in ("sweep", "select", "collapse", "map", "group", "expand"):
+        columns_open = False            # these build their columns themselves
     else:
         columns_open = (workflow._columns_open(operation)
                         if workflow is not None else False)
@@ -5399,6 +5589,7 @@ class Workflow:
         self.resources[name] = ResourceDecl(name, type_, dict(settings),
                                             type_.__name__)
         self._recheck_users(name, stale=existed)
+        self._refresh_staleness()
         return ResRef(name)
 
     def _recheck_users(self, name: str, *, stale: bool) -> None:
@@ -5493,6 +5684,8 @@ class Workflow:
                 Operation(tool_id="identity", fn=identity)[mod.source()],
                 source_(operation),
             )
+            out = self.steps[step_id].output
+            out.meta["version"], out.meta["read"] = _data_version(out.data), {}
             if existed:
                 self._mark_stale_dependents(step_id)
             else:
@@ -5627,11 +5820,14 @@ class Workflow:
                                          op.fn, new_input, bound_to=op.bound_to)
 
     def _mark_stale_dependents(self, step_id: str) -> None:
-        """Mark every transitive reader that has already run as ``stale``.
+        """Re-decide staleness after *step_id* changed (009 §5–§6).
 
-        Changing an upstream recomputes nothing (§7's push/pull), but a dependent
-        that ran now holds outdated data — ``status`` says ``stale`` until it is
-        re-run. Staged dependents are left alone: they have no data to be stale.
+        Changing an upstream recomputes nothing (§7's push/pull), but a step
+        that ran may now hold outdated data — ``status`` says ``stale`` until it
+        is re-run. A step with ``read`` stamps is stale when a step it read has
+        a different version now (its data really changed), or is stale itself.
+        An output saved before stamps existed keeps the old rule: any change
+        upstream marks it stale.
         """
         frontier, seen = [step_id], set()
         while frontier:
@@ -5640,9 +5836,65 @@ class Workflow:
                     continue
                 seen.add(sid)
                 output = self.steps[sid].output
-                if not output.meta.get("staged"):
+                if not output.meta.get("staged") and "read" not in output.meta:
                     output.meta["stale"] = True
                 frontier.append(sid)
+        self._refresh_staleness()
+
+    def version(self, step_id: str) -> str | None:
+        """The version of *step_id*'s data — a hash; None until it holds data."""
+        step = self.steps.get(step_id)
+        if step is None or step.output.meta.get("staged"):
+            return None
+        if "version" not in step.output.meta:
+            step.output.meta["version"] = _data_version(step.output.data)
+        return step.output.meta["version"]
+
+    def _resource_version(self, name: str) -> str | None:
+        decl = self.resources.get(name)
+        if decl is None:
+            return None
+        return hashlib.sha1(json.dumps(decl.to_dict(), sort_keys=True,
+                                       default=repr).encode()).hexdigest()[:12]
+
+    def _read_stamps(self, operation: Operation) -> dict:
+        """The versions of everything *operation* reads, as of now."""
+        stamps: dict = {name: self.version(name) for name in operation.reads}
+        for name in operation.resources:
+            stamps[f"res:{name}"] = self._resource_version(name)
+        return stamps
+
+    def _refresh_staleness(self) -> None:
+        """Set every run step's ``stale`` from its ``read`` stamps."""
+        memo: dict[str, bool] = {}
+
+        def stale(sid: str) -> bool:
+            if sid in memo:
+                return memo[sid]
+            memo[sid] = False                       # a cycle can't make itself stale
+            output = self.steps[sid].output
+            if output.meta.get("staged"):
+                return False
+            read = output.meta.get("read")
+            if read is None:                       # saved before stamps: keep its flag
+                memo[sid] = bool(output.meta.get("stale"))
+                return memo[sid]
+            result = False
+            for name, seen in read.items():
+                if name.startswith("res:"):
+                    current = self._resource_version(name[4:])
+                else:
+                    current = self.version(name) if name in self.steps else None
+                    if name in self.steps and stale(name):
+                        result = True
+                if current != seen:
+                    result = True
+            memo[sid] = result
+            return result
+
+        for sid, st in self.steps.items():
+            if not st.output.meta.get("staged") and st.output.meta.get("read") is not None:
+                st.output.meta["stale"] = stale(sid)
 
     # ── what a step reads ────────────────────────────────────────────────
     def _known_columns(self, operation: Operation) -> list[str]:
@@ -5809,6 +6061,28 @@ class Workflow:
 
     def run(self, step_id: str, tools: dict[str, Callable] | None = None,
             resources: Mapping[str, Any] | None = None) -> Step:
+        """Execute one step; record its version and the versions it read (009 §5).
+
+        See :meth:`_run_step` for how a step runs. Afterwards its output carries
+        ``version`` (a hash of its data) and ``read`` (``{step: version}`` for
+        every step it read, ``{"res:name": …}`` for resources), and every step
+        is re-checked for staleness from those stamps.
+        """
+        step = self.steps[step_id]
+        read = self._read_stamps(step.operation) if step_id in self.steps else {}
+        result = self._run_step(step_id, tools, resources)
+        out = self.steps[step_id].output
+        if not out.meta.get("staged"):
+            out.meta["version"] = _data_version(out.data)
+            if not (step.operation.shape_verb and step.operation.shape_verb.kind == "source"
+                    and is_identity(step.operation.fn)):
+                out.meta["read"] = read
+            out.meta.pop("stale", None)
+        self._mark_stale_dependents(step_id)
+        return result
+
+    def _run_step(self, step_id: str, tools: dict[str, Callable] | None = None,
+                  resources: Mapping[str, Any] | None = None) -> Step:
         """Execute one step and replace its staged Output with the real one.
 
         *resources* is the caller's live objects, name → object, for every
@@ -5855,9 +6129,17 @@ class Workflow:
                 f"first, or call run_all()."
             )
         if is_combine(step.operation):
-            frames = [rows(self.steps[str(g)].output)
-                      for g in step.operation.inputs]
-            step.output = _run_combine(step.operation, frames)
+            frames = []
+            for g in step.operation.inputs:
+                frame = rows(self.steps[str(g)].output).copy(deep=False)
+                frame.attrs["step_id"] = str(g)        # so an error can name it
+                frames.append(frame)
+            try:
+                step.output = _run_combine(step.operation, frames)
+            except ValueError as exc:
+                # A zip_ that would drop rows, a join on a missing key: the step
+                # fails with the reason (the run stops on it), never raises.
+                step.output = _failed_output(step.operation, str(exc))
             self._restage_after(step_id)
             return step
         try:
@@ -5890,9 +6172,8 @@ class Workflow:
         if chosen is not None:
             step.output.meta["auto"] = chosen
         self._restage_after(step_id)
-        # 008 C10.5: re-running a step makes everything that already read it
-        # stale — fixing a root clears what it blocked, by re-running it.
-        self._mark_stale_dependents(step_id)
+        # 008 C10.5 / 009 §6: what already read this step is re-checked for
+        # staleness by `run`, from the versions it read.
         return step
 
     def run_all(self, tools: dict[str, Callable] | None = None,
@@ -6207,11 +6488,60 @@ def formula_names(tools: dict[str, Callable] | None = None) -> dict[str, Any]:
     return names
 
 
+#: Verbs that run a tool once per row: auto gives them its breaker (009 §7).
+ROW_WISE = frozenset({"map", "filter", "group", "expand"})
+
+
+def _auto_defaults(operation: Operation, kind: str) -> list["Modifier"]:
+    """The default modifiers auto adds for *kind* — none the step already states."""
+    stated = {m.kind for m in operation.modifiers}
+    defaults = []
+    if kind in ROW_WISE and "breaker" not in stated:
+        defaults.append(Modifier("breaker", {"after": BREAKER_AFTER}))
+    return defaults
+
+
+def _runs_over_rows(fn: Callable, data: Any, given: dict) -> bool:
+    """Does *data* fail to fit the tool as one argument, while its rows would?
+
+    True when *data* is a grid, the tool's first free parameter is typed and a
+    grid doesn't fit that type (``n: int``), and the grid's columns supply
+    every required parameter. A tool typed to take a frame, or untyped, is
+    called with the frame as-is.
+    """
+    if not isinstance(data, (pd.DataFrame, Output)):
+        return False
+    try:
+        parameters = [p for p in _signature(fn).parameters.values()
+                      if p.kind not in (inspect.Parameter.VAR_POSITIONAL,
+                                        inspect.Parameter.VAR_KEYWORD)
+                      and p.name not in given]
+    except (TypeError, ValueError):
+        return False
+    if not parameters or parameters[0].annotation is inspect.Parameter.empty:
+        return False
+    if _type_fits(pd.DataFrame, parameters[0].annotation) is not False:
+        return False
+    columns = set(_rows_frame(data).columns)
+    required = [p.name for p in parameters if p.default is inspect.Parameter.empty]
+    return bool(required) and all(name in columns for name in required)
+
+
 def _with_verb(operation: Operation, kind: str) -> Operation:
-    """*operation* with its ``auto`` replaced by the concrete verb *kind*."""
-    modifiers = tuple(Modifier(kind, {}) if m.kind == "auto" else m
-                      for m in operation.modifiers)
-    return replace(operation, modifiers=modifiers)
+    """*operation* with its ``auto`` replaced by the verb *kind* and auto's defaults.
+
+    The defaults go just inside the verb (``[retry, breaker, map]``,
+    innermost first), so they see every unit's final outcome.
+    """
+    defaults = _auto_defaults(operation, kind)
+    modifiers: list = []
+    for m in operation.modifiers:
+        if m.kind == "auto":
+            modifiers += defaults
+            modifiers.append(Modifier(kind, {}))
+        else:
+            modifiers.append(m)
+    return replace(operation, modifiers=tuple(modifiers))
 
 
 def _resolve_auto(operation: Operation, upstream: Any) -> tuple[Operation, str, str]:
@@ -6220,6 +6550,9 @@ def _resolve_auto(operation: Operation, upstream: Any) -> tuple[Operation, str, 
     if fn is None:
         return _with_verb(operation, "map"), "map", "the tool isn't known; assuming per row"
     kind, why = infer_verb(fn, upstream, operation.arguments)
+    added = _auto_defaults(operation, kind)
+    if added:
+        why += "; adds " + ", ".join(repr(m) for m in added)
     return _with_verb(operation, kind), kind, why
 
 

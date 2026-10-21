@@ -119,8 +119,11 @@ def build() -> grid.Workflow:
     wf["readings"] = readings()                      # source: 4 rows, 2 cols
     wf["records"] = records()                        # source: dict cells
 
-    # ── map — n rows in, n rows out, plus one payload column ────────────
-    wf["scored"] = scale[mod.map(over=wf["readings"], name="score")]
+    # ── map — n rows in, n rows out, and ONLY the tool's result ─────────
+    # A map step is its results: `score` holds one column. Each row keeps its
+    # input row's id, so `zip_` puts the readings and their scores side by side.
+    wf["score"] = scale[mod.map(over=wf["readings"], name="score")]
+    wf["scored"] = zip_(wf["readings"], wf["score"])    # city, n, score
 
     # ── the row-axis reshapers (no tool runs) ───────────────────────────
     wf["kept"] = is_big[mod.filter(over=wf["scored"])]          # filter: rows
@@ -134,7 +137,9 @@ def build() -> grid.Workflow:
     wf["renamed"] = mod.rename(over=wf["scored"], columns={"n": "count"})
 
     # ── group -> collapse: the stratified-summary chain ─────────────────
-    wf["bucketed"] = label_city[mod.group(over=wf["scored"], name="bucket")]
+    # group is only the key, on each row's id; zip_ pairs every row with it
+    wf["bucket"] = label_city[mod.group(over=wf["scored"], name="bucket")]
+    wf["bucketed"] = zip_(wf["scored"], wf["bucket"])
     wf["per_city"] = add_n[mod.collapse(by="bucket", over=wf["bucketed"], initial=0)]
 
     # ── collapse to one row — a builtin reducer and a registry reducer ──
@@ -156,8 +161,10 @@ def build() -> grid.Workflow:
     wf["robust"] = scale[mod.map(over=wf["readings"], name="score"),
                          mod.retry(times=2), mod.timeout(seconds=5)]
 
-    # ── verb inference — pass a reference, no verb; the shape is chosen ──
-    # The stored verb is concrete and replaceable, not hidden (see infer_verb).
+    # ── auto — pass a reference, no verb; the orchestration is chosen ───
+    # Saved as mod.auto() and decided from the data at each run; row-wise
+    # choices also get auto's default breaker(after=5). Write a verb yourself
+    # (scale[mod.map()](…)) to choose instead — then nothing is added.
     wf["auto_map"] = scale(wf["readings"])          # ordinary tool    → map
     wf["auto_filter"] = is_big(wf["readings"])      # returns bool     → filter
     wf["auto_collapse"] = add_n(wf["readings"])     # (acc, x) reducer → collapse
@@ -362,7 +369,8 @@ def build_resources() -> grid.Workflow:
     wf["inferred"] = res["db"].lookup(wf["keys"])           # verb inferred: map
 
     # ── a resource step's output feeds later steps like any other ────────
-    wf["region_table"] = mod.select(over=wf["regions"], columns=["city", "value"])
+    # a map step is only its results; zip_ puts each city beside its region
+    wf["region_table"] = zip_(wf["readings"], wf["regions"])
     return wf
 
 
@@ -407,8 +415,10 @@ def main() -> None:
     for sid, step in wf.steps.items():
         print(f"  {sid:12} {step.describe()}")
 
-    print("\nmap (scored):")
-    print(wf.step("scored").output.view().to_string(index=False))
+    print("\nmap (score) — only the tool's result, on the input's row ids:")
+    print(wf.step("score").output.view().to_string())
+    print("\nzip_ (scored) — the readings and their scores side by side:")
+    print(wf.step("scored").output.data.to_string(index=False))
 
     print("\ngroup -> collapse (per_city):")
     print(wf.step("per_city").output.data.to_string(index=False))
@@ -419,10 +429,10 @@ def main() -> None:
     print("\nsweep (grid_search):")
     print(wf.step("grid_search").output.data.to_string(index=False))
 
-    print("\nverb inference (pass a reference, no verb — the shape is chosen):")
+    print("\nauto (pass a reference, no verb — saved as auto, chosen from the data):")
     for sid in ("auto_map", "auto_filter", "auto_collapse", "auto_expand"):
-        kind = wf.step(sid).operation.to_dict()["modifiers"][0]["kind"]
-        print(f"  {sid:14} → {kind}")
+        picked = wf.step(sid).output.meta["auto"]
+        print(f"  {sid:14} → {picked['verb']:9} ({picked['reason']})")
 
     print("\nstandard types as sources (each one cell):")
     for sid in ("a_list", "a_dict", "a_scalar"):

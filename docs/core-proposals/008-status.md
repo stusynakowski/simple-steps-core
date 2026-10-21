@@ -19,8 +19,9 @@
   **stops `run_all`**. The new `mod.try_except(...)` lets a step's failures
   through (see [Failures](#failures-stop-the-run-unless-caught)).
 - **Before bumping the pin,** read [Changes that can break the
-  app](#changes-that-can-break-the-app). Eighteen behaviours differ from
-  `a799d0e`.
+  app](#changes-that-can-break-the-app). Nineteen behaviours differ from
+  `a799d0e`; the first, map's
+  output, changes the most.
 - 545 tests pass. Each finished ask has a test written from its "Done when"
   line, in `tests/unit/test_008_asks.py`.
 
@@ -35,7 +36,7 @@
 | **N2** | done, **as a warning** | An explicit argument wins over a same-named column, and the step warns: *"city='NYC' overrides the 'city' column of 'readings' for every row…"* |
 | **C10** | done, **changed by owner** | Failure as state, root `cause`, blocked rows, forward refs. `run_all` now stops on an uncaught failure; see below |
 | **C11** | done | Python literals saved exactly; non-literals refused at declaration |
-| **C13** | done, **narrowed** | An explicit `name=` that already exists is refused unless `replace=True`. The default `value` overwriting `value` is a warning |
+| **C13** | done, **by design** | `map`/`group`/`expand` output only their results, so no output can replace an input column. `replace=` is accepted and does nothing |
 | **C14** | done | Missing is `None`; nullable int columns stay ints; `None`-worded type problems |
 | **C1** | done | References in settings, positional args after the input, conversion by type |
 | **C7** (+K9) | done | `rows`/`cols` selection, `select(rows=, columns=)`, string column names, reserved names |
@@ -70,6 +71,20 @@
 Each of these differs from `a799d0e`. They are ordered by how likely the app
 is to hit them.
 
+0. **A step that computes is only its results** (owner decision,
+   2026-10-20). `map`, `group` and `expand` output the tool's result column
+   alone, and no longer carry the input's columns.
+   - `map` and `group` keep the input's row ids, so `zip_(wf["in"],
+     wf["out"])` (or `join`) puts the input and results side by side.
+   - `group` → `collapse(by=…)` goes through that zip.
+   - `expand`'s rows lose their parent's columns; the ledger's `unit` still
+     names the parent row (C16 is the planned fix).
+   - Anything that read an input column *through* one of these steps
+     (`map → select(city)`, `group → collapse(by=, n)`) must read the zip
+     instead.
+   - C13's check is gone: nothing can be replaced.
+   - **The app's K1 probe** (`select(city, score)` after a map) can't pass as
+     written; core's copy checks the same deferral through `zip_`.
 1. **`run_all` raises `grid.StepFailed`** on a failed cell its step didn't
    catch. Steps after it don't run. Add `mod.try_except(...)` where failure is
    expected.
@@ -264,6 +279,9 @@ module level, or it can't be resolved and the source plans as `unknown`.
 
 ## Decisions for the app to confirm
 
+0. **A step that computes is only its results** (owner decision): `map`,
+   `group` and `expand`. C8's "map shows input columns known" no longer
+   holds, and `expand` needs C16's derived ids to keep its parent link.
 1. **Stop on uncaught failure** (owner decision), replacing C10's "run
    everything else".
 2. **N2 is a warning,** not a refusal: an explicit argument wins.

@@ -284,6 +284,50 @@ workflow unless the step says it may fail.
 - Also: modifier equality now sees a setting's selection, and a tool given
   as a handle equals the same tool saved as `$tool`.
 
+## Decision (owner, 2026-10-20): a map step is only its results
+
+`map` no longer carries its input's columns: its output is the tool's result,
+one column (`value`, or `name=`), on the input's row ids. To see inputs and
+results together, combine them: `zip_(wf["in"], wf["out"])` by position (the
+ids line up), or `join`.
+
+- `CARRIES_COLUMNS` is now `filter`, `group`, `expand`. A map step's columns
+  are always known: exactly its payload, even over a source that hasn't run.
+- **C13 no longer applies to `map`.** It has nothing to replace. `group` and
+  `expand` still carry their input, so they keep the C13 check and its
+  default-name warning. `replace=` is still accepted on `map` (v2 files may
+  carry it) and does nothing there.
+- **Affects the app's asks:** C8's planned-grid table says a map shows "input
+  columns `known`; output column `pending`". Under this rule a map plans one
+  `pending` column. The app's K1 probe (`select(city, score)` after a map)
+  can't pass as written; core's copy checks the same deferral through
+  `zip_`.
+- The example now has `score` (the map) and `scored = zip_(readings,
+  score)`. Tests, probes and the resource example (`region_table = zip_(…)`)
+  were updated to match.
+
+## Decision (owner, 2026-10-20): every step that computes is only its results
+
+Extends the map decision to `group` and `expand`.
+
+- **`group`** outputs only its key column (`group`, or `name=`), on the input's
+  row ids. `group` → `collapse(by=…)` now goes through a zip:
+  `wf["keys"] = label[mod.group(name="bucket")](wf["rows"])`, then
+  `wf["keyed"] = zip_(wf["rows"], wf["keys"])`, then
+  `add[mod.collapse(by="bucket")](wf["keyed"])`.
+- **`expand`** outputs only its items (`value`, or `name=`). Its rows no longer
+  hold their parent's columns. The ledger's `unit` still names the input row
+  each item came from. Since the counts differ, `zip_` can't line them back
+  up; C16's derived row ids (`a.0`, `a.1`) are the planned way to keep that
+  link. An empty expand is one empty `value` column.
+- `CARRIES_COLUMNS` is now just `filter`. The rearranging verbs (`select`,
+  `slice`, `sort`, `distinct`, `rename`, `drop`) keep passing columns
+  through: they compute nothing.
+- **C13's check is gone:** with no step adding a column to carried ones,
+  nothing can be replaced. `replace=` is still accepted and does nothing.
+- A column with no values is now undecidable for type checks (an empty
+  `object` column used to fail an `int` parameter).
+
 ## Status
 
 | Ask | Phase | Status |
