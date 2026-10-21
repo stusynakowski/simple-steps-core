@@ -71,7 +71,7 @@ __all__ = [
     "mod",
     "DECORATORS", "MODIFIERS", "ModifierKind", "SHAPE_VERBS", "is_shape",
     "compile_operation",
-    "PAYLOAD", "LEDGER_COLUMNS",
+    "PAYLOAD", "STATES",
 ]
 
 #: Default name for the column holding whatever a tool returned.
@@ -103,41 +103,136 @@ class Settings:
 settings = Settings(implicit_auto=_env_flag("SIMPLE_STEPS_IMPLICIT_AUTO", True))
 
 #: Every ledger has exactly these columns, so the UI can rely on them.
-LEDGER_COLUMNS = ("status", "error", "attempts", "seconds", "unit", "cause", "caught")
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Output
+# Output — data, states, meta (009)
 # ─────────────────────────────────────────────────────────────────────────
-@dataclass
+#: Every state a cell can be in, mildest first, so a row's state is its
+#: worst cell's. ``stale`` is not stored: it's a step-level fact (meta) shown
+#: over known cells.
+STATES = ("known", "maybe", "pending", "blocked", "failed", "invalid")
+
+#: Which state a verb's per-unit record maps to.
+_RECORD_STATE = {"completed": "known", "staged": "pending", "invalid": "invalid"}
+
+
+def _state_column(values: Sequence[str], index: Any) -> pd.Series:
+    return pd.Series(pd.Categorical(values, categories=STATES, ordered=True), index=index)
+
+
+def _states_frame(row_states: Sequence[str], data: pd.DataFrame) -> pd.DataFrame:
+    """One state per cell, same shape as *data*: each row's state in every column."""
+    return pd.DataFrame({c: _state_column(row_states, data.index) for c in data.columns},
+                        index=data.index)
+
+
+def _from_records(records: Sequence[dict], index: Sequence[Any], data: pd.DataFrame,
+                  meta: dict) -> tuple[pd.DataFrame, dict]:
+    """Turn a verb's per-unit records into per-cell states and sparse notes.
+
+    Records are how a verb reports its units while it runs. They are not kept:
+    a row that completed normally costs one state code per cell, nothing more.
+    Only rows with something to say — an error, a cause, a caught failure,
+    retries, an unusual lineage — get a note in ``meta["notes"]``.
+    """
+    by_id: dict = {}
+    notes: dict = dict(meta.get("notes") or {})
+    for row_id, record in zip(index, records):
+        status = record.get("status")
+        if status == "failed":
+            state = "blocked" if record.get("cause") else "failed"
+        else:
+            state = _RECORD_STATE.get(status, "known")
+        by_id[row_id] = state
+        note = {k: record[k] for k in ("error", "cause") if record.get(k)}
+        if record.get("caught"):
+            note["caught"] = True
+        if record.get("attempts") not in (None, 0, 1):
+            note["attempts"] = record["attempts"]
+        unit = record.get("unit")
+        if unit is not None and (note or isinstance(unit, list)):
+            note["unit"] = unit            # lineage that the row id doesn't already say
+        if note:
+            notes[row_id] = note
+    row_states = [by_id.get(i, "known") for i in data.index]
+    if notes:
+        meta["notes"] = notes
+    return _states_frame(row_states, data), meta
+
+
 class Output:
-    """What a step produced: a payload grid plus a row-aligned ledger.
+    """What a step produced: **data, states, meta** (009).
 
-    ``data`` holds values and is what downstream steps consume. ``ledger``
-    holds execution state and is never consumed as data. They share an index,
-    so :meth:`view` is a clean join — see docs/shape-algebra.md §5.
+    - ``data``: the step's results, typed, indexed by row id. What downstream
+      steps consume.
+    - ``states``: the same shape as ``data``; one state per cell, from
+      :data:`STATES` (``known``, ``maybe``, ``pending``, ``blocked``,
+      ``failed``, ``invalid``). Compact: one byte per cell.
+    - ``meta``: everything else, open-ended. ``notes`` (row id → error, cause,
+      caught, attempts, unit — only for rows that have something to say),
+      ``plan``, ``auto``, ``version``, ``read``, ``stale``, ``excluded`` …
+
+    ``print(output)`` shows it all as one grid.
     """
 
-    data: pd.DataFrame
-    ledger: pd.DataFrame
-    meta: dict = field(default_factory=dict)
+    def __init__(self, data: pd.DataFrame, states: pd.DataFrame | None = None,
+                 meta: dict | None = None, *, records: Sequence[dict] | None = None,
+                 index: Sequence[Any] | None = None):
+        self.data = data
+        self.meta = dict(meta) if meta else {}
+        if states is None:
+            records = records if records is not None else []
+            index = data.index if index is None else index
+            if records:
+                states, self.meta = _from_records(records, index, data, self.meta)
+            else:
+                states = _states_frame(["known"] * len(data), data)
+        self.states = states
 
-    # ── the merged view (the only thing a user needs to look at) ─────────
+    # ── reading states ───────────────────────────────────────────────────
+    @property
+    def notes(self) -> dict:
+        """Row id → what there is to say about that row (error, cause, …)."""
+        return self.meta.get("notes") or {}
+
+    @property
+    def row_states(self) -> pd.Series:
+        """Each row's state: its worst cell's (a row with one failed cell is failed)."""
+        if not len(self.states.columns):
+            return _state_column(["known"] * len(self.data), self.data.index)
+        codes = self.states.apply(lambda col: col.cat.codes).max(axis=1)
+        return _state_column([STATES[c] for c in codes], self.data.index)
+
+    def ids_in(self, *states: str) -> list:
+        """Row ids whose state is one of *states*."""
+        rs = self.row_states
+        return list(rs.index[rs.isin(states)])
+
     def view(self) -> pd.DataFrame:
-        """``data`` joined with its ledger — the one table to render."""
-        return self.data.join(self.ledger, rsuffix="_run")
+        """``data`` plus each row's ``state`` and, where there is one, its note."""
+        out = self.data.copy()
+        out["state"] = self.row_states.astype(str)
+        if self.meta.get("stale"):
+            out.loc[out["state"] == "known", "state"] = "stale"
+        if self.notes:
+            out["note"] = [_note_text(self.notes.get(i)) for i in out.index]
+        return out
 
     # ── the two halves ───────────────────────────────────────────────────
     @property
     def ok(self) -> pd.DataFrame:
-        """Rows that completed."""
-        good = self.ledger.index[self.ledger["status"] == "completed"]
-        return self.data.loc[self.data.index.intersection(good)]
+        """Rows whose every cell is known."""
+        return self.data.loc[self.ids_in("known")]
 
     @property
     def failed(self) -> pd.DataFrame:
-        """Ledger rows that failed — the re-drive set, with their errors."""
-        return self.ledger[self.ledger["status"] == "failed"]
+        """Rows that failed or were blocked — the re-drive set, with their notes."""
+        ids = self.ids_in("failed", "blocked")
+        rows_ = {i: {"state": self.row_states[i], **self.notes.get(i, {})} for i in ids}
+        return pd.DataFrame.from_dict(rows_, orient="index",
+                                      columns=None) if rows_ else pd.DataFrame(
+            columns=["state", "error"])
 
     @property
     def values(self) -> list[Any]:
@@ -175,13 +270,23 @@ class Output:
         return self.meta.get("form", "grid")
 
     def progress(self) -> str:
-        done = int((self.ledger["status"] == "completed").sum())
-        return f"{done}/{len(self.ledger)}"
+        return f"{len(self.ids_in('known'))}/{len(self.data)}"
+
+    def __str__(self) -> str:
+        """The output as one grid: a caption, then values with their states."""
+        caption = repr(self)
+        if self.meta.get("staged"):
+            plan = self.meta.get("plan") or {}
+            return f"{caption}\n{_plan_words(plan)}" if plan else caption
+        return f"{caption}\n{self.view().to_string()}"
 
     def __repr__(self) -> str:
         verb = self.meta.get("verb", "?")
-        failed = len(self.failed)
+        if self.meta.get("staged"):
+            return f"<Output {verb} · staged>"
+        failed = len(self.ids_in("failed", "blocked"))
         tail = f", {failed} failed" if failed else ""
+        tail += ", stale" if self.meta.get("stale") else ""
         return (f"<Output {verb} · {len(self.data)} row(s) × "
                 f"{len(self.data.columns)} col(s){tail}>")
 
@@ -286,16 +391,11 @@ def _uncaught_failure(output: "Output") -> tuple[Any, str] | None:
     """The first failed cell that should stop the run: its own failure, not
     caught by ``mod.try_except``. A row blocked by an upstream failure has a
     ``cause`` — its root already stopped the run, or was caught."""
-    ledger = output.ledger
-    if not len(ledger) or "status" not in ledger.columns:
-        return None
-    for index, record in ledger[ledger["status"] == "failed"].iterrows():
-        if record.get("caught") is True:
+    for row_id in output.ids_in("failed"):        # blocked rows have a cause
+        note = output.notes.get(row_id, {})
+        if note.get("caught"):
             continue
-        cause = record.get("cause")
-        if isinstance(cause, str) and cause:
-            continue
-        return index, record.get("error")
+        return row_id, note.get("error")
     return None
 
 
@@ -319,8 +419,8 @@ def _failed_output(operation: Any, error: str) -> "Output":
     kind = operation.shape_verb.kind if operation.shape_verb else None
     return Output(
         data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
-        ledger=_ledger([{"status": "failed", "error": error, "attempts": 0,
-                         "seconds": 0.0}], [0]),
+        records=[{"status": "failed", "error": error, "attempts": 0,
+                         "seconds": 0.0}], index=[0],
         meta={"verb": kind, "form": "scalar", "payload": PAYLOAD})
 
 
@@ -336,35 +436,19 @@ def _upstream_failures(source: Any) -> dict:
         return {}
     if source.meta.get("blocked_all"):
         return {index: source.meta["blocked_all"] for index in source.data.index}
-    ledger = source.ledger
-    if not len(ledger) or "status" not in ledger.columns:
-        return {}
     sid = source.meta.get("step_id") or "input"
     out = {}
-    failed = ledger[ledger["status"] == "failed"]
-    for index, record in failed.iterrows():
-        if index not in source.data.index:
-            continue                         # e.g. a filtered-out unit
-        cause = record.get("cause") if "cause" in failed.columns else None
-        out[index] = (f"upstream cell {sid}[{index}] failed",
-                      cause if isinstance(cause, str) and cause
-                      else f"{sid}[{index}]: {record.get('error')}")
+    for row_id in source.ids_in("failed", "blocked"):
+        note = source.notes.get(row_id, {})
+        out[row_id] = (f"upstream cell {sid}[{row_id}] failed",
+                       note.get("cause") or f"{sid}[{row_id}]: {note.get('error')}")
     return out
 
 
 def _blocked(error: str, cause: str) -> dict:
-    """The ledger record of a unit that was not run because its input failed."""
+    """The record of a unit that was not run because its input failed."""
     return {"status": "failed", "error": error, "attempts": 0, "seconds": 0.0,
             "cause": cause}
-
-
-def _ledger(records: list[dict], index: Sequence[Any]) -> pd.DataFrame:
-    """Build a ledger with the standard columns, even when empty."""
-    frame = pd.DataFrame(records, index=pd.Index(index, name=None))
-    for column in LEDGER_COLUMNS:
-        if column not in frame.columns:
-            frame[column] = None
-    return frame[list(LEDGER_COLUMNS)]
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -807,7 +891,7 @@ def _expected_columns(expect: dict) -> tuple[list, dict]:
     return list(columns or []), {}
 
 
-def _rows_plan(kind, rule, expected, n_in, expect, label) -> dict:
+def _rows_plan(kind, rule, expected, n_in, expect, label, upstream=None) -> dict:
     """The row axis of a plan (008 C9): exact, stated, bounded or unknown."""
     if any(k in expect for k in ("rows", "min_rows", "max_rows")):
         plan = {"certainty": "stated"}
@@ -829,9 +913,10 @@ def _rows_plan(kind, rule, expected, n_in, expect, label) -> dict:
         "source": f"{label} is a source that hasn't run; its rows come from its data",
         "expand": f"expand: how many items {label} returns per row is only known by running",
         "table": f"table: {label} returns a new grid; its rows come from running it",
-    }.get(kind, "its input's row count isn't known yet")
+    }.get(kind, f"its input {upstream!r} doesn't know its row count yet"
+                if upstream else "its input's row count isn't known yet")
     resolve = [f"run {label}" if kind in ("source", "expand", "table")
-               else "run the steps before it"]
+               else (f"run {upstream!r}" if upstream else "run the steps before it")]
     if kind == "expand":
         resolve.append("annotate a fixed length: -> tuple[T, T]")
     resolve.append("state it on the step: mod.expect(rows=…)")
@@ -901,6 +986,59 @@ def _output_mismatch(operation: "Operation", data: pd.DataFrame) -> str | None:
                     f"{' (and maybe more)' if expect.get('more_columns') else ''}; "
                     f"got {', '.join(map(str, have)) or 'none'}")
     return None
+
+
+def _plain(value: Any) -> Any:
+    """A cell value as plain Python: numpy scalars unwrapped, missing as None."""
+    if _is_missing(value) if not isinstance(value, (list, dict, tuple, set)) else False:
+        return None
+    if hasattr(value, "item") and hasattr(value, "dtype"):
+        return value.item()
+    return value
+
+
+def _note_text(note: dict | None) -> str:
+    """A row's note in a few words, for printing."""
+    if not note:
+        return ""
+    if note.get("cause"):
+        return f"blocked by {note['cause']}"
+    text = note.get("error") or ""
+    return f"{text} (caught)" if note.get("caught") and "caught" not in text else text
+
+
+def _plan_markers(plan: dict, step_id: str) -> list[dict]:
+    """The known unknowns of a plan, as things to draw (009 §4).
+
+    A trailing marker row for a row count that isn't exact, and a trailing
+    marker column for columns that may be more than the known ones — each
+    with the plan's ``because`` and ``resolve``.
+    """
+    markers = []
+    rows_ = plan.get("rows") or {}
+    certainty = rows_.get("certainty")
+    if certainty == "unknown":
+        markers.append({"kind": "rows", "certainty": "unknown",
+                        "text": f"‹rows unknown — {rows_.get('because', '')}›",
+                        "because": rows_.get("because"), "resolve": rows_.get("resolve", [])})
+    elif certainty == "bounded":
+        span = f"{rows_.get('min', 0)}–{rows_.get('max', '?')}"
+        markers.append({"kind": "rows", "certainty": "bounded",
+                        "text": f"‹{span} rows — {rows_.get('because', '')}›",
+                        "because": rows_.get("because"), "resolve": rows_.get("resolve", [])})
+    elif certainty == "stated" and "count" not in rows_:
+        span = f"{rows_.get('min', 0)}–{rows_.get('max', '?')}"
+        markers.append({"kind": "rows", "certainty": "stated",
+                        "text": f"‹{span} rows (stated)›", "because": "stated with mod.expect",
+                        "resolve": []})
+    columns = plan.get("columns") or {}
+    if columns.get("more") or columns.get("certainty") in ("bounded", "unknown"):
+        known = columns.get("names") or []
+        markers.append({"kind": "columns", "certainty": columns.get("certainty"),
+                        "text": "‹+ maybe more columns›" if known else "‹columns unknown›",
+                        "because": columns.get("because", "stated as some of the columns"),
+                        "resolve": columns.get("resolve", [])})
+    return markers
 
 
 def _plan_words(plan: dict) -> str:
@@ -1279,7 +1417,7 @@ def map_(source: Any, fn: Callable, *, name: str = PAYLOAD,
 
     data = pd.DataFrame(index=frame.index)
     data[name] = _typed(values, frame.index)
-    return Output(data=data, ledger=_ledger(records, frame.index),
+    return Output(data=data, records=records, index=frame.index,
                   meta={"verb": "map", "form": "column", "payload": name,
                         "n_in": len(frame)})
 
@@ -1288,8 +1426,10 @@ def filter_(source: Any, fn: Callable, *, retries: int = 0,
             axis: str = "rows") -> Output:
     """``filter`` — keep the rows where *fn* is truthy. Columns unchanged.
 
-    The ledger keeps **all** units, so a row that was excluded (or whose
-    predicate raised) is still visible and re-drivable; ``kept`` says which.
+    Nothing is hidden: a row whose predicate **raised** stays, marked
+    ``failed`` (and a row blocked upstream stays ``blocked``), so the failure is
+    visible downstream. Rows the predicate rejected are listed by id in
+    ``meta["excluded"]``.
     """
     frame = rows(source, axis=axis)
     blocked = _upstream_failures(source)
@@ -1298,23 +1438,21 @@ def filter_(source: Any, fn: Callable, *, retries: int = 0,
         if index in blocked:
             # 008 C10: a failed row is carried through, still failed, so the
             # failure stays visible downstream instead of being filtered away.
-            record = {**_blocked(*blocked[index]), "kept": True}
+            record = _blocked(*blocked[index])
             keep.append(True)
             records.append(record)
             continue
         value, record = _call(fn, row, retries)
-        passed = bool(value) and record["status"] == "completed"
-        record["kept"] = passed
+        passed = record["status"] != "completed" or bool(value)
         keep.append(passed)
         records.append(record)
 
-    ledger = _ledger(records, frame.index)
-    ledger["kept"] = keep
     data = frame[pd.Series(keep, index=frame.index)]
-    return Output(data=data, ledger=ledger,
+    excluded = [i for i, k in zip(frame.index, keep) if not k]
+    return Output(data=data, records=records, index=frame.index,
                   meta={"verb": "filter", "form": "column",
                         "payload": None, "n_in": len(frame),
-                        "n_dropped": len(frame) - len(data)})
+                        "n_dropped": len(excluded), "excluded": excluded})
 
 
 def group_(source: Any, fn: Callable, *, name: str = "group",
@@ -1342,7 +1480,7 @@ def group_(source: Any, fn: Callable, *, name: str = "group",
     # it with the rows it labels by `zip_(wf["in"], wf["keys"])`.
     data = pd.DataFrame(index=frame.index)
     data[name] = _typed(keys, frame.index)
-    return Output(data=data, ledger=_ledger(records, frame.index),
+    return Output(data=data, records=records, index=frame.index,
                   meta={"verb": "group", "form": "column", "payload": name,
                         "key": name, "n_in": len(frame)})
 
@@ -1404,7 +1542,7 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
     if by is not None:                       # key first reads better
         data[by] = keys
     data[name] = _typed(results, data.index)
-    return Output(data=data, ledger=_ledger(records, index),
+    return Output(data=data, records=records, index=index,
                   meta={"verb": "collapse", "form": "scalar" if by is None
                         else "column", "payload": name, "by": by,
                         "n_in": len(frame)})
@@ -1477,7 +1615,7 @@ def expand_(source: Any, fn: Callable, *, name: str = PAYLOAD,
         # payload is object, which is the honest answer — nothing was produced,
         # so its type is unknown, and an empty column is undecidable anyway.
         data = pd.DataFrame({name: pd.Series([], dtype=object)})
-    return Output(data=data, ledger=_ledger(records, data.index),
+    return Output(data=data, records=records, index=data.index,
                   meta={"verb": "expand", "form": "column", "payload": name,
                         "n_in": len(frame)})
 
@@ -1503,11 +1641,11 @@ def table_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
     if blocked:
         record = _blocked(*next(iter(blocked.values())))
         return Output(data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
-                      ledger=_ledger([record], [0]), meta=meta)
+                      records=[record], index=[0], meta=meta)
     value, record = _call(fn, frame, retries)
     if record["status"] != "completed":
         return Output(data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
-                      ledger=_ledger([record], [0]), meta=meta)
+                      records=[record], index=[0], meta=meta)
     if isinstance(value, pd.Series):
         value = value.to_frame()
     if not isinstance(value, pd.DataFrame):
@@ -1518,10 +1656,10 @@ def table_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
                       "error": f"TypeError: table expects a DataFrame back, got "
                                f"{type(value).__name__}"}
             return Output(data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
-                          ledger=_ledger([record], [0]), meta=meta)
+                          records=[record], index=[0], meta=meta)
     data = _normalize_missing(_str_columns(value, "the table"))
     records = [{**record, "unit": "table"} for _ in range(len(data))]
-    return Output(data=data, ledger=_ledger(records, data.index),
+    return Output(data=data, records=records, index=data.index,
                   meta={**meta, "columns": list(data.columns)})
 
 
@@ -1573,7 +1711,7 @@ def sweep_(fn: Callable, *, name: str = PAYLOAD, retries: int = 0,
 
     data = pd.DataFrame(out_rows)
     grid_shape = tuple(len(params[k]) for k in names)
-    return Output(data=data, ledger=_ledger(records, data.index),
+    return Output(data=data, records=records, index=data.index,
                   meta={"verb": "sweep", "form": "grid", "payload": name,
                         "params": names, "grid": grid_shape,
                         "n_in": len(combos)})
@@ -1587,8 +1725,8 @@ def grid(value: Any) -> Output:
     frame = _normalize_missing(_str_columns(rows(value), "the source"))
     return Output(
         data=frame,
-        ledger=_ledger([{"status": "completed", "error": None, "attempts": 1,
-                         "seconds": 0.0} for _ in range(len(frame))], frame.index),
+        records=[{"status": "completed", "error": None, "attempts": 1,
+                         "seconds": 0.0} for _ in range(len(frame))], index=frame.index,
         meta={"verb": "source", "form": "column", "payload": None,
               "n_in": len(frame)},
     )
@@ -1783,7 +1921,7 @@ def widen_(source: Any, fn: Callable = identity, *,
     data = frame.copy()
     for column in wanted:
         data[column] = [row[column] for row in lifted]
-    return Output(data=data, ledger=_ledger(records, frame.index),
+    return Output(data=data, records=records, index=frame.index,
                   meta={"verb": "widen", "form": "column", "payload": None,
                         "n_in": len(frame), "columns": list(data.columns)})
 
@@ -1932,7 +2070,7 @@ def _column_output(verb: str, frame: pd.DataFrame, data: pd.DataFrame,
     records = [_blocked(*blocked[i]) if i in blocked
                else {"status": "completed", "error": None, "attempts": 0,
                      "seconds": 0.0} for i in ledger_index]
-    return Output(data=data, ledger=_ledger(records, ledger_index),
+    return Output(data=data, records=records, index=ledger_index,
                   meta={"verb": verb, "form": "column", "payload": None,
                         "n_in": len(frame), "columns": list(data.columns)})
 
@@ -1961,16 +2099,16 @@ def source_(value: Any, fn: Callable = identity, **_params) -> Output:
         return _source_failure(f"{type(exc).__name__}: {exc}", caught=None)
     out = grid(value)
     if caught is not None:
-        out.ledger["error"] = f"caught {caught}; used the default"
-        out.ledger["caught"] = True
+        out.meta["notes"] = {i: {"error": f"caught {caught}; used the default",
+                                 "caught": True} for i in out.data.index}
     return out
 
 
 def _source_failure(error: str, caught: Any) -> Output:
     return Output(
         data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
-        ledger=_ledger([{"status": "failed", "error": error, "attempts": 1,
-                         "seconds": 0.0, "caught": caught}], [0]),
+        records=[{"status": "failed", "error": error, "attempts": 1,
+                         "seconds": 0.0, "caught": caught}], index=[0],
         meta={"verb": "source", "form": "scalar", "payload": None})
 
 
@@ -4149,15 +4287,28 @@ def _decode(blob: dict) -> Any:
 
 
 def _encode_output(output: Output) -> dict:
-    return {"data": _encode(output.data),
-            "ledger": _encode(output.ledger),
-            "meta": {k: v for k, v in output.meta.items() if k != "problems"}}
+    meta = {k: v for k, v in output.meta.items()
+            if k not in ("problems", "notes", "column_types")}
+    blob = {"data": _encode(output.data),
+            "states": {str(c): [str(v) for v in output.states[c]] for c in output.states.columns},
+            "meta": meta}
+    if output.notes:
+        blob["notes"] = [[_plain(i), note] for i, note in output.notes.items()]
+    return blob
 
 
 def _decode_output(blob: dict) -> Output:
-    return Output(data=_decode(blob["data"]),
-                  ledger=_decode(blob["ledger"]),
-                  meta=dict(blob["meta"]))
+    data = _decode(blob["data"])
+    meta = dict(blob["meta"])
+    if blob.get("notes"):
+        meta["notes"] = {i: note for i, note in blob["notes"]}
+    if "states" in blob:
+        states = pd.DataFrame({c: _state_column(v, data.index)
+                               for c, v in blob["states"].items()}, index=data.index)
+        return Output(data, states, meta)
+    # An older session saved a per-row ledger: read its records once.
+    ledger = _decode(blob["ledger"])
+    return Output(data, meta=meta, records=ledger.to_dict("records"), index=ledger.index)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -4780,8 +4931,7 @@ def _type_mismatches(operation: Operation, fn: Callable,
     frame = rows(upstream)
     # Only rows that completed count: a failed cell is a failure, not a
     # missing value, and its row is blocked downstream anyway (008 C10).
-    completed = upstream.ledger.index[upstream.ledger["status"] == "completed"] \
-        if len(upstream.ledger) else frame.index
+    completed = pd.Index(upstream.ids_in("known"))
     declared = list(parameters.values())
     if verb.kind in ("collapse", "table"):
         declared = declared[1:]          # the verb supplies the accumulator / the grid
@@ -5056,10 +5206,11 @@ def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
     primary = max(range(len(frames)), key=lambda i: (depth[i], -i))
     target = frames[primary].index
     keys = [str(t) for t in target]
-    aligned = []
+    aligned, picked_ids = [], []
     for i, frame in enumerate(frames):
         if i == primary:
             aligned.append(frame)
+            picked_ids.append(list(frame.index))
             continue
         lookup = _row_lookup(frame)
         related = any(k in lookup or any(a in lookup for a in _ancestors(k)) for k in keys)
@@ -5070,6 +5221,7 @@ def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
                     f"{names[i]!r} ({len(frame)} rows): their row ids are unrelated "
                     f"and their lengths differ. Use join to match them on a column")
             aligned.append(frame.set_axis(target))     # unrelated ids: by position
+            picked_ids.append(list(frame.index))
             continue
         picked, unmatched, used = [], [], set()
         for key in keys:
@@ -5095,10 +5247,13 @@ def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
         out = frame.loc[picked]
         out.index = target
         aligned.append(out)
+        picked_ids.append(picked)
     data = pd.concat(aligned, axis=1)
     # A shared column name would appear twice; keep the first (union, first
     # wins) so the result matches the staged prediction.
-    return data.loc[:, ~data.columns.duplicated()]
+    data = data.loc[:, ~data.columns.duplicated()]
+    data.attrs["zip_picked"] = picked_ids        # for carrying each cell's state
+    return data
 
 
 def _rows_text(keys: list[str]) -> str:
@@ -5210,7 +5365,7 @@ def _stage_combine(operation: Operation, workflow: "Workflow | None") -> Output:
     return Output(
         data=pd.DataFrame({c: [None] * len(index) for c in columns or [PAYLOAD]},
                           index=index),
-        ledger=_ledger(records, index),
+        records=records, index=index,
         meta={"verb": operation.tool_id, "form": "column", "payload": None,
               "staged": True, "problems": (), "n_in": None, "expected": expected,
               "rows_rule": rule, "columns": columns, "columns_open": columns_open},
@@ -5223,7 +5378,7 @@ def _run_combine(operation: Operation, frames: list[pd.DataFrame]) -> Output:
     data = COMBINE[operation.tool_id]["apply"](frames, operation.arguments)
     records = [{"status": "completed", "error": None, "attempts": 0,
                 "seconds": 0.0} for _ in range(len(data))]
-    return Output(data=data, ledger=_ledger(records, data.index),
+    return Output(data=data, records=records, index=data.index,
                   meta={"verb": operation.tool_id, "form": "column",
                         "payload": None, "n_in": None,
                         "columns": list(data.columns)})
@@ -5252,8 +5407,8 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         kind = operation.shape_verb.kind if operation.shape_verb else None
         return Output(
             data=pd.DataFrame({PAYLOAD: [None]}, index=[0]),
-            ledger=_ledger([{"status": "invalid", "error": problems[0],
-                             "attempts": 0, "seconds": 0.0}], [0]),
+            records=[{"status": "invalid", "error": problems[0],
+                             "attempts": 0, "seconds": 0.0}], index=[0],
             meta={"verb": kind, "form": "scalar", "payload": PAYLOAD,
                   "staged": True, "problems": problems, "n_in": None,
                   "expected": None, "rows_rule": None, "columns": [PAYLOAD]},
@@ -5396,7 +5551,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     upstream_name = str(operation.input) if operation.input is not None else None
     plan = {
         "rows": _rows_plan(kind, rule, expected if "rows" not in expect else None,
-                           n_in, expect, label),
+                           n_in, expect, label, upstream_name),
         "columns": _columns_plan(kind, ordered, columns_open, expect, label, upstream_name),
         "types": {c: _type_label(types.get(c)) for c in ordered},
     }
@@ -5407,7 +5562,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     return Output(
         data=pd.DataFrame({c: pd.Series([None] * len(index), index=index, dtype=object)
                            for c in index_names or [PAYLOAD]}, index=index),
-        ledger=_ledger(records, index),
+        records=records, index=index,
         meta={"verb": kind, "form": "scalar" if kind is None else "column",
               "payload": payload, "staged": True, "problems": (),
               "n_in": n_in, "expected": expected, "rows_rule": rule,
@@ -5439,8 +5594,10 @@ class Step:
 
     @property
     def status(self) -> str:
-        """A rollup of the ledger — a step is only as done as its rows."""
-        states = set(self.output.ledger["status"])
+        """A rollup of the cells' states — a step is only as done as its rows."""
+        if self.output.meta.get("staged"):
+            return "invalid" if self.problems else "staged"
+        states = set(self.output.row_states.astype(str))
         if "invalid" in states:
             return "invalid"
         # Ran, but an upstream changed (or re-ran) since: the data — failed
@@ -5448,16 +5605,9 @@ class Step:
         # root makes what it blocked stale). Nothing recomputes on its own.
         if self.output.meta.get("stale"):
             return "stale"
-        for state in ("failed", "running", "staged"):
-            if state in states:
-                return state
-        if states:
-            return "completed"
-        # No ledger rows at all is ambiguous, and the ledger cannot settle it:
-        # either this step is staged and its addresses are not yet knowable, or
-        # it ran and legitimately produced nothing (every unit filtered out, or
-        # expanded to zero rows). `meta["staged"]` is what distinguishes them.
-        return "staged" if self.output.meta.get("staged") else "completed"
+        if states & {"failed", "blocked"}:
+            return "failed"
+        return "completed"            # including a step that ran to zero rows
 
     @property
     def plan(self) -> dict:
@@ -5955,6 +6105,176 @@ class Workflow:
             return _UNKNOWN
         return _ref_value(step.output.data, None, ref.id)
 
+    # ── what the UI draws: a step's grid, known unknowns included (009 §4) ──
+    def preview(self, step_id: str, rows: tuple[int, int] | None = None) -> dict:
+        """A step as something to draw: what is known, and what isn't, and why.
+
+        Works whether or not the step has run. Returns plain data:
+
+        - ``columns``: the known columns, each with its ``type``;
+        - ``rows``: the rows that exist (or are planned), each with a ``state``
+          and its ``cells`` (``value`` when there is one, else ``type``);
+        - ``row_count``: the plan's row axis — ``exact`` with a count, or
+          ``bounded`` / ``stated`` / ``unknown`` with ``because``/``resolve``;
+        - ``markers``: the **known unknowns** to draw in place — a trailing
+          row such as *"‹rows unknown — load hasn't run…›"*, a trailing column
+          *"‹+ maybe more columns›"* — each with its ``because`` and ``resolve``.
+
+        *rows* is a ``(start, stop)`` window of positions, for paging.
+        """
+        step = self.steps[step_id]
+        out, plan = step.output, step.plan
+        staged = bool(out.meta.get("staged"))
+        summary = {"step": step_id, "status": step.status, "summary": step.describe(),
+                   "formula": step.operation.to_source()}
+        if not step.valid:
+            root, why = self.root_cause(step_id) or (step_id, step.problems[0])
+            return {**summary, "columns": [], "rows": [], "row_count": None,
+                    "problems": list(step.problems),
+                    "markers": [{"kind": "invalid", "text": f"‹can't run — {step.problems[0]}›",
+                                 "root": root, "because": why}]}
+        types = plan.get("types", {})
+        names = list(plan.get("columns", {}).get("names", []))
+        columns = [{"name": c, "type": types.get(c, "any")} for c in names]
+        markers = _plan_markers(plan, step_id)
+        all_rows = self._preview_rows(step, staged, names, types)
+        lo, hi = (rows if rows is not None else (0, len(all_rows)))
+        return {**summary, "columns": columns, "rows": all_rows[lo:hi],
+                "row_count": plan.get("rows"), "markers": markers,
+                "window": {"start": lo, "stop": min(hi, len(all_rows)),
+                           "of": len(all_rows)}}
+
+    def _preview_rows(self, step: Step, staged: bool, names: list, types: dict) -> list[dict]:
+        out = step.output
+        if not staged:
+            stale = bool(out.meta.get("stale"))
+            row_states = out.row_states
+            result = []
+            for position, row_id in enumerate(out.data.index):
+                note = out.notes.get(row_id, {})
+                cells = {}
+                for c in out.data.columns:
+                    state = str(out.states.at[row_id, c])
+                    if state == "known" and stale:
+                        state = "stale"
+                    cell = {"state": state, "type": types.get(c, "any")}
+                    if state in ("known", "stale"):
+                        cell["value"] = _plain(out.data.at[row_id, c])
+                    if state in ("failed", "blocked"):
+                        cell.update({k: v for k, v in note.items() if k in ("error", "cause")})
+                    cells[str(c)] = cell
+                row_state = str(row_states[row_id])
+                result.append({"position": position, "id": _plain(row_id),
+                               "state": "stale" if stale and row_state == "known" else row_state,
+                               "cells": cells})
+            return result
+        # Staged: rows exist only where staging knows them. A 1:1 verb over a
+        # known input has its ids; a filter may drop any of its input's rows.
+        verb = step.operation.shape_verb.kind if step.operation.shape_verb else None
+        index, state = list(out.data.index), "pending"
+        if not index and ROWS_RULE.get(verb) == "at_most":
+            known = self._known_index(step.operation)
+            index, state = (list(known) if known is not None else []), "maybe"
+        return [{"position": i, "id": _plain(row_id), "state": state,
+                 "cells": {c: {"state": state, "type": types.get(c, "any")} for c in names}}
+                for i, row_id in enumerate(index)]
+
+    def cell(self, step_id: str, row: int, column: str) -> dict:
+        """One cell, for a click: its value or what is expected there (009 §4).
+
+        *row* is a position (negative counts from the end), *column* a name.
+        The ``state`` is one of ``known``, ``stale`` (an old value, still
+        shown), ``failed``, ``blocked`` (an input cell failed), ``pending`` (not
+        run; the row exists), ``maybe`` (not run; the row may be dropped),
+        ``unknown`` (not run; whether the row exists isn't known — "row 2, if
+        it exists"), or ``missing`` (no such row or column). Anything short of
+        known carries ``because`` (and ``resolve`` where there is a way).
+        """
+        view = self.preview(step_id)
+        base = {"step": step_id, "row": row, "column": column}
+        if view["status"] == "invalid":
+            return {**base, "state": "missing", "because": view["problems"][0]}
+        names = [c["name"] for c in view["columns"]]
+        plan = self.steps[step_id].plan
+        col_plan = plan.get("columns", {})
+        if column not in names:
+            if col_plan.get("more") or col_plan.get("certainty") in ("bounded", "unknown"):
+                return {**base, "state": "unknown", "type": "any",
+                        "because": col_plan.get("because", "its columns aren't all known yet"),
+                        "resolve": col_plan.get("resolve", [])}
+            return {**base, "state": "missing",
+                    "because": f"{step_id!r} has no column {column!r} "
+                               f"(it has {', '.join(names) or 'none'})"}
+        type_ = next(c["type"] for c in view["columns"] if c["name"] == column)
+        rows_ = view["rows"]
+        n = len(rows_)
+        if -n <= row < n:
+            entry = rows_[row]
+            cell = {**base, "id": entry["id"], **entry["cells"].get(column, {"state": entry["state"]}),
+                    "type": type_}
+            cell["inputs"] = self._cell_inputs(step_id, entry["id"])
+            if cell["state"] == "stale":
+                cell["because"] = "a step it read has changed since it ran"
+            return cell
+        row_plan = view["row_count"] or {}
+        if row_plan.get("certainty") == "exact" or not self.steps[step_id].output.meta.get("staged"):
+            last = f" (0–{n - 1})" if n else ""
+            return {**base, "state": "missing",
+                    "because": f"row {row} of {step_id!r}, which has {n} rows{last}"}
+        return {**base, "state": "unknown", "type": type_,
+                "because": row_plan.get("because", "its row count isn't known yet"),
+                "resolve": row_plan.get("resolve", [])}
+
+    def _cell_inputs(self, step_id: str, row_id: Any) -> list[dict]:
+        """The input cells a result row came from: the same id, or its parent's."""
+        op_ = self.steps[step_id].operation
+        found = []
+        for g in op_.grids:
+            upstream = self.steps.get(str(g))
+            if upstream is None or upstream.output.meta.get("staged"):
+                found.append({"step": str(g), "id": None, "state": "staged"})
+                continue
+            lookup = _row_lookup(upstream.output.data)
+            key = str(row_id)
+            match = key if key in lookup else next(
+                (a for a in _ancestors(key) if a in lookup), None)
+            found.append({"step": str(g), "id": _plain(lookup[match]) if match else None,
+                          "state": upstream.status})
+        return found
+
+    def _carry_zip_states(self, step: Step) -> None:
+        """Give a zip's cells the states of the cells they came from (009 §2).
+
+        A cell that failed (or was blocked) in its own step is ``blocked`` here,
+        with that cell as its cause: the zip didn't fail, its input did, so it
+        never stops the run a second time.
+        """
+        out = step.output
+        picked = out.data.attrs.get("zip_picked")
+        if not picked:
+            return
+        states = out.states.copy()
+        notes: dict = {}
+        seen: set = set()
+        for g, ids in zip(step.operation.inputs, picked):
+            source = self.steps[str(g)].output
+            for column in source.data.columns:
+                if column in seen or column not in states.columns:
+                    continue
+                seen.add(column)
+                for row_id, from_id in zip(out.data.index, ids):
+                    state = str(source.states.at[from_id, column])
+                    if state in ("failed", "blocked"):
+                        states.at[row_id, column] = "blocked"
+                        note = source.notes.get(from_id, {})
+                        notes.setdefault(row_id, {
+                            "error": f"upstream cell {g}[{from_id}] failed",
+                            "cause": note.get("cause") or f"{g}[{from_id}]: {note.get('error')}"})
+        out.states = states
+        if notes:
+            out.meta["notes"] = notes
+        out.data.attrs.pop("zip_picked", None)
+
     def root_cause(self, step_id: str) -> tuple[str, str] | None:
         """Where an invalid step's problem starts: ``(step_id, problem)``.
 
@@ -5987,15 +6307,13 @@ class Workflow:
             step = self.steps.get(str(value))
             if step is None or step.output.meta.get("staged"):
                 continue
-            ledger = step.output.ledger
-            failed = ledger[ledger["status"] == "failed"] if len(ledger) else ledger
-            if len(failed):
-                index = failed.index[0]
-                cause = failed.iloc[0].get("cause")
+            failed = step.output.ids_in("failed", "blocked")
+            if failed:
+                index = failed[0]
+                note = step.output.notes.get(index, {})
                 return (f"argument {name!r} reads {step.step_id}, which has a failed "
                         f"cell {step.step_id}[{index}]",
-                        cause if isinstance(cause, str) and cause
-                        else f"{step.step_id}[{index}]: {failed.iloc[0]['error']}")
+                        note.get("cause") or f"{step.step_id}[{index}]: {note.get('error')}")
         return None
 
     # ── running ──────────────────────────────────────────────────────────
@@ -6136,6 +6454,8 @@ class Workflow:
                 frames.append(frame)
             try:
                 step.output = _run_combine(step.operation, frames)
+                if step.operation.tool_id == "zip":
+                    self._carry_zip_states(step)
             except ValueError as exc:
                 # A zip_ that would drop rows, a join on a missing key: the step
                 # fails with the reason (the run stops on it), never raises.
@@ -6157,7 +6477,7 @@ class Workflow:
         bad_argument = self._failed_argument(step.operation)
         if bad_argument is not None and source is not None:
             # Every row is blocked: hand the verb an input that says so.
-            source = Output(source.data, source.ledger,
+            source = Output(source.data, source.states,
                             {**source.meta, "blocked_all": bad_argument})
         try:
             step.output = resolved.run(source, tools)

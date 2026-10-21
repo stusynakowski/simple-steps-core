@@ -72,6 +72,15 @@ def sum_up(acc, n):
     return (acc or 0) + n
 
 
+
+def _errors(out):
+    """Each row's error, in row order (None where there's none)."""
+    return [out.notes.get(i, {}).get("error") for i in out.data.index]
+
+
+def _row_states(out):
+    return [str(v) for v in out.row_states]
+
 @pytest.fixture
 def three():
     return pd.DataFrame({"n": [1, 2, 3]})
@@ -871,15 +880,17 @@ def test_map_is_only_its_results(three):
     assert list(out.data.index) == list(three.index)
 
 
-def test_ledger_is_row_aligned_and_view_joins_cleanly(three):
+def test_states_are_the_same_shape_as_the_data(three):
+    """009: an output is data, states (one per cell) and meta."""
     out = score[mod.map()](grid(three))
-    assert list(out.data.index) == list(out.ledger.index)
-    assert len(out.view()) == 3
+    assert out.states.shape == out.data.shape
+    assert list(out.states.index) == list(out.data.index)
+    assert list(out.view()["state"]) == ["known"] * 3
 
 
-def test_filter_ledger_keeps_every_unit(three):
+def test_filter_lists_the_rows_it_excluded(three):
     out = keep[mod.filter()](grid(three))
-    assert len(out.data) == 2 and len(out.ledger) == 3
+    assert len(out.data) == 2 and out.meta["excluded"] == [0]
 
 
 def test_column_axis_is_guarded_not_half_built():
@@ -938,7 +949,7 @@ def test_cardinality_propagates_before_anything_runs(three):
     wf["raw"] = three
     wf["scored"] = score[mod.map(over=wf["raw"])]
     assert wf.step("scored").output.meta["expected"] == 3
-    assert set(wf.step("scored").output.ledger["status"]) == {"staged"}
+    assert set(wf.step("scored").output.row_states) == {"pending"}
 
 
 def test_declaring_never_computes(three):
@@ -1296,7 +1307,6 @@ def test_an_unexportable_payload_says_so(three):
     wf.run_all()
     wf.step("objects").output = Output(
         data=pd.DataFrame({"value": [object()]}),
-        ledger=wf.step("raw").output.ledger.head(1),
         meta={"form": "column", "payload": "value"},
     )
     with pytest.raises(PayloadError, match="cannot export"):
@@ -1599,8 +1609,7 @@ def test_a_session_round_trip_preserves_dtypes():
         before, after = wf.step(sid).output.data, back.step(sid).output.data
         assert list(before.dtypes) == list(after.dtypes), sid
         assert list(before.columns) == list(after.columns), sid
-    assert list(wf.step("f").output.ledger.dtypes) == \
-           list(back.step("f").output.ledger.dtypes)
+    assert list(wf.step("f").output.row_states) == list(back.step("f").output.row_states)
 
 
 def test_an_export_without_dtypes_still_decodes():
@@ -1676,7 +1685,7 @@ def test_a_downstream_step_of_an_empty_expand_still_validates_and_runs():
 
 
 def test_a_step_that_ran_to_zero_rows_reports_completed():
-    """An empty ledger cannot say which; meta['staged'] is what distinguishes."""
+    """No rows can't say which; meta['staged'] is what distinguishes."""
     @tool(strict=True)
     def nothing(n: int) -> list:
         """Expands to nothing."""
@@ -1778,9 +1787,9 @@ def test_a_non_mapping_cell_is_a_per_unit_failure():
     wf["raw"] = pd.DataFrame({"value": [{"a": 1}, 42]})
     wf["wide"] = mod.widen(columns=["a"], over=wf["raw"])
     wf.run("wide")          # the failing step itself; run_all would stop here
-    ledger = wf.step("wide").output.ledger
-    assert list(ledger["status"]) == ["completed", "failed"]
-    assert "needs a mapping per row" in ledger["error"].iloc[1]
+    out = wf.step("wide").output
+    assert _row_states(out) == ["known", "failed"]
+    assert "needs a mapping per row" in _errors(out)[1]
     assert list(wf.step("wide").output.failed.index) == [1], "re-drivable"
 
 
@@ -1789,9 +1798,9 @@ def test_a_missing_field_is_a_per_unit_failure_not_a_crash():
     wf["raw"] = pd.DataFrame({"value": [{"a": 1, "b": 2}, {"a": 3}]})
     wf["wide"] = mod.widen(columns=["a", "b"], over=wf["raw"])
     wf.run("wide")          # the failing step itself; run_all would stop here
-    ledger = wf.step("wide").output.ledger
-    assert list(ledger["status"]) == ["completed", "failed"]
-    assert "has no 'b'" in ledger["error"].iloc[1]
+    out = wf.step("wide").output
+    assert _row_states(out) == ["known", "failed"]
+    assert "has no 'b'" in _errors(out)[1]
     assert wf.step("wide").output.data["a"].iloc[1] == 3, "the rest still lifted"
 
 
@@ -1826,7 +1835,7 @@ def test_widen_a_tuple_cell_auto_names_c0_c1():
     out = wf.step("wide").output
     assert list(out.data.columns) == ["value", "c0", "c1"]
     assert list(out.data["c0"]) == [10, 20] and list(out.data["c1"]) == [1, 4]
-    assert set(out.ledger["status"]) == {"completed"}
+    assert set(_row_states(out)) == {"known"}
 
 
 def test_widen_a_tuple_with_explicit_columns_matches_by_position():
@@ -1847,7 +1856,7 @@ def test_widen_ragged_tuples_auto_pad_with_none():
     assert list(out.data.columns) == ["value", "c0", "c1", "c2"]
     assert out.data["c0"].tolist() == [1, 9]
     assert out.data["c2"].iloc[0] == 3 and pd.isna(out.data["c2"].iloc[1])
-    assert set(out.ledger["status"]) == {"completed"}, "ragged is not a failure"
+    assert set(_row_states(out)) == {"known"}, "ragged is not a failure"
 
 
 def test_widen_explicit_columns_too_many_for_a_short_tuple_is_a_failure():
@@ -1855,9 +1864,9 @@ def test_widen_explicit_columns_too_many_for_a_short_tuple_is_a_failure():
     wf["raw"] = pd.DataFrame({"value": [(10, 1), (20,)]})
     wf["wide"] = mod.widen(columns=["a", "b"], over=wf["raw"])
     wf.run("wide")          # the failing step itself; run_all would stop here
-    ledger = wf.step("wide").output.ledger
-    assert list(ledger["status"]) == ["completed", "failed"]
-    assert "too few" in ledger["error"].iloc[1]
+    out = wf.step("wide").output
+    assert _row_states(out) == ["known", "failed"]
+    assert "too few" in _errors(out)[1]
 
 
 def test_widen_a_mapping_still_needs_columns():
@@ -1879,7 +1888,7 @@ def test_expand_refuses_a_dataframe_instead_of_yielding_column_names():
     wf["e"] = frame[mod.expand()](wf["seed"])
     wf.run("e")
     assert wf.step("e").status == "failed"
-    assert "yields its column names" in wf.step("e").output.ledger["error"].iloc[0]
+    assert "yields its column names" in _errors(wf.step("e").output)[0]
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -2107,7 +2116,7 @@ def test_sweep_stages_its_exact_count_from_its_own_parameters():
     wf = Workflow()
     wf["s"] = cell[mod.sweep(model=["a", "b"], window=[7, 30, 90])]
     assert wf.step("s").describe().endswith("6 cells"), wf.step("s").describe()
-    assert len(wf.step("s").output.ledger) == 6, "addresses are known in advance"
+    assert len(wf.step("s").output.states) == 6, "addresses are known in advance"
     wf.run("s")
     assert len(wf.step("s").output.data) == 6
 

@@ -227,7 +227,9 @@ def k12_whole_table_verb():
     wf = _wf()
     wf["x"] = piv[mod.collapse(over=wf["readings"])]
     wf.run("x")
-    err = wf.step("x").output.ledger["error"].iloc[0]
+    out = wf.step("x").output
+    err = (out.notes.get(out.data.index[0], {}).get("error") if hasattr(out, "notes")
+           else out.ledger["error"].iloc[0])
     return bool(candidates), (f"verbs: {sorted(verbs)}; piv[mod.collapse()] -> {str(err)[:90]}"
                               if not candidates else f"found {sorted(candidates)}")
 
@@ -279,7 +281,9 @@ def k18_timeout_enforced():
     t0 = time.time()
     wf.run("x")
     took = time.time() - t0
-    statuses = wf.step("x").output.ledger["status"].tolist()
+    out = wf.step("x").output
+    statuses = ([str(v) for v in out.row_states] if hasattr(out, "row_states")
+                else out.ledger["status"].tolist())
     return "failed" in statuses or took < 0.3, f"4 units × 0.3s with timeout=0.05 took {took:.1f}s; statuses {statuses}"
 
 
@@ -369,7 +373,9 @@ def c10_failure_flows_downstream():
         else risky[mod.map()](wf["r"])
     wf["b"] = plus1[mod.map()](wf["a"])
     wf.run_all()
-    cause = wf.step("b").output.ledger["cause"].iloc[1] if "cause" in wf.step("b").output.ledger else None
+    out = wf.step("b").output
+    cause = (out.notes.get(1, {}).get("cause") if hasattr(out, "notes")
+             else out.ledger["cause"].iloc[1])
     dtype = str(wf.step("a").output.data["value"].dtype)
     done = (not wf.step("bad").valid and calls["n"] == 2 and dtype == "Int64"
             and cause == "a[1]: ValueError: boom")

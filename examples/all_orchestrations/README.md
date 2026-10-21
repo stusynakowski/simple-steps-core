@@ -60,7 +60,7 @@ need no registration — the no-tool reshapers (`select`, `drop`, `rename`,
 - **Resources**: a dummy DB and LLM with bound (`@bound_tool`) and unbound
   (`@tool` + `res["…"]`) tools, declared with `wf.define`, run with
   `resources=`, saved as declarations.
-- **Failure**: a tool that fails on some rows → the ledger keeps every unit and
+- **Failure**: a tool that fails on some rows → each cell keeps its state (`failed`, with a note) and
   `.failed` is the re-drive set.
 
 ## Resources (`build_resources()`)

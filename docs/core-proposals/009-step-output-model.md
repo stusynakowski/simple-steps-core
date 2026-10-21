@@ -311,7 +311,9 @@ one per row. Undo it per step by removing it, or with `mod.breaker(after=None)`
 | 1 | Strict `zip_`; results-only steps and expand's derived ids, with tests | **done** (2026-10-21), uncommitted |
 | 2 | Hash versions and `read` stamps | **done** (2026-10-21), uncommitted |
 | 3 | Auto: breaker, implicit `mod.auto()`, direct calls, the setting | **done** (2026-10-21), uncommitted |
-| 4–7 | `wf.cell`, "if present" selections, `step.references()`, cell-level fingerprints | next |
+| 4 | `wf.preview` and `wf.cell`: known unknowns shown | **done** (2026-10-21), uncommitted |
+| 4b | **Output = data, states, meta** (owner, 2026-10-21); the ledger removed | **done** (2026-10-21), uncommitted |
+| 5–7 | "if present" selection steps, `step.references()`, cell-level fingerprints | next |
 
 **Step 1, as built:**
 - `zip_` pairs by id and never drops a row. An unmatched row of the finest
@@ -377,6 +379,50 @@ one per row. Undo it per step by removing it, or with `mod.breaker(after=None)`
   fewer rows. A failed combine no longer raises from `run`.
 - Re-running a step with an identical result no longer makes later steps
   stale.
+
+**Step 4, as built** (owner, 2026-10-21: *a known unknown is still useful
+information; store it and show it*):
+- The known unknowns are stored on every step (`step.plan`; rebuilt exactly
+  when a saved workflow loads) and exposed as something to draw.
+- **`wf.preview(step_id, rows=(start, stop))`** returns `columns` (name, type),
+  `rows` (each with `state` and `cells`), `row_count` (the plan's row axis)
+  and **`markers`**: the known unknowns as a trailing row (*"‹rows unknown —
+  …›"*, *"‹0–4 rows — filter keeps at most…›"*) or column (*"‹+ maybe more
+  columns›"*), each with `because` and `resolve`. Staged rows are `pending`
+  (1:1 verbs over known rows) or `maybe` (filter, slice, distinct). Run rows
+  are `known`, `stale` (old value shown), `failed` or `blocked`.
+- **`wf.cell(step_id, row, column)`** gives one cell: `state`, `type`,
+  `value`, `error`, `cause`, `id`, and `inputs` (the input cells it came
+  from, by row id). A row that may not exist yet is `unknown`, with the type
+  and how to resolve it. A row or column that can't exist is `missing`.
+- A step waiting on an unrun step names it: *"its input 'r' doesn't know its
+  row count yet"*, resolve *"run 'r'"*.
+- Tests: `test_009_*` (8 more). The UI brief ([../ui-context.md](../ui-context.md)
+  §3a) shows the shapes.
+
+**Step 4b, as built:** *data, states, meta.* MVP, so the old shape was cut,
+not kept beside it.
+- `Output(data, states, meta)`. `states` is the same shape as `data`: one
+  ordered categorical per column over `STATES` = `known`, `maybe`, `pending`,
+  `blocked`, `failed`, `invalid` (worst last). `row_states` is the worst per
+  row. `stale` stays step-level (`meta["stale"]`) and is shown over known
+  cells.
+- `meta["notes"]`: row id → `error`, `cause`, `caught`, `attempts` (only when
+  retried) and `unit` (only when the id doesn't say it), **only for rows that
+  have something to say**. Per-row seconds are gone.
+- Verbs still build per-unit records while running; `Output` converts them
+  once and drops them. **The ledger, `_ledger` and `LEDGER_COLUMNS` are
+  removed.**
+- `filter`: a row whose predicate raised **stays**, `failed`; rejected rows
+  are listed in `meta["excluded"]`.
+- `zip_` carries each cell's state from the step it came from: a failed or
+  blocked input cell is `blocked` in the zip, with its cause.
+- `print(output)` is the merged grid (values, `state`, `note`); a staged
+  output prints its plan. Sessions save `data`, `states` (per column) and
+  `meta`, with notes as id/note pairs so ids keep their type. An older session
+  saved with a ledger still loads.
+- **Memory:** for 100,000 rows the status is **0.10 MB** (it was 12.9 MB,
+  16× the data); no notes when every row succeeds.
 
 ### The plan, in order
 

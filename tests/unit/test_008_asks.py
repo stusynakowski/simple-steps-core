@@ -279,9 +279,9 @@ def test_R8_C10_a_failed_cell_keeps_the_type_and_blocks_its_row(failing):
     assert failing.step("b").problems == ()               # not refused as float
     assert b.values == [101, None, 301]
     assert CALLS["plus1"] == 2                            # never called for row 1
-    row = b.ledger.loc[1]
-    assert (row["status"], row["error"], row["attempts"], row["cause"]) == (
-        "failed", "upstream cell a[1] failed", 0, "a[1]: ValueError: boom")
+    assert b.row_states[1] == "blocked"                   # the tool wasn't called
+    assert b.notes[1] == {"error": "upstream cell a[1] failed",
+                          "cause": "a[1]: ValueError: boom"}
 
 
 def test_C10_the_root_cause_travels_through_every_verb(failing):
@@ -291,9 +291,9 @@ def test_C10_the_root_cause_travels_through_every_verb(failing):
     failing["again"] = plus1_008[mod.map()](failing["kept"])
     failing.run_all()
     for sid in ("kept", "ordered", "again"):
-        ledger = failing.step(sid).output.ledger
-        assert ledger.loc[1, "status"] == "failed", sid
-        assert ledger.loc[1, "cause"] == "a[1]: ValueError: boom", sid
+        out = failing.step(sid).output
+        assert out.row_states[1] == "blocked", sid
+        assert out.notes[1]["cause"] == "a[1]: ValueError: boom", sid
     assert 1 in failing.step("kept").output.data.index    # carried, not filtered
     assert failing.step("sum").output.values == [None]
     assert CALLS["total"] == 0                            # the reducer never ran
@@ -308,7 +308,8 @@ def test_C10_an_argument_with_a_failed_cell_blocks_every_row(failing):
     failing.run_all()
     assert failing.step("u").output.values == [None, None, None]
     assert CALLS["plus1"] == 0
-    assert set(failing.step("u").output.ledger["cause"]) == {"a[1]: ValueError: boom"}
+    assert {n["cause"] for n in failing.step("u").output.notes.values()} == {
+        "a[1]: ValueError: boom"}
 
 
 def test_C10_fixing_the_root_marks_what_it_blocked_stale(failing):
@@ -587,7 +588,7 @@ def test_C5_a_source_that_breaks_its_declared_columns_fails():
     w["r"] = liar_008[mod.source()](path="x")
     w.run("r")
     assert w.step("r").status == "failed"
-    assert w.step("r").output.ledger["error"].iloc[0] == (
+    assert w.step("r").output.notes[0]["error"] == (
         "liar_008 declares columns city, n; it returned town")
 
 
@@ -626,7 +627,7 @@ def test_C9_stated_rows_stage_and_are_checked_at_run(wf):
     assert w.step("r").plan["rows"] == {"certainty": "stated", "count": 12}
     assert w.step("r").output.meta["expected"] == 12
     w.run("r")
-    assert w.step("r").output.ledger["error"].iloc[0] == "expected 12 rows, got 2"
+    assert w.step("r").output.notes[0]["error"] == "expected 12 rows, got 2"
     wf["kept"] = op("identity")[mod.filter(), mod.expect(rows=10)](wf["readings"])
     assert "at most 4 rows; expect(rows=10) can't hold" in wf.step("kept").problems[0]
     wf["empty"] = scale_008[mod.map(), mod.expect()](wf["readings"])
@@ -679,8 +680,9 @@ def test_try_except_with_a_default_completes_the_row(two_branches):
     w.run_all()
     a = w.step("a").output
     assert a.values == [100, 0, 300] and w.step("a").status == "completed"
-    assert a.ledger.loc[1, "error"] == "caught ValueError: boom; used the default"
-    assert bool(a.ledger.loc[1, "caught"])
+    assert a.notes[1] == {"error": "caught ValueError: boom; used the default",
+                          "caught": True}
+    assert a.row_states[1] == "known"                     # completed with the default
     assert w.step("b").output.values == [101, 1, 301]
 
 
@@ -690,7 +692,7 @@ def test_try_except_without_a_default_lets_the_run_continue(two_branches):
     w["b"] = plus1_008[mod.map()](w["a"])
     w.run_all()                                            # does not raise
     assert w.step("a").status == "failed"
-    assert w.step("b").output.ledger.loc[1, "cause"] == "a[1]: ValueError: boom"
+    assert w.step("b").output.notes[1]["cause"] == "a[1]: ValueError: boom"
     assert CALLS["plus1"] == 2
 
 
@@ -798,7 +800,7 @@ def test_K12_a_table_tool_that_returns_no_frame_fails(wf):
         return 3
     wf["t"] = not_a_frame_008[mod.table()](wf["readings"])
     wf.run("t")
-    assert wf.step("t").output.ledger["error"].iloc[0] == (
+    assert wf.step("t").output.notes[0]["error"] == (
         "TypeError: table expects a DataFrame back, got int")
 
 
@@ -928,10 +930,10 @@ def test_009_zip_never_drops_a_row(r3):
     r3.run("kept")
     r3.run("short_first")
     r3.run("long_first")
-    assert r3.step("short_first").output.ledger["error"].iloc[0] == (
+    assert r3.step("short_first").output.notes[0]["error"] == (
         "zip_ pairs rows by id: row 2 of 'r' has no matching row in 'kept'. "
         "For a partial match, use join")
-    assert r3.step("long_first").output.ledger["error"].iloc[0] == (
+    assert r3.step("long_first").output.notes[0]["error"] == (
         "zip_ pairs rows by id: row 2 of 'r' has no matching row in 'kept'. "
         "For a partial match, use join")
     with pytest.raises(grid.StepFailed, match="use join"):
@@ -949,7 +951,7 @@ def test_009_zip_of_unrelated_grids_pairs_by_position_only_when_lengths_agree():
     w.run("ac")
     assert w.step("ab").output.data.to_dict("list") == {"x": [1, 2], "y": [3, 4]}
     assert "row ids are unrelated and their lengths differ" in \
-        w.step("ac").output.ledger["error"].iloc[0]
+        w.step("ac").output.notes[0]["error"]
 
 
 def test_009_string_row_ids_survive_a_saved_session(r3):
@@ -968,9 +970,9 @@ def test_009_a_failed_parent_keeps_one_placeholder_row_with_its_id(r3):
         return [n]
     r3["items"] = picky_009[mod.expand(), mod.try_except()](r3["r"])
     r3.run_all()
-    ledger = r3.step("items").output.ledger
-    assert ledger.loc["1.0", "status"] == "failed"
-    assert ledger.loc["1.0", "unit"] == 1
+    items = r3.step("items").output
+    assert items.row_states["1.0"] == "failed"
+    assert items.notes["1.0"]["unit"] == 1                # its parent row
 
 
 # ── 009 step 2: versions from data hashes, read stamps, stale from versions ──
@@ -1082,11 +1084,12 @@ def test_009_a_systematic_failure_trips_autos_breaker_after_5_calls(spent):
     w = _all_fail()
     w["x"] = flaky_009(w["r"])                              # implicit auto
     w.run("x")
-    ledger = w.step("x").output.ledger
+    out = w.step("x").output
     assert spent["calls"] == 5                              # not 20
-    assert list(ledger["attempts"])[:6] == [1, 1, 1, 1, 1, 0]
-    assert ledger["error"].iloc[5] == (
+    assert out.notes[4]["error"] == "ValueError: bad key"   # the 5th real failure
+    assert out.notes[5]["error"] == (
         "not run: stopped after 5 failures in a row (ValueError: bad key)")
+    assert list(out.row_states) == ["failed"] * 20
     assert w.step("x").output.meta["auto"]["reason"].endswith("adds breaker(after=5)")
 
 
@@ -1127,7 +1130,8 @@ def test_009_try_except_never_swallows_a_breaker_stop(spent):
     spent["calls"] = 0
     w.run("y")
     assert spent["calls"] == 5                               # stopped; not turned into 0s
-    assert w.step("y").output.ledger["attempts"].iloc[-1] == 0
+    out = w.step("y").output
+    assert out.notes[out.data.index[-1]]["error"].startswith("not run: stopped")
 
 
 def test_009_a_direct_call_runs_over_rows_only_when_the_frame_doesnt_fit():
@@ -1160,3 +1164,140 @@ def test_009_with_implicit_auto_off_the_orchestration_must_be_written(monkeypatc
     assert wf.step("ok").output.values == [10, 20, 30, 20]
     frame = pd.DataFrame({"n": [1, 2]})
     assert isinstance(times10_009(frame), pd.DataFrame)      # off: the frame is passed as-is
+
+
+# ── 009 step 4: known unknowns are shown — wf.preview and wf.cell ─────────
+@tool
+def score_009(n: int) -> float:
+    if n < 0:
+        raise ValueError("negative")
+    return n * 1.5
+
+
+@tool
+def big_009(n: int) -> bool:
+    return n > 1
+
+
+@pytest.fixture()
+def unrun():
+    w = Workflow()
+    w["r"] = load_typed_008[mod.source()](path="x")        # city: str, n: int
+    w["s"] = score_009(w["r"])
+    return w
+
+
+def test_009_known_columns_unknown_rows_are_shown_with_a_marker(unrun):
+    view = unrun.preview("r")
+    assert view["columns"] == [{"name": "city", "type": "str"}, {"name": "n", "type": "int"}]
+    assert view["rows"] == []
+    assert view["row_count"]["certainty"] == "unknown"
+    marker = view["markers"][0]
+    assert marker["kind"] == "rows" and marker["text"].startswith("‹rows unknown — ")
+    assert "run load_typed_008" in marker["resolve"]
+
+
+def test_009_a_later_step_names_the_step_it_is_waiting_on(unrun):
+    marker = unrun.preview("s")["markers"][0]
+    assert marker["because"] == "its input 'r' doesn't know its row count yet"
+    assert marker["resolve"][0] == "run 'r'"
+    assert unrun.preview("s")["columns"] == [{"name": "value", "type": "float"}]
+
+
+def test_009_some_columns_known_shows_a_more_columns_marker():
+    w = Workflow()
+    w["r"] = load_raw_008[mod.source(), mod.expect(columns={"city": str},
+                                                   more_columns=True)](path="x")
+    kinds = {m["kind"]: m["text"] for m in w.preview("r")["markers"]}
+    assert kinds["columns"] == "‹+ maybe more columns›"
+    assert kinds["rows"].startswith("‹rows unknown")
+
+
+def test_009_planned_rows_are_pending_or_maybe(wf):
+    wf["s"] = score_009[mod.map()](wf["readings"])
+    wf["k"] = big_009[mod.filter()](wf["readings"])
+    s, k = wf.preview("s"), wf.preview("k")
+    assert [r["state"] for r in s["rows"]] == ["pending"] * 4
+    assert s["rows"][0]["cells"] == {"value": {"state": "pending", "type": "float"}}
+    assert [r["state"] for r in k["rows"]] == ["maybe"] * 4
+    assert k["markers"][0]["text"] == "‹0–4 rows — filter keeps at most the 4 rows it reads›"
+
+
+def test_009_a_run_step_shows_values_failures_and_staleness(unrun):
+    unrun["s"] = score_009[mod.auto(), mod.try_except()](unrun["r"])
+    unrun.run_all()
+    drawn = unrun.preview("s")["rows"]
+    assert [r["state"] for r in drawn] == ["known", "known"]          # load gives n = 1, 2
+    unrun["r"] = load_typed_008[mod.source()](path="y")             # re-declared: s is stale
+    assert [r["state"] for r in unrun.preview("s")["rows"]] == ["stale", "stale"]
+    assert unrun.preview("s")["rows"][0]["cells"]["value"]["value"] == 1.5   # old value kept
+
+
+def test_009_clicking_a_cell_says_what_is_there_or_expected(unrun):
+    before = unrun.cell("s", 1, "value")
+    assert (before["state"], before["type"]) == ("unknown", "float")   # row 1, if it exists
+    assert before["resolve"][0] == "run 'r'"
+    unrun.run("r")
+    unrun.run("s")
+    known = unrun.cell("s", 1, "value")
+    assert (known["state"], known["value"]) == ("known", 3.0)
+    assert known["inputs"] == [{"step": "r", "id": 1, "state": "completed"}]
+    assert unrun.cell("s", 9, "value")["because"] == "row 9 of 's', which has 2 rows (0–1)"
+    assert unrun.cell("s", 0, "nope")["state"] == "missing"
+
+
+def test_009_a_failed_and_a_blocked_cell(wf):
+    w = Workflow()
+    w["r"] = pd.DataFrame({"n": [1, -1]})
+    w["s"] = score_009[mod.map(), mod.try_except()](w["r"])
+    w["t"] = op("identity")[mod.select(columns=["value"])](w["s"])
+    w.run_all()
+    failed = w.cell("s", 1, "value")
+    assert (failed["state"], failed["error"]) == ("failed", "ValueError: negative")
+    blocked = w.cell("t", 1, "value")
+    assert blocked["state"] == "blocked" and blocked["cause"] == "s[1]: ValueError: negative"
+
+
+def test_009_an_invalid_step_says_why(wf):
+    wf["bad"] = score_009[mod.map()](wf["nope"])
+    view = wf.preview("bad")
+    assert view["status"] == "invalid"
+    assert view["markers"][0]["text"] == "‹can't run — input 'nope', which is not an earlier step›"
+
+
+# ── 009: an output is data, states and meta ─────────────────────────────
+def test_009_an_output_is_data_states_and_meta(failing):
+    failing.run_all()
+    out = failing.step("a").output
+    assert out.states.shape == out.data.shape
+    assert list(out.row_states) == ["known", "failed", "known"]
+    assert out.notes == {1: {"error": "ValueError: boom", "caught": True}}   # only row 1
+    assert out.meta["version"] and "ledger" not in vars(out)
+
+
+def test_009_a_zip_carries_each_cells_state(failing):
+    failing["view"] = zip_(failing["r"], failing["a"])
+    failing.run_all()
+    view = failing.step("view").output
+    assert [str(v) for v in view.states.loc[1]] == ["known", "blocked"]   # n known, value blocked
+    assert view.notes[1]["cause"] == "a[1]: ValueError: boom"
+    assert failing.step("view").status == "failed"           # shown, but the run went on
+
+
+def test_009_printing_an_output_shows_states_and_notes(failing):
+    failing.run_all()
+    text = str(failing.step("a").output)
+    assert text.splitlines()[0] == "<Output map · 3 row(s) × 1 col(s), 1 failed>"
+    assert "failed" in text and "ValueError: boom (caught)" in text
+    staged = Workflow()
+    staged["r"] = load_typed_008[mod.source()](path="x")
+    assert str(staged.step("r").output) == (
+        "<Output source · staged>\ncolumns city (str), n (int) · rows unknown until it runs")
+
+
+def test_009_states_and_notes_survive_a_saved_session(failing):
+    failing.run_all()
+    back = Workflow.from_json(failing.to_session_json(), grid.TOOLS)
+    out = back.step("a").output
+    assert list(out.row_states) == ["known", "failed", "known"]
+    assert out.notes == {1: {"error": "ValueError: boom", "caught": True}}   # id stays an int

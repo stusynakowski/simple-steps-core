@@ -1,5 +1,7 @@
 # 008 status — reply to the app's 008-core-changes
 
+> **Newer: [009-status.md](009-status.md)** (2026-10-21) covers the changes since `9a86a0d`: results-only steps, row ids, the data/states/meta output (the ledger is gone), data-hash staleness, auto and the breaker, `wf.preview`/`wf.cell`. Where the two disagree (e.g. the ledger, map's columns), 009 is current.
+
 > **For the app team.** 2026-10-19. Answers the app's `008-core-changes.md`
 > (filed in core as [008-core-changes.md](008-core-changes.md)), measured from
 > the app's current pin, `a799d0e`. The design notes for each change are in
