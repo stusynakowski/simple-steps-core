@@ -1314,7 +1314,7 @@ def test_an_unexportable_payload_says_so(three):
 
 
 def test_exports_are_json(ran):
-    assert json.loads(ran.to_json())["version"] == 2
+    assert json.loads(ran.to_json())["version"] == 3
     full = json.loads(ran.to_session_json())
     assert "inputs" not in full, "one payload map, not two"
     assert full["outputs"]["raw"]["data"]["kind"] == "frame"

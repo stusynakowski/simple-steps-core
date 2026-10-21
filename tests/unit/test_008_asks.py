@@ -372,14 +372,16 @@ def test_C11_a_non_literal_is_refused_at_declaration(wf):
         "weight: a date isn't a literal; pass a str ('2024-01-01'), or make it a step",)
 
 
-def test_K17_v2_is_written_v1_loads_and_newer_is_refused(wf):
-    assert json.loads(wf.to_json())["version"] == 2
+def test_K17_v3_is_written_older_versions_load_and_newer_is_refused(wf):
+    assert json.loads(wf.to_json())["version"] == 3
     v1 = {"version": 1, "steps": [{"step_id": "r", "operation": {
         "tool_id": "scale_008", "input": None, "arguments": {"weight": 2},
         "modifiers": [{"kind": "map", "params": {}}]}}]}
-    assert Workflow.from_dict(v1).step("r").operation.arguments == {"weight": 2}
-    with pytest.raises(ValueError, match="reads versions 1 to 2"):
-        Workflow.from_dict({**v1, "version": 3})
+    for version in (1, 2):
+        loaded = Workflow.from_dict({**v1, "version": version})
+        assert loaded.step("r").operation.arguments == {"weight": 2}
+    with pytest.raises(ValueError, match="reads versions 1 to 3"):
+        Workflow.from_dict({**v1, "version": 4})
 
 
 def test_C1_a_reference_in_a_setting_resolves_and_goes_stale(wf):

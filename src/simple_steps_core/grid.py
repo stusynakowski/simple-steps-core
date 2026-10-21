@@ -3381,10 +3381,15 @@ def _decode_ref(value: Any) -> Any:
     return value
 
 
-#: Version of the saved operation format. 2 added tagged literals (C11),
-#: references in settings (C1), tools in settings (C2) and selections (C7).
-#: Version 1 files still load (008 K17).
-FORMAT_VERSION = 2
+#: Version of the saved format. Every version back to 1 still loads (008 K17);
+#: a file from a newer core is refused with a message, never half-read.
+#:
+#: - 2: tagged literals (C11), references in settings (C1), tools in settings
+#:   (C2), selections (C7).
+#: - 3 (009): implicit steps save ``mod.auto()``; the ``breaker`` modifier;
+#:   session outputs save ``data``, ``states`` and ``notes`` (no ledger), with
+#:   data-hash ``version`` and ``read`` stamps in their meta.
+FORMAT_VERSION = 3
 
 #: The tags a saved value can carry. A literal dict that happens to use one of
 #: these keys (or any `$` key, or a non-string key) is saved as `$dict`, so a

@@ -60,21 +60,22 @@ Ordered by how likely the app is to hit them.
    tools, still get the frame as-is.
 8. **Re-running a step with an identical result no longer makes later steps
    stale.** Staleness compares data versions.
-9. **Saved sessions changed shape.** Each output saves `data`, `states` (per
-   column), `meta` and `notes` (as id/note pairs), not `ledger`. Older
-   sessions saved with a ledger still load.
+9. **Saved files are version 3, and sessions changed shape.** Each output
+   saves `data`, `states` (per column), `meta` and `notes` (as id/note pairs),
+   not `ledger`. Versions 1–2, and sessions saved with a ledger, still load. A
+   core at `9a86a0d` refuses version 3 files with a clear message.
 10. **`output.failed`** now returns the failed and blocked rows' notes
     (`state`, `error`, `cause`, `caught`), not ledger rows.
 
-## Recommended before pinning: bump the saved-format version
+## The saved format is now version 3
 
-Files saved by this core still say `"version": 2`, but contain things a core
-at `9a86a0d` doesn't understand: a `breaker` modifier, implicit `auto`, and
-outputs without a ledger. An older core would load such a file and fail
-partway (*"unknown modifier 'breaker'"*, a `KeyError` on `ledger`), instead of
-refusing it with *"saved in format version 3; this core reads versions 1 to
-2"*. Per K17, **bump `FORMAT_VERSION` to 3** in core when this is committed.
-It's a one-line change; core keeps reading versions 1–2.
+Files saved by this core say **`"version": 3`** (they contain a `breaker`
+modifier, implicit `auto`, and outputs without a ledger). This core reads
+versions 1, 2 and 3. A core at `9a86a0d` (which reads 1–2) **refuses** a
+version 3 file with a clear message (*"saved in format version 3; this core
+reads versions 1 to 2. Upgrade simple-steps-core to load it."*) instead of
+half-reading it. This follows K17's rule: when the saved format changes, the
+version is bumped and older versions keep loading.
 
 ---
 
