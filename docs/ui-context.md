@@ -205,6 +205,29 @@ this; it's worked out from row ids and the formula.
 - Every spelling of a selection saves identically, e.g.
   `{"$ref": "p", "rows": {"start": 1, "stop": 3}, "columns": {"from": "name", "to": "price"}}`.
 
+### Row ids (`#`) and column names as values
+
+- **`#` is the row number: always 0…n-1 down every step's grid,** in order,
+  even after a `filter`, `sort` or `expand`. Draw it as the first column
+  (`output.view()` and `wf.preview()` rows include it). It's what a user
+  clicks and references: `rows[…]`, `cols["#"]` and `wf.cell(step, row, …)`
+  all count by `#`.
+- Each row's link to the input row it came from is kept internally (the
+  `id` in preview rows and cell inputs). The UI never needs to show it. A
+  cell's inputs name their row by the input step's `#` (`"row": 2`).
+- **Columns are numbered the same way:** each column in `wf.preview()` has a
+  `#` (0…m-1, left to right), and `wf.cell()` returns `column_number`. That's
+  what `cols[1]` and `cols[0:3]` select. Show it so position references are
+  readable. Names stay the safer reference: positions follow the current
+  column order.
+- `cols["#"]` selects the row numbers like a column: `wf["p"][cols["#"]]`,
+  `wf["p"][1:3][cols[["#", "n"]]]` (gives `#` 1, 2), `select(columns=["#", "city"])`.
+- **`wf["p"].header`** is the step's column names, as a value (a list
+  argument), or as a step: one column, `name`.
+- **Loading a table:** a table with its own `#` column is refused (*"'#' is
+  reserved for row ids; rename or remove that column"*). A predefined index
+  becomes an ordinary column (its name, or `index`).
+
 ## 6. Auto, and what to show about it
 
 - A formula with no orchestration (`score(wf["r"])`) is **auto**. Core picks

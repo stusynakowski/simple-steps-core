@@ -944,18 +944,18 @@ def test_009_zip_never_drops_a_row(r3):
         r3.run_all()
 
 
-def test_009_zip_of_unrelated_grids_pairs_by_position_only_when_lengths_agree():
+def test_009_zip_of_loaded_tables_pairs_by_id_and_refuses_extra_rows():
+    """Loaded tables all get ids 0…n-1, so they pair by id; a longer one is refused."""
     w = Workflow()
-    w["a"] = pd.DataFrame({"x": [1, 2]}, index=["p", "q"])
+    w["a"] = pd.DataFrame({"x": [1, 2]})
     w["b"] = pd.DataFrame({"y": [3, 4]})
-    w["c"] = pd.DataFrame({"z": [5, 6, 7]}, index=["u", "v", "w"])
+    w["c"] = pd.DataFrame({"z": [5, 6, 7]})
     w["ab"] = zip_(w["a"], w["b"])
     w["ac"] = zip_(w["a"], w["c"])
     w.run("ab")
     w.run("ac")
     assert w.step("ab").output.data.to_dict("list") == {"x": [1, 2], "y": [3, 4]}
-    assert "row ids are unrelated and their lengths differ" in \
-        w.step("ac").output.notes[0]["error"]
+    assert "row 2 of 'c' has no matching row in 'a'" in w.step("ac").output.notes[0]["error"]
 
 
 def test_009_string_row_ids_survive_a_saved_session(r3):
@@ -1193,7 +1193,8 @@ def unrun():
 
 def test_009_known_columns_unknown_rows_are_shown_with_a_marker(unrun):
     view = unrun.preview("r")
-    assert view["columns"] == [{"name": "city", "type": "str"}, {"name": "n", "type": "int"}]
+    assert view["columns"] == [{"name": "city", "type": "str", "#": 0},
+                               {"name": "n", "type": "int", "#": 1}]
     assert view["rows"] == []
     assert view["row_count"]["certainty"] == "unknown"
     marker = view["markers"][0]
@@ -1205,7 +1206,7 @@ def test_009_a_later_step_names_the_step_it_is_waiting_on(unrun):
     marker = unrun.preview("s")["markers"][0]
     assert marker["because"] == "its input 'r' doesn't know its row count yet"
     assert marker["resolve"][0] == "run 'r'"
-    assert unrun.preview("s")["columns"] == [{"name": "value", "type": "float"}]
+    assert unrun.preview("s")["columns"] == [{"name": "value", "type": "float", "#": 0}]
 
 
 def test_009_some_columns_known_shows_a_more_columns_marker():
@@ -1246,7 +1247,7 @@ def test_009_clicking_a_cell_says_what_is_there_or_expected(unrun):
     known = unrun.cell("s", 1, "value")
     assert (known["state"], known["value"]) == ("known", 3.0)
     # 010 C27: one entry per binding — the column read and the argument it fed
-    assert known["inputs"] == [{"step": "r", "id": 1, "columns": ["n"], "argument": "n",
+    assert known["inputs"] == [{"step": "r", "id": 1, "row": 1, "columns": ["n"], "argument": "n",
                                 "state": "known", "values": {"n": 2}, "more": 0}]
     assert unrun.cell("s", 9, "value")["because"] == "row 9 of 's', which has 2 rows (0–1)"
     assert unrun.cell("s", 0, "nope")["state"] == "missing"
@@ -1315,7 +1316,7 @@ def test_009_a_cell_shows_the_input_values_that_produced_it(failing):
     up from the row id, never stored per cell."""
     failing.run_all()
     failed = failing.cell("a", 1, "value")
-    assert failed["inputs"] == [{"step": "r", "id": 1, "columns": ["n"], "argument": "n",
+    assert failed["inputs"] == [{"step": "r", "id": 1, "row": 1, "columns": ["n"], "argument": "n",
                                  "state": "known", "values": {"n": 2}, "more": 0}]   # n = 2 raised
     assert "inputs" not in failing.step("a").output.meta                # nothing stored
     failing["view"] = zip_(failing["r"], failing["a"])
@@ -1347,7 +1348,7 @@ def test_009_wide_input_rows_show_a_few_values_and_count_the_rest():
     inputs = w.cell("s", 0, "value")["inputs"]
     assert len(inputs) == 9                       # one binding per column read
     copied = w.cell("one", 0, "c0")["inputs"]
-    assert copied == [{"step": "r", "id": 0, "columns": ["c0"], "argument": None,
+    assert copied == [{"step": "r", "id": 0, "row": 0, "columns": ["c0"], "argument": None,
                        "state": "known", "values": {"c0": 0}, "more": 0}]
 
 
@@ -1469,9 +1470,9 @@ def test_C27_every_input_cell_is_named_with_its_argument():
     w["s"] = scale_008[mod.map()](w["r"], weight=w["w"][0][cols["w"]])
     w.run("s")
     assert w.cell("s", 1, "value")["inputs"] == [
-        {"step": "r", "id": 1, "columns": ["n"], "argument": "n", "state": "known",
+        {"step": "r", "id": 1, "row": 1, "columns": ["n"], "argument": "n", "state": "known",
          "values": {"n": 2}, "more": 0},
-        {"step": "w", "id": 0, "columns": ["w"], "argument": "weight", "state": "known",
+        {"step": "w", "id": 0, "row": 0, "columns": ["w"], "argument": "weight", "state": "known",
          "values": {"w": 1.5}},
     ]
 
@@ -1553,3 +1554,73 @@ def test_C25_row_staleness_survives_a_saved_session(rows3):
     assert back.stale_rows("s") == [1]
     back.run_all()
     assert back.stale_rows("s") == [] and back.step("s").output.values == [10, 200, 30]
+
+
+
+# ── "#" is the row-id column (2026-10-23) ───────────────────────────────
+def test_hash_is_the_row_number_0_to_n_minus_1_on_every_step(wf):
+    """'#' always counts 0…n-1 down the grid — even after a filter, whose rows
+    still link to the input rows they came from (internally, by id)."""
+    @tool
+    def big_hash(n: int) -> bool:
+        return n > 1
+
+    wf["k"] = big_hash[mod.filter()](wf["readings"])        # keeps input rows 1, 2, 3
+    wf["s"] = scale_008[mod.map()](wf["k"])
+    wf.run_all()
+    assert list(wf.step("s").output.view()["#"]) == [0, 1, 2]
+    assert [r["#"] for r in wf.preview("s")["rows"]] == [0, 1, 2]
+    cell = wf.cell("s", 0, "value")                          # '#0' of s
+    assert cell["inputs"][0]["step"] == "k" and cell["inputs"][0]["row"] == 0
+    assert wf.cell("k", 0, "n")["inputs"][0]["row"] == 1     # k's #0 is readings' #1
+    assert str(wf.step("s").output).splitlines()[1].split()[0] == "#"
+    assert grid.ROW_ID == "#"
+
+
+def test_a_table_with_its_own_hash_column_is_refused():
+    with pytest.raises(grid.SelectionError, match="'#', which is reserved for row ids"):
+        Workflow()["bad"] = pd.DataFrame({"#": [1], "n": [2]})
+
+
+def test_a_predefined_index_becomes_a_column():
+    w = Workflow()
+    w["p"] = pd.DataFrame({"n": [5, 6]}, index=pd.Index(["a", "b"], name="code"))
+    w["q"] = pd.DataFrame({"n": [7]}, index=[10])                    # unnamed
+    assert w.step("p").output.view()[["#", "code", "n"]].to_dict("list") == {
+        "#": [0, 1], "code": ["a", "b"], "n": [5, 6]}
+    assert list(w.step("q").output.data.columns) == ["index", "n"]
+    with pytest.raises(grid.SelectionError, match="a column already has that name"):
+        Workflow()["clash"] = pd.DataFrame({"code": [1]}, index=pd.Index(["x"], name="code"))
+
+
+def test_row_ids_and_column_names_can_be_referenced(wf):
+    @tool
+    def width_hdr(names: list) -> int:
+        return len(names)
+
+    wf["ids"] = wf["readings"][cols["#"]]
+    wf["both"] = wf["readings"][1:3][cols[["#", "n"]]]
+    wf["picked"] = op("identity")[mod.select(columns=["#", "city"])](wf["readings"])
+    wf["hdr"] = wf["readings"].header
+    wf["w"] = width_hdr.bind(names=wf["readings"].header)[mod.source()]
+    wf.run_all()
+    assert wf.step("ids").output.data.to_dict("list") == {"#": [0, 1, 2, 3]}
+    assert wf.step("both").output.data.to_dict("list") == {"#": [1, 2], "n": [2, 3]}
+    assert list(wf.step("picked").output.data.columns) == ["#", "city"]
+    assert wf.step("hdr").output.data.to_dict("list") == {"name": ["city", "n"]}
+    assert wf.step("w").output.data.iloc[0, 0] == 2
+    assert wf.step("w").operation.to_source() == 'width_hdr[mod.source()](names=wf["readings"].header)'
+    back = Workflow.from_json(wf.to_session_json(), grid.TOOLS)
+    back.run_all()
+    assert back.step("w").output.data.iloc[0, 0] == 2
+
+
+
+def test_columns_are_numbered_0_to_m_minus_1_like_rows(wf):
+    """A column's number is its position — what cols[1] or cols[0:2] select."""
+    wf["picked"] = wf["readings"][cols[1]]
+    wf.run_all()
+    view = wf.preview("readings")
+    assert [(c["name"], c["#"]) for c in view["columns"]] == [("city", 0), ("n", 1)]
+    assert wf.cell("readings", 2, "n")["column_number"] == 1
+    assert list(wf.step("picked").output.data.columns) == ["n"]          # cols[1] is "n"

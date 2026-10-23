@@ -71,11 +71,17 @@ __all__ = [
     "mod",
     "DECORATORS", "MODIFIERS", "ModifierKind", "SHAPE_VERBS", "is_shape",
     "compile_operation",
-    "PAYLOAD", "STATES",
+    "PAYLOAD", "STATES", "ROW_ID",
 ]
 
 #: Default name for the column holding whatever a tool returned.
 PAYLOAD = "value"
+
+#: The row-number column, ``#``: 0…n-1 down every step's grid, in order. It's
+#: what a user sees, clicks and references (``cols["#"]``, ``rows[…]``,
+#: ``wf.cell(step, row, …)``). Reserved: a table can't bring its own. Each
+#: row's *link* to its input row is the DataFrame index, kept internal.
+ROW_ID = "#"
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -227,7 +233,8 @@ class Output:
         return bool(self.uncaught)
 
     def view(self) -> pd.DataFrame:
-        """``data`` plus each row's ``state`` and, where there is one, its note."""
+        """The grid as a user sees it: ``#`` (0…n-1), the data, each row's
+        ``state`` and, where there is one, its note."""
         out = self.data.copy()
         out["state"] = self.row_states.astype(str)
         if self.meta.get("stale"):
@@ -238,7 +245,8 @@ class Output:
             out.loc[which, "state"] = "stale"
         if self.notes:
             out["note"] = [_note_text(self.notes.get(i)) for i in out.index]
-        return out
+        out.insert(0, ROW_ID, range(len(out)))
+        return out.reset_index(drop=True)
 
     # ── the two halves ───────────────────────────────────────────────────
     @property
@@ -299,7 +307,7 @@ class Output:
         if self.meta.get("staged"):
             plan = self.meta.get("plan") or {}
             return f"{caption}\n{_plan_words(plan)}" if plan else caption
-        return f"{caption}\n{self.view().to_string()}"
+        return f"{caption}\n{self.view().to_string(index=False)}"
 
     def __repr__(self) -> str:
         verb = self.meta.get("verb", "?")
@@ -1750,7 +1758,7 @@ def table_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
                                f"{type(value).__name__}"}
             return Output(data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
                           records=[record], index=[0], meta=meta)
-    data = _normalize_missing(_str_columns(value, "the table"))
+    data = _normalize_missing(_own_index(_str_columns(value, "the table"), "the table"))
     records = [{**record, "unit": "table"} for _ in range(len(data))]
     return Output(data=data, records=records, index=data.index,
                   meta={**meta, "columns": list(data.columns)})
@@ -1810,12 +1818,44 @@ def sweep_(fn: Callable, *, name: str = PAYLOAD, retries: int = 0,
                         "n_in": len(combos)})
 
 
+def _own_index(frame: pd.DataFrame, where: str = "the table") -> pd.DataFrame:
+    """A loaded table's rows get core's own ids, 0…n-1, in the ``#`` index.
+
+    A column named ``#`` is refused: ``#`` is the row-id column. A
+    predefined index (anything but the plain 0, 1, 2 …) becomes an ordinary
+    column, keeping its name (``index`` when it has none), so nothing is lost.
+    """
+    if ROW_ID in [str(c) for c in frame.columns]:
+        raise SelectionError(
+            f"{where} has a column named {ROW_ID!r}, which is reserved for row "
+            f"ids; rename or remove that column")
+    index = frame.index
+    plain = (isinstance(index, pd.RangeIndex) and index.start == 0 and index.step == 1
+             and index.name in (None, ROW_ID))
+    if plain:
+        return frame
+    names = [str(n) if n is not None else ("index" if index.nlevels == 1 else f"index_{i}")
+             for i, n in enumerate(index.names)]
+    for name in names:
+        if name == ROW_ID or name in frame.columns:
+            raise SelectionError(
+                f"{where}'s index {name!r} would become a column, but "
+                f"{'that name is reserved for row ids' if name == ROW_ID else 'a column already has that name'}; "
+                f"rename the index or the column")
+    out = frame.copy()
+    out.index = out.index.set_names(names)
+    out = out.reset_index()
+    return out
+
+
 def grid(value: Any) -> Output:
     """Lift any value into an Output so a chain can start from it.
 
-    ``score[mod.map()](grid(df))`` — how a chain begins.
+    ``score[mod.map()](grid(df))`` — how a chain begins. A table's own index
+    becomes a column; its rows get ids 0…n-1 (see :func:`_own_index`).
     """
-    frame = _normalize_missing(_str_columns(rows(value), "the source"))
+    frame = _normalize_missing(_own_index(_str_columns(rows(value), "the source"),
+                                          "the source"))
     return Output(
         data=frame,
         records=[{"status": "completed", "error": None, "attempts": 1,
@@ -1871,6 +1911,8 @@ def select_(source: Any, fn: Callable = identity, *,
     if callable(columns):
         # 008 C2: a tool is a predicate on column names.
         columns = [c for c in frame.columns if columns(c)]
+    if isinstance(columns, (list, tuple)) and ROW_ID in columns:
+        columns = {"names": list(columns)}
     if isinstance(columns, dict) or row_sel is not None:
         # 008 C7/K9: every selection form; kept rows keep their ids.
         data = _apply_selection(frame, row_sel, columns or None,
@@ -3249,6 +3291,8 @@ def _selection_kind(ref: "StepRef") -> str | None:
         return None
     one_row = _is_int(ref.rows)
     columns = ref.columns or {}
+    if columns.get("header"):
+        return "column"
     one_col = (len(columns.get("names") or []) == 1
                or (isinstance(columns.get("positions"), list)
                    and len(columns["positions"]) == 1))
@@ -3281,9 +3325,19 @@ def _position(n: int, i: int, what: str, step_id: str) -> int:
 
 
 def _resolve_columns(columns: list, sel: Any, step_id: str) -> list:
-    """The column names a selection picks, in order, from *columns*."""
+    """The column names a selection picks, in order, from *columns*.
+
+    ``#`` (the row ids) can be named like a column; ``{"header": true}`` is
+    the column names themselves, as one column called ``name``.
+    """
     if sel is None:
         return list(columns)
+    if isinstance(sel, dict) and sel.get("header"):
+        return ["name"]
+    columns = [ROW_ID, *[c for c in columns if c != ROW_ID]] if (
+        (isinstance(sel, (list, tuple)) and ROW_ID in sel)
+        or (isinstance(sel, dict) and (ROW_ID in (sel.get("names") or [])
+                                       or ROW_ID in (sel.get("from"), sel.get("to"))))) else list(columns)
     if isinstance(sel, (list, tuple)):                  # select's plain list form
         sel = {"names": list(sel)}
     if "names" in sel:
@@ -3318,8 +3372,14 @@ def _apply_selection(frame: pd.DataFrame, row_sel: Any, col_sel: Any,
                      step_id: str) -> pd.DataFrame:
     """The block a selection names. Rows keep their ids, so cells stay addressable."""
     out = frame
+    if isinstance(col_sel, dict) and col_sel.get("header"):
+        # The column names themselves (`wf["p"].header`): one per row.
+        return pd.DataFrame({"name": [str(c) for c in frame.columns]})
     if col_sel is not None:
-        out = out[_resolve_columns(list(out.columns), col_sel, step_id)]
+        wanted = _resolve_columns(list(out.columns), col_sel, step_id)
+        if ROW_ID in wanted:
+            out = out.assign(**{ROW_ID: range(len(out))})  # the row numbers, 0…n-1
+        out = out[wanted]
     if row_sel is not None:
         n = len(out)
         if _is_int(row_sel):
@@ -3364,6 +3424,18 @@ class StepRef:
     @property
     def selected(self) -> bool:
         return self.rows is not None or self.columns is not None
+
+    @property
+    def header(self) -> "StepRef":
+        """``wf["p"].header`` — the step's column names, as a value (a list).
+
+        For a tool that works over all of a grid's columns, a schema check, or
+        labels. As a step on its own, a grid with one column, ``name``.
+        """
+        if self.selected:
+            raise SelectionError("header is the whole step's column names; "
+                                 "take it from wf[…] before selecting")
+        return replace(self, columns={"header": True})
 
     def __getitem__(self, key: Any) -> "StepRef":
         """``wf["p"][1:5]``, ``[cols["a":"c"]]``, ``[1:5, cols[…]]`` — in any order.
@@ -4658,6 +4730,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                                            "distinct")
             and workflow is not None
             and (verb.params.get("columns") or verb.params.get("by"))
+            and not (isinstance(verb.params.get("columns"), (list, tuple))
+                     and ROW_ID in verb.params["columns"] and verb.kind == "select")
             and not any(isinstance(verb.params.get(k), StepRef)
                         or (verb.kind == "select" and isinstance(verb.params.get(k), dict))
                         or _is_tool_value(verb.params.get(k))
@@ -6375,7 +6449,10 @@ class Workflow:
                                  "root": root, "because": why}]}
         types = plan.get("types", {})
         names = list(plan.get("columns", {}).get("names", []))
-        columns = [{"name": c, "type": types.get(c, "any")} for c in names]
+        # Each column's number, 0…m-1 left to right: the counterpart of a row's
+        # "#", for showing and clicking by position (cols[0], cols[0:3]).
+        columns = [{"name": c, "type": types.get(c, "any"), ROW_ID: i}
+                   for i, c in enumerate(names)]
         markers = _plan_markers(plan, step_id)
         if out.meta.get("stale"):
             label = f"stale output ({out.meta.get('stale_reason') or 'an earlier step changed'})"
@@ -6416,7 +6493,7 @@ class Workflow:
                         cell.update({k: v for k, v in note.items() if k in ("error", "cause")})
                     cells[str(c)] = cell
                 row_state = str(row_states[row_id])
-                result.append({"position": position, "id": _plain(row_id),
+                result.append({ROW_ID: position, "position": position, "id": _plain(row_id),
                                "state": "stale" if stale and row_state == "known" else row_state,
                                "cells": cells})
             return result
@@ -6427,7 +6504,7 @@ class Workflow:
         if not index and ROWS_RULE.get(verb) == "at_most":
             known = self._known_index(step.operation)
             index, state = (list(known) if known is not None else []), "maybe"
-        return [{"position": i, "id": _plain(row_id), "state": state,
+        return [{ROW_ID: i, "position": i, "id": _plain(row_id), "state": state,
                  "cells": {c: {"state": state, "type": types.get(c, "any")} for c in names}}
                 for i, row_id in enumerate(index)]
 
@@ -6458,6 +6535,7 @@ class Workflow:
                     "because": f"{step_id!r} has no column {column!r} "
                                f"(it has {', '.join(names) or 'none'})"}
         type_ = next(c["type"] for c in view["columns"] if c["name"] == column)
+        base["column_number"] = names.index(column)
         rows_ = view["rows"]
         n = len(rows_)
         if -n <= row < n:
@@ -6629,6 +6707,7 @@ class Workflow:
         out = upstream.output
         if rows_ is not None:
             ids = [i for i in rows_ if i in out.data.index]
+            entry["row_numbers"] = [int(out.data.index.get_loc(i)) for i in ids]
             states = {str(out.states.at[i, c]) for i in ids for c in entry["columns"]
                       if c in out.states.columns}
             return {**entry, "rows": [_plain(i) for i in ids],
@@ -6639,6 +6718,7 @@ class Workflow:
         if match is None:
             return {**entry, "state": "missing", "values": {}}
         input_id = lookup[match]
+        entry["row"] = int(out.data.index.get_loc(input_id))   # its "#" in that step
         cols_ = [c for c in entry["columns"] if c in out.data.columns]
         states = {str(out.states.at[input_id, c]) for c in cols_} or {str(out.row_states[input_id])}
         shown = cols_[:self.INPUT_VALUES_SHOWN]
@@ -6662,12 +6742,14 @@ class Workflow:
         states = {str(out.states.at[i, c]) for i in ids for c in cols_}
         entry = {"step": ref.id, "columns": cols_, "argument": argument,
                  "state": _worst(states, out.meta.get("stale"))}
+        positions = [int(out.data.index.get_loc(i)) for i in ids]
         if len(ids) == 1:
             row = ids[0]
-            entry.update({"id": _plain(row),
+            entry.update({"id": _plain(row), "row": positions[0],
                           "values": {c: _plain(block.at[row, c]) for c in cols_[:self.INPUT_VALUES_SHOWN]}})
         else:
-            entry.update({"id": None, "rows": [_plain(i) for i in ids], "values": {}})
+            entry.update({"id": None, "rows": [_plain(i) for i in ids],
+                          "row_numbers": positions, "values": {}})
         return entry
 
     def _carry_zip_states(self, step: Step) -> None:
@@ -7170,6 +7252,8 @@ def _src(value: Any) -> str:
     """A value as formula text: a reference, a tool, or a Python literal."""
     if isinstance(value, StepRef):
         text = f"wf[{_src(value.id)}]"
+        if isinstance(value.columns, dict) and value.columns.get("header"):
+            return text + ".header"
         rows_ = value.rows
         if rows_ is not None:
             if isinstance(rows_, dict):

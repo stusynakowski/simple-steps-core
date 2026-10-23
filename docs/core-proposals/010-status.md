@@ -126,6 +126,34 @@ Two smaller changes from the same session, both uncommitted:
   short reason (`meta["stale_reason"]`): `updated args`, `input r changed`,
   `resource llm changed` or `r is stale`.
 
+## Also: `#` row ids and column names (owner, 2026-10-23)
+
+- **`#` is the row number: always 0…n-1 down every step's grid,** in order
+  (`grid.ROW_ID`), even after a `filter`, `sort` or `expand`. `output.view()`
+  and `wf.preview()` rows carry it. `rows[…]`, `cols["#"]` and `wf.cell(step,
+  row, …)` all count by it. Cell inputs name their row by the input step's
+  `#` (`"row"`, or `"row_numbers"` for several).
+- **Columns are numbered too:** each `wf.preview()` column has `"#"` (its
+  position, 0…m-1), and `wf.cell()` returns `column_number`. These are what
+  `cols[i]` selects. A column's name remains its id; there's no separate id
+  that survives a rename.
+- The link from a row to the input row it came from (the DataFrame index;
+  `id` in previews and cell inputs) is internal. It's what `zip_`, cell
+  inputs and per-cell staleness use, and the UI never needs to show it.
+- **Loading a table** (a literal source, a tool source's frame, a `table`
+  step's frame):
+  - a column named `#` is refused: *"the source has a column named '#',
+    which is reserved for row ids; rename or remove that column"*;
+  - a predefined index (anything but the plain 0, 1, 2 …) becomes an ordinary
+    column, keeping its name or called `index`. An index whose name matches
+    an existing column is refused.
+- **Referencing them:**
+  - `cols["#"]` selects the row numbers like a column: `wf["p"][cols["#"]]`,
+    `wf["p"][1:3][cols[["#", "n"]]]`, `select(columns=["#", "city"])`;
+  - `wf["p"].header` is the column names: as an argument, a list; as a step,
+    one column, `name`. Saved as `{"$ref": "p", "columns": {"header": true}}`,
+    printed as `wf["p"].header`.
+
 ## Changes the app may notice
 
 1. `inputs` entries gained `columns` and `argument`. `values` holds only
@@ -140,3 +168,8 @@ Two smaller changes from the same session, both uncommitted:
    `wf.preview`, rather than assuming the whole step.
 5. Editing a step that has run keeps its old output (stale) instead of
    resetting it to staged.
+6. A table loaded with a labelled index no longer keeps those labels as row
+   ids: they become a column. A table with a `#` column is refused.
+7. `#` (0…n-1) is what to show and reference. Cell inputs gained `row` (the
+   input's `#`), and preview rows gained `#`. The `id` fields are internal
+   links.

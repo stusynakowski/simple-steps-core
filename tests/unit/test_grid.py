@@ -2132,13 +2132,16 @@ def test_a_range_index_round_trips_as_a_range_index(ran):
         assert before.equals(after), sid
 
 
-def test_a_labelled_index_is_not_turned_into_a_range(three):
+def test_a_labelled_index_becomes_its_own_column(three):
+    """A loaded table's own index is kept as a column; its rows get ids 0…n-1."""
     wf = Workflow()
-    wf["raw"] = pd.DataFrame({"n": [1, 2]}, index=["p", "q"])
+    wf["raw"] = pd.DataFrame({"n": [1, 2]}, index=pd.Index(["p", "q"], name="code"))
     wf["s"] = score[mod.map(over=wf["raw"])]
     wf.run_all()
+    assert wf.step("raw").output.data.to_dict("list") == {"code": ["p", "q"], "n": [1, 2]}
     back = Workflow.from_json(wf.to_session_json(), TOOLS)
-    assert list(back.step("s").output.data.index) == ["p", "q"]
+    assert list(back.step("s").output.data.index) == [0, 1]
+    assert list(back.step("raw").output.view()["#"]) == [0, 1]
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -2180,8 +2183,10 @@ def test_a_position_past_the_end_says_so(three):
 # ─────────────────────────────────────────────────────────────────────────
 @pytest.fixture
 def table():
+    # Rows get core's own ids 0…3 (a loaded table's labelled index would
+    # become a column instead; see test_a_labelled_index_becomes_its_own_column).
     return pd.DataFrame({"city": ["Oslo", "Cairo", "Lima", "Cairo"],
-                         "n": [3, 1, 2, 1]}, index=["p", "q", "r", "s"])
+                         "n": [3, 1, 2, 1]})
 
 
 def test_slice_takes_rows_by_position(table):
@@ -2191,9 +2196,9 @@ def test_slice_takes_rows_by_position(table):
     wf["mid"] = mod.slice(start=1, stop=3, over=wf["raw"])
     wf["picked"] = mod.slice(at=[0, 3], over=wf["raw"])
     wf.run_all()
-    assert list(wf.step("first2").output.data.index) == ["p", "q"]
-    assert list(wf.step("mid").output.data.index) == ["q", "r"]
-    assert list(wf.step("picked").output.data.index) == ["p", "s"]
+    assert list(wf.step("first2").output.data.index) == [0, 1]
+    assert list(wf.step("mid").output.data.index) == [1, 2]
+    assert list(wf.step("picked").output.data.index) == [0, 3]
     assert list(wf.step("first2").output.data.columns) == ["city", "n"]
 
 
@@ -2270,7 +2275,7 @@ def test_distinct_keeps_the_first_of_each_group(table):
     wf.run_all()
     out = wf.step("u").output.data
     assert list(out["city"]) == ["Oslo", "Cairo", "Lima"]
-    assert list(out.index) == ["p", "q", "r"], "the first occurrence keeps its address"
+    assert list(out.index) == [0, 1, 2], "the first occurrence keeps its address"
 
 
 def test_distinct_over_the_whole_row_by_default():
