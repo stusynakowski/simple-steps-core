@@ -76,10 +76,10 @@ The rules, with four decisions for the owner, are in [row-ids.md](row-ids.md).
 
 | Feature | ID |
 |---|---|
-| A declared record type (`TypedDict`, `NamedTuple`, dataclass) spreads into one column per field | G8 |
+| A declared record type (`TypedDict`, `NamedTuple`, dataclass) spreads into one column per field *Done (phase 4)* | G8 |
 | `mod.name`: a name, a list, a mapping or a pattern; replaces `name=`. The last modifier that defines names wins; with none, columns keep their defaults *A single name: done (phase 4)* | G12 |
 | Kernel-wide naming conventions (`Kernel(cat, naming=…)`) | outputs-and-reshaping.md §10 |
-| `widen` reads declared fields, replaces the column it spreads, plans exactly *Replaces the column and takes the union of keys: done (phase 4). Reading declared record types (G9): open* | G9, G10 |
+| `widen` reads declared fields, replaces the column it spreads, plans exactly *Done (phase 4): replaces the column, takes the union of keys, and reads declared record types* | G9, G10 |
 | A `try_except` default that doesn't fit the return type warns; a step that used defaults warns | G6, G7 |
 | Failure notes say where a row failed: tool, timeout, retry, breaker, expect, upstream | G7 |
 | `timeout` enforced | K18 |

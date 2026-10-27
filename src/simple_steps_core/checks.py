@@ -1602,7 +1602,8 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     elif kind == "widen":
         names_ = variables(upstream_columns)
         spread = VALUE_COLUMN if VALUE_COLUMN in names_ else (names_[0] if len(names_) == 1 else None)
-        fields = list(verb.settings.get("columns") or [])
+        fields = list(verb.settings.get("columns") or
+                      (workflow._declared_fields(operation) if workflow is not None else None) or [])
         # the column it spreads goes: its fields are the columns now (G10)
         ordered = [c for c in upstream_columns if c != spread or c in fields]
         ordered += [c for c in fields if c not in ordered]
@@ -1618,6 +1619,14 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         # A built-in reducer: one column per variable, under its own name (R-D1).
         by_ = verb.settings.get("by")
         ordered += [c for c in variables(upstream_columns) if c != by_ and c not in ordered]
+        payload = None
+    declared_record = None
+    if payload and not any(m.kind == "name" for m in operation.modifiers):
+        declared_record = record_return(kind, operation.fn or BUILTIN_TOOLS.get(operation.tool))
+    if declared_record is not None:
+        # a declared record: one column per field, in declared order (G8)
+        fields_ = _record_fields(declared_record[0])
+        ordered += [f for f in fields_ if f not in ordered]
         payload = None
     if payload and payload not in ordered:
         ordered.append(payload)
@@ -1637,8 +1646,9 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         columns_open = not is_identity(fn)
     elif kind == "table":
         columns_open = True             # what the tool returns — unless declared
-    elif kind == "widen" and not verb.settings.get("columns"):
-        columns_open = True             # the fields are only known by running (G9)
+    elif kind == "widen" and not verb.settings.get("columns") and not (
+            workflow is not None and workflow._declared_fields(operation)):
+        columns_open = True             # undeclared fields are only known by running
     elif kind == "collapse" and unsettled:
         columns_open = True             # the key's column is named by a tool
     elif kind == "collapse" and reducer_form(operation.fn or BUILTIN_TOOLS.get(operation.tool)) == "per_column":
@@ -1677,6 +1687,9 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
                 types[new] = upstream_types.get(old)
     if payload and kind not in ("source",):
         types[payload] = _payload_type(kind, fn)
+    if declared_record is not None:
+        for f, t in _record_fields(declared_record[0]).items():
+            types[f] = t | None if declared_record[1] and t is not None else t
     if kind in ("source", "table") and not is_identity(fn):
         schema = _declared_schema(fn)
         if schema is not None:
@@ -1768,6 +1781,8 @@ from .values import (  # noqa: E402
     _optional_parts,
     _payload_type,
     _return_hint,
+    _record_fields,
+    record_return,
     _shape_kind,
     _shape_problem,
     _type_label,

@@ -13,6 +13,7 @@ from typing import Sequence
 import hashlib
 import inspect
 import json
+import typing
 
 import pandas as pd
 
@@ -1253,6 +1254,21 @@ class Workflow:
             return {"kind": "rebuild", "formula": f"mod.expand(columns={lists!r})({me})"}
         return {"kind": "trace"}
 
+    def _declared_fields(self, operation: Operation) -> list[str] | None:
+        """For ``widen`` with no ``columns=``: the fields of the record type the
+        column it spreads is declared to hold (G9), so its plan is exact."""
+        verb = operation.shape_verb
+        if verb is None or verb.kind != "widen" or operation.input is None:
+            return None
+        names_ = variables(self._predicted_of(str(operation.input)))
+        spread = VALUE_COLUMN if VALUE_COLUMN in names_ else (names_[0] if len(names_) == 1 else None)
+        hint = self._column_types(operation).get(spread) if spread else None
+        args = typing.get_args(hint)
+        if type(None) in args and len(args) == 2:
+            hint = next(a for a in args if a is not type(None))
+        fields = _record_fields(hint) if hint is not None else None
+        return list(fields) if fields else None
+
     def _groups_by_step_of(self, operation: Operation) -> tuple[str, str] | None:
         """``(by, s)`` for an operation that is ``collapse(by="#s")``."""
         verb = operation.shape_verb
@@ -1710,6 +1726,12 @@ class Workflow:
             # Every row is blocked: hand the verb an input that says so.
             source = Output(source.data, source.states,
                             {**source.meta, "blocked_all": bad_argument})
+        declared = self._declared_fields(step.operation) if not (
+            step.operation.shape_verb and step.operation.shape_verb.settings.get("columns")) else None
+        if declared and source is not None:                # G9: widen the declared fields
+            resolved = replace(resolved, modifiers=tuple(
+                Modifier(m.kind, {**m.settings, "columns": declared}) if m.kind == "widen" else m
+                for m in resolved.modifiers))
         restore = self._restore_column(step_id)
         if restore is not None and source is not None:
             source = Output(source.data, source.states, {**source.meta, "restore": restore})
@@ -1722,11 +1744,12 @@ class Workflow:
         try:
             step.output = resolved.run(source, tools)
             step.output.data = _str_columns(step.output.data, step_id)
+            _spread_record(resolved, step.output)
             _carry_id_columns(resolved, source, step.output)
             found = step.output.meta.pop("warnings", None) or []
             if found:                             # said while running (J-D3)
                 step.warnings = tuple(dict.fromkeys(
-                    [*step.warnings, *(Problem(w, "not_a_list", step=step_id, severity="warning")
+                    [*step.warnings, *(Problem(w, "run_warning", step=step_id, severity="warning")
                                         for w in found)]))
             mismatch = _output_mismatch(step.operation, step.output.data)
             if mismatch:
@@ -2038,6 +2061,7 @@ from .checks import (  # noqa: E402
 from .combines import _row_lookup, _run_combine, is_combine, own_id_columns  # noqa: E402
 from .errors import ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402
 from .problems import Problem  # noqa: E402
+from .values import _record_fields, record_return  # noqa: E402
 from .modifiers import (  # noqa: E402
     MODIFIERS,
     Modifier,
@@ -2056,6 +2080,7 @@ from .output import (  # noqa: E402
     is_id_column,
     VALUE_COLUMN,
     variables,
+    _typed,
 )
 from .references import (  # noqa: E402
     ResRef,
@@ -2086,6 +2111,80 @@ from .values import (  # noqa: E402
     _value_fits,
 )
 from .verbs import source_  # noqa: E402
+
+
+def _spread_record(operation: Operation, output: Output) -> None:
+    """A declared record type spreads into one column per field, in declared
+    order (G8, outputs-and-reshaping.md §3, §5). One name (``mod.name("b")``)
+    keeps it in one cell. Each row is held to the declaration cell by cell."""
+    verb = operation.shape_verb
+    kind = verb.kind if verb is not None else None
+    if kind == "auto":
+        kind = (output.meta.get("auto") or {}).get("verb")
+    declared = record_return(kind, operation.fn)
+    column = output.meta.get("value_column")
+    if declared is None or column not in output.data.columns or any(
+            m.kind == "name" for m in operation.modifiers):
+        return
+    cls, optional = declared
+    fields = list(_record_fields(cls))
+    data, states = output.data, output.states
+    notes = dict(output.meta.get("notes") or {})
+    values = {f: [] for f in fields}
+    failed: dict = {f: [] for f in fields}
+    extra: dict = {}
+    for i in data.index:
+        record, state = data.at[i, column], str(states.at[i, column])
+        if state != "known":
+            for f in fields:
+                values[f].append(None)
+            continue
+        if record is None:
+            for f in fields:
+                values[f].append(None)
+                if not optional:
+                    failed[f].append(i)
+            if not optional:
+                notes[i] = {**notes.get(i, {}), "error": f"returned None; declared {cls.__name__}"}
+            continue
+        get = (record.get if isinstance(record, dict) else lambda f, r=record: getattr(r, f, _MISSING))
+        have = record if isinstance(record, dict) else {}
+        for k_ in have:
+            if k_ not in fields:
+                extra[k_] = extra.get(k_, 0) + 1
+        missing = []
+        for f in fields:
+            v = get(f, _MISSING) if isinstance(record, dict) else get(f)
+            if v is _MISSING:
+                values[f].append(None)
+                failed[f].append(i)
+                missing.append(f)
+            else:
+                values[f].append(v)
+        if missing:
+            notes[i] = {**notes.get(i, {}), "error": f"missing field {', '.join(map(repr, missing))}"}
+    at = list(data.columns).index(column)
+    left, right = list(data.columns)[:at], list(data.columns)[at + 1:]
+    new = data[left].copy()
+    new_states = states[left].copy()
+    for f in fields:
+        new[f] = _typed(values[f], data.index)
+        new_states[f] = states[column]
+    for c in right:
+        new[c], new_states[c] = data[c], states[c]
+    for f, ids in failed.items():
+        for i in ids:
+            new_states.at[i, f] = "failed"
+    output.data, output.states = new, new_states
+    output.meta["notes"] = notes
+    output.meta["value_column"] = fields[0] if len(fields) == 1 else None
+    if extra:
+        output.meta.setdefault("warnings", []).extend(
+            f"{n} row{'s' if n != 1 else ''} returned a field {f!r} that {cls.__name__} "
+            f"doesn't declare: dropped" for f, n in extra.items())
+
+
+_MISSING = object()
 
 
 def _named(operation: Operation) -> str:

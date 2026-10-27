@@ -36,8 +36,8 @@ green, and it is committed. *Today* lines were run at `39835bc`.
 | Feature | Designed in | Today |
 |---|---|---|
 | **G5** a fold with no `initial=` ✓ | grid-model.md §8 | built: starts from its accumulator type's empty value |
-| **G8** a declared record type (`-> LoHi`) spreads into one column per field | outputs-and-reshaping.md §3 (decided 2026-10-26) | stays one cell |
-| **G9** `widen` reads declared record types, so its plan is exact | outputs-and-reshaping.md §6 | needs `columns=`, or takes the union when it runs |
+| **G8** a declared record type (`-> LoHi`) spreads into one column per field ✓ | outputs-and-reshaping.md §3 (decided 2026-10-26) | built, under `map`, `expand` (`-> list[LoHi]`), `collapse`, `sweep`, `auto`; each row held to it (§5); one name keeps it in one cell |
+| **G9** `widen` reads declared record types, so its plan is exact ✓ | outputs-and-reshaping.md §6 | built |
 | **G12** `mod.name` as a list, a mapping or a pattern; kernel-wide naming conventions | outputs-and-reshaping.md §4, §10 (decided 2026-10-26) | a single name only |
 | **G6, G7** a `try_except` default that doesn't fit the return type warns; a step that used defaults warns; a failure note says *where* it failed | grid-model.md §5.1, §5.2 (decided 2026-10-26) | silent; notes have no `where` |
 | **K18** `timeout` is enforced | grid-model.md §6 | ignored: a 0.3 s call with `timeout=0.05` runs to the end |

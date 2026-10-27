@@ -266,8 +266,11 @@ def _return_hint(fn: Any) -> Any:
 
 
 def _record_fields(cls: Any) -> dict | None:
-    """Field name → type for a TypedDict or dataclass, else None."""
+    """Field name → type for a TypedDict, dataclass or NamedTuple, else None."""
     import dataclasses
+    if isinstance(cls, type) and issubclass(cls, tuple) and hasattr(cls, "_fields"):
+        hints = getattr(cls, "__annotations__", {})
+        return {f: hints.get(f) for f in cls._fields}
     if isinstance(cls, type) and (dataclasses.is_dataclass(cls)
                                   or (issubclass(cls, dict) and hasattr(cls, "__annotations__"))):
         try:
@@ -275,6 +278,27 @@ def _record_fields(cls: Any) -> dict | None:
         except Exception:
             return dict(getattr(cls, "__annotations__", {}))
     return None
+
+
+def record_return(kind: str | None, fn: Any) -> tuple[Any, bool] | None:
+    """The record type a tool declares it returns per call, and whether it may
+    be None: ``-> LoHi``, ``-> LoHi | None``, and under ``expand``
+    ``-> list[LoHi]`` (G8, outputs-and-reshaping.md §3). None otherwise."""
+    hint = _return_hint(fn)
+    if hint is None or kind in (None, "filter", "source", "widen", "table", "group"):
+        return None
+    if typing.get_origin(hint) is typing.Annotated:
+        hint = typing.get_args(hint)[0]
+    if kind == "expand":
+        args = typing.get_args(hint)
+        if typing.get_origin(hint) not in (list, tuple, set, frozenset) or not args:
+            return None
+        hint = args[0]
+    optional = False
+    args = typing.get_args(hint)
+    if type(None) in args and len(args) == 2:
+        hint, optional = next(a for a in args if a is not type(None)), True
+    return (hint, optional) if _record_fields(hint) else None
 
 
 def _declared_schema(fn: Any) -> dict | None:
