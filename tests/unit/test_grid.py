@@ -335,7 +335,7 @@ def test_select_keeps_every_row(wide):
     wf["narrow"] = op("identity")[mod.select(columns=["city"], over=wf["raw"])]
     wf.run_all()
     assert len(wf.step("narrow").output.data) == 2
-    assert wf.step("narrow").output.meta["payload"] is None
+    assert wf.step("narrow").output.meta["value_column"] is None
 
 
 def test_select_applies_no_tool(wide):
@@ -750,7 +750,7 @@ def test_filter_carries_columns_through_and_writes_none(three):
     wf = Workflow()
     wf["raw"] = three
     wf["kept"] = keep[mod.filter()](wf["raw"])
-    assert wf.step("kept").output.meta["payload"] is None
+    assert wf.step("kept").output.meta["value_column"] is None
     assert predicted_columns(wf.step("kept").output) == ["n"]
 
 
@@ -1314,7 +1314,7 @@ def test_an_unexportable_payload_says_so(three):
     wf.run_all()
     wf.step("objects").output = Output(
         data=pd.DataFrame({"value": [object()]}),
-        meta={"form": "column", "payload": "value"},
+        meta={"form": "column", "value_column": "value"},
     )
     with pytest.raises(PayloadError, match="cannot export"):
         wf.to_session_dict()

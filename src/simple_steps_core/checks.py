@@ -1067,7 +1067,7 @@ def predicted_columns(output: Output) -> list[str]:
     recorded = output.meta.get("columns")
     if recorded is not None:
         return list(recorded)
-    payload = output.meta.get("payload")
+    payload = output.meta.get("value_column")
     return [payload] if payload else []
 
 
@@ -1218,7 +1218,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
             data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0]),
             records=[{"status": "invalid", "error": problems[0],
                              "attempts": 0, "seconds": 0.0}], index=[0],
-            meta={"verb": kind, "form": "scalar", "payload": VALUE_COLUMN,
+            meta={"verb": kind, "form": "scalar", "value_column": VALUE_COLUMN,
                   "staged": True, "problems": problems, "n_in": None,
                   "expected": None, "rows_rule": None, "columns": [VALUE_COLUMN]},
         )
@@ -1373,7 +1373,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
                            for c in index_names or [VALUE_COLUMN]}, index=index),
         records=records, index=index,
         meta={"verb": kind, "form": "scalar" if kind is None else "column",
-              "payload": payload, "staged": True, "problems": (),
+              "value_column": payload, "staged": True, "problems": (),
               "n_in": n_in, "expected": expected, "rows_rule": rule,
               "columns": ordered, "columns_open": columns_open,
               "plan": plan, "column_types": types},

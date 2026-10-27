@@ -132,7 +132,7 @@ class Output:
     @property
     def value_column(self) -> str | None:
         """The column the tool's results were written to, or None."""
-        return self.meta.get("payload")
+        return self.meta.get("value_column")
 
     @property
     def staged(self) -> bool:
@@ -224,7 +224,7 @@ class Output:
     @property
     def values(self) -> list[Any]:
         """The payload column as a plain list, for the common case."""
-        column = self.meta.get("payload")
+        column = self.meta.get("value_column")
         if column is None:
             return []
         # 008 C14: a missing value reads back as None — never NaN or pd.NA.
@@ -391,7 +391,7 @@ def _failed_output(operation: Any, error: str) -> "Output":
         data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
         records=[{"status": "failed", "error": error, "attempts": 0,
                          "seconds": 0.0}], index=[0],
-        meta={"verb": kind, "form": "scalar", "payload": VALUE_COLUMN})
+        meta={"verb": kind, "form": "scalar", "value_column": VALUE_COLUMN})
 
 
 def _upstream_failures(source: Any) -> dict:

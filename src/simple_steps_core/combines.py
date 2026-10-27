@@ -217,7 +217,7 @@ def _stage_combine(operation: Operation, workflow: "Workflow | None") -> Output:
         data=pd.DataFrame({c: [None] * len(index) for c in columns or [VALUE_COLUMN]},
                           index=index),
         records=records, index=index,
-        meta={"verb": operation.tool, "form": "column", "payload": None,
+        meta={"verb": operation.tool, "form": "column", "value_column": None,
               "staged": True, "problems": (), "n_in": None, "expected": expected,
               "rows_rule": rule, "columns": columns, "columns_open": columns_open},
     )
@@ -231,7 +231,7 @@ def _run_combine(operation: Operation, frames: list[pd.DataFrame]) -> Output:
                 "seconds": 0.0} for _ in range(len(data))]
     return Output(data=data, records=records, index=data.index,
                   meta={"verb": operation.tool, "form": "column",
-                        "payload": None, "n_in": None,
+                        "value_column": None, "n_in": None,
                         "columns": list(data.columns)})
 
 

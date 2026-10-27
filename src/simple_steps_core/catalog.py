@@ -541,7 +541,7 @@ def value_column(output: Any) -> str | None:
     """
     if isinstance(output, Step):
         output = output.output
-    return output.meta.get("payload") if isinstance(output, Output) else None
+    return output.meta.get("value_column") if isinstance(output, Output) else None
 
 
 def check_modifier(kind: str, params: dict | None = None) -> tuple[str, ...]:

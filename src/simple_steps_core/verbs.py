@@ -189,7 +189,7 @@ def map_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
     data = pd.DataFrame(index=frame.index)
     data[name] = _typed(values, frame.index)
     return Output(data=data, records=records, index=frame.index,
-                  meta={"verb": "map", "form": "column", "payload": name,
+                  meta={"verb": "map", "form": "column", "value_column": name,
                         "n_in": len(frame)})
 
 
@@ -222,7 +222,7 @@ def filter_(source: Any, fn: Callable, *, retries: int = 0,
     excluded = [i for i, k in zip(frame.index, keep) if not k]
     return Output(data=data, records=records, index=frame.index,
                   meta={"verb": "filter", "form": "column",
-                        "payload": None, "n_in": len(frame),
+                        "value_column": None, "n_in": len(frame),
                         "n_dropped": len(excluded), "excluded": excluded})
 
 
@@ -252,7 +252,7 @@ def group_(source: Any, fn: Callable, *, name: str = "group",
     data = pd.DataFrame(index=frame.index)
     data[name] = _typed(keys, frame.index)
     return Output(data=data, records=records, index=frame.index,
-                  meta={"verb": "group", "form": "column", "payload": name,
+                  meta={"verb": "group", "form": "column", "value_column": name,
                         "key": name, "n_in": len(frame)})
 
 
@@ -321,7 +321,7 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
     data[name] = _typed(results, data.index)
     return Output(data=data, records=records, index=index,
                   meta={"verb": "collapse", "form": "scalar" if by is None
-                        else "column", "payload": name, "by": by,
+                        else "column", "value_column": name, "by": by,
                         "n_in": len(frame)})
 
 
@@ -393,7 +393,7 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
         # so its type is unknown, and an empty column is undecidable anyway.
         data = pd.DataFrame({name: pd.Series([], dtype=object)})
     return Output(data=data, records=records, index=data.index,
-                  meta={"verb": "expand", "form": "column", "payload": name,
+                  meta={"verb": "expand", "form": "column", "value_column": name,
                         "n_in": len(frame)})
 
 
@@ -414,7 +414,7 @@ def table_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
     """
     frame = _rows_frame(source)
     blocked = _upstream_failures(source)
-    meta = {"verb": "table", "form": "grid", "payload": None, "n_in": len(frame)}
+    meta = {"verb": "table", "form": "grid", "value_column": None, "n_in": len(frame)}
     if blocked:
         record = _blocked(*next(iter(blocked.values())))
         return Output(data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
@@ -489,7 +489,7 @@ def sweep_(fn: Callable, *, name: str = VALUE_COLUMN, retries: int = 0,
     data = pd.DataFrame(out_rows)
     grid_shape = tuple(len(params[k]) for k in names)
     return Output(data=data, records=records, index=data.index,
-                  meta={"verb": "sweep", "form": "grid", "payload": name,
+                  meta={"verb": "sweep", "form": "grid", "value_column": name,
                         "params": names, "grid": grid_shape,
                         "n_in": len(combos)})
 
@@ -536,7 +536,7 @@ def grid(value: Any) -> Output:
         data=frame,
         records=[{"status": "completed", "error": None, "attempts": 1,
                          "seconds": 0.0} for _ in range(len(frame))], index=frame.index,
-        meta={"verb": "source", "form": "column", "payload": None,
+        meta={"verb": "source", "form": "column", "value_column": None,
               "n_in": len(frame)},
     )
 
@@ -733,7 +733,7 @@ def widen_(source: Any, fn: Callable = identity, *,
     for column in wanted:
         data[column] = [row[column] for row in lifted]
     return Output(data=data, records=records, index=frame.index,
-                  meta={"verb": "widen", "form": "column", "payload": None,
+                  meta={"verb": "widen", "form": "column", "value_column": None,
                         "n_in": len(frame), "columns": list(data.columns)})
 
 
@@ -882,7 +882,7 @@ def _column_output(verb: str, frame: pd.DataFrame, data: pd.DataFrame,
                else {"status": "completed", "error": None, "attempts": 0,
                      "seconds": 0.0} for i in ledger_index]
     return Output(data=data, records=records, index=ledger_index,
-                  meta={"verb": verb, "form": "column", "payload": None,
+                  meta={"verb": verb, "form": "column", "value_column": None,
                         "n_in": len(frame), "columns": list(data.columns)})
 
 
@@ -920,7 +920,7 @@ def _source_failure(error: str, caught: Any) -> Output:
         data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
         records=[{"status": "failed", "error": error, "attempts": 1,
                          "seconds": 0.0, "caught": caught}], index=[0],
-        meta={"verb": "source", "form": "scalar", "payload": None})
+        meta={"verb": "source", "form": "scalar", "value_column": None})
 
 
 # Names used only inside functions, imported last so the modules can refer
