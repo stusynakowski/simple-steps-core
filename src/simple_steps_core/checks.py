@@ -1631,6 +1631,9 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     elif kind == "collapse" and reducer_form(operation.fn or BUILTIN_TOOLS.get(operation.tool)) == "per_column":
         # one column per input variable: known when the input's columns are (P4)
         columns_open = workflow._columns_open(operation) if workflow is not None else False
+    elif kind == "expand" and verb.settings.get("columns"):
+        # a reshape: keeps the grid's columns, known when the input's are (P5)
+        columns_open = workflow._columns_open(operation) if workflow is not None else False
     elif kind == "expand" and not verb.settings.get("columns") and \
             _expands_into(operation, fn_ := operation.fn or BUILTIN_TOOLS.get(operation.tool),
                           workflow) != "list":

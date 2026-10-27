@@ -1772,9 +1772,19 @@ def test_a_downstream_tool_binds_to_a_widened_field(records):
     assert wf.step("f").output.values == [64.4, 87.8]
 
 
-def test_widen_needs_columns():
-    with pytest.raises(ValueError, match="widen needs columns="):
-        widen_(pd.DataFrame({"value": [{"a": 1}]}))
+def test_widen_without_columns_takes_the_union_of_the_keys():
+    """J-D2 (reshaping.md §9.2): the keys seen, in first-seen order; a record
+    without one is absent there. No rows, no columns."""
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"value": [{"a": 1}, {"b": 2, "a": 3}]})
+    wf["none"] = pd.DataFrame({"value": pd.Series([], dtype=object)})
+    wf["wide"] = mod.widen(over=wf["raw"])
+    wf["empty"] = mod.widen(over=wf["none"])
+    wf.run_all()
+    out = wf.step("wide").output
+    assert list(out.data.columns) == ["a", "b"]
+    assert str(out.states.at[0, "b"]) == "absent"
+    assert list(wf.step("empty").output.data.columns) == []
 
 
 def test_widen_applies_no_tool(records):
@@ -1880,12 +1890,6 @@ def test_widen_explicit_columns_too_many_for_a_short_tuple_is_a_failure():
     out = wf.step("wide").output
     assert _row_states(out) == ["known", "failed"]
     assert "too few" in _errors(out)[1]
-
-
-def test_widen_a_mapping_still_needs_columns():
-    """Only sequences are auto-named; a record's fields are not guessed."""
-    with pytest.raises(ValueError, match="widen needs columns="):
-        widen_(pd.DataFrame({"value": [{"a": 1}]}))
 
 
 # ─────────────────────────────────────────────────────────────────────────

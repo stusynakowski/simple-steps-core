@@ -472,7 +472,9 @@ Each law is one test, `test_L<n>_…`. Grouped by the guarantee it checks:
 |---|---|
 | L21 | the plan says `inverse: rebuild`, `trace` or `opaque` |
 | L39 | on every step of every test, the run matches its plan and the guarantees hold (the invariant check) |
-| L40 | on generated grids and generated chains of verbs, the guarantees hold (the property test, `tests/unit/test_reshape_properties.py`; `STRESS=1` for 2,000 examples) |
+| L40 | on generated grids and generated chains of every verb, the guarantees hold (the property test, `tests/unit/test_reshape_properties.py`; `STRESS=1` for 2,000 examples) |
+| L40b | a generated workflow, saved and loaded, runs to the same data and states |
+| L40c | a generated workflow whose source changes, run again, equals a fresh run on the new source |
 
 **5. Nothing is lost silently**
 

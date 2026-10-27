@@ -31,7 +31,8 @@ comes off.
 | 7 ✓ | `mod.pack`: a row's variables into one dict (R-D2); `widen` drops the column it spreads (G10) and, without `columns=`, takes the union of the keys (J-D2's union) | `672232f` |
 | 8 ✓ | `absent` for every cell with no source value (J-D1, J-D2, G2); `expand` never tidies, with `as_list`; a dict expands to key/value rows, `gather_dict` packs them back (J-D3, J-D4); the empty step (J-D6, G17); verbs can warn while running | `217e7cd`, `41d4db0`, `7050053` |
 | 9 ✓ | every plan says how to go back: `rebuild` with the formula, `trace`, `opaque`, `generated` (R-D8); L52 runs every `rebuild` formula and checks it gives the input back | `c6cf2c5` |
-| 10 ✓ | the property test (L40): generated grids meeting V1–V9 and generated chains of every verb, checked for no crash, A1–A6, lineage and every `rebuild` round trip; 2,000 examples with `STRESS=1`, 120 in the normal suite. It found nine bugs (§6, F1–F3, G1–G3, H1, H2), all fixed | this commit |
+| 10 ✓ | the property test (L40): generated grids meeting V1–V9 and generated chains of every verb, checked for no crash, A1–A6, lineage and every `rebuild` round trip; 2,000 examples with `STRESS=1`, 120 in the normal suite. It found nine bugs (§6, F1–F3, G1–G3, H1, H2), all fixed | `51a1051` |
+| 10b ✓ | wider composing: 42 moves (every verb, modifier and combine, `try_except`, `retry`, raising tools, `table`, `sweep`, sources, column arguments, `match_ids`, the empty step, dropped traces), each measured to really run; and two more properties: a saved workflow runs the same (L40b), an edit then a rerun matches a fresh run (L40c). Found four more bugs (P5, W1, Z1, V1), all fixed | this commit |
 
 **Every law holds, L40 included: 54 law tests.** No test is marked
 expected-to-fail. **The reshaping system is closed** (§4).
@@ -204,9 +205,18 @@ inverse step's formula (R-D8).
 
 *Done 2026-10-27*, in `tests/unit/test_reshape_properties.py`. Run it hard
 with `STRESS=1 .venv/bin/python -m pytest tests/unit/test_reshape_properties.py`
-(2,000 examples; about 40 seconds). Three stress runs, about 6,000 generated
-workflows, pass. Most of what it found was on grids with no rows, which no
-hand-written test had tried.
+(2,000 examples of each property; about 2.5 minutes). Most of what it found
+was on grids with no rows, which no hand-written test had tried.
+
+**Widened (10b).** A first measure showed seven moves never ran: they passed a
+selection straight into another step, which core refuses. The generator now
+declares helpers as their own steps, and every move is measured to complete
+(774 completed steps in 400 examples; only `gather_dict` needs a mapping
+`expand` before it and rarely meets one, which L26b covers by hand). Two
+properties were added: a saved workflow, loaded and run, gives the same data
+and states (L40b); changing the source and running again gives what a fresh
+kernel gives (L40c), so staleness never leaves an old value behind. Two
+stress runs, about 12,000 workflows, pass.
 
 What was planned:
 
@@ -304,6 +314,10 @@ Found by running core, 2026-10-27. Wrong answers given silently are in bold.
 | G3 | a `join` on a key one side lacks raised `KeyError` | fixed (step 10): refused when declared |
 | H1 | a `sort` (or grouping) by a column holding lists raised `TypeError` out of `run_all` | fixed (step 10): the step fails, saying why (V6) |
 | **H2** | **carrying `#` columns turned `None` into `NaN` and ids into floats** (`0` → `0.0`) | fixed (step 10): inserted as objects |
+| P5 | `expand(columns=…)` planned exact columns while its input's weren't known | fixed (step 10b) |
+| W1 | `widen()` of a grid with no rows raised out of `run_all`: no keys to take the union of | fixed (step 10b): no rows, no columns |
+| Z1 | a `zip_` whose input had no variables got a `rebuild` formula, `select(columns=[])`, that isn't a valid step | fixed (step 10b): it says `trace` |
+| V1 | a `ValueError` from core's own verbs escaped `run_all` | fixed (step 10b): the step fails with the reason, as for `KeyError` and `TypeError` |
 | R1 | unpacking a gathered list gives new ids, not the packed ones | fixed (step 6) |
 | R2 | no way to pack a row whatever its width | fixed (step 7) |
 | R3 | `identity` under `map` packs a row into a dict only when it has 2 or more columns | fixed (step 7): `pack` packs a row whatever its width |

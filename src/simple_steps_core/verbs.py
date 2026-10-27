@@ -790,7 +790,10 @@ def _widen_columns(cells: list[Any], records: list[dict]) -> list[str] | None:
     if completed and all(isinstance(c, (list, tuple)) for c in completed):
         width = max(len(c) for c in completed)
         return [f"c{i}" for i in range(width)]
-    if completed and all(isinstance(c, dict) or c is None for c in completed):
+    if not completed:
+        return []                                # nothing to read: no columns (an empty grid)
+    if any(isinstance(c, dict) for c in completed):
+        # the union of the records' keys; a row that isn't one fails on its own
         return list(dict.fromkeys(k for c in completed if isinstance(c, dict) for k in c))
     return None
 

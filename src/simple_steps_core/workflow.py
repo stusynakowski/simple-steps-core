@@ -1213,7 +1213,8 @@ class Workflow:
                 grids = [str(g) for g in op_.grids]
                 one_origin = all(self._same_ids(a) & self._same_ids(b)
                                  for n, a in enumerate(grids) for b in grids[n + 1:])
-                if one_origin:
+                each_has = all(variables(self._predicted_of(g)) for g in grids)
+                if one_origin and each_has:      # (a select of nothing isn't a step: L40)
                     return {"kind": "rebuild", "formula": [
                         f"mod.select(columns={variables(self._predicted_of(g))!r})({me})"
                         for g in grids]}
@@ -1730,7 +1731,7 @@ class Workflow:
             mismatch = _output_mismatch(step.operation, step.output.data)
             if mismatch:
                 raise SelectionError(mismatch)
-        except (SelectionError, KeyError, TypeError) as exc:
+        except (SelectionError, KeyError, TypeError, ValueError) as exc:
             # 008 C7: a position out of range, a column that is gone — the step
             # fails with the reason, never None, NaN or an empty grid. A TypeError
             # here is core's own reshaping (a tool's is caught per row): a sort,
