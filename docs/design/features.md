@@ -59,6 +59,8 @@ Each is confirmed before it lands, and gets a probe.
 
 ### References that follow the data
 
+The rules, with four decisions for the owner, are in [row-ids.md](row-ids.md).
+
 | Feature | ID |
 |---|---|
 | Selections pick rows by row id, so `wf["srt"][0]` is the same row after a sort | K19 |
