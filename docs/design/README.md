@@ -51,7 +51,8 @@ that cannot see each other.
 | [outputs-and-reshaping.md](outputs-and-reshaping.md) | The output principles, tools that return several values (records, lists, tables) under each verb, and how the reshapes fit together |
 | [step-expressions.md](step-expressions.md) | What a step may say: the general form, the other forms, references, literals, what's refused and why, the saved form |
 | [extensions.md](extensions.md) | The app's additions (`extras`), and the guarantee that the app's saved workflow runs the same in plain Python |
-| [kernel-session.md](kernel-session.md) | What working with core in a Python session looks like: the acceptance session |
+| [kernel-session.md](kernel-session.md) | **The working guide**: constructing a workflow, seeing and changing its data, saving, loading and running kernels, with real output; each part marked built or planned |
+| [features.md](features.md) | Every feature this migration includes: built, next, phase 4, later; and the decisions still open |
 | [cleanup-plan.md](cleanup-plan.md) | What is removed, what is kept, the new package layout, the order of work, and what the app changes |
 
 ## Rules for working on core

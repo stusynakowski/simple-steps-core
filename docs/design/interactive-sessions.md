@@ -1,8 +1,11 @@
 # The grid model in an interactive session
 
-> Proposed 2026-10-26. How a kernel behaves while someone builds a workflow
-> step by step, in a terminal, a notebook or the app's UI. *Today* behaviour was
-> run at `86170a3` on `grid.Workflow`, which is what the `Kernel` grows from.
+> Proposed 2026-10-26; **built through phase 3e**, except what is marked
+> planned. How a kernel behaves while someone builds a workflow step by step, in
+> a terminal, a notebook or the app's UI. *Today* notes were run at `86170a3`,
+> before the kernel existed. The working guide, with real output, is
+> [kernel-session.md](kernel-session.md); what is still to come is
+> [features.md](features.md).
 
 ## 1. The idea
 
@@ -94,10 +97,10 @@ can't be read by later steps until it has an expression.
 
 | Call | Does |
 |---|---|
-| `k.run("f")` | runs `f` on **what its inputs show now**. A `stale` input passes through as it is, which is what you want while tinkering. An input that has **never run** has nothing to show, so it runs first (*today*: refused, *"Run 'p' then 'sick' first"*) |
+| `k.run("f")` | runs `f` on **what its inputs show now**. A `stale` input passes through as it is, which is what you want while tinkering. An input that has **never run** has nothing to show, so it runs first. *Built (3b)* |
 | `k.run_all()` | runs every valid step that isn't `completed`, in order, each after what it reads. Stops at a failure nothing handles |
-| `k.run("triage")` | runs a stage's steps in order |
-| `k.run("f", observe=[…])` | attaches observing modifiers (progress) for this run |
+| `k.run("triage")` | runs a stage's steps in order. *Planned (R9)* |
+| `k.run("f", observe=[…])` | attaches observing modifiers (progress) for this run. *Planned (K23)* |
 
 When a step finishes, it records the version of every input it read. That is
 what lets the kernel tell, later, that an input changed.
@@ -197,9 +200,11 @@ something the app works out.
 | # | What |
 |---|---|
 | G13 | **Readers aren't re-checked against a changed upstream.** `sick` changed from a `filter` (keeping `temp_c`) to a `map` (only `value`): `f`, which needs `temp_c`, is only `stale`, `validate()` reports nothing, and running `f` fails every row with `TypeError: to_f() missing 1 required positional argument: 'temp_c'`. It should be a problem on `f` as soon as `sick` changes |
-| G14 | `run("f")` refuses when an input hasn't run, instead of running it first (C33) |
+| G14 | `run("f")` refuses when an input hasn't run, instead of running it first (C33). *Done in phase 3b* |
 | G15 | no `needs_run()`, no change callbacks, no "read a stale input" mark. *Done in phase 3d* |
 | G16 | a literal step's value isn't saved: `k["x"] = [3, 1, 2]` is saved as an `identity` source with no data, and a reloaded kernel can't run it. A literal is a step's recipe, so the spec should hold JSON-safe literals; a DataFrame assigned in Python is data, and needs a source tool or an output snapshot. *Done (owner, 2026-10-26): JSON-safe literals are saved in the step's spec; a DataFrame isn't* |
+| G17 | `k["x"] = None` declares the value `None`, not an empty step: a placeholder line should be a 1×1 `"empty"` that later steps can't read until it has an expression |
+| G18 | a step's `repr` is one line (`<Step 'f' completed · map to_f · 1 cell>`); it should show its formula, state, reason, problems and first rows, as the kernel's table does for all steps |
 
 ## 10. Open
 

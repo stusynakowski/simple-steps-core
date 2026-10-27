@@ -58,7 +58,7 @@ once per row:
 
 The **shape verbs** call a tool. At most one per step. When a tool returns several values
 (a record, a list of records, a table), see
-[outputs-and-reshaping.md §2](outputs-and-reshaping.md#2-tools-that-return-several-values).
+[outputs-and-reshaping.md §3](outputs-and-reshaping.md#3-tools-that-return-several-values).
 
 | Verb | Tool's form | Rows | Columns out | Row ids out |
 |---|---|---|---|---|

@@ -344,8 +344,11 @@ class Kernel:
         return rows
 
     def __repr__(self) -> str:
-        head = (f"Kernel: {len(self)} steps, {len(self.catalog.tools)} tools "
-                f"(+ built-ins), {len(self.workflow.resources)} resources")
+        def count(n: int, word: str) -> str:
+            return f"{n} {word}" + ("" if n == 1 else "s")
+        head = (f"Kernel: {count(len(self), 'step')}, "
+                f"{count(len(self.catalog.tools), 'tool')} (+ built-ins), "
+                f"{count(len(self.workflow.resources), 'resource')}")
         rows = self._rows()
         if not rows:
             return head
