@@ -124,7 +124,10 @@ shown. Left: the seed recommendation (C-D2).
 ### Step G. Hand over to the app
 
 Everything that changed for the app: reshaping-plan.md §7, plus what steps
-A–F change. The app repo writes `core-handover/`.
+A–F change. The app repo writes `core-handover/`. **Derived 2026-10-27 in
+[app-migration.md](app-migration.md)**, which recommends moving the app now,
+before D–F (G-D1): none of them blocks it, and each lands later as a small
+additive pass.
 
 ## 4. Done means
 
