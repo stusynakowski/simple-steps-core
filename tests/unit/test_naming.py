@@ -49,7 +49,7 @@ def k():
 
 @pytest.mark.parametrize("step, columns", [
     (lambda: to_f_n[mod.map(), mod.name("temp_f")](wf["p"]), ["temp_f"]),
-    (lambda: both_n[mod.expand(), mod.name("reading")](wf["p"]), ["reading"]),
+    (lambda: both_n[mod.expand(), mod.name("reading")](wf["p"]), ["#p", "reading"]),
     (lambda: add_n[mod.collapse(by="ward"), mod.name("total")](wf["p"]), ["ward", "total"]),
     (lambda: to_f_n[mod.group(), mod.name("band")](wf["p"]), ["ward", "temp_c", "band"]),
     (lambda: grid_n[mod.sweep(model=["a", "b"]), mod.name("upper")](), ["model", "upper"]),

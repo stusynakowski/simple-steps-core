@@ -155,7 +155,6 @@ def test_L6_unpacking_groups_gives_back_the_rows(k):
     same_rows(data(k, "back"), data(k, "vt"))
 
 
-@pytest.mark.xfail(strict=True, reason="R-D5: no by='#v' (M1)")
 def test_L7_expand_then_collapse_by_its_parent_gives_one_row_per_parent(k):
     k["e"] = readings_rc[mod.expand()](wf["v"])
     k["back"] = gather[mod.collapse(by="#v")](wf["e"])
@@ -410,16 +409,14 @@ def e(k):
     return k
 
 
-@pytest.mark.xfail(strict=True, reason="R-D10: no #v column yet")
 def test_L28_positions_count_variables_only(e):
     from simple_steps_core import cols
     e["first"] = wf["e"][cols[0]]
     e.run_all()
     assert "#v" in data(e, "e").columns
-    assert list(data(e, "first").columns) == ["value"]
+    assert list(data(e, "first").columns) == ["#v", "value"]       # cols[0] is value; #v is kept
 
 
-@pytest.mark.xfail(strict=True, reason="R-D10: no #v column yet")
 def test_L29_tools_get_variables_only(e):
     k2 = Kernel(Catalog(tools=TOOLS + [row_keys_rc]))
     k2["v"] = visits_rc[mod.source()]()
@@ -427,10 +424,9 @@ def test_L29_tools_get_variables_only(e):
     k2["keys"] = row_keys_rc[mod.map()](wf["e"])
     k2.run_all()
     assert "#v" in data(k2, "e").columns
-    assert all(not c.startswith("#") for keys in data(k2, "keys").iloc[:, 0] for c in keys)
+    assert all(not c.startswith("#") for keys in data(k2, "keys")["value"] for c in keys)
 
 
-@pytest.mark.xfail(strict=True, reason="R-D10: no #v column yet")
 def test_L30_zip_of_one_origin_keeps_one_hash_column(e):
     e["a"] = mod.rename(columns={"value": "a"})(wf["e"])
     e["b"] = mod.rename(columns={"value": "b"})(wf["e"])

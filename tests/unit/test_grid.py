@@ -1668,8 +1668,8 @@ def test_an_expand_to_nothing_keeps_its_columns_and_their_dtypes():
 
     out = wf.step("gone").output.data
     assert len(out) == 0
-    # an expand step is only its items: one column, even when there are none
-    assert list(out.columns) == ["value"]
+    # an expand step is its parents and its items, even when there are none
+    assert list(out.columns) == ["#raw", "value"]
 
 
 def test_a_downstream_step_of_an_empty_expand_still_validates_and_runs():

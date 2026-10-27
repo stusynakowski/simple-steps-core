@@ -1291,6 +1291,7 @@ class Workflow:
         try:
             step.output = resolved.run(source, tools)
             step.output.data = _str_columns(step.output.data, step_id)
+            _carry_id_columns(resolved, source, step.output)
             mismatch = _output_mismatch(step.operation, step.output.data)
             if mismatch:
                 raise SelectionError(mismatch)
@@ -1526,6 +1527,31 @@ class Workflow:
         return f"<Workflow {len(self.steps)} step(s): {list(self.steps)}>"
 
 
+#: The verbs whose rows are their input's rows, with the same ids
+#: (reshaping.md §5): their output carries the input's `#` columns.
+_KEEPS_IDS = {"map", "filter", "group", "widen", "sort", "rename", "select",
+              "drop", "slice", "distinct"}
+
+
+def _carry_id_columns(operation: Operation, source: Any, output: Output) -> None:
+    """Give a step that keeps ids its input's `#` columns (reshaping.md §5.1).
+
+    In one place, so no verb has to remember. A `#` column the step names
+    itself (dropped, or renamed into a variable) is the step's choice and
+    isn't put back.
+    """
+    verb = operation.shape_verb
+    if verb is None or verb.kind not in _KEEPS_IDS or not isinstance(source, Output):
+        return
+    named = set(verb.settings.get("columns") or ()) if verb.kind in ("drop", "rename") else set()
+    frame = source.data
+    carried = {c: frame[c] for c in frame.columns
+               if is_id_column(c) and c != ROW_ID and c not in output.data.columns
+               and c not in named}
+    if carried:
+        output.add_id_columns(carried)
+
+
 # Names used only inside functions, imported last so the modules can refer
 # to each other (see grid.py).
 from .system_tools import (  # noqa: E402
@@ -1576,6 +1602,7 @@ from .output import (  # noqa: E402
     _failed_output,
     _str_columns,
     _uncaught_failure,
+    is_id_column,
 )
 from .references import (  # noqa: E402
     ResRef,

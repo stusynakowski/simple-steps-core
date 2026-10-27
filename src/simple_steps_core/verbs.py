@@ -91,7 +91,9 @@ def _units(frame: pd.DataFrame):
     each column's own type; a missing value becomes ``None`` (008 C14).
     """
     for index, record in zip(frame.index, frame.to_dict("records")):
-        yield index, {k: (None if _is_missing(v) else v) for k, v in record.items()}
+        # A tool gets variables only, never a `#` column (reshaping.md §5.1).
+        yield index, {k: (None if _is_missing(v) else v) for k, v in record.items()
+                      if not is_id_column(k)}
 
 
 def _as_arg(row: pd.Series) -> dict:
@@ -400,9 +402,19 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
         # payload is object, which is the honest answer — nothing was produced,
         # so its type is unknown, and an empty column is undecidable anyway.
         data = pd.DataFrame({name: pd.Series([], dtype=object)})
+    # Each row's parent, as `#<input>` (reshaping.md §5.1): the row map, so
+    # nothing has to read the parent back out of the "i.j" label.
+    data.insert(0, _id_column_for(source), pd.Series(
+        [r.get("unit") for r in records], index=data.index, dtype=object))
     return Output(data=data, records=records, index=data.index,
                   meta={"verb": "expand", "form": "column", "value_column": name,
                         "n_in": len(frame)})
+
+
+def _id_column_for(source: Any) -> str:
+    """The `#` column naming rows of *source*: `#v` for step `v`."""
+    name = source.meta.get("name") if isinstance(source, Output) else None
+    return f"{ROW_ID}{name or 'input'}"
 
 
 def table_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
@@ -427,7 +439,7 @@ def table_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
         record = _blocked(*next(iter(blocked.values())))
         return Output(data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
                       records=[record], index=[0], meta=meta)
-    value, record = _call(fn, frame, retries)
+    value, record = _call(fn, frame[variables(frame.columns)], retries)
     if record["status"] != "completed":
         return Output(data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
                       records=[record], index=[0], meta=meta)
@@ -956,5 +968,7 @@ from .output import (  # noqa: E402
     _str_columns,
     _typed,
     _upstream_failures,
+    is_id_column,
+    variables,
 )
 from .references import _apply_selection, rows  # noqa: E402

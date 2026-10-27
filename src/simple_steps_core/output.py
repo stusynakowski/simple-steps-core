@@ -24,6 +24,18 @@ VALUE_COLUMN = "value"
 ROW_ID = "#"
 
 
+def is_id_column(name: Any) -> bool:
+    """A `#` column: `#` (the row id) or `#v` (the row of input `v` a row came
+    from). Ids, not variables: positions, tools and "all columns" skip them
+    (docs/design/reshaping.md §5.1)."""
+    return isinstance(name, str) and name.startswith(ROW_ID)
+
+
+def variables(columns: Sequence[Any]) -> list:
+    """The columns that are variables: all but the `#` columns."""
+    return [c for c in columns if not is_id_column(c)]
+
+
 #: Every ledger has exactly these columns, so the UI can rely on them.
 
 
@@ -112,6 +124,13 @@ class Output:
             else:
                 states = _states_frame(["known"] * len(data), data)
         self.states = states
+
+    def add_id_columns(self, columns: dict[str, pd.Series]) -> None:
+        """Put `#` columns in front of the data, each cell `known`."""
+        for position, (name, values) in enumerate(columns.items()):
+            self.data.insert(position, name, values.reindex(self.data.index).tolist())
+            self.states.insert(position, name, _state_column(
+                ["known"] * len(self.data), self.data.index))
 
     # ── named fields (read from meta until phase 3e) ─────────────────────
     @property

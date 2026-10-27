@@ -157,7 +157,7 @@ def test_C13_an_output_never_silently_replaces_an_input_column(wf):
     assert "group's key 'n' would replace the 'n' column" in wf.step("clash").problems[0]
     wf.remove("clash")
     wf.run_all()
-    for sid, columns in (("m", ["n"]), ("e", ["value"]), ("g", ["city", "n"])):
+    for sid, columns in (("m", ["n"]), ("e", ["#readings", "value"]), ("g", ["city", "n"])):
         assert wf.step(sid).problems == ()
         assert list(wf.step(sid).output.data.columns) == columns, sid
     assert list(wf.step("g").output.data["n"]) == [2, 4, 6, 4]           # the key
@@ -960,7 +960,8 @@ def test_009_expand_ids_derive_from_the_parent(r3):
     r3["again"] = fan_ids_009[mod.expand()](r3["as_n"])     # nested: 0.0 → 0.0.k
     r3.run_all()
     assert list(r3.step("items").output.data.index) == ["0.0", "1.0", "1.1"]
-    assert list(r3.step("items").output.data.columns) == ["value"]   # results only
+    assert list(r3.step("items").output.data.columns) == ["#r", "value"]   # its parent, its results
+    assert list(r3.step("items").output.data["#r"]) == [0, 1, 1]
     assert list(r3.step("again").output.data.index)[:2] == ["0.0.0", "0.0.1"]
 
 
@@ -970,8 +971,8 @@ def test_009_zip_gives_each_item_its_parent_row(r3):
     r3.run_all()
     out = r3.step("with_parent").output.data
     assert list(out.index) == ["0.0", "1.0", "1.1"]
-    assert out.to_dict("list") == {"value": [10, 20, 21], "city": ["SF", "NYC", "NYC"],
-                                   "n": [1, 2, 2]}
+    assert out.to_dict("list") == {"#r": [0, 1, 1], "value": [10, 20, 21],
+                                   "city": ["SF", "NYC", "NYC"], "n": [1, 2, 2]}
 
 
 def test_009_zip_after_a_sort_pairs_by_id_not_position(r3):

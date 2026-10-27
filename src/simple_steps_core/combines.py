@@ -16,8 +16,14 @@ import pandas as pd
 # modifier: it is built by a constructor (`join(a, b, on=...)`) and stored as
 # its own tool_id with the grids in `Operation.inputs`. The config is literal;
 # the grids are references in `inputs`, never in modifiers.
+def _variables_only(frames: list[pd.DataFrame]) -> list[pd.DataFrame]:
+    """`join` and `stack` make new rows, so their inputs' `#` columns don't
+    describe them. They will write their own (reshaping.md §5.1, step 4)."""
+    return [f[[c for c in f.columns if not is_id_column(c)]] for f in frames]
+
+
 def _combine_stack(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
-    return pd.concat(frames, axis=0, join=config.get("join", "outer"),
+    return pd.concat(_variables_only(frames), axis=0, join=config.get("join", "outer"),
                      ignore_index=True)
 
 
@@ -89,6 +95,8 @@ def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
     if clash:
         raise ValueError(clash)                  # 010 C22: never keep one silently
     data = pd.concat(aligned, axis=1)
+    # Grids of one origin share their `#` columns: keep one of each (§5.1).
+    data = data.loc[:, ~(data.columns.duplicated() & [is_id_column(c) for c in data.columns])]
     data.attrs["zip_picked"] = picked_ids        # for carrying each cell's state
     return data
 
@@ -98,6 +106,8 @@ def _zip_clash(named: list[tuple[str, list]]) -> str | None:
     owner: dict = {}
     for name, columns in named:
         for c in columns:
+            if is_id_column(c):
+                continue                         # merged, not collided (§5.1)
             if c in owner and owner[c] != name:
                 return (f"zip_: {c!r} is in both {owner[c]!r} and {name!r}; rename "
                         f"one (mod.name(…) or mod.rename)")
@@ -111,7 +121,7 @@ def _rows_text(keys: list[str]) -> str:
 
 
 def _combine_join(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
-    left, right = frames
+    left, right = _variables_only(frames)
     suffixes = tuple(config.get("suffixes") or ("_left", "_right"))
     return pd.merge(left, right, on=config.get("on"),
                     how=config.get("how", "inner"),
@@ -240,4 +250,5 @@ from .operation import Operation  # noqa: E402
 from .output import Output, VALUE_COLUMN  # noqa: E402
 from .references import StepRef  # noqa: E402
 from .verbs import _ancestors  # noqa: E402
+from .output import is_id_column  # noqa: E402
 from .workflow import Workflow  # noqa: E402

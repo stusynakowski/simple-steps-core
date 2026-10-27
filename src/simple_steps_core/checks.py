@@ -107,7 +107,7 @@ def _output_mismatch(operation: "Operation", data: pd.DataFrame) -> str | None:
     if verb is not None and verb.kind in ("source", "table"):
         fn = operation.fn
         schema = _declared_schema(fn) if fn is not None else None
-        if schema is not None and list(schema) != list(data.columns):
+        if schema is not None and list(schema) != variables(data.columns):
             return (f"{operation.tool} declares columns {', '.join(schema)}; "
                     f"it returned {', '.join(map(str, data.columns)) or 'none'}")
     n = len(data)
@@ -119,7 +119,7 @@ def _output_mismatch(operation: "Operation", data: pd.DataFrame) -> str | None:
         return f"expected at most {expect['max_rows']} rows, got {n}"
     if expect.get("columns") is not None:
         names, _ = _expected_columns(expect)
-        have = list(data.columns)
+        have = variables(data.columns)          # `#` columns are ids (reshaping.md §5.1)
         missing = [c for c in names if c not in have]
         extra = [c for c in have if c not in names]
         if missing or (extra and not expect.get("more_columns")):
@@ -1112,6 +1112,27 @@ def columns_unknown(output: Output) -> bool:
     return bool(output.meta.get("staged") and output.meta.get("columns_open"))
 
 
+_KEEPS_IDS = frozenset({"map", "filter", "group", "widen", "sort", "rename", "select",
+                        "drop", "slice", "distinct"})
+
+
+def _with_id_columns(kind: str | None, verb: Any, operation: "Operation",
+                     ordered: list, upstream_columns: Any) -> list:
+    """The `#` columns a step will have, in front (reshaping.md §5.1).
+
+    `expand` writes `#<input>`; a step that keeps ids carries its input's,
+    except one it drops or renames itself.
+    """
+    if kind == "expand" and operation.input is not None:
+        own = [f"{ROW_ID}{operation.input}"]
+    elif kind in _KEEPS_IDS:
+        named = set(verb.settings.get("columns") or ()) if kind in ("drop", "rename") else set()
+        own = [c for c in upstream_columns if is_id_column(c) and c != ROW_ID and c not in named]
+    else:
+        return ordered
+    return [*own, *[c for c in ordered if c not in own]]
+
+
 def predicted_columns(output: Output) -> list[str]:
     """The column names a step's output will have, **in order**, as far as known.
 
@@ -1422,6 +1443,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         ordered = list(dict.fromkeys(names + known))
         types = {c: stated_types.get(c, types.get(c)) for c in ordered}
         columns_open = bool(expect.get("more_columns"))
+    ordered = _with_id_columns(kind, verb, operation, ordered, upstream_columns)
     if isinstance(expect.get("rows"), int) and expected is None:
         index, expected = list(range(expect["rows"])), expect["rows"]
     upstream_name = str(operation.input) if operation.input is not None else None
@@ -1476,7 +1498,7 @@ from .modifiers import (  # noqa: E402
     _required_settings,
 )
 from .operation import _src, Operation  # noqa: E402
-from .output import Output, ROW_ID, STATES  # noqa: E402
+from .output import Output, ROW_ID, STATES, is_id_column, variables  # noqa: E402
 from .references import (  # noqa: E402
     ResRef,
     StepRef,

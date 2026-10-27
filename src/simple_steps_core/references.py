@@ -233,6 +233,8 @@ def _resolve_columns(columns: list, sel: Any, step_id: str) -> list:
                 f"{step_id!r} has no column {', '.join(map(repr, missing))} "
                 f"(it has {', '.join(map(str, columns))})")
         return list(sel["names"])
+    # Ranges and positions count variables only (reshaping.md §5.1, rule 1).
+    columns = [c for c in columns if c == ROW_ID or not is_id_column(c)]
     if "from" in sel or "to" in sel:
         for end in (sel.get("from"), sel.get("to")):
             if end is not None and end not in columns:
@@ -513,5 +515,5 @@ res = _Res()
 # to each other (see grid.py).
 from .catalog import BoundTool, Tool  # noqa: E402
 from .errors import SelectionError  # noqa: E402
-from .output import ROW_ID  # noqa: E402
+from .output import ROW_ID, is_id_column  # noqa: E402
 from .verbs import _rows_frame  # noqa: E402
