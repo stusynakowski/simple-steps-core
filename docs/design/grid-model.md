@@ -234,10 +234,12 @@ group them with a stage to manage them as one"*. Long sequences of steps are
 consolidated with **stages** ([object-model.md §4.11](object-model.md#411-stage)),
 not by stacking verbs in one step.
 
-Modifier settings are literals, never references: a setting decides a step's
-shape, and a shape that depends on data can't be planned before it runs. The
-one exception is a tool as a setting (`collapse(by=key_tool)`, 008 C2; `group(by=…)`
-goes in phase 4, since the step's own tool computes the key).
+A modifier setting is a literal, a tool (`collapse(by=key_tool)`, 008 C2), or a
+reference to a step's value (`collapse(initial=wf["s"][0][cols["value"]])`, 008
+C1). A reference is read when the step runs, and its step may not have run
+when this one is declared. Where a setting decides the shape (`columns=`,
+`by=`), a shape that depends on data can't be planned before it runs, so the
+plan says that part is `unknown` until then.
 
 ## 7. Row ids, per verb
 
