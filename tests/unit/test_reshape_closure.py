@@ -674,3 +674,23 @@ def test_L48_header_and_name_tools_see_variables_only(e):
     e.run_all()
     assert data(e, "h")["name"].tolist() == ["value"]
     assert list(data(e, "sel").columns) == ["#v", "value"]                # #v carried, not chosen
+
+
+# ── grouping is a composition (owner, 2026-10-27) ────────────────────────────
+
+@tool
+def mean_temp_rc(temp: list) -> float:
+    return sum(temp) / len(temp)
+
+
+@pytest.mark.xfail(strict=True, reason="R-D1, R-D13 (step 6): collapse has no group-function form yet")
+def test_L49_a_reduction_is_a_map_over_packed_lists(k):
+    k["vt"] = mod.select(columns=["ward", "temp"])(wf["v"])
+    k["direct"] = mean_temp_rc[mod.collapse(by="ward")](wf["vt"])
+    k["packed"] = gather[mod.collapse(by="ward")](wf["vt"])          # a new index: one row per ward
+    k["mapped"] = mean_temp_rc[mod.map()](wf["packed"])
+    k.run_all()
+    assert data(k, "packed").loc["A", "temp"] == [37.0, 38.5, 39.1]
+    assert data(k, "direct")["value"].tolist() == data(k, "mapped")["value"].tolist()
+    assert list(data(k, "direct").index) == list(data(k, "mapped").index) == ["A", "B"]
+    assert data(k, "direct").loc["A", "#vt"] == data(k, "packed").loc["A", "#vt"] == [0, 1, 3]

@@ -48,9 +48,12 @@ position, and never reads meaning into an id. Uneven data stays visible: a
 `null`, a missing key (`absent`) and an empty list `[]` are three different
 things.
 
-**10. A reducer gets lists.** Under `collapse`, a tool gets each column it
-names as a list (`def mean_temp(temp: list[float])`), or the group's rows as
-a list of dicts. A parameter named after the `by` key gets the key.
+**10. Grouping is a new index; a reduction is a map over lists.**
+`gather[collapse(by="ward")]` re-indexes by the key and packs: one row per
+ward, each column a list of the group's values. A reducer is then an
+ordinary `map` over those lists (`def mean_temp(temp: list[float])`), so
+`mean_temp[collapse(by="ward")]` is exactly that pack followed by that map.
+A parameter named after the key gets the key.
 
 ## What core can't do, by design
 

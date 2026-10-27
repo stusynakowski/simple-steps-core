@@ -272,6 +272,26 @@ k["side"] = zip_(wf["v"], wf["back"])                          # each visit besi
 
 ## 8. Reductions and statistics
 
+**Grouping is a composition of moves you already have** (owner, 2026-10-27):
+
+```
+f[collapse(by="ward")](g)   =   f[map()](  gather[collapse(by="ward")](g)  )
+                                 reduce     re-index by the key, and pack
+```
+
+- `gather[collapse(by=k)]` makes **a new index**: one row per key, with `#`
+  the key. Each column becomes a list of the group's values, in order, and
+  `#v` lists the group's rows. It loses nothing (§4).
+- A reducer is **a `map` over those lists**: each parameter named after a
+  column gets that row's list; a parameter named after the key gets the key;
+  a parameter typed as a list of dicts gets the group's rows. Its lineage,
+  plan and types follow from the composition.
+- The fold form, `(acc, temp) -> acc`, computes the same answer one row at a
+  time, for groups too large to hold as lists.
+- The key becomes the index only as the rows are packed: while they are
+  separate rows, several share a key, and ids are unique (V4). `group`
+  writes a key column and leaves the rows alone.
+
 A reduction loses the values on purpose. It never loses which rows it
 reduced: its `#v` lists them.
 
@@ -420,6 +440,7 @@ Each law is one test, `test_L<n>_…`. Grouped by the guarantee it checks:
 | L18 | packing no rows gives `[]`; unpacking `[]` gives no rows, columns kept |
 | L33 | unpacking a reduction's `#v` puts each row beside its group's statistic |
 | L34 | reducers over no rows give their empty value |
+| L49 | `f[collapse(by=k)](g)` is `f[map()](gather[collapse(by=k)](g))`: same values, ids and `#` columns |
 
 **Uneven data**
 

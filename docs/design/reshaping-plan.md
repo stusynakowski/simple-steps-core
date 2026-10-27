@@ -111,6 +111,13 @@ dropped.
 
 ### Step 6. Round trips (guarantee 5)
 
+**The approach (owner, 2026-10-27): grouping is a new index, and a reduction
+is a composition.** `f[collapse(by=k)]` is `gather[collapse(by=k)]` (re-index
+by the key and pack each column into a list) followed by `f[map()]` over the
+lists. So a group function (R-D13) needs no machinery of its own: it is a
+`map` over a packed grid, and its lineage, plan and types follow. Law L49
+checks the two give the same grid.
+
 Built-in reducers reduce each variable separately (R-D1). An `expand` of a
 list `gather` made gives back the packed ids (R-D3). `collapse(by="#s")`
 follows `#` columns back to any earlier step (R-D5), with a row for every
@@ -118,7 +125,7 @@ row of `s` (J-D5).
 
 - **Decided** (2026-10-27): R-D1, R-D3, R-D5, R-D13, J-D5. Nothing left to confirm.
 - **Fixes:** R1, R4, R9, J3.
-- **Laws:** L1, L4, L6, L12, L13, L22, L33.
+- **Laws:** L1, L4, L6, L12, L13, L22, L33, L49.
 - **Changes for users:** `gather[collapse()]` on several columns gives one
   list per column, not a list of dicts.
 
