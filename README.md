@@ -1,5 +1,10 @@
 # simple-steps-core
 
+> **Redesign in progress (branch `core-handover`).** Core is being cut down to
+> the grid model, with a `Catalog` and a `Kernel` you can drive from a Python
+> session. What follows describes the code as it is today; what it is
+> becoming is in [docs/design/](docs/design/README.md).
+
 **A spreadsheet for expensive, impure, failable Python functions.** You write
 plain functions; the library turns each call into serializable data, runs it
 against a tabular grid, and keeps a per-row ledger of what happened — so a
