@@ -721,6 +721,22 @@ def warn(operation: Operation, workflow: "Workflow | None" = None,
                 f"{str(operation.input)!r} already has; name the output "
                 f"(name=…) to keep both, or say replace=True to silence this")
     upstream = workflow.steps.get(str(operation.input))
+    # G13: an input that was edited but hasn't re-run still shows its old
+    # output, which this step may run on; say now if its new formula won't
+    # give a column this step needs. Only when the new columns are known.
+    if upstream is not None and upstream.output.meta.get("edited"):
+        planned = (upstream.output.meta.get("next_plan") or {}).get("columns") or {}
+        if planned.get("certainty") in ("exact", "stated") and not planned.get("more"):
+            names = list(planned.get("names") or [])
+            needed = _required_columns(operation, verb)
+            gone = [r for r in needed if r not in set(names) | set(operation.arguments)]
+            if gone:
+                up_ = str(operation.input)
+                notes.append(
+                    f"needs {', '.join(map(repr, gone))} from {up_!r}, which its "
+                    f"edited formula won't produce (it will give "
+                    f"{', '.join(names) or 'no columns'}); this fails once "
+                    f"{up_!r} re-runs")
     # Only predict while the upstream is staged; once it runs, `check` is exact.
     if upstream is None or not upstream.output.meta.get("staged"):
         return _warnings(notes, step_id)
@@ -761,8 +777,31 @@ def warn(operation: Operation, workflow: "Workflow | None" = None,
 
 
 
+def _required_columns(operation: Operation, verb: Any) -> list[str]:
+    """The columns a row-wise step's tool needs from its input: parameters with
+    no default and no bound argument. Empty when it can't tell."""
+    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool)
+    if isinstance(fn, Tool):
+        fn = fn.fn
+    if fn is None:
+        return []
+    try:
+        parameters = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        return []
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
+        return []
+    if verb.kind in ("collapse", "table"):
+        parameters = parameters[1:]
+    return [p.name for p in parameters
+            if p.default is inspect.Parameter.empty
+            and p.kind is not inspect.Parameter.VAR_POSITIONAL
+            and p.name not in operation.arguments]
+
+
 #: How a warning's message says which kind it is.
 _WARNING_KINDS = (
+    ("edited formula won't produce", "column_will_be_missing"),
     ("isn't a named parameter", "unchecked_argument"),
     ("are positions", "rows_by_position"),
     ("column of", "argument_overrides_column"),

@@ -196,3 +196,20 @@ def test_until_the_input_reruns_its_reader_may_still_run_on_what_it_shows(k13):
     assert k13.step("f").problems == ()
     k13.run("f")                                     # sick's old output passes through
     assert k13.needs_run()["f"] == "read stale 'sick'"
+
+
+def test_editing_an_input_warns_a_reader_at_once_that_it_will_break(k13):
+    k13["sick"] = label_i[mod.map()](wf["p"])        # re-declared, not run
+    f = k13.step("f")
+    assert f.problems == ()                          # it can still run on what sick shows
+    assert [(w.code, w.severity, w.step) for w in f.warnings] == [
+        ("column_will_be_missing", "warning", "f")]
+    assert "needs 'temp_c' from 'sick', which its edited formula won't produce" in f.warnings[0]
+    k13.run("sick")                                  # the warning becomes the problem
+    assert [p.code for p in k13.step("f").problems] == ["missing_column"]
+    assert k13.step("f").warnings == ()
+
+
+def test_an_edit_that_keeps_the_column_warns_nothing(k13):
+    k13["sick"] = feverish_i[mod.filter()](wf["p"], limit=37)
+    assert [w.code for w in k13.step("f").warnings] == []

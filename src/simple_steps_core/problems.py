@@ -53,6 +53,7 @@ CODES: dict[str, str] = {
     "output_overwrites_column": "the step writes over a column its input already has",
     "likely_missing_column": "a column the tool needs is predicted to be missing",
     "unconfirmed_column": "a column the tool needs can't be confirmed until the input runs",
+    "column_will_be_missing": "an input was edited, and its new formula won't give a column this step needs",
 }
 
 

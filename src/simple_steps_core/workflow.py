@@ -216,6 +216,10 @@ class Workflow:
                                    warn(operation, self, step_id), kept_extras)
         if existed:
             self._mark_stale_dependents(step_id)
+            # What reads this step may need what its new formula won't give.
+            for sid, st in self.steps.items():
+                if step_id in st.operation.reads:
+                    st.warnings = warn(st.operation, self, sid)
         else:
             self._recheck_readers(step_id)
 
