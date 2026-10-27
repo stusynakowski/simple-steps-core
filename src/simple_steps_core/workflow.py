@@ -1092,8 +1092,17 @@ class Workflow:
             found.append(f"A1 {step_id}: its {ROW_ID!r} column isn't its row ids")
         op_ = step.operation
         # None only where a row has no partner on that side (reshaping.md §5).
-        may_be_none = is_combine(op_) and (op_.tool == "stack" or (
-            op_.tool == "join" and op_.arguments.get("how", "inner") != "inner"))
+        def may_be_none(column: str) -> bool:
+            """A `#` column a stack or an outer join wrote, here or carried."""
+            seen = step_id
+            while seen in self.steps:
+                o = self.steps[seen].operation
+                if is_combine(o):
+                    return o.tool == "stack" or (o.tool == "join" and o.arguments.get("how", "inner") != "inner")
+                if not keeps_ids(self._kind(seen), o.shape_verb) or o.input is None:
+                    return False
+                seen = str(o.input)
+            return False
         for c in data.columns:
             if not is_id_column(c) or c == ROW_ID:
                 continue
@@ -1106,7 +1115,7 @@ class Workflow:
                 continue
             ids = set(source.output.data.index)
             bad = [v for cell in data[c] for v in (cell if isinstance(cell, list) else [cell])
-                   if (v is None and not may_be_none) or (v is not None and v not in ids)]
+                   if (v is None and not may_be_none(c)) or (v is not None and v not in ids)]
             if bad:
                 found.append(f"A3 {step_id}: {c!r} holds {_plain(bad[0])!r}, not a row of {name!r}")
         if keeps_ids(self._kind(step_id), op_.shape_verb) and op_.input is not None:
@@ -1662,10 +1671,16 @@ class Workflow:
                 step.output = _run_combine(step.operation, frames)
                 if step.operation.tool == "zip":
                     self._carry_zip_states(step)
-            except ValueError as exc:
-                # A zip_ that would drop rows, a join on a missing key: the step
-                # fails with the reason (the run stops on it), never raises.
-                step.output = _failed_output(step.operation, str(exc))
+            except (ValueError, TypeError, KeyError) as exc:
+                # A zip_ that would drop rows, a join on a missing key, a key
+                # holding lists (V6): the step fails with the reason, never raises.
+                why = str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else str(exc)
+                if isinstance(exc, KeyError):
+                    why = f"{step.operation.tool} needs a column {why} that an input doesn't have"
+                if isinstance(exc, TypeError) and "unhashable" in why:
+                    why = (f"{step.operation.tool}: a key column holds values that can't "
+                           f"be matched, such as lists ({why}); keys are single values (V6)")
+                step.output = _failed_output(step.operation, why)
             self._restage_after(step_id)
             return step
         # K19: a column argument a row-wise verb takes one value from is
@@ -1715,10 +1730,17 @@ class Workflow:
             mismatch = _output_mismatch(step.operation, step.output.data)
             if mismatch:
                 raise SelectionError(mismatch)
-        except SelectionError as exc:
+        except (SelectionError, KeyError, TypeError) as exc:
             # 008 C7: a position out of range, a column that is gone — the step
-            # fails with the reason, never None, NaN or an empty grid.
-            step.output = _failed_output(step.operation, str(exc))
+            # fails with the reason, never None, NaN or an empty grid. A TypeError
+            # here is core's own reshaping (a tool's is caught per row): a sort,
+            # group or match key holding lists or dicts (V6).
+            why = str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else str(exc)
+            if isinstance(exc, TypeError):
+                why = (f"{step.operation.shape_verb.kind if step.operation.shape_verb else 'step'}: "
+                       f"{why}. A column used to sort, group or match must hold single "
+                       f"values, not lists or dicts (V6)")
+            step.output = _failed_output(step.operation, why)
         if chosen is not None:
             step.output.meta["auto"] = chosen
         self._restage_after(step_id)

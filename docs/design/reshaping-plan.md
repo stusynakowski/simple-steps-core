@@ -30,10 +30,11 @@ comes off.
 | 6 ✓ | reducers take lists, and grouping is a pack then a map (R-D1, R-D13); `expand(columns=…)` in lockstep (R-D4); unpacking what core packed gives back its rows (R-D3); `by="#s"` back to any earlier step, every row of it (R-D5, J-D5) | `42e49a4`, `51a9580`, `444f797` |
 | 7 ✓ | `mod.pack`: a row's variables into one dict (R-D2); `widen` drops the column it spreads (G10) and, without `columns=`, takes the union of the keys (J-D2's union) | `672232f` |
 | 8 ✓ | `absent` for every cell with no source value (J-D1, J-D2, G2); `expand` never tidies, with `as_list`; a dict expands to key/value rows, `gather_dict` packs them back (J-D3, J-D4); the empty step (J-D6, G17); verbs can warn while running | `217e7cd`, `41d4db0`, `7050053` |
-| 9 ✓ | every plan says how to go back: `rebuild` with the formula, `trace`, `opaque`, `generated` (R-D8); L52 runs every `rebuild` formula and checks it gives the input back | this commit |
+| 9 ✓ | every plan says how to go back: `rebuild` with the formula, `trace`, `opaque`, `generated` (R-D8); L52 runs every `rebuild` formula and checks it gives the input back | `c6cf2c5` |
+| 10 ✓ | the property test (L40): generated grids meeting V1–V9 and generated chains of every verb, checked for no crash, A1–A6, lineage and every `rebuild` round trip; 2,000 examples with `STRESS=1`, 120 in the normal suite. It found nine bugs (§6, F1–F3, G1–G3, H1, H2), all fixed | this commit |
 
-**Every law test holds: 53 of 53** (L1–L52, with L16b and L26b; L40 is
-the property test, built in step 10). No test is marked expected-to-fail.
+**Every law holds, L40 included: 54 law tests.** No test is marked
+expected-to-fail. **The reshaping system is closed** (§4).
 
 ## 3. The path
 
@@ -199,7 +200,15 @@ inverse step's formula (R-D8).
 - **Decided** (2026-10-27): R-D8.
 - **Laws:** L21.
 
-### Step 10. The property test (L40)
+### Step 10. The property test (L40) ✓
+
+*Done 2026-10-27*, in `tests/unit/test_reshape_properties.py`. Run it hard
+with `STRESS=1 .venv/bin/python -m pytest tests/unit/test_reshape_properties.py`
+(2,000 examples; about 40 seconds). Three stress runs, about 6,000 generated
+workflows, pass. Most of what it found was on grids with no rows, which no
+hand-written test had tried.
+
+What was planned:
 
 Generated grids that meet V1–V9 (reshaping.md §10), and generated chains of
 verbs over them, each checked with `check_invariants` and the round-trip
@@ -213,14 +222,14 @@ laws. Hand-picked examples can't show closure; this can.
 The reshaping system is closed, given valid variables, when all of these
 hold:
 
-1. `test_reshape_closure.py` has no `xfail` left: every law passes. That is
+1. ✓ `test_reshape_closure.py` has no `xfail` left: every law passes. That is
    A8, and the laws for A1–A7, of reshaping.md §2.1.
-2. `check_invariants` runs after every test that runs a kernel, and passes.
-3. The property test passes.
-4. The 58 raw column reads are audited.
-5. The docs say so: reshaping.md's laws all hold; the words *`#` column*,
-   *trace*, *origin*, *pack*, *absent* are in object-model.md §1; the app's
-   changes (§7) are handed over.
+2. ✓ `check_invariants` runs after every test that runs a kernel, and passes.
+3. ✓ The property test passes, at 2,000 examples.
+4. ✓ The 58 raw column reads are audited (step 3).
+5. ✓ The docs say so: reshaping.md's laws all hold; the words are in
+   object-model.md §1; the app's changes are listed in §7, to hand over
+   through `core-handover/` (which the app repo writes).
 
 What still can't be done after that is in
 [reshaping.md §11](reshaping.md#11-what-you-cant-do-even-when-its-closed):
@@ -287,6 +296,14 @@ Found by running core, 2026-10-27. Wrong answers given silently are in bold.
 | S7 | `distinct` with no `columns=` compared whole rows, `#` columns included, so equal rows from different parents stayed apart | fixed (step 5): it compares variables only |
 | P4 | a built-in reducer's plan claimed exact columns while its input's columns weren't known, so a `select` after it was refused | fixed (step 6) |
 | S8 | a `drop` of `#v` stopped the trace only at that step: tracing back past it reached `#v` again | fixed (step 6): the trace remembers what was dropped on the way back |
+| **F1** | **a `filter` that kept no rows lost every column**: its mask, empty, was read as a column selection | fixed (step 10) |
+| F2 | `zip_(a, a)` wasn't refused: its columns landed beside themselves, and later code crashed | fixed (step 10): refused when declared |
+| F3 | a `join` on a key holding lists raised out of `run_all` | fixed (step 10): the step fails, saying keys are single values (V6) |
+| G1 | the checker refused `None` in a `stack`'s `#` columns once another step carried them | fixed (step 10): allowed wherever they're carried |
+| G2 | `expand(columns=…)` and `pack` naming a column the input lacks weren't refused when declared, and raised `KeyError` at run | fixed (step 10): refused when declared; at run, the step fails with the reason |
+| G3 | a `join` on a key one side lacks raised `KeyError` | fixed (step 10): refused when declared |
+| H1 | a `sort` (or grouping) by a column holding lists raised `TypeError` out of `run_all` | fixed (step 10): the step fails, saying why (V6) |
+| **H2** | **carrying `#` columns turned `None` into `NaN` and ids into floats** (`0` → `0.0`) | fixed (step 10): inserted as objects |
 | R1 | unpacking a gathered list gives new ids, not the packed ones | fixed (step 6) |
 | R2 | no way to pack a row whatever its width | fixed (step 7) |
 | R3 | `identity` under `map` packs a row into a dict only when it has 2 or more columns | fixed (step 7): `pack` packs a row whatever its width |

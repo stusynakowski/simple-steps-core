@@ -158,7 +158,10 @@ class Output:
     def add_id_columns(self, columns: dict[str, pd.Series]) -> None:
         """Put `#` columns in front of the data, each cell `known`."""
         for position, (name, values) in enumerate(columns.items()):
-            self.data.insert(position, name, values.reindex(self.data.index).tolist())
+            # As objects, so an id stays an int and a missing one stays None
+            # (found by the property test: a list insert made them floats and NaN).
+            ids = [None if _is_missing(v) else v for v in values.reindex(self.data.index).tolist()]
+            self.data.insert(position, name, pd.Series(ids, index=self.data.index, dtype=object))
             self.states.insert(position, name, _state_column(
                 ["known"] * len(self.data), self.data.index))
 

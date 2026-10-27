@@ -219,7 +219,9 @@ def filter_(source: Any, fn: Callable, *, retries: int = 0,
         keep.append(passed)
         records.append(record)
 
-    data = frame[pd.Series(keep, index=frame.index)]
+    # A bool mask: an empty object one would select columns, and lose them all
+    # (found by the property test: a 0-row filter is a 0×n grid, its columns kept).
+    data = frame[pd.Series(keep, index=frame.index, dtype=bool)]
     excluded = [i for i, k in zip(frame.index, keep) if not k]
     return Output(data=data, records=records, index=frame.index,
                   meta={"verb": "filter", "form": "column",

@@ -34,11 +34,19 @@ docs.
 | **formula** | a step's operation written as text, as in the formula bar. Text belongs to the app; core prints it (`to_source()`) but does not parse it | *expression* (same thing; one word now) |
 | **spec** | the saved form of any object: everything needed to produce the same output, assuming what it references holds the same data. Never holds output data | *declaration*, *saved step*, `ResourceDecl` |
 | **status** | what is live about an object: a step's output, state and problems; a resource's loaded instance. A live object is its spec plus its status | — |
-| **state** | one value from a fixed list. A **step state** is one of `staged`, `completed`, `stale`, `failed`, `invalid`. A **cell state** is one of `known`, `maybe`, `pending`, `blocked`, `failed`, `invalid` | step *status* (the field is renamed `state`) |
+| **state** | one value from a fixed list. A **step state** is one of `staged`, `completed`, `stale`, `failed`, `invalid`. A **cell state** is one of `absent`, `known`, `maybe`, `pending`, `blocked`, `failed`, `invalid` | step *status* (the field is renamed `state`) |
 | **problem** | a structured reason a step can't run or ran badly: code, message, step, and the row or argument when there is one. A **warning** is a problem that doesn't block | plain-string problems |
 | **row id** | the stable label of a row: the output DataFrame's index, shown and referenced as the `#` column (owner, 2026-10-27; [reshaping-plan.md](reshaping-plan.md) R-D11). Kept by verbs that keep rows, so it follows a row through a sort | — |
 | **row number** | a row's position 0…n-1 as displayed. It has no name: never stored, never referenced, never used to pair rows | `#` (for the row number) |
 | **value column** | the column a tool's result is written to: `value` unless named with `mod.name`. A declared record writes one column per field | *payload* |
+| **`#` column** | a column core writes and keeps: `#`, the row id, and `#v`, the row (or, for a group, the list of rows) of step `v` each row came from. Ids, not variables: tools never see them, and nothing but core writes a name starting with `#` ([reshaping.md §1](reshaping.md#1-the-model)) | — |
+| **trace** | following a row back through `#` columns to the rows it came from, step by step; never by reading an id or a position ([reshaping.md §2](reshaping.md#2-the-five-guarantees)) | *ancestors* (parsing `"i.j"`) |
+| **origin** | the step that decided which samples a step's rows are. Two rows line up only within one origin, or as a child and its parent ([reshaping.md §6](reshaping.md#6-matching-rows)) | — |
+| **pack** | to put a selection into one cell: a column into a list (`gather[collapse()]`), a row into a dict (`mod.pack`). **Unpack** is the way back (`expand`, `widen`) | — |
+| **absent** | a cell state: no value here at all (a key a record lacks, a `stack` or `join` gap), kept apart from a `None` value | — |
+| **empty step** | a step with no expression yet (`k["x"] = None`): a 1×1 grid holding `"empty"`, which nothing reads until it has one | — |
+| **rebuild**, **trace**, **opaque**, **generated** | what a step's plan says about going back: rebuild its input from its output alone (with the formula), trace to its input rows, trace to its whole input, or nothing to go back to ([reshaping.md §7](reshaping.md#7-going-back)) | — |
+| **mapping** | a dict whose keys are data, not variables: `expand` gives a row per key; a **record** is a dict whose keys are variables: `widen` gives a column per key | — |
 | **extras** | an open mapping on every spec, keyed by namespace (`"simple_steps.ui"`), that core saves and loads but never reads or hashes. The app's extensions (step notes, colours, tool widgets, agent permissions) live here. Removing them never changes an output ([extensions.md](extensions.md)) | — |
 
 Two pairs that are easy to mix up:

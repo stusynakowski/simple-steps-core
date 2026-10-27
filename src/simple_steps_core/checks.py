@@ -415,6 +415,22 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             )
         if operation.tool == "join" and not operation.arguments.get("on"):
             problems.append("join needs on= — the key column(s) to merge on")
+        elif operation.tool == "join" and workflow is not None:
+            on = operation.arguments.get("on")
+            keys = [on] if isinstance(on, str) else list(on or [])
+            for g in operation.grids:
+                if str(g) not in workflow.steps or columns_unknown(workflow.steps[str(g)].output):
+                    continue
+                have = workflow._predicted_of(str(g))
+                lacking = [key for key in keys if key not in have]
+                if lacking and have:
+                    problems.append(f"join on {lacking[0]!r}, which {str(g)!r} does not have "
+                                    f"(it has {', '.join(map(str, variables(have)))})")
+        if operation.tool == "zip" and len({str(g) for g in operation.grids}) < len(operation.grids):
+            twice = next(str(g) for g in operation.grids if
+                         [str(x) for x in operation.grids].count(str(g)) > 1)
+            problems.append(f"zip_ reads {twice!r} twice: it would put its columns beside "
+                            f"themselves")
         if operation.tool == "zip" and workflow is not None:
             # 010 C22: a column both grids have would keep one silently.
             clash = _zip_clash([(str(g), workflow._predicted_of(str(g)))
@@ -524,7 +540,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     # Deliberately not `widen`: its columns are the record's fields, which do
     # not exist upstream — that is the whole point of the verb.
     if (verb is not None and verb.kind in ("select", "drop", "rename", "sort",
-                                           "distinct")
+                                           "distinct", "pack", "expand")
             and workflow is not None
             and (verb.settings.get("columns") or verb.settings.get("by"))
             and not (isinstance(verb.settings.get("columns"), (list, tuple))
