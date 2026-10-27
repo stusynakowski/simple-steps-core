@@ -26,5 +26,6 @@ input for this work. Read it; don't edit it.
 ```bash
 .venv/bin/python -m pytest                            # the tests
 .venv/bin/python examples/all_orchestrations/pipeline.py
-.venv/bin/python core-handover/probes/terminal_demo.py
+.venv/bin/python examples/kernel_session.py            # the working guide's session
+.venv/bin/python scripts/core_asks.py                  # one probe per ask: OPEN / DONE
 ```

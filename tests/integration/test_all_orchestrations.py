@@ -16,6 +16,10 @@ sys.path.insert(0, str(_EXAMPLE))
 
 import pipeline  # noqa: E402  (path inserted above)
 
+from simple_steps_core.catalog import resource_catalog  # noqa: E402
+from simple_steps_core.checks import predicted_columns  # noqa: E402
+from simple_steps_core.errors import ResourceNotLoaded  # noqa: E402
+
 
 @pytest.fixture(scope="module")
 def wf():
@@ -245,16 +249,16 @@ def test_T1_3_T1_4_a_resource_is_not_a_column_and_declares_without_the_object():
     wf = pipeline.build_resources()          # nothing loaded, nothing run
     assert all(p == () for p in wf.validate().values())
     # a map step is only its results
-    assert pipeline.grid.predicted_columns(wf.step("summaries").output) == ["value"]
+    assert predicted_columns(wf.step("summaries").output) == ["value"]
 
 
 def test_T1_5_running_without_the_resource_is_a_clear_problem():
     wf = pipeline.build_resources()
-    with pytest.raises(pipeline.grid.ResourceNotLoaded, match="resource 'llm' is not loaded"):
+    with pytest.raises(ResourceNotLoaded, match="resource 'llm' is not loaded"):
         wf.run("summaries")
     live = pipeline.live_resources()
     del live["llm"]
-    with pytest.raises(pipeline.grid.ResourceNotLoaded, match="'llm'"):
+    with pytest.raises(ResourceNotLoaded, match="'llm'"):
         wf.run("summaries", resources=live)
     assert wf.step("summaries").state == "staged"   # the tool never ran
 
@@ -314,7 +318,7 @@ def test_T2_1_T2_2_bound_tools_run_on_their_instance(res_run):
 
 
 def test_T2_3_catalog_lists_types_settings_and_marked_tools_only():
-    cat = pipeline.grid.resource_catalog(pipeline.CATALOG.resource_types)
+    cat = resource_catalog(pipeline.CATALOG.resource_types)
     db, llm = cat["FakeDB"], cat["FakeLLM"]
     assert [s["name"] for s in db["settings"]] == ["table"]
     assert list(db["tools"]) == ["FakeDB.lookup"]          # not reset
@@ -366,6 +370,6 @@ def test_settings_must_be_literals():
         def __init__(self, seed: pipeline.pd.DataFrame):
             self.seed = seed
     with pytest.raises(TypeError, match="literal settings only"):
-        pipeline.grid.Workflow().define("wh", Warehouse, seed=None)
+        pipeline.Workflow().define("wh", Warehouse, seed=None)
     with pytest.raises(TypeError, match="no setting 'modle'"):
-        pipeline.grid.Workflow().define("llm", pipeline.FakeLLM, modle="x")
+        pipeline.Workflow().define("llm", pipeline.FakeLLM, modle="x")

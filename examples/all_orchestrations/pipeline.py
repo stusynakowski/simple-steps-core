@@ -24,9 +24,20 @@ from __future__ import annotations
 
 import pandas as pd
 
-from simple_steps_core import grid
-from simple_steps_core.grid import (bound_tool, join, mod, op, res, resource,
-                                    stack, tool, zip_)
+from simple_steps_core import (
+    bound_tool,
+    Catalog,
+    join,
+    mod,
+    res,
+    resource,
+    stack,
+    tool,
+    wf as unbound_wf,
+    zip_,
+)
+from simple_steps_core.operation import op
+from simple_steps_core.workflow import Workflow
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -107,13 +118,13 @@ def records() -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────────────────
 # The one workflow — every valid orchestration, wired over the shared registry.
 # ─────────────────────────────────────────────────────────────────────────
-def build() -> grid.Workflow:
+def build() -> Workflow:
     """Declare (but do not run) the comprehensive workflow.
 
     Each assignment is one step. Reading top to bottom is the whole grammar:
     a tool, a shape verb in brackets, the step it reads via ``over=``.
     """
-    wf = grid.Workflow()
+    wf = Workflow()
 
     # ── sources — a value is one cell until a verb fans out over it ──────
     wf["readings"] = readings()                      # source: 4 rows, 2 cols
@@ -205,7 +216,7 @@ def build() -> grid.Workflow:
     return wf
 
 
-def run() -> grid.Workflow:
+def run() -> Workflow:
     """Build and run the whole workflow, every step after the ones it reads."""
     return build().run_all()
 
@@ -213,47 +224,47 @@ def run() -> grid.Workflow:
 # ─────────────────────────────────────────────────────────────────────────
 # The components around the verbs: failure, staging/validation, round-trip.
 # ─────────────────────────────────────────────────────────────────────────
-def failure() -> grid.Workflow:
+def failure() -> Workflow:
     """A tool that fails on some rows: the ledger keeps every unit.
 
     `risky` raises on n == 2. Two of the four readings are 2, so two rows fail
     and two complete — and `.failed` is the exact re-drive set.
 
-    A failed row stops `run_all` (raising `grid.StepFailed`) unless the step
+    A failed row stops `run_all` (raising `StepFailed`) unless the step
     lets it through. `mod.try_except()` does: the failed rows stay in the
     ledger, marked `caught`, and the run carries on. `try_except(default=0)`
     would complete them with 0 instead.
     """
-    wf = grid.Workflow()
+    wf = Workflow()
     wf["readings"] = readings()
     wf["out"] = risky[mod.map(over=wf["readings"], name="out"),
                       mod.try_except(on=[ValueError]), mod.retry(times=1)]
     return wf.run_all()
 
 
-def validation() -> grid.Workflow:
+def validation() -> Workflow:
     """Staging and declaration-time checks — both before anything runs.
 
     One good step (staged, its cell count predicted) and two bad ones (an
     unknown bound argument, and a reference to a step that does not exist).
     `wf.validate()` returns every step's problems without executing.
     """
-    wf = grid.Workflow()
+    wf = Workflow()
     wf["readings"] = readings()
     wf["scored"] = scale[mod.map(over=wf["readings"], name="score")]   # valid, staged
     wf["bad_arg"] = scale.bind(nope=1)[mod.map(over=wf["readings"])]   # unknown param
-    wf["dangling"] = scale[mod.map(over=grid.wf["nowhere"])]          # missing upstream
+    wf["dangling"] = scale[mod.map(over=unbound_wf["nowhere"])]          # missing upstream
     return wf
 
 
-def roundtrip() -> tuple[grid.Workflow, grid.Workflow]:
+def roundtrip() -> tuple[Workflow, Workflow]:
     """Serialize a run workflow and rebuild it — payloads and all.
 
     The full session export carries every payload; rebuilding through the same
     registry reproduces the exact outputs. Returns (original, reloaded).
     """
     original = run()
-    reloaded = grid.Workflow.from_json(original.to_session_json(), CATALOG.functions)
+    reloaded = Workflow.from_json(original.to_session_json(), CATALOG.functions)
     return original, reloaded
 
 
@@ -334,7 +345,7 @@ def lookup_fresh(city: str, db: FakeDB) -> str:
 # Everything this example's workflows may use. @tool and @resource register
 # nothing, so this is the one list of what exists here: loading a saved
 # workflow by name uses it, and so does the palette below.
-CATALOG = grid.Catalog(
+CATALOG = Catalog(
     tools=[scale, is_big, label_city, add_n, fan_out, make_coords, grid_cell,
            risky, make_pair, enrich, summarize, lookup_fresh],
     resources=[FakeDB, FakeLLM, TinyLLM])
@@ -351,14 +362,14 @@ def live_resources() -> dict:
             "tiny": TinyLLM(model="tiny-1")}
 
 
-def build_resources() -> grid.Workflow:
+def build_resources() -> Workflow:
     """Declare (but do not run) the resource workflow.
 
     Resources are declared once with ``wf.define`` — a type and literal
     settings, no object — and every step names the one it uses with ``res[…]``.
     Declaring needs only the declared types, so every step validates here.
     """
-    wf = grid.Workflow()
+    wf = Workflow()
     wf.define("db", FakeDB)
     wf.define("llm", FakeLLM, model="fake-1")
     wf.define("tiny", TinyLLM, model="tiny-1")
@@ -383,15 +394,15 @@ def build_resources() -> grid.Workflow:
     return wf
 
 
-def run_resources() -> tuple[grid.Workflow, dict]:
+def run_resources() -> tuple[Workflow, dict]:
     """Build and run the resource workflow against the caller's objects."""
     live = live_resources()
     return build_resources().run_all(resources=live), live
 
 
-def resource_problems() -> grid.Workflow:
+def resource_problems() -> Workflow:
     """Every way a resource step is refused at declaration — nothing runs."""
-    wf = grid.Workflow()
+    wf = Workflow()
     wf.define("db", FakeDB)
     wf.define("llm", FakeLLM)
     wf["notes"] = notes()
@@ -402,7 +413,7 @@ def resource_problems() -> grid.Workflow:
     return wf
 
 
-def resource_roundtrip() -> tuple[grid.Workflow, grid.Workflow]:
+def resource_roundtrip() -> tuple[Workflow, Workflow]:
     """Save the resource workflow and reload it — declarations only, no objects.
 
     The session export, like :func:`roundtrip`, so the source tables come
@@ -410,7 +421,7 @@ def resource_roundtrip() -> tuple[grid.Workflow, grid.Workflow]:
     settings, never the live object.
     """
     original = build_resources()
-    reloaded = grid.Workflow.from_json(original.to_session_json(), CATALOG.functions,
+    reloaded = Workflow.from_json(original.to_session_json(), CATALOG.functions,
                                        resource_types=CATALOG.resource_types)
     return original, reloaded
 

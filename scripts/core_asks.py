@@ -24,8 +24,22 @@ from pathlib import Path
 from typing import Annotated, Callable, TypedDict
 
 import pandas as pd
-from simple_steps_core import grid
-from simple_steps_core.grid import mod, op, tool
+from simple_steps_core import (
+    cols,
+    mod,
+    Operation,
+    Output,
+    Tool,
+    tool,
+    wf as unbound_wf,
+    zip_,
+)
+from simple_steps_core.catalog import catalog, check_modifier, formula_names
+from simple_steps_core.checks import check, infer_verb, predicted_columns
+from simple_steps_core.modifiers import modifier_catalog, MODIFIERS
+from simple_steps_core.operation import op
+from simple_steps_core.verbs import grid
+from simple_steps_core.workflow import Workflow
 
 warnings.simplefilter("ignore")
 
@@ -33,11 +47,21 @@ I = op("identity")  # noqa: E741  (kept as in the app's copy)
 
 
 # ── The example's tools, so probes read like the docs ─────────────────────────
+def _core_modules() -> list:
+    """The package and every module in it."""
+    return [m for n, m in sys.modules.items() if n.split(".")[0] == "simple_steps_core"]
+
+
+def _core_has(name: str) -> bool:
+    """Does core define *name* anywhere: on the package or in one of its modules?"""
+    return any(hasattr(m, name) for m in _core_modules())
+
+
 def _tools(scope: dict | None = None) -> dict:
     """The tools this script defines, by name (and any in *scope*): @tool
     registers nothing, so reloading a workflow by name needs them passed."""
     found = {**globals(), **(scope or {})}
-    return {v.id: v.fn for v in found.values() if isinstance(v, grid.Tool)}
+    return {v.id: v.fn for v in found.values() if isinstance(v, Tool)}
 
 
 @tool
@@ -82,8 +106,8 @@ def readings() -> pd.DataFrame:
 DATA = json.dumps({"city": ["SF", "NYC", "SF", "LA"], "n": [1, 2, 3, 2]})
 
 
-def _wf() -> grid.Workflow:
-    wf = grid.Workflow()
+def _wf() -> Workflow:
+    wf = Workflow()
     wf["readings"] = readings()
     return wf
 
@@ -110,10 +134,10 @@ def k1_unrun_source_columns():
     # (core) Changed from the app's probe: a map step is only its results
     # (owner decision, 2026-10-20), so `city` can't follow `score` through a
     # map. The same deferral is checked through zip_, which carries both.
-    wf = grid.Workflow()
+    wf = Workflow()
     wf["readings"] = to_rows.bind(data=DATA)[mod.source()]
     wf["score"] = scale[mod.map(name="score")](wf["readings"])
-    wf["scored"] = grid.zip_(wf["readings"], wf["score"])
+    wf["scored"] = zip_(wf["readings"], wf["score"])
     wf["picked"] = mod.select(over=wf["scored"], columns=["city", "score"])
     declared = wf.step("picked").state
     wf.run_all()
@@ -125,7 +149,7 @@ def k1_unrun_source_columns():
 def k2_inference_run_state():
     a = _wf()
     a["x"] = add_n(a["readings"])
-    b = grid.Workflow()
+    b = Workflow()
     b["readings"] = to_rows.bind(data=DATA)[mod.source()]
     b["x"] = add_n(b["readings"])
     va = a.steps["x"].operation.to_dict()["modifiers"][-1]["kind"]
@@ -171,14 +195,14 @@ def k6_source_call_form():
     built, err = _try(lambda: to_rows[mod.source()](data=DATA))
     if err:
         return False, f"to_rows[mod.source()](data=…) -> {err[:110]}"
-    return isinstance(built, grid.Operation), f"-> {type(built).__name__}"
+    return isinstance(built, Operation), f"-> {type(built).__name__}"
 
 
 def k7_sweep_call_form():
     built, err = _try(lambda: grid_cell[mod.sweep(model=["a"], window=[7])]())
     if err:
         return False, f"grid_cell[mod.sweep(…)]() -> {err[:110]}"
-    return isinstance(built, grid.Operation), f"-> {type(built).__name__} (a DataFrame means it ran instead of declaring)"
+    return isinstance(built, Operation), f"-> {type(built).__name__} (a DataFrame means it ran instead of declaring)"
 
 
 def k8_modifier_callable():
@@ -229,7 +253,7 @@ def k11_multi_input():
 
 
 def k12_whole_table_verb():
-    verbs = set(grid.modifier_catalog())
+    verbs = set(modifier_catalog())
     candidates = verbs & {"table", "apply", "frame", "whole", "pipe"}
     wf = _wf()
     wf["x"] = piv[mod.collapse(over=wf["readings"])]
@@ -242,23 +266,23 @@ def k12_whole_table_verb():
 
 
 def k13_catalog_takes_tool():
-    entry = grid.modifier_catalog()["select"]
+    entry = modifier_catalog()["select"]
     keys = set(entry) - {"name", "class", "row_rule", "settings"}
     return bool(keys & {"takes_tool", "tool", "default_tool"}), f"modifier_catalog()['select'] keys: {sorted(entry)}"
 
 
 def k14_progress_callback():
-    params = inspect.signature(grid.Workflow.run).parameters
-    return any(p not in ("self", "step_id", "tools", "resources") for p in params), f"Workflow.run{inspect.signature(grid.Workflow.run)}"
+    params = inspect.signature(Workflow.run).parameters
+    return any(p not in ("self", "step_id", "tools", "resources") for p in params), f"Workflow.run{inspect.signature(Workflow.run)}"
 
 
 def k15_redrive():
-    return hasattr(grid.Workflow, "redrive"), f"Workflow.redrive exists: {hasattr(grid.Workflow, 'redrive')}"
+    return hasattr(Workflow, "redrive"), f"Workflow.redrive exists: {hasattr(Workflow, 'redrive')}"
 
 
 def k16_results_store():
-    has = hasattr(grid.Output, "ref") or any("store" in n.lower() for n in dir(grid))
-    return has, f"Output.ref: {hasattr(grid.Output, 'ref')}; store names in grid: {[n for n in dir(grid) if 'store' in n.lower()]}"
+    has = hasattr(Output, "ref") or any("store" in n.lower() for m in _core_modules() for n in dir(m))
+    return has, f"Output.ref: {hasattr(Output, 'ref')}; store names in core: {[n for m in _core_modules() for n in dir(m) if 'store' in n.lower()]}"
 
 
 def k17_json_version():
@@ -268,8 +292,8 @@ def k17_json_version():
     blob = json.loads(_wf().to_json())
     current = blob.get("version")
     old = {**blob, "version": 1}
-    _, old_err = _try(lambda: grid.Workflow.from_dict(old))
-    _, new_err = _try(lambda: grid.Workflow.from_dict({**blob, "version": 99}))
+    _, old_err = _try(lambda: Workflow.from_dict(old))
+    _, new_err = _try(lambda: Workflow.from_dict({**blob, "version": 99}))
     done = current == 4 and old_err is not None and new_err is not None
     return done, (f"to_json version = {current!r}; v1 refused: {old_err is not None}; "
                   f"newer refused: {new_err is not None}")
@@ -300,8 +324,8 @@ def n1_dict_or_none_setting():
     class DB:
         def __init__(self, table: dict | None = None):
             self.table = table
-    _, e1 = _try(lambda: grid.Workflow().define("db", DB, table={"SF": "n"}))
-    _, e2 = _try(lambda: grid.Workflow().define("db", DB, table=None))
+    _, e1 = _try(lambda: Workflow().define("db", DB, table={"SF": "n"}))
+    _, e2 = _try(lambda: Workflow().define("db", DB, table=None))
     return not e1 and not e2, f"table={{…}} -> {e1 or 'ok'}; table=None -> {e2 or 'ok'}"
 
 
@@ -335,20 +359,20 @@ def c13_output_replaces_input():
 def o_missing_required_setting():
     blob = {"tool": "scale", "input": None, "arguments": {},
             "modifiers": [{"kind": "retry", "settings": {}}, {"kind": "map", "settings": {}}]}
-    operation = grid.Operation.from_dict(blob)
-    problems = grid.check(operation)
+    operation = Operation.from_dict(blob)
+    problems = check(operation)
     return any("times" in p for p in problems), f"check(retry without times) -> {problems or '()'}"
 
 
 def c6_unbound_wf():
-    has = hasattr(grid, "wf")
+    has = _core_has("wf")
     if not has:
-        return False, "grid.wf does not exist"
-    w1, w2 = grid.Workflow(), grid.Workflow()
+        return False, "unbound_wf does not exist"
+    w1, w2 = Workflow(), Workflow()
     w1["r"] = pd.DataFrame({"n": [1, 2]})
     w2["r"] = pd.DataFrame({"n": [7, 8]})
     for w in (w1, w2):
-        w["x"] = scale[mod.map()](grid.wf["r"])
+        w["x"] = scale[mod.map()](unbound_wf["r"])
         w.run("x")
     got = (w1.step("x").output.values, w2.step("x").output.values)
     return got == ([10, 20], [70, 80]), f"-> {got}"
@@ -368,7 +392,7 @@ def c10_failure_flows_downstream():
         calls["n"] += 1
         return value + 1
 
-    wf = grid.Workflow()
+    wf = Workflow()
     wf["r"] = pd.DataFrame({"n": [1, 2, 3]})
     built, err = _try(lambda: scale[mod.map()](wf["nope"]))
     if err:
@@ -376,7 +400,7 @@ def c10_failure_flows_downstream():
     wf["bad"] = built
     # The owner's rule (2026-10-19): an uncaught failure stops run_all, so
     # the failure only flows downstream as state when the step lets it through.
-    wf["a"] = risky[mod.map(), mod.try_except()](wf["r"]) if "try_except" in grid.MODIFIERS \
+    wf["a"] = risky[mod.map(), mod.try_except()](wf["r"]) if "try_except" in MODIFIERS \
         else risky[mod.map()](wf["r"])
     wf["b"] = plus1[mod.map()](wf["a"])
     wf.run_all()
@@ -398,7 +422,7 @@ def c14_missing_is_none():
     def inc(n: int) -> int:
         return n + 1
 
-    wf = grid.Workflow()
+    wf = Workflow()
     wf["r"] = pd.DataFrame({"n": [1, None, 3]})
     wf["o"] = inc_opt[mod.map()](wf["r"])
     wf["i"] = inc[mod.map()](wf["r"])
@@ -429,7 +453,7 @@ def c11_literals_round_trip():
     wrong = []
     for v in values:
         wf["s"] = scale.bind(weight=v)[mod.map()](wf["readings"])
-        back = grid.Workflow.from_json(wf.to_session_json(), _tools(locals())).step("s").operation.arguments["weight"]
+        back = Workflow.from_json(wf.to_session_json(), _tools(locals())).step("s").operation.arguments["weight"]
         if back != v or type(back) is not type(v):
             wrong.append(f"{v!r} -> {back!r}")
     wf["d"] = scale.bind(weight=datetime.date(2024, 1, 1))[mod.map()](wf["readings"])
@@ -464,19 +488,19 @@ def c2_tool_settings():
     if err:
         return False, f"sort(by=tool) -> {err[:100]}"
     wf["s"] = built
-    back = grid.Workflow.from_json(wf.to_session_json(), _tools(locals()))
+    back = Workflow.from_json(wf.to_session_json(), _tools(locals()))
     back.run("s")
     got = list(back.step("s").output.data["n"])
     return got == [3, 2, 2, 1], f"sort(by=neg_n) after a round trip -> {got}"
 
 
 def c7_selection():
-    wf = grid.Workflow()
+    wf = Workflow()
     wf["p"] = pd.DataFrame({"name": list("abcde"), "qty": [1, 2, 3, 4, 5],
                             "price": [10.0, 20.0, 30.0, 40.0, 50.0]})
-    if not hasattr(grid, "cols"):
-        return False, "grid.cols does not exist"
-    c = grid.cols
+    if not _core_has("cols"):
+        return False, "cols does not exist"
+    c = cols
     wf["block"] = wf["p"][1:3][c["name":"price"]]
     wf.run("block")
     got = wf.step("block").output.data.to_dict("list")
@@ -498,12 +522,12 @@ def c5_load(path: str) -> Annotated[pd.DataFrame, _C5Out]:
 def c5_typed_source_columns():
     # Module level on purpose: under `from __future__ import annotations` a
     # return annotation is a string, resolvable only from the module's names.
-    wf = grid.Workflow()
+    wf = Workflow()
     wf["r"] = c5_load[mod.source()](path="x")
     wf["typo"] = I[mod.select(columns=["cty"])](wf["r"])
     step = wf.step("r")
     plan = getattr(step, "plan", None) or {}
-    cols_ = plan.get("columns", {}).get("names") if plan else grid.predicted_columns(step.output)
+    cols_ = plan.get("columns", {}).get("names") if plan else predicted_columns(step.output)
     caught = bool(wf.step("typo").problems)
     return cols_ == ["city", "n"] and caught, (
         f"unrun source columns -> {cols_}; select typo caught at declaration: {caught} "
@@ -515,7 +539,7 @@ def c9_partial_plans():
     def load_raw(path: str) -> pd.DataFrame:
         return pd.DataFrame({"city": ["SF"]})
 
-    wf = grid.Workflow()
+    wf = Workflow()
     wf["r"] = load_raw[mod.source()](path="x")
     plan = getattr(wf.step("r"), "plan", None)
     if not plan:
@@ -555,11 +579,11 @@ def c3_public_functions():
     # registry, which K24 removed: a Catalog says what a workflow may use.
     wanted = ["builtin_tools", "shape_verbs", "value_column", "check_modifier",
               "Catalog"]
-    missing = [n for n in wanted if not hasattr(grid, n)]
+    missing = [n for n in wanted if not _core_has(n)]
     if missing:
         return False, f"missing: {missing}"
-    tagged = "tags" in grid.catalog(_tools()).get("scale", {})
-    problems = grid.check_modifier("retry", {})
+    tagged = "tags" in catalog(_tools()).get("scale", {})
+    problems = check_modifier("retry", {})
     return tagged and bool(problems), f"functions present; tags in catalog: {tagged}; check_modifier('retry') -> {problems}"
 
 
@@ -567,12 +591,12 @@ def m_infer_bound_method():
     class DB:
         def lookup(self, key):
             return key
-    kind = grid.infer_verb(DB.lookup, grid.grid(pd.DataFrame({"key": ["SF"]})), {})[0]
+    kind = infer_verb(DB.lookup, grid(pd.DataFrame({"key": ["SF"]})), {})[0]
     return kind == "map", f"infer_verb(DB.lookup, …) -> {kind}"
 
 
 def n_auto_modifier():
-    if "auto" not in grid.MODIFIERS:
+    if "auto" not in MODIFIERS:
         return False, "'auto' not in MODIFIERS"
     wf = _wf()
     wf["x"] = add_n[mod.auto()](wf["readings"])
@@ -588,7 +612,7 @@ def p_to_source():
     if not hasattr(operation, "to_source"):
         return False, "Operation.to_source does not exist"
     text = operation.to_source()
-    back = eval(text, {"__builtins__": {}}, grid.formula_names(_tools()))
+    back = eval(text, {"__builtins__": {}}, formula_names(_tools()))
     return back == operation, f"{text} -> equal: {back == operation}"
 
 
@@ -601,7 +625,7 @@ def c12_kwargs_warn():
         def kw_probe(n: int, **opts) -> int:
             return n
     warned = any("accepts **opts" in str(c.message) for c in caught)
-    is_open = grid.catalog({"kw_probe": kw_probe})["kw_probe"].get("open")
+    is_open = catalog({"kw_probe": kw_probe})["kw_probe"].get("open")
     return warned and is_open, f"warned: {warned}; catalog open: {is_open}"
 
 
@@ -612,7 +636,7 @@ def c16_row_ids():
 
     wf = _wf()
     wf["items"] = fan[mod.expand()](wf["readings"])
-    wf["with_parent"] = grid.zip_(wf["items"], wf["readings"])
+    wf["with_parent"] = zip_(wf["items"], wf["readings"])
     wf.run_all()
     ids = list(wf.step("items").output.data.index)
     cities = list(wf.step("with_parent").output.data["city"])
@@ -644,7 +668,7 @@ ASKS = [
     ("N2", "(core) an explicit literal beats a same-named column, with a warning", n2_literal_beats_column),
     ("C13", "(core) an output never silently replaces an input column", c13_output_replaces_input),
     ("O", "(core) a missing required setting is a declaration problem", o_missing_required_setting),
-    ("C6", "(core) grid.wf: an unbound step reference", c6_unbound_wf),
+    ("C6", "(core) wf: an unbound step reference", c6_unbound_wf),
     ("C10", "(core) failure is a state that flows downstream", c10_failure_flows_downstream),
     ("C14", "(core) missing is None; nullability is checked", c14_missing_is_none),
     ("R8", "(core) failed rows keep an int column int", r8_failed_rows_keep_int),

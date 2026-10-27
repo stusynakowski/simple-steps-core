@@ -13,40 +13,40 @@ import json
 import pandas as pd
 import pytest
 
-from simple_steps_core import grid as grid_module
-from simple_steps_core.grid import (
-    BUILTIN_TOOLS,
-    DECORATORS,
-    DEFAULT_PAYLOAD,
-    MODIFIERS,
-    SHAPE_VERBS,
-    Modifier,
+from simple_steps_core import (
+    mod,
     Operation,
     Output,
-    PayloadError,
-    ROWS_RULE,
+    rows,
     Step,
-    StepRef,
-    Workflow,
-    annotation_problems,
-    catalog,
-    compile_operation,
-    grid,
+    tool,
+    wf as unbound_wf,
+    zip_,
+)
+from simple_steps_core.catalog import catalog
+from simple_steps_core.checks import (
+    DEFAULT_PAYLOAD,
     infer_verb,
     predicted_columns,
-    identity,
-    is_shape,
-    mod,
-    op,
-    rows,
-    slice_,
-    sort_,
-    distinct_,
-    rename_,
-    tool,
-    widen_,
-    declaration_problems,
+    ROWS_RULE,
 )
+from simple_steps_core.errors import PayloadError
+from simple_steps_core.modifiers import (
+    _d_apply,
+    DECORATORS,
+    is_shape,
+    Modifier,
+    modifier_catalog,
+    MODIFIERS,
+    SHAPE_VERBS,
+)
+from simple_steps_core.operation import op
+from simple_steps_core.references import StepRef
+from simple_steps_core.run import _provisional, compile_operation
+from simple_steps_core.system_tools import BUILTIN_TOOLS, identity, is_identity
+from simple_steps_core.values import _decode, annotation_problems, declaration_problems
+from simple_steps_core.verbs import distinct_, grid, rename_, slice_, sort_, widen_
+from simple_steps_core.workflow import Workflow
 
 
 from _module_tools import module_tools  # noqa: E402
@@ -352,7 +352,6 @@ def test_select_cannot_keep_a_column_the_input_lacks(wide):
 
 
 def test_is_identity_sees_through_the_adapter():
-    from simple_steps_core.grid import _d_apply, is_identity
     assert is_identity(identity)
     assert is_identity(_d_apply(identity))
     assert not is_identity(_d_apply(score.fn))
@@ -518,7 +517,6 @@ def test_the_catalog_is_json_safe():
 
 
 def test_modifier_catalog_is_json_and_lists_each_verbs_settings():
-    from simple_steps_core.grid import modifier_catalog
 
     mc = modifier_catalog()
     json.dumps(mc)                                   # serves as GET /modifiers
@@ -642,7 +640,7 @@ def test_run_still_means_run_and_refuses_a_reference(three):
 
 def _auto_verb(operation, wf):
     """The verb auto would pick for *operation* in *wf*, as things stand (009)."""
-    return grid_module._provisional(operation, wf)[1]
+    return _provisional(operation, wf)[1]
 
 
 def test_a_bare_tool_call_on_a_reference_is_the_whole_step(three):
@@ -1167,7 +1165,7 @@ def test_one_shape_verb_with_execution_modifiers_is_fine(three):
 
 def test_a_dangling_reference_is_caught():
     wf = Workflow()
-    wf["dangling"] = score[mod.map(over=grid_module.wf["nope"])]
+    wf["dangling"] = score[mod.map(over=unbound_wf["nope"])]
     assert "not an earlier step" in wf.step("dangling").problems[0]
 
 
@@ -1183,7 +1181,7 @@ def test_self_reference_is_caught(three):
     wf = Workflow()
     wf["raw"] = three
     wf["loop"] = score[mod.map(over=wf["raw"])]
-    wf["loop"] = score[mod.map(over=grid_module.wf["loop"])]
+    wf["loop"] = score[mod.map(over=unbound_wf["loop"])]
     assert "input is itself" in wf.step("loop").problems[0]
 
 
@@ -1192,7 +1190,7 @@ def test_a_cycle_is_caught(three):
     wf["raw"] = three
     wf["a"] = score[mod.map(over=wf["raw"])]
     wf["b"] = score[mod.map(over=wf["a"])]
-    wf["a"] = score[mod.map(over=grid_module.wf["b"])]
+    wf["a"] = score[mod.map(over=unbound_wf["b"])]
     assert "circular" in wf.step("a").problems[0]
 
 
@@ -1513,7 +1511,7 @@ def test_provenance_is_not_part_of_the_data(two_workflows):
     """Naming a step two ways must not change equality or the export."""
     a, _ = two_workflows
     from_ref = score[mod.map(over=a["raw"])]
-    from_str = score[mod.map(over=grid_module.wf["raw"])]
+    from_str = score[mod.map(over=unbound_wf["raw"])]
     assert from_ref == from_str
     assert from_ref.to_dict() == from_str.to_dict()
     assert str(from_str.input) == "raw"
@@ -1556,9 +1554,9 @@ def test_provenance_is_diagnosed_before_a_dangling_reference(two_workflows):
 
 
 def test_an_unbound_ref_means_whatever_is_here(two_workflows):
-    """grid.wf (008 C6): no origin, so no provenance to violate."""
+    """unbound_wf (008 C6): no origin, so no provenance to violate."""
     a, b = two_workflows
-    b["x"] = score[mod.map(over=grid_module.wf["raw"])]
+    b["x"] = score[mod.map(over=unbound_wf["raw"])]
     assert b.step("x").problems == ()
     b.run("x")
     assert b.step("x").output.values == [1000, 2000], "ran on b's own raw"
@@ -1566,7 +1564,7 @@ def test_an_unbound_ref_means_whatever_is_here(two_workflows):
 
 def test_an_operation_with_an_unbound_ref_is_reusable(two_workflows):
     a, b = two_workflows
-    template = score[mod.map(over=grid_module.wf["raw"])]
+    template = score[mod.map(over=unbound_wf["raw"])]
     a["x"] = template
     b["x"] = template
     assert a.step("x").problems == () and b.step("x").problems == ()
@@ -1626,7 +1624,6 @@ def test_a_session_round_trip_preserves_dtypes():
 
 def test_an_export_without_dtypes_still_decodes():
     """Exports written before dtypes were recorded keep working."""
-    from simple_steps_core.grid import _decode
     frame = _decode({"kind": "frame",
                      "data": pd.DataFrame({"a": [1, 2]}).to_json(orient="split")})
     assert list(frame["a"]) == [1, 2]
@@ -1635,7 +1632,7 @@ def test_an_export_without_dtypes_still_decodes():
 def test_a_repr_does_not_depend_on_how_a_step_was_named(two_workflows):
     """A ref lives in params, so a repr must flatten it like __eq__ does."""
     a, _ = two_workflows
-    assert repr(score[mod.map()](a["raw"])) == repr(score[mod.map(over=grid_module.wf["raw"])])
+    assert repr(score[mod.map()](a["raw"])) == repr(score[mod.map(over=unbound_wf["raw"])])
     assert "over='raw'" in repr(score[mod.map(over=a["raw"])])
 
 
@@ -2122,7 +2119,7 @@ def test_collapse_by_stages_as_one_per_group_not_one_cell(three):
     wf = Workflow()
     wf["raw"] = three
     wf["g"] = hemi[mod.group(name="h")](wf["raw"])          # only the key
-    wf["gz"] = grid_module.zip_(wf["raw"], wf["g"])            # rows + their key
+    wf["gz"] = zip_(wf["raw"], wf["g"])            # rows + their key
     wf.run_all()
     wf["c"] = sum_up[mod.collapse(by="h", over=wf["gz"])]
     assert "one cell per group" in wf.step("c").describe()

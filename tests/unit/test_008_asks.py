@@ -10,8 +10,37 @@ import warnings
 import pandas as pd
 import pytest
 
-from simple_steps_core import grid
-from simple_steps_core.grid import Workflow, mod, op, tool
+from simple_steps_core import (
+    bound_tool,
+    Catalog,
+    cols,
+    join,
+    mod,
+    Operation,
+    Output,
+    res,
+    rows,
+    tool,
+    wf as unbound_wf,
+    zip_,
+)
+from simple_steps_core.catalog import (
+    builtin_tools,
+    catalog,
+    check_modifier,
+    formula_names,
+    shape_verbs,
+    value_column,
+)
+from simple_steps_core.checks import check, columns_unknown, infer_verb
+from simple_steps_core.combines import _combine_zip
+from simple_steps_core.errors import PayloadError, SelectionError, StepFailed
+from simple_steps_core.modifiers import modifier_catalog
+from simple_steps_core.operation import op
+from simple_steps_core.output import ROW_ID, STATES
+from simple_steps_core.references import _encode_ref
+from simple_steps_core.verbs import collapse_, grid, map_
+from simple_steps_core.workflow import Workflow
 
 warnings.simplefilter("ignore", UserWarning)    # tools re-declared per test
 
@@ -61,7 +90,7 @@ def test_K1_an_unrun_source_defers_column_checks_then_checks_them():
     w["picked"] = mod.select(over=w["head"], columns=["city", "n"])
     w["typo"] = mod.select(over=w["head"], columns=["cty"])
     assert w.step("picked").problems == () and w.step("typo").problems == ()
-    assert grid.columns_unknown(w.step("head").output)
+    assert columns_unknown(w.step("head").output)
     w.run_all()
     assert w.step("picked").output.data.to_dict("list") == {
         "city": ["SF", "NYC", "SF", "LA"], "n": [1, 2, 3, 2]}
@@ -70,7 +99,7 @@ def test_K1_an_unrun_source_defers_column_checks_then_checks_them():
 
 
 def test_K1_a_literal_source_has_known_columns(wf):
-    assert not grid.columns_unknown(wf.step("readings").output)
+    assert not columns_unknown(wf.step("readings").output)
     wf["typo"] = mod.select(over=wf["readings"], columns=["cty"])
     assert "names 'cty'" in wf.step("typo").problems[0]
 
@@ -151,10 +180,10 @@ def test_N1_a_union_parameter_accepts_a_bound_literal(wf):
 def test_O_a_missing_required_setting_is_a_problem_without_a_workflow():
     blob = {"tool": "scale_008", "input": None, "arguments": {},
             "modifiers": [{"kind": "retry", "settings": {}}, {"kind": "map", "settings": {}}]}
-    problems = grid.check(grid.Operation.from_dict(blob, {"scale_008": scale_008.fn}))
+    problems = check(Operation.from_dict(blob, {"scale_008": scale_008.fn}))
     assert problems == ("retry needs times= — it has no default, so a step "
                         "without it cannot run",)
-    assert grid.check(scale_008[mod.timeout()]) == (
+    assert check(scale_008[mod.timeout()]) == (
         "timeout needs seconds= — it has no default, so a step without it "
         "cannot run",)
 
@@ -163,7 +192,7 @@ def test_C6_the_same_formula_resolves_in_whichever_workflow():
     w1, w2 = Workflow(), Workflow()
     w1["r"] = pd.DataFrame({"n": [1, 2]})
     w2["r"] = pd.DataFrame({"n": [7, 8]})
-    line = scale_008[mod.map()](grid.wf["r"])
+    line = scale_008[mod.map()](unbound_wf["r"])
     for w in (w1, w2):
         w["x"] = line
         w.run("x")
@@ -174,16 +203,16 @@ def test_C6_the_same_formula_resolves_in_whichever_workflow():
 
 def test_C6_grid_wf_is_a_reference_not_a_workflow():
     with pytest.raises(KeyError):
-        grid.wf[0]
+        unbound_wf[0]
     with pytest.raises(AttributeError, match="not a workflow"):
-        grid.wf.run
+        unbound_wf.run
 
 
 def test_K5_a_string_over_is_refused_in_python():
     with pytest.raises(TypeError, match=r"pass wf\['readings'\]"):
         mod.map(over="readings")
     # JSON keeps string ids
-    op_ = grid.Operation.from_dict({"tool": "scale_008", "input": "readings",
+    op_ = Operation.from_dict({"tool": "scale_008", "input": "readings",
                                     "arguments": {}, "modifiers": [{"kind": "map", "settings": {}}]})
     assert str(op_.input) == "readings"
 
@@ -204,7 +233,7 @@ def test_K11_a_list_over_points_at_the_combine_verbs(wf):
 
 
 def test_K13_the_modifier_catalog_says_which_verbs_take_a_tool():
-    cat = grid.modifier_catalog()
+    cat = modifier_catalog()
     assert (cat["map"]["takes_tool"], cat["map"]["default_tool"]) == (True, None)
     assert (cat["select"]["takes_tool"], cat["select"]["default_tool"]) == (False, "identity")
     assert (cat["collapse"]["takes_tool"], cat["collapse"]["default_tool"]) == ("optional", "gather")
@@ -354,7 +383,6 @@ from _module_tools import module_tools  # noqa: E402
 #: This module's tools, by name: what reloading a saved workflow needs.
 TOOLS_008 = module_tools(globals())
 
-from simple_steps_core.grid import cols, rows  # noqa: E402
 
 
 def _reload(w):
@@ -448,13 +476,13 @@ def test_C2_a_tool_in_a_setting_runs_and_round_trips(wf):
                                "first_letter_008": first_letter_008})
     back.run("s")
     assert list(back.step("s").output.data["n"]) == [3, 2, 2, 1]
-    by = next(x for x in grid.modifier_catalog()["sort"]["settings"] if x["name"] == "by")
+    by = next(x for x in modifier_catalog()["sort"]["settings"] if x["name"] == "by")
     assert by["type"].endswith("| tool")
 
 
 def test_C2_a_lambda_runs_but_cannot_be_saved(wf):
     wf["s"] = op("identity")[mod.sort(by=lambda n: -n)](wf["readings"])
-    with pytest.raises(grid.PayloadError, match="register it with @tool"):
+    with pytest.raises(PayloadError, match="register it with @tool"):
         wf.to_json()
 
 
@@ -484,7 +512,7 @@ def test_C7_every_spelling_saves_identically(prices):
     b = prices["p"][cols["name":"price"], 1:3]
     c = prices["p"][rows[1:3], cols["name":"price"]]
     assert a == b == c
-    assert grid._encode_ref(a) == {"$ref": "p", "rows": {"start": 1, "stop": 3},
+    assert _encode_ref(a) == {"$ref": "p", "rows": {"start": 1, "stop": 3},
                                    "columns": {"from": "name", "to": "price"}}
 
 
@@ -505,13 +533,13 @@ def test_C7_a_selection_as_an_argument_converts_by_type(prices):
 
 
 def test_C7_refusals(prices):
-    with pytest.raises(grid.SelectionError, match=r"cols\['price'\]"):
+    with pytest.raises(SelectionError, match=r"cols\['price'\]"):
         prices["p"]["price"]
-    with pytest.raises(grid.SelectionError, match="names or positions"):
+    with pytest.raises(SelectionError, match="names or positions"):
         cols[["name", 2]]
-    with pytest.raises(grid.SelectionError, match="already has its rows"):
+    with pytest.raises(SelectionError, match="already has its rows"):
         prices["p"][1:5][2]
-    with pytest.raises(grid.SelectionError, match="empty"):
+    with pytest.raises(SelectionError, match="empty"):
         prices["p"][[]]
     with pytest.raises(TypeError, match="can't be a tool's input"):
         scale_008[mod.map()](prices["p"][1:3])
@@ -523,7 +551,7 @@ def test_C7_column_names_are_strings():
     w = Workflow()
     w["y"] = pd.DataFrame({2023: [1, 2], 2024: [3, 4]})
     assert list(w.step("y").output.data.columns) == ["2023", "2024"]
-    with pytest.raises(grid.SelectionError, match="both become '1'"):
+    with pytest.raises(SelectionError, match="both become '1'"):
         w["clash"] = pd.DataFrame({1: [1], "1": [2]})
 
 
@@ -671,7 +699,7 @@ def test_an_uncaught_failure_stops_run_all(two_branches):
     w["a"] = risky_008[mod.map()](w["r"])
     w["b"] = plus1_008[mod.map()](w["a"])
     w["other"] = scale_008[mod.map()](w["r"], weight=2)    # independent branch
-    with pytest.raises(grid.StepFailed) as stopped:
+    with pytest.raises(StepFailed) as stopped:
         w.run_all()
     err = stopped.value
     assert (err.step_id, err.cell, err.error) == ("a", 1, "ValueError: boom")
@@ -721,7 +749,7 @@ def test_try_except_default_none_is_a_value_not_no_default(two_branches):
 def test_try_except_on_catches_only_the_named_exceptions(two_branches):
     w = two_branches
     w["a"] = risky_008[mod.map(), mod.try_except(default=0, on=[KeyError])](w["r"])
-    with pytest.raises(grid.StepFailed, match="ValueError: boom"):
+    with pytest.raises(StepFailed, match="ValueError: boom"):
         w.run_all()
     w["a"] = risky_008[mod.map(), mod.try_except(default=0, on=[ValueError])](w["r"])
     w.run_all()
@@ -746,7 +774,7 @@ def test_a_failing_source_stops_the_run_or_is_caught():
     w = Workflow()
     w["src"] = broken_008[mod.source()](path="x")
     w["after"] = scale_008[mod.map()](w["src"])
-    with pytest.raises(grid.StepFailed, match="OSError: no such file"):
+    with pytest.raises(StepFailed, match="OSError: no such file"):
         w.run_all()
     w["src"] = broken_008[mod.source(), mod.try_except(default=[])](path="x")
     w.run("src")
@@ -754,32 +782,38 @@ def test_a_failing_source_stops_the_run_or_is_caught():
 
 
 # ── Phase 5: the boundary — C3, K12, M, P, N, C12 ───────────────────────
-from simple_steps_core.grid import bound_tool  # noqa: E402
+
+
+def _core_modules():
+    """The package and every module in it, for checking a name exists nowhere."""
+    import sys
+    return [m for n, m in sys.modules.items() if n.split(".")[0] == "simple_steps_core"]
 
 
 def test_C3_functions_instead_of_globals():
-    assert "identity" in grid.builtin_tools()
-    assert "map" in grid.shape_verbs() and "retry" not in grid.shape_verbs()
+    assert "identity" in builtin_tools()
+    assert "map" in shape_verbs() and "retry" not in shape_verbs()
     # K24: nothing is registered, so there is no list of every declared tool.
-    assert not hasattr(grid, "declared_tools") and not hasattr(grid, "resource_types")
-    out = grid.map_(grid.grid(pd.DataFrame({"n": [1]})), scale_008.fn, name="s")
-    assert grid.value_column(out) == "s"
+    assert not any(hasattr(m, "declared_tools") or hasattr(m, "resource_types")
+                   for m in _core_modules())
+    out = map_(grid(pd.DataFrame({"n": [1]})), scale_008.fn, name="s")
+    assert value_column(out) == "s"
 
 
 def test_C3_a_modifier_is_checked_on_its_own():
-    assert grid.check_modifier("map", {"nme": "s"}) == (
+    assert check_modifier("map", {"nme": "s"}) == (
         "map takes no parameter 'nme'; it accepts axis, name, replace, retries",)
-    assert grid.check_modifier("retry") == (
+    assert check_modifier("retry") == (
         "retry needs times= — it has no default, so a step without it cannot run",)
-    assert grid.check_modifier("retry", {"times": 2}) == ()
-    assert scale_008[mod.retry()].check() == grid.check_modifier("retry")
+    assert check_modifier("retry", {"times": 2}) == ()
+    assert scale_008[mod.retry()].check() == check_modifier("retry")
 
 
 def test_C3_tags_reach_the_catalog():
     @tool(tags=["rowmap", "app"])
     def tagged_008(n: int) -> int:
         return n
-    described = grid.catalog({"tagged_008": tagged_008})
+    described = catalog({"tagged_008": tagged_008})
     assert described["tagged_008"]["tags"] == ["rowmap", "app"]
     assert described["identity"]["tags"] == []
 
@@ -787,8 +821,8 @@ def test_C3_tags_reach_the_catalog():
 def test_C3_a_catalog_is_fixed_once_made():
     """There is no registry to freeze (K24): what a workflow may use is its
     catalog, which can only be narrowed, into a new catalog."""
-    assert not hasattr(grid, "freeze")
-    cat = grid.Catalog(tools=[scale_008])
+    assert not any(hasattr(m, "freeze") for m in _core_modules())
+    cat = Catalog(tools=[scale_008])
     smaller = cat.without("scale_008")
     assert "scale_008" in cat and "scale_008" not in smaller
     assert not hasattr(cat, "add")
@@ -824,9 +858,9 @@ def test_M_infer_verb_drops_a_methods_self():
         @bound_tool
         def lookup(self, key: str) -> str:
             return key
-    upstream = grid.grid(pd.DataFrame({"key": ["SF"]}))
-    assert grid.infer_verb(DB008.lookup, upstream, {})[0] == "map"
-    assert grid.infer_verb((DB008, "lookup"), upstream, {})[0] == "map"
+    upstream = grid(pd.DataFrame({"key": ["SF"]}))
+    assert infer_verb(DB008.lookup, upstream, {})[0] == "map"
+    assert infer_verb((DB008, "lookup"), upstream, {})[0] == "map"
 
 
 @tool
@@ -854,7 +888,7 @@ def test_N_auto_is_saved_as_auto_and_resolved_at_run(wf):
     assert [m.kind for m in wf.step("s").operation.modifiers] == ["retry", "auto"]
     back = Workflow.from_json(wf.to_session_json(), TOOLS_008)
     assert back.step("s").operation == wf.step("s").operation
-    assert grid.modifier_catalog()["auto"]["row_rule"] == "unknown"
+    assert modifier_catalog()["auto"]["row_rule"] == "unknown"
 
 
 def test_P_to_source_round_trips(wf):
@@ -866,11 +900,11 @@ def test_P_to_source_round_trips(wf):
         scale_008.bind(weight=(1, 2))[mod.map(), mod.try_except(default={1: "x"},
                                                                 on=[ValueError])](wf["readings"]),
         scale_008[mod.map()](wf["readings"], weight=wf["p"][0][cols["a"]]),
-        grid.join(wf["readings"], wf["readings"], on="city", how="left"),
+        join(wf["readings"], wf["readings"], on="city", how="left"),
         add_008[mod.auto()](wf["readings"]),
         scale_008.bind(weight=2)[mod.retry(times=1)],
     ]
-    names = grid.formula_names(TOOLS_008)
+    names = formula_names(TOOLS_008)
     for operation in ops:
         text = operation.to_source()
         assert eval(text, {"__builtins__": {}}, names) == operation, text
@@ -883,7 +917,7 @@ def test_C12_kwargs_tools_warn_and_say_so():
         @tool
         def kw_008(n: int, **opts) -> int:
             return n
-    assert grid.catalog({"kw_008": kw_008})["kw_008"]["open"] is True
+    assert catalog({"kw_008": kw_008})["kw_008"]["open"] is True
     w = Workflow()
     w["r"] = pd.DataFrame({"n": [1]})
     w["x"] = kw_008[mod.map()](w["r"], colr="red")
@@ -891,7 +925,6 @@ def test_C12_kwargs_tools_warn_and_say_so():
 
 
 # ── 009 step 1: results only, shared row ids, strict zip_ (C16 for expand) ──
-from simple_steps_core.grid import zip_  # noqa: E402
 @tool
 def fan_ids_009(n) -> list:
     return [n * 10 + k for k in range(n)]
@@ -953,7 +986,7 @@ def test_009_zip_never_drops_a_row(r3):
     assert r3.step("long_first").output.notes[0]["error"] == (
         "zip_ pairs rows by id: row 2 of 'r' has no matching row in 'kept'. "
         "For a partial match, use join")
-    with pytest.raises(grid.StepFailed, match="use join"):
+    with pytest.raises(StepFailed, match="use join"):
         r3.run_all()
 
 
@@ -1049,7 +1082,7 @@ def test_009_a_changed_resource_makes_its_readers_stale():
     w = Workflow()
     w.define("s", Scaler009, k=2)
     w["r"] = pd.DataFrame({"n": [1]})
-    w["x"] = scaled_009[mod.map()](w["r"], s=grid.res["s"])
+    w["x"] = scaled_009[mod.map()](w["r"], s=res["s"])
     w.run_all(resources={"s": Scaler009(2)})
     w.define("s", Scaler009, k=2)                       # same settings: fresh
     assert w.step("x").state == "completed"
@@ -1166,7 +1199,7 @@ def test_009_a_direct_call_runs_over_rows_only_when_the_frame_doesnt_fit():
 
     frame = pd.DataFrame({"n": [1, 2, 3]})
     out = plus_one_009(frame)
-    assert isinstance(out, grid.Output) and out.values == [2, 3, 4]
+    assert isinstance(out, Output) and out.values == [2, 3, 4]
     assert width_009(frame) == 1                            # fits as-is
     assert untyped_009(frame) is frame                       # untyped: as-is
     assert plus_one_009(5) == 6                              # parens still run
@@ -1456,7 +1489,7 @@ def test_C22_zip_columns_known_only_at_run_are_checked_then():
     frames = [w2.step("a").output.data.copy(), w2.step("b").output.data.copy()]
     frames[0].attrs["name"], frames[1].attrs["name"] = "a", "b"
     with pytest.raises(ValueError, match="'n' is in both 'a' and 'b'"):
-        grid._combine_zip(frames, {})                       # the run-time guard
+        _combine_zip(frames, {})                       # the run-time guard
 
 
 def test_C23_collapse_by_a_missing_column_is_refused():
@@ -1469,8 +1502,8 @@ def test_C23_collapse_by_a_missing_column_is_refused():
 
 
 def test_C23_the_run_time_guard_fails_the_step():
-    with pytest.raises(grid.SelectionError, match="collapse groups by 'city'"):
-        grid.collapse_(grid.grid(pd.DataFrame({"n": [1]})), lambda acc, row: acc, by="city")
+    with pytest.raises(SelectionError, match="collapse groups by 'city'"):
+        collapse_(grid(pd.DataFrame({"n": [1]})), lambda acc, row: acc, by="city")
 
 
 
@@ -1508,7 +1541,7 @@ def test_C24_input_states_are_cell_states(failing):
     failing["b"] = plus1_008[mod.map()](failing["a"])
     failing.run_all()
     states = {i["state"] for r in (0, 1, 2) for i in failing.cell("b", r, "value")["inputs"]}
-    assert states <= set(grid.STATES) | {"stale", "pending", "missing", "unknown"}
+    assert states <= set(STATES) | {"stale", "pending", "missing", "unknown"}
     assert failing.cell("b", 1, "value")["inputs"][0]["state"] == "failed"
 
 
@@ -1585,11 +1618,11 @@ def test_hash_is_the_row_number_0_to_n_minus_1_on_every_step(wf):
     assert cell["inputs"][0]["step"] == "k" and cell["inputs"][0]["row"] == 0
     assert wf.cell("k", 0, "n")["inputs"][0]["row"] == 1     # k's #0 is readings' #1
     assert str(wf.step("s").output).splitlines()[1].split()[0] == "#"
-    assert grid.ROW_ID == "#"
+    assert ROW_ID == "#"
 
 
 def test_a_table_with_its_own_hash_column_is_refused():
-    with pytest.raises(grid.SelectionError, match="'#', which is reserved for row ids"):
+    with pytest.raises(SelectionError, match="'#', which is reserved for row ids"):
         Workflow()["bad"] = pd.DataFrame({"#": [1], "n": [2]})
 
 
@@ -1600,7 +1633,7 @@ def test_a_predefined_index_becomes_a_column():
     assert w.step("p").output.view()[["#", "code", "n"]].to_dict("list") == {
         "#": [0, 1], "code": ["a", "b"], "n": [5, 6]}
     assert list(w.step("q").output.data.columns) == ["index", "n"]
-    with pytest.raises(grid.SelectionError, match="a column already has that name"):
+    with pytest.raises(SelectionError, match="a column already has that name"):
         Workflow()["clash"] = pd.DataFrame({"code": [1]}, index=pd.Index(["x"], name="code"))
 
 

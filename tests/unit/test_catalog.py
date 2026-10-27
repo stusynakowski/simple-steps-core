@@ -9,8 +9,8 @@ import warnings
 import pandas as pd
 import pytest
 
-from simple_steps_core.grid import (Catalog, Workflow, bound_tool, mod, res, resource,
-                                    tool, wf)
+from simple_steps_core import bound_tool, Catalog, mod, res, resource, tool, wf, zip_
+from simple_steps_core.workflow import Workflow
 
 
 @tool
@@ -153,7 +153,6 @@ def test_a_tool_outside_the_catalog_is_a_problem_and_never_runs(cat):
 
 def test_a_removed_modifier_or_combine_is_a_problem(cat):
     w = fever(cat.without("retry", "zip"))
-    from simple_steps_core.grid import zip_
     w["r"] = to_f_c[mod.map(), mod.retry(times=2)](wf["p"])
     w["z"] = zip_(wf["p"], wf["f"])
     assert w.step("r").problems == ("modifier 'retry' is not in this workflow's catalog",)
