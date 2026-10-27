@@ -26,11 +26,12 @@ comes off.
 | 2 ✓ | `#` is the row id (R-D11, R8); `expand` writes `#v` and steps that keep ids carry it (R-D10); rows are followed back through `#` columns, never by parsing ids (R-D6, M8, M9) | `b2ac908`, `45b547a`, `464e423` |
 | 3 ✓ | the invariant check runs on every step of every test (`tests/conftest.py`, `Workflow.check_invariants`); it found and fixed P1–P3 and S1–S6 (§6) | `e2761d9` |
 | 4 ✓ | rows meet only through a recorded match, checked when declared (R-D7): `zip_` and column arguments; `zip_(…, match_ids=True)`; ids match exactly; a parent's value reaches each child; A5 is enforced in every test | `daca7e2` |
-| 5 ✓ | every verb records where its rows came from: `collapse` and `distinct` write `#v` lists, `join` and `stack` write `#a`, `#b`; a click on their cells shows the exact input rows; a dropped trace is named | this commit |
+| 5 ✓ | every verb records where its rows came from: `collapse` and `distinct` write `#v` lists, `join` and `stack` write `#a`, `#b`; a click on their cells shows the exact input rows; a dropped trace is named | `cc5a801` |
+| 6 ✓ | reducers take lists, and grouping is a pack then a map (R-D1, R-D13); `expand(columns=…)` in lockstep (R-D4); unpacking what core packed gives back its rows (R-D3); `by="#s"` back to any earlier step, every row of it (R-D5, J-D5) | `42e49a4`, `51a9580`, this commit |
 
-**32 of the 48 law tests hold:** L2, L7–L11, L14–L20, L28–L31, L34–L39,
-L41–L48. The other 16 are marked with the step that fixes them. L40 (the
-property test) is built in step 10.
+**40 of the 49 law tests hold:** L1, L2, L6–L20, L22, L28–L39, L41–L49.
+The other 9 are marked with the step that fixes them: L3–L5 (step 7), L21
+(step 9), L23–L27 (step 8). L40 (the property test) is built in step 10.
 
 ## 3. The path
 
@@ -109,7 +110,15 @@ dropped.
 - **Changes for users:** `collapse`, `distinct`, `join` and `stack` outputs
   gain `#` columns, and a click on their cells shows the exact input rows.
 
-### Step 6. Round trips (guarantee 5)
+### Step 6. Round trips (guarantee 5) ✓
+
+*Done 2026-10-27*, in three pieces: reducers and group functions (6a);
+`expand(columns=…)` and packed ids coming back (6b; R-D4 moved here from
+step 7, because 6b needs it); `by="#s"` (6c). A `drop` of `#v` now stops a
+trace for every step after it, not only that one: tracing back past it
+skips the column it dropped. L4 and L5 need `mod.pack`, in step 7.
+
+What was planned:
 
 **The approach (owner, 2026-10-27): grouping is a new index, and a reduction
 is a composition.** `f[collapse(by=k)]` is `gather[collapse(by=k)]` (re-index
@@ -129,7 +138,7 @@ row of `s` (J-D5).
 - **Changes for users:** `gather[collapse()]` on several columns gives one
   list per column, not a list of dicts.
 
-### Step 7. The missing moves
+### Step 7. The missing moves (now only `pack`; R-D4 is built in step 6)
 
 `mod.pack(columns=…)` packs a row's variables into a dict (R-D2), and
 `widen` drops the dict it spread (G10). `mod.expand(columns=[…])` unpacks
@@ -222,7 +231,7 @@ Found by running core, 2026-10-27. Wrong answers given silently are in bold.
 
 | # | What | Status |
 |---|---|---|
-| M1 | `expand` → `collapse` didn't round-trip per parent | fixed for a direct parent (step 2, L7); further back in step 6 |
+| M1 | `expand` → `collapse` didn't round-trip per parent | fixed (step 6): `by="#s"` reaches any earlier step |
 | M2 | `collapse(by=…)`'s groups are kept in a note, not a `#` column (per-group staleness works from the note: L41) | fixed (step 5): `#v`, a list per group |
 | M3 | `distinct` traces a kept row only to itself | fixed (step 5) |
 | M4 | `join` and `stack` trace to whole steps | fixed (step 5): `#a`, `#b` |
@@ -245,18 +254,20 @@ Found by running core, 2026-10-27. Wrong answers given silently are in bold.
 | S5 | a source tool returning a `#` column raised out of `run_all` instead of failing its step | fixed (step 3) |
 | S6 | which steps keep ids was listed twice (checks and workflow) | fixed (step 3): one `keeps_ids` rule |
 | S7 | `distinct` with no `columns=` compared whole rows, `#` columns included, so equal rows from different parents stayed apart | fixed (step 5): it compares variables only |
-| R1 | unpacking a gathered list gives new ids, not the packed ones | step 6 |
+| P4 | a built-in reducer's plan claimed exact columns while its input's columns weren't known, so a `select` after it was refused | fixed (step 6) |
+| S8 | a `drop` of `#v` stopped the trace only at that step: tracing back past it reached `#v` again | fixed (step 6): the trace remembers what was dropped on the way back |
+| R1 | unpacking a gathered list gives new ids, not the packed ones | fixed (step 6) |
 | R2 | no way to pack a row whatever its width | step 7 |
 | R3 | `identity` under `map` packs a row into a dict only when it has 2 or more columns | step 7 |
-| R4 | `gather` on several columns packs both axes in one step | step 6 |
-| R5 | `expand` unpacks one list only | step 7 |
+| R4 | `gather` on several columns packs both axes in one step | fixed (step 6) |
+| R5 | `expand` unpacks one list only | fixed (step 6) |
 | **R6** | **every reducer gave `None` over no rows, `count` included** | fixed (step 1) |
 | R7 | `collapse(by=…)` with a missing column | not a bug: refused when the columns are known |
 | R8 | `cols["#"]` stored row numbers as data | fixed (step 2) |
-| R9 | under `collapse(by=…)`, built-in reducers get the key in each row: `total` by ward fails | step 6 |
+| R9 | under `collapse(by=…)`, built-in reducers get the key in each row: `total` by ward fails | fixed (step 6) |
 | J1 | `expand` wraps a bare string | step 8 |
 | J2 | `expand` of `None` gives one `None` row | step 8 |
-| J3 | `expand` of `[]` loses its parent for the way back | step 6 |
+| J3 | `expand` of `[]` loses its parent for the way back | fixed (step 6) |
 | J4 | `widen(columns=…)` fails rows missing a key; ints become floats; `null` and missing look alike | step 8 |
 | J5 | `expand` of a dict gives one row holding the dict | step 8 |
 

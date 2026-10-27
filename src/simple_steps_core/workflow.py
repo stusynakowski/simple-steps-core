@@ -968,8 +968,11 @@ class Workflow:
         while seen in self.steps:
             op_ = self.steps[seen].operation
             restored = self._restore_column(seen)
+            grouped = self._groups_by_step(seen)
             if restored is not None:             # its items are the packed rows again
                 seen = self._id_source(restored)
+            elif grouped is not None:            # one row per row of s, with s's ids
+                seen = grouped[1]
             elif not keeps_ids(self._kind(seen), op_.shape_verb) or op_.input is None:
                 break
             else:
@@ -998,7 +1001,8 @@ class Workflow:
         doesn't."""
         return self._trace(step_id, list(ids), self._same_ids(target), 0)
 
-    def _trace(self, step_id: str, ids: list, target: set, depth: int) -> list | None:
+    def _trace(self, step_id: str, ids: list, target: set, depth: int,
+               dropped: frozenset = frozenset()) -> list | None:
         if step_id in target:
             return ids
         step = self.steps.get(step_id)
@@ -1007,21 +1011,29 @@ class Workflow:
         data = step.output.data
         for c in data.columns:
             parent = self._id_source(c)
+            if c in dropped:
+                continue                  # dropped further on: the trace stops (§5.1, rule 5)
             if parent is not None and self._lists_rows(step_id, c):
                 continue                  # each row came from several: no one partner
             if parent is not None:
                 mapped = [data.at[i, c] if i in data.index else None for i in ids]
                 if any(isinstance(m, list) for m in mapped):
                     continue              # these rows came from several: no one partner
-                found = self._trace(parent, mapped, target, depth + 1)
+                found = self._trace(parent, mapped, target, depth + 1, dropped)
                 if found is not None:
                     return found
         op_ = step.operation
         restored = self._restore_column(step_id)
         if restored is not None and self._id_source(restored) is not None:
-            return self._trace(self._id_source(restored), ids, target, depth + 1)
+            return self._trace(self._id_source(restored), ids, target, depth + 1, dropped)
+        grouped = self._groups_by_step(step_id)
+        if grouped is not None:
+            return self._trace(grouped[1], ids, target, depth + 1, dropped)
         if keeps_ids(self._kind(step_id), op_.shape_verb) and op_.input is not None:
-            return self._trace(str(op_.input), ids, target, depth + 1)
+            verb = op_.shape_verb
+            if verb.kind in ("drop", "rename"):
+                dropped = dropped | {c for c in (verb.settings.get("columns") or ()) if is_id_column(c)}
+            return self._trace(str(op_.input), ids, target, depth + 1, dropped)
         if is_combine(op_) and op_.tool == "zip":
             for g in op_.grids:           # a zip's rows are its finest input's
                 inner = self.steps.get(str(g))
@@ -1149,6 +1161,24 @@ class Workflow:
                 and op_.input is not None:     # carried unchanged: no tool rewrites it
             found = self._packed_by(str(op_.input), column, depth + 1)
         return found if found is not None and found in self._predicted_of(step_id) else None
+
+    def _groups_by_step_of(self, operation: Operation) -> tuple[str, str] | None:
+        """``(by, s)`` for an operation that is ``collapse(by="#s")``."""
+        verb = operation.shape_verb
+        if verb is None or verb.kind != "collapse" or operation.input is None:
+            return None
+        by = verb.settings.get("by")
+        s = self._id_source(by) if isinstance(by, str) else None
+        return (by, s) if s is not None else None
+
+    def _groups_by_step(self, step_id: str) -> tuple[str, str] | None:
+        """For ``collapse(by="#s")``: ``(by, s)``, the step whose rows it groups by."""
+        step = self.steps.get(step_id)
+        if step is None or self._kind(step_id) != "collapse":
+            return None
+        by = step.operation.shape_verb.settings.get("by")
+        s = self._id_source(by) if isinstance(by, str) else None
+        return (by, s) if s is not None else None
 
     def _restore_column(self, step_id: str) -> str | None:
         """For an expand: the `#` list whose ids its items get back, if all it
@@ -1573,6 +1603,12 @@ class Workflow:
         restore = self._restore_column(step_id)
         if restore is not None and source is not None:
             source = Output(source.data, source.states, {**source.meta, "restore": restore})
+        group_by = self._groups_by_step(step_id)
+        if group_by is not None and source is not None:
+            by, s = group_by
+            keys = self.trace(str(step.operation.input), list(source.data.index), s) or []
+            source = Output(source.data, source.states, {**source.meta, "group": {
+                "by": by, "keys": keys, "all": list(self.steps[s].output.data.index)}})
         try:
             step.output = resolved.run(source, tools)
             step.output.data = _str_columns(step.output.data, step_id)

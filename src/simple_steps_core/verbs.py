@@ -269,6 +269,15 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
         by = key_name
     elif by is None:
         groups = [(None, frame)]
+    elif isinstance(source, Output) and (source.meta.get("group") or {}).get("by") == by:
+        # by="#s": each row's key is the row of step s it traces to, found by
+        # the workflow through `#` columns; one group for every row of s, in
+        # s's order, empty or not (R-D5, J-D5). Rows tracing to no row of s
+        # are left out.
+        plan = source.meta["group"]
+        keys_ = list(plan["keys"])
+        groups = [(k, frame.loc[[i for i, kk in zip(frame.index, keys_) if kk == k]])
+                  for k in plan["all"]]
     else:
         if by not in frame.columns:
             # 010 C23: a step that fails, with the reason — not a bare KeyError.

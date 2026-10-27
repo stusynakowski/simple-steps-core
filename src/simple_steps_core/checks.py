@@ -546,8 +546,23 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                     f"the input does not have (it has {', '.join(map(str, available))})"
                 )
 
+    # 6b''. collapse(by="#s") groups by an earlier step's rows (R-D5): each row
+    #       must trace to one row of s, through `#` columns.
+    grouped = workflow._groups_by_step_of(operation) if workflow is not None else None
+    if grouped is not None:
+        by_, s_ = grouped
+        source_ = str(operation.input)
+        if source_ in workflow.steps and not workflow._reaches(source_, s_):
+            dropped = workflow._dropped_at(source_, by_)
+            problems.append(
+                f"collapse groups by {by_!r}, but the trace to {s_!r} was dropped at "
+                f"{dropped!r}: that step drops or renames {by_!r}, so where these rows "
+                f"came from is no longer known" if dropped is not None else
+                f"collapse groups by {by_!r}, but the rows of {source_!r} don't each come "
+                f"from one row of {s_!r} (a collapse or distinct in between, or no link "
+                f"at all), so grouping by {by_!r} isn't defined")
     # 6b'. collapse(by=…) groups by a column the input must have (010 C23).
-    if (verb is not None and verb.kind == "collapse" and workflow is not None
+    if (grouped is None and verb is not None and verb.kind == "collapse" and workflow is not None
             and isinstance(verb.settings.get("by"), str)
             and not workflow._columns_open(operation)):
         available = workflow._known_columns(operation)
@@ -1458,6 +1473,11 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     swept = 0
     if grouped:
         rule = "per_group"
+    by_step = workflow._groups_by_step_of(operation) if workflow is not None else None
+    if by_step is not None and by_step[1] in workflow.steps:
+        s_out = workflow.steps[by_step[1]].output       # one row per row of s (J-D5)
+        if not s_out.meta.get("staged") or s_out.meta.get("expected") is not None:
+            rule = "groups_of"
     elif kind == "sweep":
         lists = [v for k, v in verb.settings.items()
                  if k not in ("name", "over", "retries")]
@@ -1474,6 +1494,10 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         index, expected = [0], 1
     elif rule == "selected":
         index, expected = _selected_index(verb, operation, workflow, known)
+    elif rule == "groups_of":
+        s_out = workflow.steps[by_step[1]].output
+        index = list(s_out.data.index)
+        expected = len(index) if not s_out.meta.get("staged") else s_out.meta.get("expected")
     elif rule == "same" and known is not None:
         index, expected = list(known), n_in
     elif rule == "one":
@@ -1553,6 +1577,9 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         columns_open = True             # the fields are only known by running (G9)
     elif kind == "collapse" and unsettled:
         columns_open = True             # the key's column is named by a tool
+    elif kind == "collapse" and reducer_form(operation.fn or BUILTIN_TOOLS.get(operation.tool)) == "per_column":
+        # one column per input variable: known when the input's columns are (P4)
+        columns_open = workflow._columns_open(operation) if workflow is not None else False
     elif kind in ("sweep", "select", "collapse", "map", "expand"):
         columns_open = False            # these build their columns themselves
     else:

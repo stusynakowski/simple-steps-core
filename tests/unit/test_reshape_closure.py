@@ -207,7 +207,6 @@ def test_L12_a_stack_splits_back_into_its_inputs(k):
     same_rows(data(k, "back"), data(k, "a"))
 
 
-@pytest.mark.xfail(strict=True, reason="R-D5, R-D6: join keeps no row map (M4)")
 def test_L13_a_join_collapses_back_to_one_side(k):
     k["j"] = join(wf["v"], wf["w"], on="ward", how="left")
     k["back"] = first[mod.collapse(by="#v")](wf["j"])
@@ -334,7 +333,6 @@ def run(k):
         pass
 
 
-@pytest.mark.xfail(strict=True, reason="J-D5, R-D4, R-D5: [] loses its parent (J3)")
 def test_L22_jagged_lists_round_trip_empty_included(j):
     j["r"] = tags_rc[mod.source()]()
     j["e"] = mod.expand(columns=["tags"])(wf["r"])
