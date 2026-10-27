@@ -229,3 +229,19 @@ def test_a_secret_setting_is_shown_as_one():
     entry = Catalog(resources=[Db]).describe()["resource_types"]["Db"]
     assert {"name": "password", "type": "Secret[str]", "required": True,
             "default": None} in entry["settings"]
+
+
+# ── a resource is an argument, by keyword or by position ─────────────────
+def test_a_resource_passed_by_position_is_the_tools_argument():
+    k = Kernel(Catalog(tools=[beds, patients_i, to_f_i], resources=[Ward]))
+    k.define("ward", Ward)
+    k["by_name"] = beds[mod.source()](ward=res["ward"])
+    k["by_place"] = beds[mod.source()](res["ward"])
+    assert k.step("by_place").operation.to_dict() == k.step("by_name").operation.to_dict()
+    k.run_all()
+    assert k.step("by_place").data["value"].tolist() == [[1, 2]]
+
+
+def test_a_plain_call_with_a_resource_says_to_make_a_step():
+    with pytest.raises(TypeError, match=r"has no object until the workflow runs"):
+        beds(res["ward"])

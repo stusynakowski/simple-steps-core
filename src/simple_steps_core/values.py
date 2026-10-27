@@ -541,8 +541,14 @@ def _bind_positional(operation: "Operation", source: Any, values: tuple,
     for value in values:
         if isinstance(value, ResRef):
             decl = workflow.resources.get(value.name) if workflow is not None else None
-            fits = [p for p in free if decl is not None and decl.type is not None
-                    and _type_fits(decl.type, p.annotation)]
+            if decl is not None and decl.type is not None:
+                fits = [p for p in free if _type_fits(decl.type, p.annotation)]
+            else:
+                # Not declared in a workflow this call can see (`res[…]` before
+                # the step is assigned): the first parameter that isn't a
+                # literal. Declaring the step checks the type.
+                fits = [p for p in free if p.annotation is not inspect.Parameter.empty
+                        and not _literal_annotation(p.annotation)]
             target = fits[0] if fits else None
             if target is None:
                 raise TypeError(

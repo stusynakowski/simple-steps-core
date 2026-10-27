@@ -555,6 +555,12 @@ class Tool:
             return self._start()(*args, **kwargs)
         if any(isinstance(a, Operation) for a in (*args, *kwargs.values())):
             raise TypeError(_NESTED_OPERATION)
+        if any(isinstance(a, ResRef) for a in (*args, *kwargs.values())):
+            # A plain call would hand the function a reference, not the object.
+            raise TypeError(
+                f"{self.id}: res[…] has no object until the workflow runs. Make it "
+                f"a step: wf[...] = {self.id}[mod.source()](res[...]), or "
+                f"{self.id}[mod.map()](wf[...], res[...])")
         if len(args) == 1 and _runs_over_rows(self.fn, args[0], kwargs):
             # 009 decision 7: a frame whose rows are the arguments runs over them.
             return self._start().bind(**kwargs)[mod.auto()](args[0])

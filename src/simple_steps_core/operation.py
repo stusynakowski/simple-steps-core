@@ -344,6 +344,10 @@ class Operation:
         it concretely — so ``wf["scored"] = score(wf["raw"])`` is the whole
         step, and the verb it chose is visible and replaceable.
         """
+        if isinstance(source, ResRef):
+            # A resource is an argument, never data or an input: it binds to
+            # the parameter its type fits, as it would after an input.
+            more, source = (source, *more), _NO_SOURCE
         if more:
             # 008 C1: positional arguments after the input bind like keywords.
             literals = {**literals, **_bind_positional(self, source, more, literals)}
