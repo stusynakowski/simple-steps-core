@@ -29,10 +29,11 @@ comes off.
 | 5 ✓ | every verb records where its rows came from: `collapse` and `distinct` write `#v` lists, `join` and `stack` write `#a`, `#b`; a click on their cells shows the exact input rows; a dropped trace is named | `cc5a801` |
 | 6 ✓ | reducers take lists, and grouping is a pack then a map (R-D1, R-D13); `expand(columns=…)` in lockstep (R-D4); unpacking what core packed gives back its rows (R-D3); `by="#s"` back to any earlier step, every row of it (R-D5, J-D5) | `42e49a4`, `51a9580`, `444f797` |
 | 7 ✓ | `mod.pack`: a row's variables into one dict (R-D2); `widen` drops the column it spreads (G10) and, without `columns=`, takes the union of the keys (J-D2's union) | `672232f` |
-| 8 ✓ | `absent` for every cell with no source value (J-D1, J-D2, G2); `expand` never tidies, with `as_list`; a dict expands to key/value rows, `gather_dict` packs them back (J-D3, J-D4); the empty step (J-D6, G17); verbs can warn while running | `217e7cd`, `41d4db0`, this commit |
+| 8 ✓ | `absent` for every cell with no source value (J-D1, J-D2, G2); `expand` never tidies, with `as_list`; a dict expands to key/value rows, `gather_dict` packs them back (J-D3, J-D4); the empty step (J-D6, G17); verbs can warn while running | `217e7cd`, `41d4db0`, `7050053` |
+| 9 ✓ | every plan says how to go back: `rebuild` with the formula, `trace`, `opaque`, `generated` (R-D8); L52 runs every `rebuild` formula and checks it gives the input back | this commit |
 
-**51 of the 52 law tests hold:** every law but L21 (step 9). L40, the
-property test, is built in step 10.
+**Every law test holds: 53 of 53** (L1–L52, with L16b and L26b; L40 is
+the property test, built in step 10). No test is marked expected-to-fail.
 
 ## 3. The path
 
@@ -182,7 +183,15 @@ gives `key`, `value` rows (J-D4).
 - **Changes for users:** `expand` of a bare string or `None` no longer gives
   one row; it fails that row, or gives none.
 
-### Step 9. The plan says how to go back
+### Step 9. The plan says how to go back ✓
+
+*Done 2026-10-27.* Held to A8 (running a `rebuild` formula gives the input
+back exactly), the §7 table was too generous: `sort` can't rebuild its input
+from its output (the order is the input's), and `stack`, `join` and `expand`
+regroup back to the rows but not always the columns. They say `trace`. A
+fourth kind, `generated`, is for steps with no input.
+
+What was planned:
 
 Each plan carries `inverse: rebuild | trace | opaque`, and for `rebuild` the
 inverse step's formula (R-D8).

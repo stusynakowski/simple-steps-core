@@ -130,15 +130,18 @@ class Workflow:
         holding ``"empty"``, staged, that nothing can read until it has one."""
         if value is None:
             plan = {"rows": {"certainty": "exact", "count": 1},
-                    "columns": {"certainty": "exact", "names": [VALUE_COLUMN]}, "types": {}}
+                    "columns": {"certainty": "exact", "names": [VALUE_COLUMN]}, "types": {},
+                    "inverse": {"kind": "generated"}}
             empty = Output(pd.DataFrame({VALUE_COLUMN: ["empty"]}, index=[0]),
-                           meta={"staged": True, "empty": True, "plan": plan})
+                           meta={"staged": True, "empty": True, "plan": plan,
+                                 "inverse": {"kind": "generated"}})
             return Step(step_id, Operation(tool="identity", fn=identity)[mod.source()],
                         empty, extras=extras, literal=None)
         step = Step(step_id, Operation(tool="identity", fn=identity)[mod.source()],
                     source_(value), extras=extras, literal=value)
         step.output.meta["version"] = _data_version(step.output.data)
         step.output.meta["read"] = {}
+        step.output.meta["inverse"] = {"kind": "generated"}
         return step
 
     def _as_operation(self, operation: Any) -> Any:
@@ -225,6 +228,7 @@ class Workflow:
                 output = Output(previous.output.data, previous.output.states,
                                 {**previous.output.meta, "edited": True,
                                  "next_plan": staged.meta.get("plan")})
+        output.meta["inverse"] = self.inverse(step_id, operation)
         self.steps[step_id] = Step(step_id, operation, output, problems,
                                    warn(operation, self, step_id), kept_extras)
         if existed:
@@ -1185,6 +1189,60 @@ class Workflow:
             found = self._packed_by(str(op_.input), column, depth + 1)
         return found if found is not None and found in self._predicted_of(step_id) else None
 
+    # ── how to go back (reshaping.md §7, R-D8) ────────────────────────────
+    def inverse(self, step_id: str, operation: Operation | None = None) -> dict:
+        """How to go back from *step_id*'s output to its input, decided by the
+        verb, never the data: ``rebuild`` (with the inverse step's formula,
+        which gives the input back exactly), ``trace`` (the values are lost
+        here, but `#` columns lead to the input rows), ``opaque`` (a table
+        tool: the trace leads to the whole input), or ``generated`` (no input:
+        nothing to go back to)."""
+        op_ = operation if operation is not None else self.steps[step_id].operation
+        me = f'wf["{step_id}"]'
+        if is_combine(op_):
+            if op_.tool == "zip" and not op_.arguments.get("match_ids"):
+                grids = [str(g) for g in op_.grids]
+                one_origin = all(self._same_ids(a) & self._same_ids(b)
+                                 for n, a in enumerate(grids) for b in grids[n + 1:])
+                if one_origin:
+                    return {"kind": "rebuild", "formula": [
+                        f"mod.select(columns={variables(self._predicted_of(g))!r})({me})"
+                        for g in grids]}
+            return {"kind": "trace"}
+        verb = op_.shape_verb
+        kind = verb.kind if verb is not None else None
+        if kind == "auto":
+            kind = (self.steps[step_id].output.meta.get("auto") or {}).get("verb") \
+                if step_id in self.steps else None
+        if op_.input is None or kind in ("source", "sweep"):
+            return {"kind": "generated"}
+        if kind == "table":
+            return {"kind": "opaque"}
+        source = str(op_.input)
+        settings = verb.settings
+        if kind == "rename" and isinstance(settings.get("columns"), dict):
+            back = {new: old for old, new in settings["columns"].items()}
+            return {"kind": "rebuild", "formula": f"mod.rename(columns={back!r})({me})"}
+        if kind == "pack" and _named(op_) == VALUE_COLUMN:
+            chosen = list(settings.get("columns") or variables(self._predicted_of(source)))
+            return {"kind": "rebuild", "formula": f"mod.widen(columns={chosen!r})({me})"}
+        if kind == "widen":
+            names_ = variables(self._predicted_of(source))
+            spread = VALUE_COLUMN if VALUE_COLUMN in names_ else (names_[0] if len(names_) == 1 else None)
+            fields = list(settings.get("columns") or [])
+            if not fields and step_id in self.steps and not self.steps[step_id].output.meta.get("staged"):
+                fields = [c for c in variables(self.steps[step_id].output.data.columns) if c not in names_]
+            if spread == VALUE_COLUMN:
+                return {"kind": "rebuild",
+                        "formula": f"mod.pack(columns={fields!r})({me})" if fields else None}
+            return {"kind": "trace"}
+        if kind == "collapse" and _base(op_.fn or BUILTIN_TOOLS.get(op_.tool)) is BUILTIN_TOOLS["gather"] \
+                and self._groups_by_step_of(op_) is None:
+            by = settings.get("by")
+            lists = [c for c in variables(self._predicted_of(source)) if c != by]
+            return {"kind": "rebuild", "formula": f"mod.expand(columns={lists!r})({me})"}
+        return {"kind": "trace"}
+
     def _groups_by_step_of(self, operation: Operation) -> tuple[str, str] | None:
         """``(by, s)`` for an operation that is ``collapse(by="#s")``."""
         verb = operation.shape_verb
@@ -1524,6 +1582,15 @@ class Workflow:
 
     def _run_step(self, step_id: str, tools: dict[str, Callable] | None = None,
                   resources: Mapping[str, Any] | None = None) -> Step:
+        """Run one step (:meth:`_run_step_body`), then say how to go back from
+        what it produced (reshaping.md §7): every branch passes here."""
+        step = self._run_step_body(step_id, tools, resources)
+        if not step.output.meta.get("empty"):
+            step.output.meta["inverse"] = self.inverse(step_id)
+        return step
+
+    def _run_step_body(self, step_id: str, tools: dict[str, Callable] | None = None,
+                       resources: Mapping[str, Any] | None = None) -> Step:
         """Execute one step and replace its staged Output with the real one.
 
         *resources* is the caller's live objects, name → object, for every
@@ -1996,3 +2063,11 @@ from .values import (  # noqa: E402
     _value_fits,
 )
 from .verbs import source_  # noqa: E402
+
+
+def _named(operation: Operation) -> str:
+    """The column a step's `mod.name` gives it, or `value`."""
+    for m in reversed(operation.modifiers):
+        if m.kind == "name" and isinstance(m.settings.get("to"), str):
+            return m.settings["to"]
+    return VALUE_COLUMN

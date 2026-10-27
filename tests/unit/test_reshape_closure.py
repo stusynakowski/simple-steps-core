@@ -286,14 +286,44 @@ def test_L20_a_table_is_its_own_origin(k):
     assert state(k, "z") == "invalid"
 
 
-@pytest.mark.xfail(strict=True, reason="R-D8: the plan doesn't say how to go back")
 def test_L21_the_plan_says_how_to_go_back(k):
+    k["r"] = mod.rename(columns={"temp": "t"})(wf["v"])
     k["srt"] = mod.sort(by="temp")(wf["v"])
     k["f"] = hot_rc[mod.filter()](wf["v"])
     k["tb"] = reorder_rc[mod.table()](wf["v"])
-    assert k.workflow.steps["srt"].plan["inverse"] == "rebuild"
-    assert k.workflow.steps["f"].plan["inverse"] == "trace"
-    assert k.workflow.steps["tb"].plan["inverse"] == "opaque"
+    kinds = {n: k.workflow.steps[n].plan["inverse"]["kind"] for n in ("v", "r", "srt", "f", "tb")}
+    assert kinds == {"v": "generated", "r": "rebuild", "srt": "trace", "f": "trace", "tb": "opaque"}
+    assert k.workflow.steps["r"].plan["inverse"]["formula"] == \
+        "mod.rename(columns={'t': 'temp'})(wf[\"r\"])"
+
+
+def test_L52_every_rebuild_gives_its_input_back(k):
+    """A8: where a step's inverse is rebuild, running the formula on its output
+    gives back its input: the same rows, ids and variables."""
+    k["vt"] = mod.select(columns=["ward", "temp"])(wf["v"])
+    k["names"] = mod.select(columns=["name"])(wf["v"])
+    k["r"] = mod.rename(columns={"temp": "t"})(wf["v"])
+    k["p"] = mod.pack(columns=["name", "ward", "temp"])(wf["v"])
+    k["g"] = gather[mod.collapse(by="ward")](wf["vt"])
+    k["z"] = zip_(wf["names"], wf["vt"])
+    k["wd"] = mod.widen()(wf["p"])
+    k.run_all()
+    checked = 0
+    for step, inputs in (("r", ["v"]), ("p", ["v"]), ("g", ["vt"]), ("z", ["names", "vt"]), ("wd", ["p"])):
+        inverse = k.workflow.steps[step].plan["inverse"]
+        assert inverse["kind"] == "rebuild", step
+        formulas = inverse["formula"] if isinstance(inverse["formula"], list) else [inverse["formula"]]
+        for n, (formula, original) in enumerate(zip(formulas, inputs)):
+            name = f"back_{step}_{n}"
+            k[name] = eval(formula, {"mod": mod, "wf": wf, "op": op})
+            k.run_all()
+            back, want = data(k, name), data(k, original)
+            names_ = [c for c in want.columns if not str(c).startswith("#")]
+            assert sorted(map(str, back.index)) == sorted(map(str, want.index)), (step, formula)
+            pd.testing.assert_frame_equal(back.loc[list(want.index), names_], want[names_],
+                                          check_dtype=False, obj=f"{step}: {formula}")
+            checked += 1
+    assert checked == 6
 
 
 # ── uneven data: jagged JSON (§9) ────────────────────────────────────────────

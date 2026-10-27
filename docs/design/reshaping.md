@@ -243,11 +243,24 @@ new ids (`"0.1"`, a label only) and a child origin.
 Every step's plan says how to go back from its output to its input. The verb
 decides which, never the data:
 
+Every step's plan has `plan["inverse"]`:
+
 | Inverse | Means | Steps |
 |---|---|---|
-| **rebuild** | the input can be computed from this output alone; the plan writes the inverse step | `sort`, `rename`, `pack` ↔ `widen`, `gather` ↔ an `expand` that gives back ids, `zip_` → `select` per input, `stack` → `first[collapse(by="#a")]` per input, `join(how="outer")` → `first[collapse(by="#a")]` per side |
-| **trace** | the values are lost here, but `#` columns lead to the exact input rows, which are still in the workflow | `filter`, `slice`, `distinct`, `select`, `drop`, `join(how="inner")`, reductions, every tool call |
+| **rebuild** | the input can be computed from this output alone, exactly: the plan gives the formula of the step that does it (L52 runs every one) | `rename` → `rename` back; `pack` → `widen`; `widen` (of a `value` column) → `pack`; `gather[collapse(by=k)]` → `expand(columns=…)`; a `zip_` of one origin → a `select` per input |
+| **trace** | the values or the order are lost here, but `#` columns lead to the exact input rows, which are still in the workflow | `sort` (the rows are all there; their order is the input's), `filter`, `slice`, `distinct`, `select`, `drop`, `expand`, `stack`, `join`, reductions, every tool call |
 | **opaque** | the trace leads to the whole input | `table` |
+| **generated** | there is no input to go back to | `source`, `sweep`, a value, the empty step |
+
+```python
+k["r"] = mod.rename(columns={"temp": "t"})(wf["v"])
+k.step("r").plan["inverse"]
+# {'kind': 'rebuild', 'formula': "mod.rename(columns={'t': 'temp'})(wf[\"r\"])"}
+```
+
+`stack`, `join` and `expand` go back by regrouping, `collapse(by="#s")`
+(below): that gets the input's rows back exactly, but not always its
+columns, so the plan says `trace`, not `rebuild`.
 
 Every intermediate grid is kept, so "lossy" only means that this output alone
 can't rebuild its input. You can always trace back, unless you dropped the
@@ -481,6 +494,7 @@ Each law is one test, `test_L<n>_…`. Grouped by the guarantee it checks:
 | L18 | packing no rows gives `[]`; unpacking `[]` gives no rows, columns kept |
 | L33 | unpacking a reduction's `#v` puts each row beside its group's statistic |
 | L34 | reducers over no rows give their empty value |
+| L52 | every `rebuild` formula, run on its step's output, gives back that step's input: rows, ids and variables |
 | L49 | `f[collapse(by=k)](g)` is `f[map()](gather[collapse(by=k)](g))`: same values, ids and `#` columns |
 
 **Uneven data**

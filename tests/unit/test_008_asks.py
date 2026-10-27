@@ -698,7 +698,8 @@ def test_C9_a_step_that_ran_has_an_exact_plan(wf):
     assert wf.step("readings").plan == {
         "rows": {"certainty": "exact", "count": 4},
         "columns": {"certainty": "exact", "names": ["city", "n"]},
-        "types": {"city": "str", "n": "int"}}
+        "types": {"city": "str", "n": "int"},
+        "inverse": {"kind": "generated"}}                 # a value: nothing to go back to
 
 
 # ── A failure stops the run, unless the step catches it (mod.try_except) ──

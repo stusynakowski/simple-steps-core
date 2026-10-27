@@ -37,7 +37,8 @@ a key, or say `zip_(…, match_ids=True)` if you know the ids mean the same
 samples. Equal size is never enough.
 
 **7. You see the shape before you run.** Each step's plan says its rows and
-columns, and how to go back. A result that breaks the plan fails.
+columns, and how to go back: `rebuild` (with the step that does it), `trace`,
+`opaque` or `generated`. A result that breaks the plan fails.
 
 **8. Nothing is lost silently.** Filters and statistics drop values on
 purpose, but every row still traces back to the rows it came from. Only you

@@ -161,12 +161,17 @@ class Step:
         ``unknown``. Anything short of exact says ``because`` and how to
         ``resolve`` it. A step that has run is exact on every axis.
         """
+        inverse = self.output.meta.get("inverse")
         if not self.output.meta.get("staged"):
             data = self.output.data
-            return {"rows": {"certainty": "exact", "count": len(data)},
+            plan = {"rows": {"certainty": "exact", "count": len(data)},
                     "columns": {"certainty": "exact", "names": list(data.columns)},
                     "types": {c: _type_label(_dtype_type(data[c])) for c in data.columns}}
-        return self.output.meta.get("plan") or {}
+        else:
+            plan = dict(self.output.meta.get("plan") or {})
+        if inverse is not None:
+            plan["inverse"] = inverse             # how to go back (reshaping.md §7)
+        return plan
 
     def describe(self) -> str:
         """What this step is, in words — and, for ``auto``, which verb it picked."""
