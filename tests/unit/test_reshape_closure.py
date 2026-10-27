@@ -360,17 +360,29 @@ def test_L24_packing_widened_uneven_dicts_gives_them_back(j):
     assert data(j, "back").iloc[:, 0].tolist() == data(j, "m")["meta"].tolist()
 
 
-@pytest.mark.xfail(strict=True, reason="J-D3: expand wraps a bare string (J1)")
 def test_L25_expand_doesnt_normalise_a_bare_string(j):
-    j["m"] = mixed_rc[mod.source()]()
+    j["m"] = mixed_rc[mod.source()]()                                # ["a"], "c", None
     j["e"] = identity[mod.expand()](wf["m"])
     run(j)
     assert state(j, "e") == "failed"
-    assert "not a list" in str(j.workflow.steps["e"].output.notes.get(1))
-    assert "a" in data(j, "e").iloc[:, 0].tolist()                  # the other rows ran
+    assert "as_list" in str(j.workflow.steps["e"].output.notes.get("1.0"))
+    assert "a" in data(j, "e")["value"].tolist()                    # the other rows ran
+    assert any("held None" in str(w) for w in j.workflow.steps["e"].warnings)
+    j["l"] = op("as_list")[mod.map()](wf["m"])                       # said on purpose
+    j["e2"] = identity[mod.expand()](wf["l"])
+    j.run("l")
+    j.run("e2")
+    assert data(j, "e2")["value"].tolist() == ["a", "c"]
 
 
-@pytest.mark.xfail(strict=True, reason="J-D4: expand of a dict gives one row (J5)")
+def test_L26b_a_mapping_packs_back_with_gather_dict(j):
+    j["s"] = scores_rc[mod.source()]()
+    j["e"] = identity[mod.expand()](wf["s"])                         # key, value rows
+    j["back"] = op("gather_dict")[mod.collapse(by="#s")](wf["e"])
+    j.run_all()
+    assert data(j, "back")["value"].tolist() == [{"2026-01": 3, "2026-02": 4}]
+
+
 def test_L26_expanding_a_mapping_gives_key_value_rows(j):
     j["s"] = scores_rc[mod.source()]()
     j["e"] = identity[mod.expand()](wf["s"])
@@ -378,7 +390,6 @@ def test_L26_expanding_a_mapping_gives_key_value_rows(j):
     assert data(j, "e")[["key", "value"]].values.tolist() == [["2026-01", 3], ["2026-02", 4]]
 
 
-@pytest.mark.xfail(strict=True, reason="J-D3: expand of None gives a None row (J2)")
 def test_L27_expanding_none_gives_no_rows(j):
     j["m"] = mixed_rc[mod.source()]()
     j["n"] = mod.select(rows=[2])(wf["m"])                         # the None row

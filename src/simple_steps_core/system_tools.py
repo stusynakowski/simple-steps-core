@@ -97,6 +97,23 @@ def last(acc: Any = None, **row: Any) -> Any:
     return identity(**row)
 
 
+def as_list(**row: Any) -> list:
+    """A value as a list, on purpose (reshaping.md §9.2, J-D3): a list stays
+    itself, ``None`` becomes ``[]``, anything else ``[value]``. Use it under
+    ``map`` before ``expand`` when a single value means a one-item list. Finds
+    its value the way :func:`identity` does."""
+    value = identity(**row)
+    if value is None:
+        return []
+    return list(value) if isinstance(value, (list, tuple)) else [value]
+
+
+def gather_dict(key: list, value: list) -> dict:
+    """The rows of a group as one dict, ``{key: value}``: the inverse of
+    ``expand`` over a dict (J-D4)."""
+    return dict(zip(key, value))
+
+
 # What each reducer gives over no rows (docs/design/reshaping.md R6): the
 # value it would start from. ``first`` and ``last`` have none, so they give
 # ``None``; the ``absent`` cell state (J-D1) will say so better.
@@ -182,6 +199,8 @@ BUILTIN_TOOLS: dict[str, Callable] = {
     "total": total,
     "first": first,
     "last": last,
+    "as_list": as_list,
+    "gather_dict": gather_dict,
 }
 
 

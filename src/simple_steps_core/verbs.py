@@ -400,6 +400,7 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
         _no_tool("expand", fn)
         return _unpack(source, list(columns), restore)
     frame = rows(source, axis=axis)
+    none_rows = 0
     blocked = _upstream_failures(source)
     out_rows, records, ids = [], [], []
     for index, row in _units(frame, _absent_of(source)):
@@ -430,16 +431,28 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
             out_rows.append({name: None})
             ids.append(_child_id(index, 0))
             continue
-        items = (list(produced)
-                 if isinstance(produced, Iterable)
-                 and not isinstance(produced, (str, bytes, dict))
-                 else [produced])
+        # expand never tidies data for you (reshaping.md §9.2, J-D3): None gives
+        # no rows (counted, and said); a dict is a mapping, one row per key
+        # (J-D4); a single value where a list belongs fails its row.
+        mapping = isinstance(produced, Mapping)
+        if produced is None:
+            none_rows += 1
+            continue
+        if not mapping and (isinstance(produced, (str, bytes)) or not isinstance(produced, Iterable)):
+            records.append({**record, "status": "failed", "unit": index,
+                            "error": f"not a list: {type(produced).__name__}. If a single "
+                                     f"value means a one-item list, say so first: "
+                                     f"as_list[mod.map()]"})
+            out_rows.append({name: None})
+            ids.append(_child_id(index, 0))
+            continue
+        items = list(produced.items()) if mapping else list(produced)
         packed_ids = frame.at[index, restore] if restore in frame.columns else None
         for k, item in enumerate(items):
             # Only the item (owner decision, 2026-10-20), on an id derived from
             # its parent's; the ledger's `unit` names the parent too. Items of
             # a list core packed get back the ids they were packed from.
-            out_rows.append({name: item})
+            out_rows.append({"key": item[0], name: item[1]} if mapping else {name: item})
             records.append({**record, "unit": index})
             ids.append(packed_ids[k] if isinstance(packed_ids, list) and k < len(packed_ids)
                        else _child_id(index, k))
@@ -448,7 +461,7 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
     # type when a failed unit leaves a gap (008 R8) — `DataFrame(rows)` would
     # turn every int column with a None into float64.
     data = pd.DataFrame(index=_id_index(ids))
-    for column in (list(out_rows[0]) if out_rows else []):
+    for column in list(dict.fromkeys(c for r in out_rows for c in r)):
         data[column] = _typed([r.get(column) for r in out_rows], data.index)
     if not len(data.columns):
         # Every unit expanded to nothing. `DataFrame([])` has no columns at all,
@@ -466,9 +479,11 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
     # nothing has to read the parent back out of the "i.j" label.
     data.insert(0, _id_column_for(source), pd.Series(
         [r.get("unit") for r in records], index=data.index, dtype=object))
+    warnings_ = ([f"{none_rows} row{'s' if none_rows != 1 else ''} held None, not a list: "
+                  f"{'they' if none_rows != 1 else 'it'} gave no rows"] if none_rows else [])
     return Output(data=data, records=records, index=data.index,
                   meta={"verb": "expand", "form": "column", "value_column": name,
-                        "n_in": len(frame)})
+                        "n_in": len(frame), "warnings": warnings_})
 
 
 def _id_index(ids: list) -> pd.Index:

@@ -1623,6 +1623,11 @@ class Workflow:
             step.output = resolved.run(source, tools)
             step.output.data = _str_columns(step.output.data, step_id)
             _carry_id_columns(resolved, source, step.output)
+            found = step.output.meta.pop("warnings", None) or []
+            if found:                             # said while running (J-D3)
+                step.warnings = tuple(dict.fromkeys(
+                    [*step.warnings, *(Problem(w, "not_a_list", step=step_id, severity="warning")
+                                        for w in found)]))
             mismatch = _output_mismatch(step.operation, step.output.data)
             if mismatch:
                 raise SelectionError(mismatch)
@@ -1925,6 +1930,7 @@ from .checks import (  # noqa: E402
 )
 from .combines import _row_lookup, _run_combine, is_combine, own_id_columns  # noqa: E402
 from .errors import ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402
+from .problems import Problem  # noqa: E402
 from .modifiers import (  # noqa: E402
     MODIFIERS,
     Modifier,

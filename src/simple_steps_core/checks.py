@@ -1242,6 +1242,30 @@ def _selected_index(verb: Any, operation: "Operation", workflow: "Workflow | Non
     return chosen, len(chosen)
 
 
+def _expands_into(operation: "Operation", fn: Any, workflow: "Workflow | None") -> str | None:
+    """What an expand's tool returns per row, as far as is declared: "list",
+    "mapping", or None (not known until it runs)."""
+    if is_identity(fn):
+        if workflow is None or operation.input is None:
+            return None
+        names_ = variables(workflow._predicted_of(str(operation.input)))
+        column = VALUE_COLUMN if VALUE_COLUMN in names_ else (names_[0] if len(names_) == 1 else None)
+        hint = workflow._column_types(operation).get(column) if column else None
+    else:
+        hint = _return_hint(fn)
+    if hint is None:
+        return None
+    if typing.get_origin(hint) is typing.Annotated:
+        hint = typing.get_args(hint)[0]
+    origin = typing.get_origin(hint) or hint
+    if origin in (dict, collections.abc.Mapping) or (isinstance(origin, type) and issubclass(origin, dict)):
+        return "mapping"
+    if origin in (list, tuple, set, frozenset) or (isinstance(origin, type) and issubclass(
+            origin, collections.abc.Iterable) and origin not in (str, bytes)):
+        return "list"
+    return None
+
+
 def keeps_ids(kind: str | None, verb: Any) -> bool:
     """Are a step's rows its input's rows, with the same ids (reshaping.md §5)?
 
@@ -1587,6 +1611,16 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     elif kind == "collapse" and reducer_form(operation.fn or BUILTIN_TOOLS.get(operation.tool)) == "per_column":
         # one column per input variable: known when the input's columns are (P4)
         columns_open = workflow._columns_open(operation) if workflow is not None else False
+    elif kind == "expand" and not verb.settings.get("columns") and \
+            _expands_into(operation, fn_ := operation.fn or BUILTIN_TOOLS.get(operation.tool),
+                          workflow) != "list":
+        # A dict expands into key, value rows (J-D4). Known from the tool's
+        # declared return, or the column identity unpacks; else not until it runs.
+        if _expands_into(operation, fn_, workflow) == "mapping" and payload in ordered:
+            ordered.insert(ordered.index(payload), "key")
+            columns_open = False
+        else:
+            columns_open = True
     elif kind in ("sweep", "select", "collapse", "map", "expand"):
         columns_open = False            # these build their columns themselves
     else:
@@ -1697,6 +1731,7 @@ from .values import (  # noqa: E402
     _open_keywords,
     _optional_parts,
     _payload_type,
+    _return_hint,
     _shape_kind,
     _shape_problem,
     _type_label,
