@@ -150,3 +150,49 @@ def test_a_move_can_fix_an_order(k):
     k.move("early", -1)
     assert list(k) == ["p", "sick", "f", "early"]
     assert k.step("early").problems == ()
+
+
+# ── G13: a step is re-checked when its input's columns change ────────────
+@tool
+def label_i(name: str) -> str:
+    return name.upper()
+
+
+@pytest.fixture
+def k13():
+    k = Kernel(Catalog(tools=[patients_i, to_f_i, feverish_i, label_i]))
+    k["p"] = patients_i[mod.source()]()
+    k["sick"] = feverish_i[mod.filter()](wf["p"])
+    k["f"] = to_f_i[mod.map()](wf["sick"])
+    k["g"] = to_f_i[mod.map()](wf["f"], temp_c=1.0)
+    k.run_all()
+    return k
+
+
+def test_a_reader_whose_column_is_gone_is_a_problem_once_its_input_runs(k13):
+    k13["sick"] = label_i[mod.map()](wf["p"])        # sick no longer has temp_c
+    k13.run("sick")
+    f = k13.step("f")
+    assert f.state == "invalid"
+    assert [(p.code, p.message) for p in f.problems] == [
+        ("missing_column", "to_f_i() needs 'temp_c', which 'sick' does not have (it has value)")]
+    assert [p.code for p in k13.step("g").problems] == ["invalid_input"]
+    assert k13.validate()["f"] == f.problems
+    assert f.data["value"].tolist() == [100.76]         # what it showed is kept
+
+
+def test_fixing_the_input_clears_the_problem(k13):
+    k13["sick"] = label_i[mod.map()](wf["p"])
+    k13.run("sick")
+    k13["sick"] = feverish_i[mod.filter()](wf["p"])
+    k13.run("sick")
+    assert k13.step("f").problems == () and k13.step("g").problems == ()
+    k13.run_all()
+    assert [s.state for s in k13.steps] == ["completed"] * 4
+
+
+def test_until_the_input_reruns_its_reader_may_still_run_on_what_it_shows(k13):
+    k13["sick"] = label_i[mod.map()](wf["p"])        # re-declared, not run
+    assert k13.step("f").problems == ()
+    k13.run("f")                                     # sick's old output passes through
+    assert k13.needs_run()["f"] == "read stale 'sick'"

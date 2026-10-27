@@ -199,7 +199,7 @@ something the app works out.
 
 | # | What |
 |---|---|
-| G13 | **Readers aren't re-checked against a changed upstream.** `sick` changed from a `filter` (keeping `temp_c`) to a `map` (only `value`): `f`, which needs `temp_c`, is only `stale`, `validate()` reports nothing, and running `f` fails every row with `TypeError: to_f() missing 1 required positional argument: 'temp_c'`. It should be a problem on `f` as soon as `sick` changes |
+| G13 | **Readers aren't re-checked against a changed upstream.** `sick` changed from a `filter` (keeping `temp_c`) to a `map` (only `value`): `f`, which needs `temp_c`, is only `stale`, `validate()` reports nothing, and running `f` fails every row with `TypeError: to_f() missing 1 required positional argument: 'temp_c'`. It should be a problem on `f` as soon as `sick` changes *Done in phase 4 (2026-10-27): when the input runs, the reader is re-checked and gets `missing_column` (its old output is kept); steps after it get `invalid_input`. Before the input re-runs, the reader may still run on what the input shows* |
 | G14 | `run("f")` refuses when an input hasn't run, instead of running it first (C33). *Done in phase 3b* |
 | G15 | no `needs_run()`, no change callbacks, no "read a stale input" mark. *Done in phase 3d* |
 | G16 | a literal step's value isn't saved: `k["x"] = [3, 1, 2]` is saved as an `identity` source with no data, and a reloaded kernel can't run it. A literal is a step's recipe, so the spec should hold JSON-safe literals; a DataFrame assigned in Python is data, and needs a source tool or an output snapshot. *Done (owner, 2026-10-26): JSON-safe literals are saved in the step's spec; a DataFrame isn't* |

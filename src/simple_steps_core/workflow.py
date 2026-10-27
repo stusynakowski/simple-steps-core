@@ -1291,9 +1291,17 @@ class Workflow:
             for other in self.steps.values():
                 if other.name in changed:
                     continue
-                if not other.output.meta.get("staged"):
-                    continue                       # already has real data
                 if not any(name in changed for name in other.operation.reads):
+                    continue
+                if not other.output.meta.get("staged"):
+                    # G13: a step that has run keeps its output (shown, stale
+                    # if its input's data changed), but is re-checked against
+                    # the input as it is now: a column it needs may be gone.
+                    problems = check(other.operation, self, other.name)
+                    if problems != other.problems:
+                        other.problems = problems
+                        wave.add(other.name)
+                    other.warnings = warn(other.operation, self, other.name)
                     continue
                 # Re-check too (008 K1): a column check that was deferred, or
                 # one that failed against a guess, is decided now that the

@@ -49,7 +49,7 @@ Each is confirmed before it lands, and gets a probe.
 
 | Feature | ID |
 |---|---|
-| **A step is re-checked when an upstream's columns change**, so a reader that lost its column is a problem at once, not a `TypeError` on every row. *Highest priority: reactive status depends on it* | G13 |
+| **A step is re-checked when an upstream's columns change**, so a reader that lost its column is a problem, not a `TypeError` on every row. *Done (phase 4, 2026-10-27), once the input re-runs* | G13 |
 | `to_source()` prints every form as written (reshapes, selections), so step ⇄ formula round-trips | G4 |
 | `k["x"] = None` is an empty step (1×1 `"empty"`), a placeholder line | G17 |
 | Row count and estimated size per output, or `unknown` with the reason; pages of 50–100 rows | K26 |
