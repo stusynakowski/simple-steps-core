@@ -201,3 +201,47 @@ Additive, each a small pass in the app (cleanup-map.md stage C rows):
 | G-D1 | move the app now, before steps D–F | yes: §1 |
 | G-D2 | older saved workspaces (K17) | refuse with core's message, as the app's own rule says; a converter only if a named user has files to keep |
 | G-D3 | the app's stage A, B, D deletions before the move | yes: less to port, and none of them needs the new core |
+
+## 7. To do in core
+
+What `simple-steps-core` does for this move, then after it. Each item is
+one piece, confirmed before it lands; ✓ when done.
+
+### Before the app moves
+
+| | To do | Why |
+|---|---|---|
+| T1 | **Tag a release** (`0.2.0`, from `0.1.0`) at the commit the app pins, and bump `__version__` | the app pins a commit today; a tag says which core the migration was checked against |
+| T2 | **Export what the app needs publicly**: `ResourceNotLoaded` (and the other errors), `op`; or say which module each comes from in `docs/integrating.md` | §3.1 sends the app to internal modules for these; an internal name may change |
+| T3 | **A public way to infer a verb and list formula names**: the UI calls `/api/infer_verb` and the parser needs `formula_names` (today `checks.infer_verb`, `catalog.formula_names`, both internal) | the app shouldn't reach into `checks` |
+| T4 | `cat.describe()` gives each tool's **`hash`** beside its tags and extras | the palette and the workflow file show `k.id`; a changed tool should be visible there too |
+| T5 | **Update kernel-session.md and its example** (`examples/kernel_session.py`) with step C: ids, `diff`, `Secret`, `data_version()` | the working guide is what the app's developer reads first (phase-4 *done means*, 4) |
+| T6 | **Run the app's acceptance session against core alone** (its doc 12, and the regenerated probes), and fix what fails here, not in the app | "if the app works out a fact about a workflow, that fact belongs in core" |
+
+### Decisions waiting on the owner
+
+| | Decision | Recommended |
+|---|---|---|
+| C-D2 | the seed recommendation | a tool with a `seed` parameter its step doesn't give warns |
+| R-D1 | a resource whose type has bound tools: also passable to a free tool as an argument, or only through its bound tools? | both allowed (today's behaviour), unless you mean to refuse |
+| G-D1–3 | §6 | as recommended there |
+
+### Leftovers from step A
+
+| | To do |
+|---|---|
+| T7 | `where: expect` on a failure note from an `expect` modifier, like `where: timeout` |
+| T8 | a source tool returning a list of records gives one row per record (`-> list[LoHi]` does under `expand`; a source doesn't yet) |
+
+### After the move: the rest of phase 4
+
+In order, each as its step in [phase4-plan.md](phase4-plan.md), and each
+followed by its small pass in the app (§5):
+
+| | Step | Needs first |
+|---|---|---|
+| T9 | **D. Sessions**: K22 outputs by data version, K23/K14 progress and `cancel()`, K15 re-run failed rows, R9 stages, the autorun modifier | D-D1 (autorun design), D-D2 (progress callback) |
+| T10 | **E. Storage**: C32/K16 the output store, R7 media handles | E-D1 (the store's interface) |
+| T11 | **F. The workflow as a table** (G18) | nothing new |
+| T12 | `scripts/core_asks.py` at 39 of 39 (K14, K15, K16 close with D and E) | T9, T10 |
+| T13 | **Phase 5, the final docs** (cleanup-plan.md §6): README, writing-tools, resources (secrets, data versions), modifiers, integrating (for the app), problems | phase 4 done |
