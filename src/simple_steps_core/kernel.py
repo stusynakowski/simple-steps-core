@@ -25,7 +25,7 @@ from typing import Any
 
 from .catalog import Catalog
 from .output import VALUE_COLUMN
-from .specs import KernelSpec
+from .specs import Naming, KernelSpec
 from .references import ResRef, StepRef
 from .step import NO_LITERAL, Step
 from .workflow import Workflow
@@ -113,12 +113,15 @@ def _formula(step: Step) -> str:
 class Kernel:
     """A workflow, the catalog it may use, and the resources it has loaded."""
 
-    def __init__(self, catalog: Catalog):
+    def __init__(self, catalog: Catalog, naming: "Naming | None" = None):
         if not isinstance(catalog, Catalog):
             raise TypeError("Kernel(catalog): pass a Catalog, e.g. "
                             "Kernel(Catalog(tools=[...]))")
+        if naming is not None and naming.case not in (None, "snake", "camel"):
+            raise ValueError(f"Naming(case=…) is 'snake', 'camel' or None, got {naming.case!r}")
         self.catalog = catalog
-        self.workflow = Workflow(catalog=catalog)
+        self.naming = naming
+        self.workflow = Workflow(catalog=catalog, naming=naming)
         self.resources = Resources(self)
         self._listeners: list[Callable[[dict], Any]] = []
 
@@ -318,7 +321,7 @@ class Kernel:
     def spec(self) -> KernelSpec:
         """Everything needed to reproduce this workflow with this set of tools:
         the workflow spec and the catalog spec. Never output data."""
-        return KernelSpec(self.workflow.spec, self.catalog.spec)
+        return KernelSpec(self.workflow.spec, self.catalog.spec, self.naming)
 
     def to_json(self) -> str:
         """The spec as JSON: steps, resources, extras and the catalog's names."""
@@ -337,9 +340,10 @@ class Kernel:
 
     @classmethod
     def _load(cls, blob: dict, catalog: Catalog) -> "Kernel":
-        kernel = cls(catalog)
-        blob = {k: v for k, v in blob.items() if k != "catalog"}
-        kernel.workflow = Workflow.from_dict(blob, catalog=catalog)
+        naming = Naming.from_dict(blob.get("naming"))
+        kernel = cls(catalog, naming)
+        blob = {k: v for k, v in blob.items() if k not in ("catalog", "naming")}
+        kernel.workflow = Workflow.from_dict(blob, catalog=catalog, naming=naming)
         return kernel
 
     # ── display ──────────────────────────────────────────────────────────

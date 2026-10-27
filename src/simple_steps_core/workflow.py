@@ -13,6 +13,7 @@ from typing import Sequence
 import hashlib
 import inspect
 import json
+import re
 import typing
 
 import pandas as pd
@@ -25,7 +26,7 @@ class Workflow:
     ``wf.run("scored")`` is what actually computes.
     """
 
-    def __init__(self, catalog: "Catalog | None" = None) -> None:
+    def __init__(self, catalog: "Catalog | None" = None, naming: Any = None) -> None:
         self.steps: dict[str, Step] = {}
         #: Declared resources, by name — the declarations, never the objects.
         self.resources: dict[str, Resource] = {}
@@ -35,6 +36,8 @@ class Workflow:
         self.catalog = catalog
         #: The app's additions to the workflow, by namespace. Saved, never read.
         self.extras: dict = {}
+        #: The kernel's naming conventions (outputs-and-reshaping.md §10), or None.
+        self.naming = naming
 
     # ── resources ────────────────────────────────────────────────────────
     def define(self, name: str, type_: type, /, **settings: Any) -> ResRef:
@@ -232,6 +235,15 @@ class Workflow:
         output.meta["inverse"] = self.inverse(step_id, operation)
         self.steps[step_id] = Step(step_id, operation, output, problems,
                                    warn(operation, self, step_id), kept_extras)
+        cased = self._case_problems(step_id, staged)
+        if cased:
+            step_ = self.steps[step_id]
+            severity = "error" if getattr(self.catalog, "strict", False) else "warning"
+            found = tuple(Problem(c, "naming_case", step=step_id, severity=severity) for c in cased)
+            if severity == "error":
+                step_.problems = tuple(step_.problems) + found
+            else:
+                step_.warnings = tuple(step_.warnings) + found
         if existed:
             self._mark_stale_dependents(step_id)
             # What reads this step may need what its new formula won't give.
@@ -1254,6 +1266,29 @@ class Workflow:
             return {"kind": "rebuild", "formula": f"mod.expand(columns={lists!r})({me})"}
         return {"kind": "trace"}
 
+    def default_name_rule(self, operation: Operation) -> dict | None:
+        """The kernel's naming pattern, for a step that writes values and has no
+        ``mod.name`` of its own (outputs-and-reshaping.md §10)."""
+        pattern = getattr(self.naming, "pattern", "{field}")
+        verb = operation.shape_verb
+        if pattern == "{field}" or verb is None or operation.name_rule is not None or \
+                (verb.kind not in NAMED_VERBS and verb.kind != "auto"):
+            return None
+        return {"pattern": pattern}
+
+    def _case_problems(self, step_id: str, output: Output) -> list[str]:
+        """Columns a step writes that don't follow the kernel's case (§10)."""
+        case = getattr(self.naming, "case", None)
+        if case is None:
+            return []
+        op_ = self.steps[step_id].operation if step_id in self.steps else None
+        source = str(op_.input) if op_ is not None and op_.input is not None else None
+        before = set(self._predicted_of(source)) if source in self.steps else set()
+        rule = _SNAKE if case == "snake" else _CAMEL
+        return [f"{c!r} isn't {case} case, as this kernel's naming asks"
+                for c in variables(predicted_columns(output))
+                if c not in before and not rule.match(str(c))]
+
     def _declared_fields(self, operation: Operation) -> list[str] | None:
         """For ``widen`` with no ``columns=``: the fields of the record type the
         column it spreads is declared to hold (G9), so its plan is exact."""
@@ -1745,7 +1780,7 @@ class Workflow:
             step.output = resolved.run(source, tools)
             step.output.data = _str_columns(step.output.data, step_id)
             _spread_record(resolved, step.output)
-            _apply_naming(resolved, step.output, step_id)
+            _apply_naming(resolved, step.output, step_id, self.default_name_rule(resolved))
             _carry_id_columns(resolved, source, step.output)
             found = step.output.meta.pop("warnings", None) or []
             if found:                             # said while running (J-D3)
@@ -1916,7 +1951,7 @@ class Workflow:
     @classmethod
     def from_dict(cls, blob: dict, tools: dict[str, Callable] | None = None,
                   resource_types: dict[str, type] | None = None, *,
-                  catalog: "Catalog | None" = None) -> "Workflow":
+                  catalog: "Catalog | None" = None, naming: Any = None) -> "Workflow":
         """Rebuild a Workflow from either export — all at once.
 
         Every step goes through the same :func:`check` and :func:`stage` the
@@ -1941,7 +1976,7 @@ class Workflow:
                 f"this workflow was saved in format version {version}, before "
                 f"the redesign; this core reads version {FORMAT_VERSION} only. "
                 "Rebuild it and save it again.")
-        workflow = cls(catalog=catalog)
+        workflow = cls(catalog=catalog, naming=naming)
         if catalog is not None:
             tools, known = catalog.functions, catalog.resource_types
         else:
@@ -2065,6 +2100,7 @@ from .problems import Problem  # noqa: E402
 from .values import _record_fields, named_columns, record_return  # noqa: E402
 from .modifiers import (  # noqa: E402
     MODIFIERS,
+    NAMED_VERBS,
     Modifier,
     is_shape,
     mod,
@@ -2185,13 +2221,16 @@ def _spread_record(operation: Operation, output: Output) -> None:
 
 
 _MISSING = object()
+_SNAKE = re.compile(r'^[a-z0-9]+(_[a-z0-9]+)*$')
+_CAMEL = re.compile(r'^[a-z][a-zA-Z0-9]*$')
 
 
-def _apply_naming(operation: Operation, output: Output, step_id: str) -> None:
+def _apply_naming(operation: Operation, output: Output, step_id: str,
+                  default: dict | None = None) -> None:
     """``mod.name`` as a list, a mapping or a pattern (G12), after the run: a
     list spreads a sequence by position, a mapping renames fields, a pattern
     renames each column the step wrote. A single name went to the verb."""
-    rule = operation.name_rule
+    rule = operation.name_rule or default
     if rule is None or operation.naming is not None:
         return
     verb = operation.shape_verb

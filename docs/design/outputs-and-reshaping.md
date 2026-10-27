@@ -157,7 +157,7 @@ for a record, or the column's own name for verbs that carry columns. So
 `sweep` (decided 2026-10-27): `name=` on a verb is a problem pointing to
 `mod.name`. *Built (phase 4):* every form: a single name, a list, a mapping and a
 pattern, each checked when declared and planned exactly; and records spread
-(§3). *Next:* kernel-wide naming conventions (§10).
+(§3); and kernel-wide naming conventions (§10).
 
 ## 5. Inconsistent data: what each case does
 

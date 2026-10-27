@@ -1670,7 +1670,9 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     declared_record = None
     if payload and operation.naming is None:      # (one name keeps a record in one cell)
         declared_record = record_return(kind, operation.fn or BUILTIN_TOOLS.get(operation.tool))
-    naming_rule = operation.name_rule if operation.naming is None else None
+    naming_rule = (operation.name_rule or (workflow.default_name_rule(operation)
+                                           if workflow is not None else None)) \
+        if operation.naming is None else None
     written: list = []
     if declared_record is not None:
         # a declared record: one column per field, in declared order (G8)

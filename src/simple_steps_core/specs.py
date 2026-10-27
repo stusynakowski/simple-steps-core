@@ -102,12 +102,38 @@ class CatalogSpec:
 
 
 @dataclass(frozen=True)
+class Naming:
+    """A kernel's naming conventions (outputs-and-reshaping.md §10).
+
+    ``pattern``: how a step with no ``mod.name`` names the columns it writes
+    (``"{field}"`` keeps them as they are; ``"{step}_{field}"`` says which step
+    wrote each). ``case``: ``"snake"``, ``"camel"`` or None: a written column
+    that doesn't follow it is a warning (a problem with a strict catalog).
+    Core never renames to fit the case.
+    """
+
+    pattern: str = "{field}"
+    case: str | None = None
+
+    def to_dict(self) -> dict:
+        return {"pattern": self.pattern, "case": self.case}
+
+    @classmethod
+    def from_dict(cls, blob: dict | None) -> "Naming | None":
+        return cls(blob.get("pattern", "{field}"), blob.get("case")) if blob else None
+
+
+@dataclass(frozen=True)
 class KernelSpec:
-    """A kernel: its workflow spec and its catalog spec — everything needed to
-    reproduce the workflow with that set of tools."""
+    """A kernel: its workflow spec, its catalog spec and its naming conventions
+    — everything needed to reproduce the workflow with that set of tools."""
 
     workflow: WorkflowSpec
     catalog: CatalogSpec
+    naming: Naming | None = None
 
     def to_dict(self) -> dict:
-        return {**self.workflow.to_dict(), "catalog": self.catalog.to_dict()}
+        out = {**self.workflow.to_dict(), "catalog": self.catalog.to_dict()}
+        if self.naming is not None:               # (a kernel without one saves as before)
+            out["naming"] = self.naming.to_dict()
+        return out

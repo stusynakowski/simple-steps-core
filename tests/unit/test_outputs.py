@@ -224,3 +224,42 @@ def test_G12_a_name_that_doesnt_fit_is_refused_when_declared(g12, naming, says):
 def test_G12_the_formula_prints_as_written(g12):
     g12["s"] = bounds[mod.map(), mod.name({"lo": "low"}, pattern="{field}_c")](wf["x"])
     assert g12.step("s").formula == 'bounds[mod.map(), mod.name({"lo": "low"}, pattern="{field}_c")](wf["x"])'
+
+
+# ── G12: kernel-wide naming conventions (outputs-and-reshaping.md §10) ───────
+
+from simple_steps_core import Naming  # noqa: E402
+
+
+@tool
+def toF(n: int) -> float:  # noqa: N802  (camel on purpose)
+    return n * 1.8 + 32
+
+
+def test_G12_a_kernel_pattern_names_every_step_without_its_own():
+    cat = Catalog(tools=[bounds, toF])
+    k = Kernel(cat, naming=Naming(pattern="{step}_{field}"))
+    k["x"] = pd.DataFrame({"n": [1, 3]})
+    k["b"] = bounds[mod.map()](wf["x"])
+    k["f"] = toF[mod.map(), mod.name("temp")](wf["x"])                  # its own name wins
+    k["s"] = mod.sort(by="n")(wf["x"])                                   # writes nothing new
+    assert k.step("b").plan["columns"]["names"] == ["b_lo", "b_hi"]
+    k.run_all()
+    assert {n: list(k.step(n).data.columns) for n in "bfs"} == {
+        "b": ["b_lo", "b_hi"], "f": ["temp"], "s": ["n"]}
+    back = Kernel.from_json(k.to_json(), cat)                           # saved with the kernel
+    assert back.naming == Naming(pattern="{step}_{field}")
+
+
+def test_G12_a_kernel_case_warns_and_never_renames():
+    k = Kernel(Catalog(tools=[toF]), naming=Naming(case="snake"))
+    k["x"] = pd.DataFrame({"n": [1]})
+    k["f"] = toF[mod.map(), mod.name("tempF")](wf["x"])
+    assert any("isn't snake case" in str(w) for w in k.step("f").warnings)
+    k.run_all()
+    assert list(k.step("f").data.columns) == ["tempF"]
+
+
+def test_G12_a_kernel_without_naming_saves_as_before():
+    k = Kernel(Catalog(tools=[toF]))
+    assert "naming" not in k.to_json()
