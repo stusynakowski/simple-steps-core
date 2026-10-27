@@ -23,22 +23,23 @@
 | Value steps saved with their value (G16); values as controls (`limit=wf["limit"]`) | 3e |
 | `k.check` for proposals; `k.needs_run`; `k.on_change`; stale inputs pass through, marked *read stale* | 3d |
 | No process-wide state: two kernels in one process share nothing (K24) | 3e (1) |
+| The agreed words; `step.status` the live part; saved format v4; `grid` removed; `Operation.from_spec` | 3e (2) |
 
-## Next: finishing phase 3
+## Phase 3 is complete
 
-Each needs the owner's go-ahead, because it changes what the app imports or
-the saved format.
+The last piece (3e) renamed everything to the agreed words, made
+`step.status` the step's live part, moved the saved format to version 4, and
+removed the `grid` module: the package's exports are the public API. What the
+app changes to move onto it is listed in
+[cleanup-plan.md §5](cleanup-plan.md#5-what-the-app-changes).
 
-| Item | What changes | For the app |
-|---|---|---|
-| **Renames to the agreed words**: `ToolHandle` → `Tool`, `tool_id` / `step_id` → `name`, `Modifier.params` → `settings`, `ResourceDecl` into `ResourceSpec`, `meta["payload"]` → `value_column` | the JSON keys too, so the format version goes up; older files don't load (decided: no compatibility) | re-save its workflows and examples |
-| **`step.status` becomes the live part** (output, state, problems), as designed; `step.state` is the string | `.status` stops being a string | read `.state` |
-| **Remove the `grid` module**: the public names are on `simple_steps_core`; tests move to the public API and to specific modules | `from simple_steps_core import grid` stops working | its migration point: imports, `core_bridge.py`, `main.py:139`, `kernels.py` onto `Kernel` |
-| **Plain imports** between modules, replacing the bottom-of-module imports and fixed load order | internal only | none |
-
-Recommended: the renames and `status` together (one format change), then
-removing `grid`. Plain imports later, module by module, as phase 4 rewrites
-each area, rather than one large restructure now.
+Deferred on purpose: **plain imports between modules.** Today several modules
+import each other at the bottom of the file and the package loads them in a
+fixed order. Phase 4 replaces that module by module, as it rewrites each area.
+Also not renamed, because the old names are used as plain identifiers
+throughout: method parameters called `step_id` and `tool_id`, and the `.id` of
+a tool or a reference (`Tool.id`, `StepRef.id`, `ToolRef.id`), which could
+become `.name` later.
 
 ## Phase 4: behaviour, one change at a time
 

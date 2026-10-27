@@ -199,3 +199,15 @@ def test_a_shadowed_rows_is_refused_through_a_kernel_too(k):
     rows = [10, 20, 30]  # noqa: F841 — shadows core's `rows`, which is the point
     with pytest.raises(TypeError, match="'rows' is reserved for row selection"):
         k["x"] = [1, 2]
+
+
+def test_an_operation_from_its_spec_is_how_a_formula_bar_hands_core_a_step(k, cat):
+    from simple_steps_core import Operation
+    spec = {"tool": "to_f_k", "input": {"$ref": "sick"}, "arguments": {},
+            "modifiers": [{"kind": "map", "settings": {}}]}
+    op = Operation.from_spec(spec, cat)
+    assert op.to_source() == 'to_f_k[mod.map()](wf["sick"])'
+    assert k.check("g", op) == ()
+    k["g"] = op
+    k.run("g")
+    assert values(k, "g") == [100.76]

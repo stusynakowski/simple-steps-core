@@ -129,7 +129,7 @@ tests and examples have moved onto the kernel.
 | 3c | `Problem` (a `str` with `code`, `step`, `argument`, `row`, `severity`; 33 codes in `problems.CODES`), given by every section of `check()` and `warn()` and by the catalog; `step.state`, `step.name`, `step.data`; `Output.version`, `read`, `plan`, `value_column`, `staged`, `stale`, `stale_reason`, `ran_with` (read from `meta` until 3e); `step.status` stays an alias of `state` until 3e | done |
 | 3d | `spec` on every object (`StepSpec`, `WorkflowSpec`, `ResourceSpec`, `CatalogSpec`, `KernelSpec`; `Kernel.from_spec`); `extras` on steps, resources and the workflow, saved and loaded; warnings name their step; `k.check(name, op)`; `k.needs_run()` and a *read stale* mark (a step run on a stale input is `completed`, and becomes stale only when that input's data changes); `k.on_change(callback)`; `k.insert`, `k.move` | done |
 | 3e (1) | isolation (K24): `@tool` and `@resource` register nothing; `TOOLS`, `TOOL_TAGS`, `RESOURCE_TYPES`, `freeze`, `is_frozen`, `declared_tools`, `resource_types()`, `STRICT_TYPES` and `settings.implicit_auto` are gone. Strictness is per tool or `Catalog(..., strict=True)`; implicit auto is always on. A workflow without a catalog uses only the functions its operations carry, or a `tools=` table passed to `from_json`, which also resolves tools saved as settings. Tests and examples name their tools explicitly | done |
-| 3e (2) | remove `grid` and the old names; plain imports; `step.status` as the live part. Awaiting the owner's go-ahead: see [features.md, Next](features.md#next-finishing-phase-3) | |
+| 3e (2) | renamed to the agreed words (`Tool`, `BoundTool`, `Resource`, `Operation.tool`, `Step.name`, `Modifier.settings`, `VALUE_COLUMN`, `value_column()`); `step.status` is a `StepStatus` and `step.state` the string; saved format v4 (`name`, `tool`, `settings`), other versions refused; `grid` removed, the package exports the public API and loads the modules in order; `Operation.from_spec(spec, catalog)`. Plain imports deferred to phase 4 | done |
 
 **Isolation was finished in 3e (1).** Before it, a kernel never *read*
 process-wide state, but core still *wrote* it: `@tool` adds every
@@ -164,24 +164,44 @@ saved workflow with its outputs is loaded against a smaller catalog.
 
 ## 5. What the app changes
 
-Its pin is a fixed commit, so nothing breaks until it moves. At the move to
-phase 3:
+Its pin is a fixed commit, so nothing breaks until it moves. Phase 3 is the
+migration point. Moving to it:
 
-1. `core_bridge.py` (`register_tool`, `REGISTRY`, `ResourceSpec`) and
-   `main.py:139` (`REGISTRY`) build a `Catalog` instead. Do this first, since
-   phase 1 removes these names.
-2. Reads of `grid.TOOLS`, `grid.RESOURCE_TYPES`, `grid.BUILTIN_TOOLS`,
-   `grid.freeze`, `grid.catalog`, `grid.tool_entry`, `grid.modifier_catalog`,
-   `grid.resource_entry`, `grid.shape_verbs` read `Catalog.describe()`.
-3. `kernels.py`'s `Kernel` wraps core's `Kernel` and keeps only key, lock and
-   last-used. Its `formulas`, `operations`, `reads`, `uses` and `problems`
-   come from core's steps; `summary()` is `repr(k)`'s data.
-4. The formula parser (`operation_formula.py`) stays in the app and targets
-   `Operation.from_spec`. `agent/proposals.py`'s `check_step` calls
-   `k.check(name, op)`.
-5. The app's "symptom of pin drift" (`cannot import name 'ResourceSpec'`)
-   changes, since `ResourceSpec` exists again: use `cannot import name 'grid'`.
-6. Saved workflows from before phase 3 don't load. The app re-saves its examples.
+1. **Import from the package, not `grid`.** `from simple_steps_core import
+   Catalog, Kernel, tool, resource, bound_tool, mod, wf, res, cols, rows, join,
+   stack, zip_, Operation, Step, Output, Problem`. Anything else comes from its
+   module (`simple_steps_core.catalog`, `.checks`, …), which may change.
+2. **Build a catalog** where `core_bridge.py` used `register_tool`,
+   `REGISTRY` and `ResourceSpec`, and `main.py:139` used `REGISTRY`:
+   `Catalog.from_modules(app_tools)` or `Catalog(tools=[...], resources=[...])`.
+   `@tool` and `@resource` register nothing.
+3. **Read the palette from the catalog.** `cat.describe()` replaces
+   `grid.catalog()`, `tool_entry`, `modifier_catalog`, `resource_catalog`,
+   `builtin_tools`, `shape_verbs`, `TOOLS`, `RESOURCE_TYPES` and `freeze`.
+4. **Host core's `Kernel`.** `kernels.py` keeps key, lock and last-used; the
+   rest comes from core: `k.step(n).state`, `.problems` (with `.code`),
+   `k.needs_run()`, `k.on_change(callback)`, `k.view`, `k.cell`, `k.check`.
+5. **Hand formulas to core as operations.** The parser (`operation_formula.py`)
+   stays in the app and builds `Operation.from_spec(spec, catalog)`;
+   `agent/proposals.py`'s `check_step` calls `k.check(name, op)`.
+6. **Rename what it reads:**
+
+   | Was | Now |
+   |---|---|
+   | `ToolHandle`, `BoundToolHandle`, `ResourceDecl` | `Tool`, `BoundTool`, `Resource` |
+   | `op.tool_id`, `step.step_id` | `op.tool`, `step.name` |
+   | `modifier.params` | `modifier.settings` |
+   | `step.status` (a string) | `step.state`; `step.status` is a `StepStatus` |
+   | `PAYLOAD`, `payload_column()`, `meta["payload"]` | `VALUE_COLUMN`, `value_column()`, `output.value_column` |
+   | preview `["status"]` | preview `["state"]` |
+   | JSON `step_id`, `tool_id`, `params` | `name`, `tool`, `settings` (format version 4) |
+
+7. **Re-save its workflows and examples.** Files in other format versions are
+   refused, with a message.
+8. **Regenerate `core-handover/`'s probes** against the new API; they import
+   `grid` and no longer run here.
+9. The "symptom of pin drift" in the app's docs becomes
+   `cannot import name 'grid' from 'simple_steps_core'`.
 
 ## 6. The documentation after the work
 

@@ -4,7 +4,8 @@ The single canonical example for `simple-steps-core`. It defines **one registry
 of tools** and one tiny tabular dataset, then wires a workflow that exercises
 **every grid-model orchestration** in one place.
 
-Everything here uses the **grid model** (`from simple_steps_core import grid`) —
+Everything here uses the grid model through `simple_steps_core`, with a
+`CATALOG` of the example's tools —
 the authoring surface being designed. See [docs/grid-model.md](../../docs/grid-model.md)
 and [docs/shape-algebra.md](../../docs/shape-algebra.md).
 

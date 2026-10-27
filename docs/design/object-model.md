@@ -4,10 +4,11 @@
 > running), so the distance to the design is visible. Where this document and
 > the code disagree, this document is the intent.
 >
-> **Build status:** `Catalog` and `Kernel` exist (phase 3a, 3b). Some *Today*
-> notes are now out of date, and some of this design isn't built yet (for
-> example, `@tool` still registers globally until 3e). What's built is tracked
-> in [cleanup-plan.md, phase 3](cleanup-plan.md#phase-3-piece-by-piece).
+> **Build status: phase 3 is complete.** The objects, words and specs below are
+> built, as `simple_steps_core`'s public API; the *Today* notes describe core
+> before the redesign. What phase 4 adds is in [features.md](features.md); two
+> names differ from this document for now: a tool's and a reference's name is
+> `.id`, and `Operation.from_spec` takes the spec as a dict.
 
 ## 1. The words
 

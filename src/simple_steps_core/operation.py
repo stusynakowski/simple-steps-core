@@ -223,6 +223,13 @@ class Operation:
         return blob
 
     @classmethod
+    def from_spec(cls, spec: dict, catalog: Any = None) -> "Operation":
+        """An operation from its spec (``op.to_dict()``), with its tools from
+        *catalog*: how a front end that parses formula text itself (the app's
+        formula bar) hands core an operation to declare or check."""
+        return cls.from_dict(spec, catalog.functions if catalog is not None else None)
+
+    @classmethod
     def from_dict(cls, blob: dict, tools: dict[str, Callable] | None = None
                   ) -> "Operation":
         """Rebuild an Operation from :meth:`to_dict`, re-attaching its function."""
