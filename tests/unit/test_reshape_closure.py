@@ -434,7 +434,7 @@ def test_L30_zip_of_one_origin_keeps_one_hash_column(e):
     assert list(data(e, "z").columns).count("#v") == 1
 
 
-@pytest.mark.xfail(strict=True, reason="R-D10: no #v column yet")
+@pytest.mark.xfail(strict=True, reason="R-D5 (step 5): the refusal doesn't say the trace was dropped")
 def test_L31_dropping_the_trace_is_a_loss_you_choose(e):
     e["d"] = mod.drop(columns=["#v"])(wf["e"])
     assert state(e, "d") != "invalid"                               # dropping is allowed
@@ -487,3 +487,66 @@ def test_L35_a_group_holding_a_failed_row_is_blocked():
     k["tot"] = op("total")[mod.collapse()](wf["r"])
     run(k)
     assert str(k.workflow.steps["tot"].output.states.iloc[0, 0]) == "blocked"
+
+
+# ── same samples: pairing across origins (guarantee 3) ───────────────────────
+
+@tool
+def label_rc(name: str, head: str) -> str:
+    return f"{name}/{head}"
+
+
+@tool
+def ints_rc() -> pd.DataFrame:
+    return pd.DataFrame({"x": [10, 20]}, index=[1, 2])
+
+
+@tool
+def strs_rc() -> pd.DataFrame:
+    return pd.DataFrame({"y": ["a", "b"]}, index=["1", "2"])
+
+
+@pytest.mark.xfail(strict=True, reason="R-D7 (step 4): column arguments pair equal ids across origins (M10)")
+def test_L36_a_column_argument_from_another_origin_is_refused():
+    k = Kernel(Catalog(tools=[visits_rc, wards_rc, label_rc]))
+    k["v"] = visits_rc[mod.source()]()
+    k["w"] = wards_rc[mod.source()]()
+    k["jw"] = join(wf["w"], wf["v"], on="ward")                     # ordered by ward: not v's rows
+    from simple_steps_core import cols
+    k["lab"] = label_rc[mod.map()](wf["v"], head=wf["jw"][cols["head"]])
+    assert state(k, "lab") == "invalid"
+
+
+@pytest.mark.xfail(strict=True, reason="R-D7 (step 4): ids are matched as text, so 1 pairs with '1' (M11)")
+def test_L37_ids_keep_their_type():
+    k = Kernel(Catalog(tools=[ints_rc, strs_rc]))
+    k["a"] = ints_rc[mod.source()]()
+    k["b"] = strs_rc[mod.source()]()
+    k["z"] = zip_(wf["a"], wf["b"], match_ids=True)                 # even on purpose: 1 is not "1"
+    run(k)
+    assert state(k, "z") == "failed"
+
+
+@pytest.mark.xfail(strict=True, reason="R-D7 (step 4): no match_ids opt-in")
+def test_L38_match_ids_pairs_equal_ids_on_purpose():
+    k = Kernel(Catalog(tools=[ints_rc]))
+    k["a"] = ints_rc[mod.source()]()
+    k["b"] = ints_rc[mod.source()]()                                # same ids, unrelated steps
+    k["b2"] = mod.rename(columns={"x": "x2"})(wf["b"])
+    k["refused"] = zip_(wf["a"], wf["b2"])
+    assert state(k, "refused") == "invalid"
+    k["z"] = zip_(wf["a"], wf["b2"], match_ids=True)
+    k.run_all()
+    assert data(k, "z").to_dict("list") == {"x": [10, 20], "x2": [10, 20]}
+
+
+# ── per-row staleness (guarantee 2) ──────────────────────────────────────────
+
+def test_L41_changing_one_row_makes_only_its_group_stale():
+    k = Kernel(Catalog(tools=[]))
+    k["v"] = pd.DataFrame({"ward": ["A", "A", "B"], "temp": [1.0, 2.0, 3.0]})
+    k["tot"] = op("count")[mod.collapse(by="ward")](wf["v"])
+    k.run_all()
+    k["v"] = pd.DataFrame({"ward": ["A", "A", "B"], "temp": [1.0, 2.0, 9.0]})   # ward B's row
+    stale = {r["#"]: r["state"] for r in k.view("tot")["rows"]}
+    assert stale == {"A": "known", "B": "stale"}

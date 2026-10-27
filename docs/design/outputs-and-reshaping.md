@@ -58,7 +58,7 @@ Core steers towards tidy outputs: a declared record spreads into variables
    observations and filter or label them, so they carry the columns: `group`
    adds its key as one more column (owner, 2026-10-27; built in phase 4).
    *Proposed:* `expand` without a tool only unpacks lists, so as a reshape
-   it carries the other columns ([reshaping.md](reshaping.md) R-D4).
+   it carries the other columns ([reshaping-plan.md](reshaping-plan.md) R-D4).
 7. **Every column name is chosen, never collided.** Names come from the
    tool's declaration, `mod.name` (§4), or a default (`value`). Two columns
    that would share a name are a problem; nothing silently replaces another
@@ -141,7 +141,7 @@ fit[mod.sweep(model=["a", "b"]), mod.name("score")]()             # model, score
   `mod.rename` in a later step.
 - **Names are checked when declared:** strings, unique, not empty, and not
   starting with `#`, which core keeps for its id columns (`#`, `#v`:
-  [reshaping.md](reshaping.md) §5.1). A
+  [reshaping.md](reshaping.md) §1). A
   name that isn't a Python identifier (`"temp c"`) is allowed, with a warning
   that it can't bind to a tool's parameter.
 - A row whose sequence has the wrong length for its names fails, with the
@@ -197,7 +197,7 @@ columns. It is the way to spread a value whose fields weren't declared.
   keys gets `None` there (missing, not failed, since nothing promised it), and
   the step warns how many rows were missing each key. *Proposed:* that cell
   is `absent`, a state apart from a `null` value, so packing it back is
-  lossless ([reshaping.md](reshaping.md) §9.1, J-D1).
+  lossless ([reshaping.md](reshaping.md) §9).
 - **Sequences:** named by `columns=`, else `c0, c1, …`.
 - **A row that isn't a record** fails (*"not a record: str"*); a `None` row
   gives `None` in every column.
@@ -231,7 +231,7 @@ and the **combines** run no tool.
    parent `i`), so references and lineage survive a reshape
    ([grid-model.md §7](grid-model.md#7-row-ids-per-verb)). *Proposed:* a
    derived id is only a label: the parent is recorded in `#` columns and
-   never read from the id ([reshaping.md](reshaping.md) §5.1, R-D6).
+   never read from the id ([reshaping.md](reshaping.md) §2).
 4. **Reshapes and combines are cheap and deterministic.** They run no tool, so
    they never fail per row, can't be retried and need no execution modifiers.
 5. **The pairs undo each other** where nothing is lost: `expand` ↔ `collapse`

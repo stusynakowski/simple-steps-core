@@ -9,7 +9,7 @@
 ## 1. What a row id is
 
 - A step's output is a DataFrame; **its index is the row ids**, shown and
-  referenced as the `#` column (owner, 2026-10-27; [reshaping.md](reshaping.md) R-D11). The row number is only the position, as
+  referenced as the `#` column (owner, 2026-10-27; [reshaping-plan.md](reshaping-plan.md) R-D11). The row number is only the position, as
   displayed, and has no name.
 - **A row keeps its id through every step that keeps it**: `map`, `filter`,
   `group`, `widen`, `sort` and the other reshapes. *Today:* yes.

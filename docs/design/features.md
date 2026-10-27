@@ -43,7 +43,9 @@ become `.name` later.
 
 ## Phase 4: behaviour, one change at a time
 
-Each is confirmed before it lands, and gets a probe.
+Each is confirmed before it lands, and gets a probe. The reshaping work (row
+ids, `#` columns, lining rows up, round trips, uneven data) has its own plan:
+[reshaping-plan.md](reshaping-plan.md).
 
 ### Seeing the data truthfully
 

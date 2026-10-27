@@ -43,7 +43,7 @@ Each is a short way to write something the general form also says.
 |---|---|
 | `wf["p"]`, `wf[0]` | step `p`; the first step. Saved by name either way |
 | `wf["p"][1:5]`, `wf["p"][1]`, `wf["p"][rows[[1, 3]]]` | rows, by row id (K19; *today* by position). A list of rows is a list: `rows[[1, 3]]`, not `rows[1, 3]` |
-| `wf["p"][cols["n"]]`, `wf["p"][cols["a":"c"]]`, `wf["p"][cols[["a", "c"]]]`, `wf["p"][cols["#"]]` | columns; `#` is the row id (R-D11, owner 2026-10-27; *today* it is the row number, [reshaping.md](reshaping.md) R8) |
+| `wf["p"][cols["n"]]`, `wf["p"][cols["a":"c"]]`, `wf["p"][cols[["a", "c"]]]`, `wf["p"][cols["#"]]` | columns; `#` is the row id (R-D11, owner 2026-10-27; *today* it is the row number, [reshaping-plan.md](reshaping-plan.md) R8) |
 | `wf["p"][0][cols["w"]]` | one cell |
 | `wf["p"].header` | the column names. As an argument, a list (`['name', 'temp_c']`). As a step, *today* one row per name in a column called `name`; whether it should be one row per name (in a column called `column`) or one cell holding the list is open. `header[k]` should pick one name; *today* the `[k]` is ignored (C28) |
 | `res["db"]` | a resource, passed to a tool's parameter |

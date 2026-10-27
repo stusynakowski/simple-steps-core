@@ -36,7 +36,7 @@ docs.
 | **status** | what is live about an object: a step's output, state and problems; a resource's loaded instance. A live object is its spec plus its status | — |
 | **state** | one value from a fixed list. A **step state** is one of `staged`, `completed`, `stale`, `failed`, `invalid`. A **cell state** is one of `known`, `maybe`, `pending`, `blocked`, `failed`, `invalid` | step *status* (the field is renamed `state`) |
 | **problem** | a structured reason a step can't run or ran badly: code, message, step, and the row or argument when there is one. A **warning** is a problem that doesn't block | plain-string problems |
-| **row id** | the stable label of a row: the output DataFrame's index, shown and referenced as the `#` column (owner, 2026-10-27; [reshaping.md](reshaping.md) R-D11). Kept by verbs that keep rows, so it follows a row through a sort | — |
+| **row id** | the stable label of a row: the output DataFrame's index, shown and referenced as the `#` column (owner, 2026-10-27; [reshaping-plan.md](reshaping-plan.md) R-D11). Kept by verbs that keep rows, so it follows a row through a sort | — |
 | **row number** | a row's position 0…n-1 as displayed. It has no name: never stored, never referenced, never used to pair rows | `#` (for the row number) |
 | **value column** | the column a tool's result is written to: `value` unless named with `mod.name`. A declared record writes one column per field | *payload* |
 | **extras** | an open mapping on every spec, keyed by namespace (`"simple_steps.ui"`), that core saves and loads but never reads or hashes. The app's extensions (step notes, colours, tool widgets, agent permissions) live here. Removing them never changes an output ([extensions.md](extensions.md)) | — |

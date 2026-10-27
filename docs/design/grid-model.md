@@ -26,7 +26,7 @@ observations ([outputs-and-reshaping.md §1](outputs-and-reshaping.md#1-the-grid
 | Part | What it is |
 |---|---|
 | **column** | named by a string. Each column has a type: declared by the tool's return type, else `unknown` until it runs, then what was observed (K27) |
-| **row id** `#` | the DataFrame's index: a row's stable label, shown and referenced as the `#` column (owner, 2026-10-27; [reshaping.md](reshaping.md) R-D11). Verbs that keep rows keep their ids, so a row can be followed through `filter` and `sort` |
+| **row id** `#` | the DataFrame's index: a row's stable label, shown and referenced as the `#` column (owner, 2026-10-27; [reshaping-plan.md](reshaping-plan.md) R-D11). Verbs that keep rows keep their ids, so a row can be followed through `filter` and `sort` |
 | **row number** | a row's position, 0…n-1, as displayed. It has no name: never stored or used to pair rows |
 | **value column** | where a computing verb writes the tool's results: `value` unless named with `mod.name`, or one column per field for a record ([outputs-and-reshaping.md](outputs-and-reshaping.md)) |
 | **cell state** | `known`, `maybe`, `pending`, `blocked`, `failed`, `invalid`. A row's state is its worst cell's |
@@ -70,7 +70,7 @@ The **shape verbs** call a tool. At most one per step. When a tool returns sever
 | `filter` | `(columns…) -> bool` | at most n | the input's | kept, for rows that pass |
 | `expand` | `(columns…) -> list` | one per item | `value` | `"i.j"`: item *j* of row *i* |
 | `group` | `(columns…) -> key` | same | the input's columns plus the key (`group`, or named with `mod.name`); a key named like an input column is refused unless `replace=True` | kept |
-| `collapse` | `(acc, columns…) -> acc`, or a built-in reducer | 1, or one per `by=` group | `by` column and `value`; *proposed:* a built-in reducer gives one column per variable ([reshaping.md](reshaping.md) R-D1) | `0`, or the key with `by=` (D3) |
+| `collapse` | `(acc, columns…) -> acc`, or a built-in reducer | 1, or one per `by=` group | `by` column and `value`; *proposed:* a built-in reducer gives one column per variable ([reshaping-plan.md](reshaping-plan.md) R-D1) | `0`, or the key with `by=` (D3) |
 | `widen` | a cell holding a record or sequence | same | one per field (`columns=`), or `c0, c1, …` for sequences | kept |
 | `table` | `(df: DataFrame) -> DataFrame` | what it returns | what it returns | what it returns |
 | `sweep` | `(settings…) -> value`, no input | one per combination | one per swept setting, and `value` | 0…n-1 |
@@ -250,11 +250,11 @@ define it.**
 |---|---|---|
 | keeps rows: `map`, `filter`, `group`, `widen`, reshapes | the input's ids | as the rule |
 | `zip_` | pairs by row id | as the rule (K19, phase 4) |
-| `expand` | `"i.j"` from the parent row `i`: a label: the parent is in `#v` ([reshaping.md](reshaping.md) §5.1, built in phase 4); *proposed:* an unpack of a list core packed gives back its ids (§6) | as the rule |
+| `expand` | `"i.j"` from the parent row `i`: a label: the parent is in `#v` ([reshaping.md](reshaping.md) §5, built in phase 4); *proposed:* an unpack of a list core packed gives back its ids (§6) | as the rule |
 | `source` | the tool's own index if it set one, else 0…n-1 | **differs:** a tool's own index becomes a column named `index`, and ids restart at 0 |
 | `collapse` | `0`, or the key with `by=` (D3) | as the rule (phase 4) |
 | `sweep`, `table` | 0…k-1 (`table`: what the tool returns) | 0…k-1 |
-| `join`, `stack` | 0…N-1, new rows; each cell's lineage points at the input cells it came from (decided 2026-10-26), through `#` columns ([reshaping.md](reshaping.md) §5.1) | 0…n-1; lineage not stored |
+| `join`, `stack` | 0…N-1, new rows; each cell's lineage points at the input cells it came from (decided 2026-10-26), through `#` columns ([reshaping.md](reshaping.md) §5) | 0…n-1; lineage not stored |
 | selection `wf["srt"][0]` | by row id | **differs:** by position (picked row id 1 after a sort) |
 
 ## 8. Found while checking (to fix, in phase 4)

@@ -109,7 +109,7 @@ step's input, giving the input twice, a value that isn't a step reference.
 | `k` | the table above; in a notebook, an HTML table | built |
 | `k.step("f")`, `k.step(3)` | the live step | built; its `repr` is one line today. Later: the workflow printed as a table of step blocks, and a step's rows labelled with their references (G18, [features.md](features.md#seeing-a-workflow-as-a-table-later)) |
 | `k.step("f").data` | its values, a DataFrame on its row ids | built |
-| `k.step("f").output.view()` | the grid as a user sees it: `#` (the row id; *today* the row number, [reshaping.md](reshaping.md) R-D11), values, each row's state and note | built |
+| `k.step("f").output.view()` | the grid as a user sees it: `#` (the row id; *today* the row number, [reshaping-plan.md](reshaping-plan.md) R-D11), values, each row's state and note | built |
 | `k.view("p", rows=(0, 50))` | a page of rows, with each cell's state and type, and how many rows there are in all | built |
 | `k.cell("f", 1)` | one cell, by row id (as selections are): value, type, state, and the input cells it came from, with their values | built |
 | `k.step("f").output.plan` | before running: rows, columns, types, each `exact`, `bounded` or `unknown` and why | built |
