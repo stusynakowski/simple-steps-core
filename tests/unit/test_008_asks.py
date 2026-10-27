@@ -151,7 +151,7 @@ def test_N1_a_union_parameter_accepts_a_bound_literal(wf):
 def test_O_a_missing_required_setting_is_a_problem_without_a_workflow():
     blob = {"tool_id": "scale_008", "input": None, "arguments": {},
             "modifiers": [{"kind": "retry", "params": {}}, {"kind": "map", "params": {}}]}
-    problems = grid.check(grid.Operation.from_dict(blob))
+    problems = grid.check(grid.Operation.from_dict(blob, {"scale_008": scale_008.fn}))
     assert problems == ("retry needs times= — it has no default, so a step "
                         "without it cannot run",)
     assert grid.check(scale_008[mod.timeout()]) == (
@@ -349,11 +349,16 @@ def test_C14_missing_is_none_and_nullability_is_checked():
 # ── Phase 3: saved format v2 — C11, C1, C2, C7 (K9), K17 ────────────────
 import datetime  # noqa: E402
 
+from _module_tools import module_tools  # noqa: E402
+
+#: This module's tools, by name: what reloading a saved workflow needs.
+TOOLS_008 = module_tools(globals())
+
 from simple_steps_core.grid import cols, rows  # noqa: E402
 
 
 def _reload(w):
-    return Workflow.from_json(w.to_session_json(), grid.TOOLS)
+    return Workflow.from_json(w.to_session_json(), TOOLS_008)
 
 
 @pytest.mark.parametrize("value", [
@@ -433,7 +438,11 @@ def test_C2_a_tool_in_a_setting_runs_and_round_trips(wf):
         "first_letter_008": ["S", "N", "L"], "value": [4, 2, 2]}
     assert json.loads(wf.to_json())["steps"][1]["operation"]["modifiers"][0]["params"] == {
         "by": {"$tool": "neg_n_008"}}
-    back = _reload(wf)
+    # The tools are defined here, not at the top of the module, so they are
+    # named when reloading: nothing is registered to find them by (K24).
+    back = Workflow.from_json(wf.to_session_json(),
+                              {**TOOLS_008, "neg_n_008": neg_n_008,
+                               "first_letter_008": first_letter_008})
     back.run("s")
     assert list(back.step("s").output.data["n"]) == [3, 2, 2, 1]
     by = next(x for x in grid.modifier_catalog()["sort"]["settings"] if x["name"] == "by")
@@ -608,7 +617,7 @@ def test_C9_some_columns_stated_rows_unknown():
     assert w.step("later").problems == ()
     w.run_all()
     assert w.step("later").output.data.to_dict("list") == {"extra": [0, 0]}
-    back = Workflow.from_json(w.to_json(), grid.TOOLS)            # saved as names
+    back = Workflow.from_json(w.to_json(), TOOLS_008)            # saved as names
     assert back.step("r").plan["types"] == {"city": "str"}
 
 
@@ -721,7 +730,7 @@ def test_try_except_saves_its_settings_by_name(two_branches):
     w["a"] = risky_008[mod.map(), mod.try_except(default=0, on=[ValueError])](w["r"])
     saved = json.loads(w.to_json())["steps"][-1]["operation"]["modifiers"]
     assert {"kind": "try_except", "params": {"default": 0, "on": ["ValueError"]}} in saved
-    back = Workflow.from_json(w.to_session_json(), grid.TOOLS)
+    back = Workflow.from_json(w.to_session_json(), TOOLS_008)
     back.run_all()
     assert back.step("a").output.values == [100, 0, 300]
 
@@ -747,9 +756,9 @@ from simple_steps_core.grid import bound_tool  # noqa: E402
 
 def test_C3_functions_instead_of_globals():
     assert "identity" in grid.builtin_tools()
-    assert "scale_008" in grid.declared_tools()
     assert "map" in grid.shape_verbs() and "retry" not in grid.shape_verbs()
-    assert isinstance(grid.resource_types(), dict)
+    # K24: nothing is registered, so there is no list of every declared tool.
+    assert not hasattr(grid, "declared_tools") and not hasattr(grid, "resource_types")
     out = grid.map_(grid.grid(pd.DataFrame({"n": [1]})), scale_008.fn, name="s")
     assert grid.payload_column(out) == "s"
 
@@ -767,18 +776,19 @@ def test_C3_tags_reach_the_catalog():
     @tool(tags=["rowmap", "app"])
     def tagged_008(n: int) -> int:
         return n
-    assert grid.catalog()["tagged_008"]["tags"] == ["rowmap", "app"]
-    assert grid.catalog()["identity"]["tags"] == []
+    described = grid.catalog({"tagged_008": tagged_008})
+    assert described["tagged_008"]["tags"] == ["rowmap", "app"]
+    assert described["identity"]["tags"] == []
 
 
-def test_C3_freeze_closes_the_registry(monkeypatch):
-    monkeypatch.setattr(grid, "_FROZEN", False)
-    grid.freeze()
-    assert grid.is_frozen()
-    with pytest.raises(RuntimeError, match="registry is frozen"):
-        @tool
-        def late_008(n: int) -> int:
-            return n
+def test_C3_a_catalog_is_fixed_once_made():
+    """There is no registry to freeze (K24): what a workflow may use is its
+    catalog, which can only be narrowed, into a new catalog."""
+    assert not hasattr(grid, "freeze")
+    cat = grid.Catalog(tools=[scale_008])
+    smaller = cat.without("scale_008")
+    assert "scale_008" in cat and "scale_008" not in smaller
+    assert not hasattr(cat, "add")
 
 
 def test_K12_a_table_tool_gets_the_whole_grid(wf):
@@ -839,7 +849,7 @@ def test_N_auto_is_saved_as_auto_and_resolved_at_run(wf):
     picked = {sid: wf.step(sid).output.meta["auto"]["verb"] for sid in "fecs"}
     assert picked == {"f": "filter", "e": "expand", "c": "collapse", "s": "map"}
     assert [m.kind for m in wf.step("s").operation.modifiers] == ["retry", "auto"]
-    back = Workflow.from_json(wf.to_session_json(), grid.TOOLS)
+    back = Workflow.from_json(wf.to_session_json(), TOOLS_008)
     assert back.step("s").operation == wf.step("s").operation
     assert grid.modifier_catalog()["auto"]["row_rule"] == "unknown"
 
@@ -857,7 +867,7 @@ def test_P_to_source_round_trips(wf):
         add_008[mod.auto()](wf["readings"]),
         scale_008.bind(weight=2)[mod.retry(times=1)],
     ]
-    names = grid.formula_names()
+    names = grid.formula_names(TOOLS_008)
     for operation in ops:
         text = operation.to_source()
         assert eval(text, {"__builtins__": {}}, names) == operation, text
@@ -870,7 +880,7 @@ def test_C12_kwargs_tools_warn_and_say_so():
         @tool
         def kw_008(n: int, **opts) -> int:
             return n
-    assert grid.catalog()["kw_008"]["open"] is True
+    assert grid.catalog({"kw_008": kw_008})["kw_008"]["open"] is True
     w = Workflow()
     w["r"] = pd.DataFrame({"n": [1]})
     w["x"] = kw_008[mod.map()](w["r"], colr="red")
@@ -961,7 +971,7 @@ def test_009_zip_of_loaded_tables_pairs_by_id_and_refuses_extra_rows():
 def test_009_string_row_ids_survive_a_saved_session(r3):
     r3["items"] = fan_ids_009[mod.expand()](r3["r"])
     r3.run_all()
-    back = Workflow.from_json(r3.to_session_json(), grid.TOOLS)
+    back = Workflow.from_json(r3.to_session_json(), TOOLS_008)
     assert list(back.step("items").output.data.index) == ["0.0", "1.0", "1.1"]
     assert list(back.step("r").output.data.index) == [0, 1, 2]
 
@@ -1046,7 +1056,7 @@ def test_009_a_changed_resource_makes_its_readers_stale():
 
 def test_009_stamps_and_staleness_survive_a_saved_session(chain):
     chain["r"] = pd.DataFrame({"n": [5, 6]})
-    back = Workflow.from_json(chain.to_session_json(), grid.TOOLS)
+    back = Workflow.from_json(chain.to_session_json(), TOOLS_008)
     assert back.step("a").status == "stale"
     assert back.step("a").output.meta["read"] == chain.step("a").output.meta["read"]
     back.run_all()
@@ -1159,15 +1169,13 @@ def test_009_a_direct_call_runs_over_rows_only_when_the_frame_doesnt_fit():
     assert plus_one_009(5) == 6                              # parens still run
 
 
-def test_009_with_implicit_auto_off_the_orchestration_must_be_written(monkeypatch, wf):
-    monkeypatch.setattr(grid.settings, "implicit_auto", False)
-    with pytest.raises(TypeError, match=r"needs an orchestration: write scale_008\[mod.map\(\)\]"):
-        scale_008(wf["readings"])
-    wf["ok"] = scale_008[mod.auto()](wf["readings"])        # stated auto still works
+def test_009_an_unwritten_orchestration_is_always_auto(wf):
+    """Implicit auto is always on: the switch that turned it off was
+    process-wide state, and is gone (K24)."""
+    assert [m.kind for m in scale_008(wf["readings"]).modifiers] == ["auto"]
+    wf["ok"] = scale_008[mod.auto()](wf["readings"])        # stated auto works too
     wf.run("ok")
     assert wf.step("ok").output.values == [10, 20, 30, 20]
-    frame = pd.DataFrame({"n": [1, 2]})
-    assert isinstance(times10_009(frame), pd.DataFrame)      # off: the frame is passed as-is
 
 
 # ── 009 step 4: known unknowns are shown — wf.preview and wf.cell ─────────
@@ -1304,7 +1312,7 @@ def test_009_printing_an_output_shows_states_and_notes(failing):
 
 def test_009_states_and_notes_survive_a_saved_session(failing):
     failing.run_all()
-    back = Workflow.from_json(failing.to_session_json(), grid.TOOLS)
+    back = Workflow.from_json(failing.to_session_json(), TOOLS_008)
     out = back.step("a").output
     assert list(out.row_states) == ["known", "failed", "known"]
     assert out.notes == {1: {"error": "ValueError: boom", "caught": True}}   # id stays an int
@@ -1550,7 +1558,7 @@ def test_C25_rows_added_or_an_argument_change_make_every_row_stale(rows3):
 
 def test_C25_row_staleness_survives_a_saved_session(rows3):
     rows3["r"] = pd.DataFrame({"city": ["SF", "NYC", "LA"], "n": [1, 20, 3]})
-    back = Workflow.from_json(rows3.to_session_json(), grid.TOOLS)
+    back = Workflow.from_json(rows3.to_session_json(), TOOLS_008)
     assert back.stale_rows("s") == [1]
     back.run_all()
     assert back.stale_rows("s") == [] and back.step("s").output.values == [10, 200, 30]
@@ -1610,7 +1618,7 @@ def test_row_ids_and_column_names_can_be_referenced(wf):
     assert wf.step("hdr").output.data.to_dict("list") == {"name": ["city", "n"]}
     assert wf.step("w").output.data.iloc[0, 0] == 2
     assert wf.step("w").operation.to_source() == 'width_hdr[mod.source()](names=wf["readings"].header)'
-    back = Workflow.from_json(wf.to_session_json(), grid.TOOLS)
+    back = Workflow.from_json(wf.to_session_json(), TOOLS_008)
     back.run_all()
     assert back.step("w").output.data.iloc[0, 0] == 2
 

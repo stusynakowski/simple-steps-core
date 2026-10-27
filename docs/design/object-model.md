@@ -447,7 +447,10 @@ Allowed: constants that never change (the cell states, the format version) and
 the stateless authoring proxies `wf`, `res`, `mod`, `rows`, `cols`.
 
 Removed from module level: `TOOLS`, `TOOL_TAGS`, `RESOURCE_TYPES`, `_VIEWS`,
-`_FROZEN` / `freeze()`, `STRICT_TYPES`, `settings` (moved to kernel options).
+`_FROZEN` / `freeze()`, `STRICT_TYPES`, `settings`. *As built (3e):* strictness is
+`@tool(strict=True)` or `Catalog(..., strict=True)`; the switch that turned
+implicit auto off is gone (it is always on); the method-view cache lives on
+each resource class.
 The lookup tables (`MODIFIERS`, `PARAM_TYPES`, `ROWS_RULE`, `COMBINE`, …)
 become private, read only through the catalog.
 

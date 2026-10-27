@@ -430,7 +430,7 @@ def _bind_positional(operation: "Operation", source: Any, values: tuple,
     columns are not known, the first parameter (the row's own value). A
     ``res[…]`` takes the first free parameter its declared type fits.
     """
-    fn = operation.fn or TOOLS.get(operation.tool_id) or BUILTIN_TOOLS.get(operation.tool_id)
+    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool_id)
     if fn is None:
         raise TypeError(f"{operation.tool_id}: pass these arguments by keyword "
                         "— its parameters are not known here")
@@ -685,7 +685,6 @@ def _decode_output(blob: dict) -> Output:
 # to each other (see grid.py).
 from .system_tools import BUILTIN_TOOLS  # noqa: E402
 from .catalog import (  # noqa: E402
-    TOOLS,
     ToolHandle,
     _signature,
     _type_fits,

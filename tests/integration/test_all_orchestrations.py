@@ -182,7 +182,7 @@ def test_combine_verbs_read_more_than_one_grid(wf):
 def test_positional_access_and_catalog(wf):
     assert wf[0].id == "readings"          # first step, by position
     assert wf[-1].id == "zipped"           # last step
-    cat = pipeline.grid.catalog()
+    cat = pipeline.CATALOG.describe()["tools"]
     assert "scale" in cat and cat["count"]["origin"] == "builtin"
 
 
@@ -314,7 +314,7 @@ def test_T2_1_T2_2_bound_tools_run_on_their_instance(res_run):
 
 
 def test_T2_3_catalog_lists_types_settings_and_marked_tools_only():
-    cat = pipeline.grid.resource_catalog()
+    cat = pipeline.grid.resource_catalog(pipeline.CATALOG.resource_types)
     db, llm = cat["FakeDB"], cat["FakeLLM"]
     assert [s["name"] for s in db["settings"]] == ["table"]
     assert list(db["tools"]) == ["FakeDB.lookup"]          # not reset
@@ -340,7 +340,7 @@ def test_marked_methods_stay_ordinary_and_unregistered():
     assert db.lookup("SF") == "west" and db.reads == 1
     db.reset()
     assert db.reads == 0
-    tools = pipeline.grid.TOOLS
+    tools = pipeline.CATALOG.tools
     assert "lookup" not in tools and "complete" not in tools
     assert "enrich" in tools and "summarize" in tools     # unbound tools are ordinary
 

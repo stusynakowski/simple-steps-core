@@ -14,9 +14,6 @@ bottom of the module, which lets modules call each other freely. That only
 works when the modules load in dependency order, which this module does
 (``_LOAD_ORDER``).
 
-**Settings that change at run time.** ``_FROZEN`` (set by ``freeze()``) and
-``STRICT_TYPES`` live in ``catalog``. Reading or setting them through ``grid``
-reads or sets catalog's, so ``grid.STRICT_TYPES = True`` still takes effect.
 """
 
 from __future__ import annotations
@@ -26,26 +23,25 @@ from __future__ import annotations
 # ruff: noqa: F822
 
 import importlib
-import types
 
 __all__ = [
+    "Catalog", "Kernel", "Problem",
     "Output", "grid", "rows", "map_", "filter_", "group_", "collapse_",
     "expand_", "sweep_", "source_", "select_", "drop_", "widen_",
     "slice_", "rename_", "sort_", "distinct_",
     "identity", "gather", "count", "total", "first", "last",
     "BUILTIN_TOOLS", "DEFAULT_TOOL", "catalog", "tool_entry",
     "modifier_catalog",
-    "TOOLS",
     "op", "Modifier", "Operation",
     "join", "stack", "zip_", "COMBINE", "is_combine",
     "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "warn", "stage",
     "wf", "res", "ResRef", "bound_tool", "cols", "Rows", "Cols", "SelectionError",
     "RESERVED_NAMES", "FORMAT_VERSION", "ToolRef", "StepFailed",
-    "builtin_tools", "declared_tools", "shape_verbs", "resource_types",
-    "payload_column", "check_modifier", "freeze", "is_frozen", "formula_names",
-    "settings", "Settings", "resource", "RESOURCE_TYPES",
+    "builtin_tools", "shape_verbs",
+    "payload_column", "check_modifier", "formula_names",
+    "resource",
     "resource_entry", "resource_catalog", "ResourceNotLoaded",
-    "STRICT_TYPES", "annotation_problems", "declaration_problems",
+    "annotation_problems", "declaration_problems",
     "PARAM_TYPES", "PARAM_TYPES_BY_VERB",
     "ROWS_RULE", "DEFAULT_PAYLOAD", "CARRIES_COLUMNS", "PayloadError",
     "is_identity", "infer_verb",
@@ -59,36 +55,14 @@ __all__ = [
 
 #: Leaves first: each module only needs, while it loads, names from modules
 #: before it.
-_LOAD_ORDER = ('problems', 'specs', 'system_tools', 'output', 'verbs', 'modifiers', 'checks', 'catalog', 'combines', 'errors', 'operation', 'options', 'references', 'run', 'step', 'values', 'workflow', 'kernel')
-
-#: Names rebound at run time; they are read and set on their home module.
-_LIVE = {"_FROZEN": "catalog", "STRICT_TYPES": "catalog"}
+_LOAD_ORDER = ('problems', 'specs', 'system_tools', 'output', 'verbs', 'modifiers', 'checks', 'catalog', 'combines', 'errors', 'operation', 'references', 'run', 'step', 'values', 'workflow', 'kernel')
 
 _MODULES = {name: importlib.import_module(f"simple_steps_core.{name}") for name in _LOAD_ORDER}
 
 for _module in _MODULES.values():
     for _name, _value in vars(_module).items():
-        if _name.startswith("__") or _name in _LIVE or _name in globals():
+        if _name.startswith("__") or _name in globals():
             continue
         globals()[_name] = _value
 del _module, _name, _value
 
-
-class _Grid(types.ModuleType):
-    """Forwards the run-time settings in :data:`_LIVE` to their home module."""
-
-    def __getattr__(self, name):
-        if name in _LIVE:
-            return getattr(_MODULES[_LIVE[name]], name)
-        raise AttributeError(f"module 'simple_steps_core.grid' has no attribute {name!r}")
-
-    def __setattr__(self, name, value):
-        if name in _LIVE:
-            setattr(_MODULES[_LIVE[name]], name, value)
-        else:
-            super().__setattr__(name, value)
-
-
-import sys as _sys  # noqa: E402
-
-_sys.modules[__name__].__class__ = _Grid

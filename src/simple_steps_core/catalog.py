@@ -18,19 +18,6 @@ import typing
 import warnings
 
 
-#: Whether ``@tool`` requires a type annotation on every parameter and on the
-#: return. Off by default so tools written before the rule existed keep working;
-#: a project that wants the guarantee everywhere sets this once, at import time,
-#: before declaring anything. ``@tool(strict=True)`` opts in one tool at a time.
-#:
-#: What the annotations buy, and why it is worth the keystrokes: they are the
-#: only description of a step's boundary that both a human and the machine read.
-#: ``check`` compares them against the upstream's real dtypes
-#: (:func:`_dtype_problems`), and ``catalog`` publishes them, so a palette can
-#: say what a tool takes and returns instead of only naming its parameters.
-STRICT_TYPES: bool = False
-
-
 def _arg_docs(fn: Callable) -> dict[str, str]:
     """Per-parameter text from a Google-style ``Args:`` docstring section.
 
@@ -168,9 +155,10 @@ def catalog(tools: dict[str, Callable] | None = None) -> dict[str, dict]:
     for name, fn in sorted(BUILTIN_TOOLS.items()):
         entries[name] = tool_entry(name, fn, "builtin")
         entries[name]["tags"] = []
-    for name, fn in sorted({**TOOLS, **(tools or {})}.items()):
-        entries[name] = tool_entry(name, fn, "declared")
-        entries[name]["tags"] = list(TOOL_TAGS.get(name, ()))
+    for name, fn in sorted((tools or {}).items()):
+        entries[name] = tool_entry(name, fn.fn if isinstance(fn, ToolHandle) else fn,
+                                   "declared")
+        entries[name]["tags"] = list(getattr(fn, "tags", ()))
     return entries
 
 
@@ -216,7 +204,7 @@ def bound_tool(fn: Callable) -> Callable:
     """Mark a **method** of a resource class as a tool that runs on one instance.
 
     The method stays an ordinary method — ``FakeDB().lookup("SF")`` still works —
-    and nothing is registered in :data:`TOOLS`. The mark only records that the
+    and nothing is registered anywhere. The mark only records that the
     type offers it, so ``res["db"].lookup[mod.map()](…)`` can use it and the
     catalog can list it. Unmarked methods are never tools, though tool code may
     still call them::
@@ -265,7 +253,6 @@ def _signature(fn: Callable) -> inspect.Signature:
 
 #: Every resource type a workflow has declared or ``@resource`` registered, by name.
 #: ``Workflow.from_dict`` resolves a saved ``"type"`` through it.
-RESOURCE_TYPES: dict[str, type] = {}
 
 
 def _settings(cls: type) -> list[inspect.Parameter]:
@@ -295,9 +282,6 @@ def _bound_tools(cls: type) -> dict[str, Callable]:
     return found
 
 
-_VIEWS: dict[tuple[type, str], Callable] = {}
-
-
 def _method_view(cls: type, name: str) -> Callable:
     """The bound tool *name* of *cls*, as a function **without** ``self``.
 
@@ -305,8 +289,13 @@ def _method_view(cls: type, name: str) -> Callable:
     staging, verb inference and the catalog read. It cannot run — the real
     instance's method replaces it at run time.
     """
-    key = (cls, name)
-    if key not in _VIEWS:
+    # Cached on the class itself, so the same view comes back each time and
+    # nothing is kept at module level.
+    views = cls.__dict__.get("__simple_steps_views__")
+    if views is None:
+        views = {}
+        setattr(cls, "__simple_steps_views__", views)
+    if name not in views:
         method = _bound_tools(cls)[name]
         signature = _signature(method)
 
@@ -319,8 +308,8 @@ def _method_view(cls: type, name: str) -> Callable:
         view.__qualname__ = f"{cls.__name__}.{name}"
         view.__doc__ = method.__doc__
         view.__module__ = getattr(method, "__module__", None)
-        _VIEWS[key] = view
-    return _VIEWS[key]
+        views[name] = view
+    return views[name]
 
 
 def resource_problems(cls: type) -> list[str]:
@@ -337,16 +326,12 @@ def resource_problems(cls: type) -> list[str]:
 
 
 def resource(cls: type) -> type:
-    """Register a class as a resource type, checking its settings are literals.
+    """Mark a class as a resource type, checking its settings are literals.
 
-    Optional — ``wf.define`` registers a type the first time it is used — but
-    declaring it puts the type and its bound tools in :func:`resource_catalog`
-    at import, before any workflow exists.
+    Nothing is registered: a resource type is used by putting it in a
+    :class:`Catalog` (``Catalog(resources=[ClinicalDB])``), and
+    :meth:`Catalog.from_modules` finds every class marked with this.
     """
-    if _FROZEN and RESOURCE_TYPES.get(cls.__name__) is not cls:
-        raise RuntimeError(
-            f"cannot declare resource type {cls.__name__!r}: the registry is "
-            "frozen. Declare resource types before grid.freeze().")
     problems = resource_problems(cls)
     reserved = _reserved_problem(cls.__name__, "resource type")
     if reserved:
@@ -354,14 +339,7 @@ def resource(cls: type) -> type:
     if problems:
         raise TypeError(f"cannot declare resource type {cls.__name__!r}: "
                         + "; ".join(problems) + ".")
-    existing = RESOURCE_TYPES.get(cls.__name__)
-    if existing is not None and existing is not cls \
-            and existing.__qualname__ != cls.__qualname__:
-        warnings.warn(
-            f"resource type {cls.__name__!r} is already declared and is being "
-            "replaced — a workflow loaded from JSON resolves the name to "
-            "whichever was declared last.", stacklevel=2)
-    RESOURCE_TYPES[cls.__name__] = cls
+    cls.__simple_steps_resource__ = True
     return cls
 
 
@@ -393,7 +371,7 @@ def resource_entry(cls: type) -> dict:
 def resource_catalog(types_: dict[str, type] | None = None) -> dict[str, dict]:
     """Every registered resource type, name → :func:`resource_entry`."""
     return {name: resource_entry(cls)
-            for name, cls in sorted({**RESOURCE_TYPES, **(types_ or {})}.items())}
+            for name, cls in sorted((types_ or {}).items())}
 
 
 @dataclass
@@ -514,7 +492,7 @@ class ToolHandle:
             return self._start()(*args, **kwargs)
         if any(isinstance(a, Operation) for a in (*args, *kwargs.values())):
             raise TypeError(_NESTED_OPERATION)
-        if len(args) == 1 and settings.implicit_auto and _runs_over_rows(self.fn, args[0], kwargs):
+        if len(args) == 1 and _runs_over_rows(self.fn, args[0], kwargs):
             # 009 decision 7: a frame whose rows are the arguments runs over them.
             return self._start().bind(**kwargs)[mod.auto()](args[0])
         return self.fn(*args, **kwargs)
@@ -545,55 +523,14 @@ class ToolHandle:
         return f"<tool {self.id!r}>"
 
 
-#: Every tool declared with ``@tool``, by id. A server needs this: a workflow
-#: arrives as ids and modifiers, so something has to turn ``"to_fahrenheit"``
-#: back into a function. Import the module that declares your tools and they
-#: are here.
-TOOLS: dict[str, Callable] = {}
-
-
-#: Free-form labels per tool id (008 C3): the app's own tool "types" (`step`,
-#: `rowmap`, …) without core owning an enum. Published in the catalog.
-TOOL_TAGS: dict[str, tuple[str, ...]] = {}
-
-
-#: Set by :func:`freeze`: no more tools or resource types may be declared.
-_FROZEN = False
-
-
-def freeze() -> None:
-    """Close the tool and resource-type registries (008 C3).
-
-    After this, ``@tool`` and ``@resource`` raise, so a server can't have its
-    palette change under it mid-session.
-    """
-    global _FROZEN
-    _FROZEN = True
-
-
-def is_frozen() -> bool:
-    """Has :func:`freeze` been called?"""
-    return _FROZEN
-
-
 def builtin_tools() -> dict[str, Callable]:
     """The tools core always has (identity, gather, count, total, first, last)."""
     return dict(BUILTIN_TOOLS)
 
 
-def declared_tools() -> dict[str, Callable]:
-    """Every tool declared with ``@tool``, by id — a copy, safe to keep."""
-    return dict(TOOLS)
-
-
 def shape_verbs() -> tuple[str, ...]:
     """The modifier kinds that change a grid's shape."""
     return tuple(SHAPE_VERBS)
-
-
-def resource_types() -> dict[str, type]:
-    """Every registered resource type, by name — a copy."""
-    return dict(RESOURCE_TYPES)
 
 
 def payload_column(output: Any) -> str | None:
@@ -620,29 +557,26 @@ def check_modifier(kind: str, params: dict | None = None) -> tuple[str, ...]:
 
 
 def tool(fn: Callable | None = None, *, id: str | None = None,
-         strict: bool | None = None, tags: Sequence[str] = (),
+         strict: bool = False, tags: Sequence[str] = (),
          extras: Mapping[str, Any] | None = None):
-    """Mark a plain function as a tool. Usable bare or with an id.
+    """Make a plain function a tool. Usable bare or with arguments.
 
-    Registers it in :data:`TOOLS` so a workflow loaded from JSON can find it
-    without the caller assembling a name→function map by hand.
+    It returns the :class:`ToolHandle` and registers it nowhere: a tool is used
+    by putting it in a :class:`Catalog`. *id* names it (the function's name
+    otherwise); *tags* are free labels; *extras* are the app's additions, by
+    namespace.
 
     *strict* requires a type annotation on every parameter and on the return,
-    refusing the declaration at import when one is missing. It defaults to
-    :data:`STRICT_TYPES`, so a project turns the rule on once rather than
-    repeating it per tool. The annotations are not decoration: ``check``
-    compares them against the upstream's real dtypes, and ``catalog`` publishes
-    them as the tool's boundary.
+    refusing the tool when one is missing (``Catalog(..., strict=True)`` asks
+    the same of every tool in a catalog). The annotations are not decoration:
+    ``check`` compares them against the upstream's real dtypes, and the catalog
+    publishes them as the tool's boundary.
     """
     if isinstance(tags, str) or not all(isinstance(t, str) for t in tags):
         raise TypeError("tags= takes a list of strings, e.g. tags=['rowmap']")
     extras = _checked_extras(extras)
 
     def make(f: Callable, tool_id: str | None) -> ToolHandle:
-        if _FROZEN:
-            raise RuntimeError(
-                f"cannot declare tool {tool_id or f.__name__!r}: the tool "
-                "registry is frozen. Declare tools before grid.freeze().")
         if _looks_like_method(f):
             # @tool on a method used to replace it with a handle that never
             # receives `self`, breaking the method and registering a global
@@ -661,26 +595,14 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
             raise TypeError(
                 f"cannot declare tool {handle.id!r}: " + "; ".join(found) + "."
             )
-        if handle.id in TOOLS and TOOLS[handle.id] is not f:
-            # A warning, not an error: re-running a notebook cell and declaring
-            # a throwaway tool per test are both legitimate. Silently replacing
-            # a *different* function is the case worth surfacing — two modules
-            # claiming one id in a server is a real hazard.
-            warnings.warn(
-                f"tool {handle.id!r} is already declared and is being replaced. "
-                f"If these are two different tools, give one another name or "
-                f"pass id= — a workflow loaded from JSON resolves the id to "
-                f"whichever was declared last.",
-                stacklevel=3,
-            )
         open_ = _open_keywords(f)
-        if open_ and not (STRICT_TYPES if strict is None else strict):
+        if open_ and not strict:
             # 008 C12: allowed, but said out loud — strict mode refuses it.
             warnings.warn(
                 f"{handle.id} accepts **{open_}: its extra keywords can't be "
                 "checked, typed or shown in a form. Name the parameters you "
                 "expect.", stacklevel=3)
-        if STRICT_TYPES if strict is None else strict:
+        if strict:
             found = annotation_problems(f)
             if found:
                 raise TypeError(
@@ -699,8 +621,6 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
                 f"{handle.id!r} is a builtin tool ({BUILTIN_TOOLS[handle.id].__doc__ or ''}"
                 f"). Give yours another name, or pass id= to rename it."
             )
-        TOOLS[handle.id] = f
-        TOOL_TAGS[handle.id] = tuple(tags)
         handle.tags, handle.extras = tuple(tags), dict(extras)
         return handle
 
@@ -719,7 +639,7 @@ def formula_names(tools: dict[str, Callable] | None = None) -> dict[str, Any]:
     names: dict[str, Any] = {"wf": wf, "res": res, "mod": mod, "rows": rows,
                              "cols": cols, "op": op, "join": join,
                              "stack": stack, "zip_": zip_}
-    for tool_id, fn in {**TOOLS, **(tools or {})}.items():
+    for tool_id, fn in (tools or {}).items():
         if tool_id.isidentifier():
             names[tool_id] = fn if isinstance(fn, ToolHandle) else ToolHandle(fn, tool_id)
     return names
@@ -769,7 +689,8 @@ class Catalog:
     default; :meth:`without` removes any of them.
     """
 
-    def __init__(self, tools: Iterable[Any] = (), resources: Iterable[type] = ()):
+    def __init__(self, tools: Iterable[Any] = (), resources: Iterable[type] = (), *,
+                 strict: bool = False):
         found: dict[str, ToolHandle] = {}
         for item in tools:
             if not isinstance(item, ToolHandle):
@@ -781,6 +702,12 @@ class Catalog:
                 raise ValueError(
                     f"two different tools are named {item.id!r}; rename one with "
                     "@tool(id=…)")
+            if strict:
+                missing = annotation_problems(item.fn)
+                if missing:
+                    raise TypeError(f"tool {item.id!r} is not fully typed: "
+                                    f"{'; '.join(missing)}. A strict catalog needs "
+                                    "every parameter and the return annotated.")
             found[item.id] = item
         kinds: dict[str, type] = {}
         for cls in resources:
@@ -801,7 +728,7 @@ class Catalog:
         self._combines = frozenset(COMBINE)
 
     @classmethod
-    def from_modules(cls, *modules: types.ModuleType) -> "Catalog":
+    def from_modules(cls, *modules: types.ModuleType, strict: bool = False) -> "Catalog":
         """Every ``@tool`` and every resource type defined in *modules*."""
         tools_, kinds = [], []
         for module in modules:
@@ -809,9 +736,9 @@ class Catalog:
                 if isinstance(value, ToolHandle):
                     tools_.append(value)
                 elif (isinstance(value, type) and value.__module__ == module.__name__
-                      and RESOURCE_TYPES.get(value.__name__) is value):
+                      and value.__dict__.get("__simple_steps_resource__")):
                     kinds.append(value)
-        return cls(tools_, kinds)
+        return cls(tools_, kinds, strict=strict)
 
     def without(self, *names: str) -> "Catalog":
         """A copy without the named tools, resource types, built-ins, modifiers
@@ -982,7 +909,6 @@ from .specs import CatalogSpec, ResourceSpec  # noqa: E402
 from .combines import COMBINE, is_combine, join, stack, zip_  # noqa: E402
 from .modifiers import MODIFIERS, Modifier, SHAPE_VERBS, mod, modifier_catalog  # noqa: E402
 from .operation import Operation, _NESTED_OPERATION, op  # noqa: E402
-from .options import settings  # noqa: E402
 from .output import Output  # noqa: E402
 from .references import (  # noqa: E402
     ResRef,

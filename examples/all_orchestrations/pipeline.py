@@ -253,7 +253,7 @@ def roundtrip() -> tuple[grid.Workflow, grid.Workflow]:
     registry reproduces the exact outputs. Returns (original, reloaded).
     """
     original = run()
-    reloaded = grid.Workflow.from_json(original.to_session_json(), grid.TOOLS)
+    reloaded = grid.Workflow.from_json(original.to_session_json(), CATALOG.functions)
     return original, reloaded
 
 
@@ -331,6 +331,15 @@ def lookup_fresh(city: str, db: FakeDB) -> str:
     return db.lookup(city) or "unknown"
 
 
+# Everything this example's workflows may use. @tool and @resource register
+# nothing, so this is the one list of what exists here: loading a saved
+# workflow by name uses it, and so does the palette below.
+CATALOG = grid.Catalog(
+    tools=[scale, is_big, label_city, add_n, fan_out, make_coords, grid_cell,
+           risky, make_pair, enrich, summarize, lookup_fresh],
+    resources=[FakeDB, FakeLLM, TinyLLM])
+
+
 def notes() -> pd.DataFrame:
     """Two short texts for the LLM to summarize."""
     return pd.DataFrame({"text": ["a", "b"]})
@@ -401,10 +410,8 @@ def resource_roundtrip() -> tuple[grid.Workflow, grid.Workflow]:
     settings, never the live object.
     """
     original = build_resources()
-    reloaded = grid.Workflow.from_json(original.to_session_json(), grid.TOOLS,
-                                       resource_types={"FakeDB": FakeDB,
-                                                       "FakeLLM": FakeLLM,
-                                                       "TinyLLM": TinyLLM})
+    reloaded = grid.Workflow.from_json(original.to_session_json(), CATALOG.functions,
+                                       resource_types=CATALOG.resource_types)
     return original, reloaded
 
 
@@ -440,7 +447,7 @@ def main() -> None:
     print("  from_list (expand) →", wf.step("from_list").output.values)
     print("  split tuple (widen) →", list(wf.step("split").output.data.columns))
 
-    print("\ntool palette (catalog):", ", ".join(sorted(grid.catalog())))
+    print("\ntool palette (catalog):", ", ".join(sorted(CATALOG.describe()["tools"])))
 
     fail = failure()
     print("\nfailure (out) — the failed re-drive set:")

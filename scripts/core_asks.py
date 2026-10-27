@@ -33,6 +33,13 @@ I = op("identity")  # noqa: E741  (kept as in the app's copy)
 
 
 # ── The example's tools, so probes read like the docs ─────────────────────────
+def _tools(scope: dict | None = None) -> dict:
+    """The tools this script defines, by name (and any in *scope*): @tool
+    registers nothing, so reloading a workflow by name needs them passed."""
+    found = {**globals(), **(scope or {})}
+    return {v.id: v.fn for v in found.values() if isinstance(v, grid.ToolHandle)}
+
+
 @tool
 def scale(n, weight=1):
     return n * 10 * weight
@@ -422,7 +429,7 @@ def c11_literals_round_trip():
     wrong = []
     for v in values:
         wf["s"] = scale.bind(weight=v)[mod.map()](wf["readings"])
-        back = grid.Workflow.from_json(wf.to_session_json(), grid.TOOLS).step("s").operation.arguments["weight"]
+        back = grid.Workflow.from_json(wf.to_session_json(), _tools(locals())).step("s").operation.arguments["weight"]
         if back != v or type(back) is not type(v):
             wrong.append(f"{v!r} -> {back!r}")
     wf["d"] = scale.bind(weight=datetime.date(2024, 1, 1))[mod.map()](wf["readings"])
@@ -457,7 +464,7 @@ def c2_tool_settings():
     if err:
         return False, f"sort(by=tool) -> {err[:100]}"
     wf["s"] = built
-    back = grid.Workflow.from_json(wf.to_session_json(), grid.TOOLS)
+    back = grid.Workflow.from_json(wf.to_session_json(), _tools(locals()))
     back.run("s")
     got = list(back.step("s").output.data["n"])
     return got == [3, 2, 2, 1], f"sort(by=neg_n) after a round trip -> {got}"
@@ -544,12 +551,14 @@ def stop_on_failure():
 
 
 def c3_public_functions():
-    wanted = ["builtin_tools", "declared_tools", "shape_verbs", "resource_types",
-              "payload_column", "check_modifier", "freeze"]
+    # declared_tools, resource_types and freeze read or closed the process-wide
+    # registry, which K24 removed: a Catalog says what a workflow may use.
+    wanted = ["builtin_tools", "shape_verbs", "payload_column", "check_modifier",
+              "Catalog"]
     missing = [n for n in wanted if not hasattr(grid, n)]
     if missing:
         return False, f"missing: {missing}"
-    tagged = "tags" in grid.catalog().get("scale", {})
+    tagged = "tags" in grid.catalog(_tools()).get("scale", {})
     problems = grid.check_modifier("retry", {})
     return tagged and bool(problems), f"functions present; tags in catalog: {tagged}; check_modifier('retry') -> {problems}"
 
@@ -579,7 +588,7 @@ def p_to_source():
     if not hasattr(operation, "to_source"):
         return False, "Operation.to_source does not exist"
     text = operation.to_source()
-    back = eval(text, {"__builtins__": {}}, grid.formula_names())
+    back = eval(text, {"__builtins__": {}}, grid.formula_names(_tools()))
     return back == operation, f"{text} -> equal: {back == operation}"
 
 
@@ -592,7 +601,7 @@ def c12_kwargs_warn():
         def kw_probe(n: int, **opts) -> int:
             return n
     warned = any("accepts **opts" in str(c.message) for c in caught)
-    is_open = grid.catalog()["kw_probe"].get("open")
+    is_open = grid.catalog({"kw_probe": kw_probe})["kw_probe"].get("open")
     return warned and is_open, f"warned: {warned}; catalog open: {is_open}"
 
 

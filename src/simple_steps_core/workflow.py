@@ -795,7 +795,7 @@ class Workflow:
             return []
         now = _ran_with(step.operation)
         was_args, now_args = ran.get("arguments", {}), now["arguments"]
-        fn = step.operation.fn or TOOLS.get(step.operation.tool_id)
+        fn = step.operation.fn
         try:
             defaults = {k: p.default for k, p in _signature(fn).parameters.items()
                         if p.default is not inspect.Parameter.empty} if fn else {}
@@ -881,7 +881,7 @@ class Workflow:
 
     def _columns_bound(self, op_: Operation, source: str, kind: str) -> list[str]:
         """The input columns a tool reads: its parameters the input supplies by name."""
-        fn = op_.fn or TOOLS.get(op_.tool_id) or BUILTIN_TOOLS.get(op_.tool_id)
+        fn = op_.fn or BUILTIN_TOOLS.get(op_.tool_id)
         columns = self._predicted_of(source)
         try:
             parameters = list(_signature(fn).parameters.values()) if fn else []
@@ -896,7 +896,7 @@ class Workflow:
 
     @staticmethod
     def _first_param(op_: Operation) -> str | None:
-        fn = op_.fn or TOOLS.get(op_.tool_id)
+        fn = op_.fn
         try:
             return next(iter(_signature(fn).parameters), None) if fn else None
         except (TypeError, ValueError):
@@ -1067,7 +1067,7 @@ class Workflow:
         if operation.bound_to is None and not settings_refs and not any(
                 isinstance(v, (StepRef, ResRef)) for v in operation.arguments.values()):
             return operation
-        fn_for_types = operation.fn or TOOLS.get(operation.tool_id) \
+        fn_for_types = operation.fn \
             or BUILTIN_TOOLS.get(operation.tool_id)
         try:
             annotations = {k: p.annotation
@@ -1162,7 +1162,7 @@ class Workflow:
                 f"step {step_id!r} is invalid and cannot run: {step.problems[0]}"
             )
         if step.operation.shape_verb and step.operation.shape_verb.kind == "source":
-            tool = (step.operation.fn or TOOLS.get(step.operation.tool_id)
+            tool = (step.operation.fn
                     or BUILTIN_TOOLS.get(step.operation.tool_id))
             if not is_identity(tool):
                 # A tool source computes its grid from a no-input tool.
@@ -1398,7 +1398,7 @@ class Workflow:
         if catalog is not None:
             tools, known = catalog.functions, catalog.resource_types
         else:
-            known = {**RESOURCE_TYPES, **(resource_types or {})}
+            known = dict(resource_types or {})
         for name, entry in (blob.get("resources") or {}).items():
             workflow.resources[name] = ResourceDecl(
                 name, known.get(entry["type"]), dict(entry.get("settings") or {}),
@@ -1458,9 +1458,7 @@ from .system_tools import (  # noqa: E402
 from .catalog import (  # noqa: E402
     Catalog,
     _checked_extras,
-    RESOURCE_TYPES,
     ResourceDecl,
-    TOOLS,
     _attach_bound,
     _settings,
     _signature,

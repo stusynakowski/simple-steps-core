@@ -128,10 +128,11 @@ tests and examples have moved onto the kernel.
 | 3b | `Kernel`: a catalog, a workflow, loaded resources (built from their spec when first needed, or attached); declare, edit, rename, delete; `run` (never-run inputs first, stale ones pass through), `run_all`; `view`, `cell`; `to_json`, `from_json(text, catalog)`; a table `repr` and `_repr_html_`. The public names are exported from `simple_steps_core` | done |
 | 3c | `Problem` (a `str` with `code`, `step`, `argument`, `row`, `severity`; 33 codes in `problems.CODES`), given by every section of `check()` and `warn()` and by the catalog; `step.state`, `step.name`, `step.data`; `Output.version`, `read`, `plan`, `value_column`, `staged`, `stale`, `stale_reason`, `ran_with` (read from `meta` until 3e); `step.status` stays an alias of `state` until 3e | done |
 | 3d | `spec` on every object (`StepSpec`, `WorkflowSpec`, `ResourceSpec`, `CatalogSpec`, `KernelSpec`; `Kernel.from_spec`); `extras` on steps, resources and the workflow, saved and loaded; warnings name their step; `k.check(name, op)`; `k.needs_run()` and a *read stale* mark (a step run on a stale input is `completed`, and becomes stale only when that input's data changes); `k.on_change(callback)`; `k.insert`, `k.move` | done |
-| 3e | the tests and examples on the kernel; remove the registry, `freeze`, `grid` and the old names | |
+| 3e (1) | isolation (K24): `@tool` and `@resource` register nothing; `TOOLS`, `TOOL_TAGS`, `RESOURCE_TYPES`, `freeze`, `is_frozen`, `declared_tools`, `resource_types()`, `STRICT_TYPES` and `settings.implicit_auto` are gone. Strictness is per tool or `Catalog(..., strict=True)`; implicit auto is always on. A workflow without a catalog uses only the functions its operations carry, or a `tools=` table passed to `from_json`, which also resolves tools saved as settings. Tests and examples name their tools explicitly | done |
+| 3e (2) | remove `grid` and the old names; plain imports; `step.status` as the live part | |
 
-**Isolation is finished in 3e** (noted 2026-10-26). Until then, a kernel never
-*reads* process-wide state, but core still *writes* it: `@tool` adds every
+**Isolation was finished in 3e (1).** Before it, a kernel never *read*
+process-wide state, but core still *wrote* it: `@tool` adds every
 tool to `TOOLS` and `TOOL_TAGS`, and `@resource` and `define()` add resource
 types to `RESOURCE_TYPES`. Two same-named tools in one process therefore swap
 the global entry (with a warning), which only affects workflows made without a

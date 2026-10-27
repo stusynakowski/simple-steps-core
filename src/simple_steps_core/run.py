@@ -82,7 +82,7 @@ def _with_verb(operation: Operation, kind: str) -> Operation:
 
 def _resolve_auto(operation: Operation, upstream: Any) -> tuple[Operation, str, str]:
     """(concrete operation, verb, reason) for an ``auto`` step over *upstream*."""
-    fn = operation.fn or TOOLS.get(operation.tool_id) or BUILTIN_TOOLS.get(operation.tool_id)
+    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool_id)
     if fn is None:
         return _with_verb(operation, "map"), "map", "the tool isn't known; assuming per row"
     kind, why = infer_verb(fn, upstream, operation.arguments)
@@ -112,7 +112,7 @@ def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Calla
     ``map(retry(tool))`` — the same object graph ``@map`` over ``@retry`` over
     the function would have produced at definition time.
     """
-    table = {**BUILTIN_TOOLS, **TOOLS, **tools}
+    table = {**BUILTIN_TOOLS, **tools}
     if operation.tool_id not in table:
         raise KeyError(f"unknown tool {operation.tool_id!r}; have {sorted(table)}")
     if _is_auto(operation):
@@ -144,7 +144,6 @@ def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Calla
 # to each other (see grid.py).
 from .system_tools import BUILTIN_TOOLS  # noqa: E402
 from .catalog import (  # noqa: E402
-    TOOLS,
     ToolHandle,
     _signature,
     _type_fits,

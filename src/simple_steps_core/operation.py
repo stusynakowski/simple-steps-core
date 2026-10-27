@@ -167,7 +167,8 @@ class Operation:
             return f"{name}({grids}{config})"
         if self.bound_to is not None:
             head = f"res[{_src(self.bound_to.name)}].{self.tool_id.rsplit('.', 1)[-1]}"
-        elif self.tool_id in TOOLS and self.tool_id.isidentifier():
+        elif (self.fn is not None and self.tool_id not in BUILTIN_TOOLS
+              and self.tool_id.isidentifier()):
             head = self.tool_id
         else:
             head = f"op({_src(self.tool_id)})"
@@ -225,7 +226,7 @@ class Operation:
     def from_dict(cls, blob: dict, tools: dict[str, Callable] | None = None
                   ) -> "Operation":
         """Rebuild an Operation from :meth:`to_dict`, re-attaching its function."""
-        table = {**BUILTIN_TOOLS, **TOOLS, **(tools or {})}
+        table = {**BUILTIN_TOOLS, **(tools or {})}
         fn = table.get(blob["tool_id"])
         # Legacy (v1) stored the input as `over` inside a modifier; hoist it.
         modifiers, hoisted = [], None
@@ -234,7 +235,7 @@ class Operation:
             over = params.pop("over", None)
             if over is not None:
                 hoisted = over
-            modifiers.append(Modifier(m["kind"], {k: _decode_argument(v)
+            modifiers.append(Modifier(m["kind"], {k: _with_tool(_decode_argument(v), table)
                                                   for k, v in params.items()}))
         arguments = {k: _decode_argument(v)
                      for k, v in (blob.get("arguments") or {}).items()}
@@ -245,7 +246,7 @@ class Operation:
             modifiers=tuple(modifiers),
             arguments=arguments,
             # A bound tool's function comes from its resource type, never from
-            # TOOLS; the workflow attaches it once it knows the type.
+            # a tool table; the workflow attaches it once it knows the type.
             fn=None if bound_to is not None
             else (fn.fn if isinstance(fn, ToolHandle) else fn),
             input=_decode_ref(blob.get("input", hoisted)),
@@ -319,11 +320,6 @@ class Operation:
             return based
         # The verb is no longer picked here: staging and each run pick it from
         # the input as it is then (`_provisional`, `_resolve_auto`).
-        if not settings.implicit_auto:
-            raise TypeError(
-                f"{self.tool_id} needs an orchestration: write "
-                f"{self.tool_id}[mod.map()](…) or {self.tool_id}[mod.auto()](…). "
-                "(Implicit auto is off: grid.settings.implicit_auto.)")
         # 009 decision 6: an unstated orchestration is auto, saved as
         # `mod.auto()` and decided from the data at each run.
         return based._add("auto")             # _add carries based.input forward
@@ -349,7 +345,7 @@ class Operation:
                 f"the call position: wf[...] = <tool>[mod...](wf[{source.id!r}]). "
                 "Calling an Operation directly is for data you already hold."
             )
-        table = {**BUILTIN_TOOLS, **TOOLS, **(tools or {})}
+        table = {**BUILTIN_TOOLS, **(tools or {})}
         if self.fn is not None:
             table.setdefault(self.tool_id, self.fn)
         if self.tool_id not in table:
@@ -370,6 +366,15 @@ class Operation:
         stack = "".join(f"{m!r} ∘ " for m in self.layers)
         src = f" over={self.input.id!r}" if isinstance(self.input, StepRef) else ""
         return f"<Operation {stack}{self.tool_id}{src}>"
+
+
+def _with_tool(value: Any, table: dict) -> Any:
+    """A saved tool name (``{"$tool": id}``) as the tool *table* has under it;
+    left as a name when the table doesn't have it (``check`` then says so)."""
+    if isinstance(value, ToolRef) and value.id in table:
+        found = table[value.id]
+        return found if isinstance(found, ToolHandle) else ToolHandle(found, value.id)
+    return value
 
 
 def op(tool_id: str, **arguments) -> Operation:
@@ -444,11 +449,10 @@ def _src(value: Any) -> str:
 # Names used only inside functions, imported last so the modules can refer
 # to each other (see grid.py).
 from .system_tools import BUILTIN_TOOLS  # noqa: E402
-from .catalog import TOOLS, ToolHandle, _attach_bound  # noqa: E402
+from .catalog import ToolHandle, _attach_bound  # noqa: E402
 from .checks import check  # noqa: E402
 from .combines import is_combine  # noqa: E402
 from .modifiers import Modifier  # noqa: E402
-from .options import settings  # noqa: E402
 from .references import (  # noqa: E402
     ResRef,
     StepRef,

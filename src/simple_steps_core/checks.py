@@ -105,7 +105,7 @@ def _output_mismatch(operation: "Operation", data: pd.DataFrame) -> str | None:
     expect = _expectation(operation)
     verb = operation.shape_verb
     if verb is not None and verb.kind in ("source", "table"):
-        fn = operation.fn or TOOLS.get(operation.tool_id)
+        fn = operation.fn
         schema = _declared_schema(fn) if fn is not None else None
         if schema is not None and list(schema) != list(data.columns):
             return (f"{operation.tool_id} declares columns {', '.join(schema)}; "
@@ -179,7 +179,7 @@ def _worst(states: set, stale: Any = False) -> str:
 def _is_tool_verb(kind: Any, op_: Any) -> bool:
     """Does this verb apply a real tool to each row (rather than copy cells)?"""
     if kind in ("map", "group", "filter", "expand"):
-        return not is_identity(op_.fn or TOOLS.get(op_.tool_id) or BUILTIN_TOOLS.get(op_.tool_id))
+        return not is_identity(op_.fn or BUILTIN_TOOLS.get(op_.tool_id))
     return False
 
 
@@ -228,15 +228,17 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
 
     # 1. the tool has to exist — unless this is a combine verb, which names no
     #    tool (join/stack/zip apply none; their id is the verb itself). A bound
-    #    tool comes from its resource's declared type, never from TOOLS.
+    #    tool comes from its resource's declared type, never from a tool table.
     if operation.bound_to is not None:
         fn = operation.fn
         if fn is None:
             problems.append(_bound_problem(operation, workflow))
     else:
-        fn = operation.fn or TOOLS.get(operation.tool_id) \
+        fn = operation.fn \
             or BUILTIN_TOOLS.get(operation.tool_id)
-        if fn is None and not is_combine(operation):
+        outside = any(getattr(p, "code", None) in ("not_in_catalog", "different_function")
+                      for p in problems)
+        if fn is None and not is_combine(operation) and not outside:
             problems.append(f"unknown tool {operation.tool_id!r}")
 
     coded(problems, "unknown_tool")
@@ -540,8 +542,9 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 continue
             if name not in TOOL_SETTINGS.get(modifier.kind, ()):
                 problems.append(f"{modifier.kind}'s {name}= doesn't take a tool")
-            elif isinstance(value, ToolRef) and value.id not in TOOLS \
-                    and value.id not in BUILTIN_TOOLS:
+            elif isinstance(value, ToolRef) and value.id not in BUILTIN_TOOLS \
+                    and not (getattr(workflow, "catalog", None) is not None
+                             and value.id in workflow.catalog.functions):
                 problems.append(f"{modifier.kind}'s {name}= names tool "
                                 f"{value.id!r}, which is not registered")
 
@@ -675,7 +678,7 @@ def warn(operation: Operation, workflow: "Workflow | None" = None,
     notes: list[str] = []
     # 008 C12: a keyword that matches no named parameter lands in **kwargs,
     # unchecked — a typo there would otherwise pass silently.
-    tool_fn = operation.fn or TOOLS.get(operation.tool_id)
+    tool_fn = operation.fn
     open_ = _open_keywords(tool_fn) if tool_fn is not None else None
     if open_:
         named = {p for p in inspect.signature(tool_fn).parameters} - {open_}
@@ -721,7 +724,7 @@ def warn(operation: Operation, workflow: "Workflow | None" = None,
     # Only predict while the upstream is staged; once it runs, `check` is exact.
     if upstream is None or not upstream.output.meta.get("staged"):
         return _warnings(notes, step_id)
-    fn = operation.fn or TOOLS.get(operation.tool_id) \
+    fn = operation.fn \
         or BUILTIN_TOOLS.get(operation.tool_id)
     if isinstance(fn, ToolHandle):
         fn = fn.fn
@@ -774,6 +777,16 @@ def _warnings(notes: list[str], step_id: str | None = None) -> tuple[Problem, ..
     return tuple(classified(n, _WARNING_KINDS, "problem", severity="warning").at(step_id)
                  for n in notes)
 
+def _resource_types_of(workflow: "Workflow | None") -> list[type]:
+    """The resource types a workflow knows: its catalog's and its resources'."""
+    if workflow is None:
+        return []
+    kinds = [d.type for d in workflow.resources.values() if d.type is not None]
+    if getattr(workflow, "catalog", None) is not None:
+        kinds += list(workflow.catalog.resource_types.values())
+    return kinds
+
+
 def _missing_columns(operation: Operation, fn: Callable,
                      workflow: "Workflow") -> list[str]:
     """Required parameters the upstream grid cannot supply.
@@ -817,7 +830,7 @@ def _missing_columns(operation: Operation, fn: Callable,
     for name in missing:
         kind = annotations.get(name)
         if isinstance(kind, type) and any(isinstance(t, type) and issubclass(t, kind)
-                                          for t in RESOURCE_TYPES.values()):
+                                          for t in _resource_types_of(workflow)):
             hint = (f". {name!r} is a resource ({kind.__name__}), not a column: "
                     f"bind it with {name}=res[\"<name>\"]")
             break
@@ -1267,7 +1280,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         # a range or position selection over columns not known yet
         columns_open = workflow._columns_open(operation) if workflow is not None else False
     elif kind == "source":
-        fn = operation.fn or TOOLS.get(operation.tool_id) \
+        fn = operation.fn \
             or BUILTIN_TOOLS.get(operation.tool_id)
         columns_open = not is_identity(fn)
     elif kind == "table":
@@ -1281,7 +1294,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     # 008 C5/C9: what a step will produce, as far as is known — and how sure.
     # Column types come from the input (carried), the tool's return (payload),
     # a source's declared schema, or `mod.expect`.
-    fn = operation.fn or TOOLS.get(operation.tool_id) or BUILTIN_TOOLS.get(operation.tool_id)
+    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool_id)
     label = operation.tool_id
     upstream_types = workflow._column_types(operation) if workflow is not None else {}
     types: dict = {c: upstream_types.get(c) for c in ordered}
@@ -1332,8 +1345,6 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
 # to each other (see grid.py).
 from .system_tools import BUILTIN_TOOLS, is_identity  # noqa: E402
 from .catalog import (  # noqa: E402
-    RESOURCE_TYPES,
-    TOOLS,
     ToolHandle,
     _bound_problem,
     _bound_tools,

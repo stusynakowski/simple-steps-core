@@ -28,7 +28,6 @@ from simple_steps_core.grid import (
     Step,
     StepRef,
     Workflow,
-    TOOLS,
     annotation_problems,
     catalog,
     compile_operation,
@@ -48,6 +47,12 @@ from simple_steps_core.grid import (
     widen_,
     declaration_problems,
 )
+
+
+from _module_tools import module_tools  # noqa: E402
+
+#: This module's tools, by name: what reloading a saved workflow needs.
+TOOLS = module_tools(globals())
 
 
 # Tools declare the values they need. Supplying rows is the modifier's job, so
@@ -450,13 +455,13 @@ def test_the_catalog_describes_every_builtin():
 
 
 def test_the_catalog_separates_system_tools_from_declared_ones():
-    described = catalog()
+    described = catalog(TOOLS)
     assert described["score"]["origin"] == "declared"
     assert described["identity"]["origin"] == "builtin"
 
 
 def test_a_catalog_entry_carries_what_a_form_needs():
-    entry = catalog()["score"]          # score(n, weight=1) — unannotated
+    entry = catalog(TOOLS)["score"]       # score(n, weight=1) — unannotated
     assert entry["params"] == [
         {"name": "n", "required": True, "default": None, "type": None,
          "choices": None, "nullable": False, "description": None},
@@ -475,7 +480,7 @@ def test_a_catalog_entry_publishes_a_typed_tools_boundary():
         """Convert one reading."""
         return celsius * 9 / 5 + 32
 
-    entry = catalog()["celsius_to_f"]
+    entry = catalog({"celsius_to_f": celsius_to_f})["celsius_to_f"]
     assert entry["params"] == [
         {"name": "celsius", "required": True, "default": None, "type": "float",
          "choices": None, "nullable": False, "description": None},
@@ -497,7 +502,7 @@ def test_catalog_keeps_literal_choices_and_optional_inner_type():
         """
         return []
 
-    region, limit = catalog()["pick"]["params"]
+    region, limit = catalog({"pick": pick})["pick"]["params"]
     assert region["type"] == "str" and region["choices"] == ["EMEA", "AMER"]
     assert region["description"] == "which region to load."
     assert limit["type"] == "int" and limit["nullable"] is True
@@ -826,10 +831,12 @@ def test_a_second_reference_binds_by_position(three):
         score(wf["raw"], wf["other"], wf["other"])
 
 
-def test_a_declared_tool_resolves_by_id(three):
-    """@tool registers it, so a workflow loaded from JSON needs no tools map."""
-    assert TOOLS["score"] is score.fn
-    assert op("score")[mod.map()](grid(three)).values == [10, 20, 30]
+def test_a_declared_tool_is_registered_nowhere(three):
+    """@tool returns the tool and registers it nowhere (K24): running a tool by
+    name needs a catalog or a tools table that has it."""
+    with pytest.raises(Exception, match="score"):
+        op("score")[mod.map()](grid(three))
+    assert op("score")[mod.map()].run(grid(three), {"score": score.fn}).values == [10, 20, 30]
 
 
 def test_an_unknown_tool_says_how_to_supply_it(three):
@@ -1355,15 +1362,18 @@ def test_strict_typing_refuses_a_whole_row_tool():
         @tool
         def loose(**row: object) -> int:
             return len(row)
-    assert (catalog()["loose"]["typed"], catalog()["loose"]["open"]) == (False, True)
+    entry = catalog({"loose": loose})["loose"]
+    assert (entry["typed"], entry["open"]) == (False, True)
 
 
-def test_strict_types_can_be_turned_on_globally(monkeypatch):
-    monkeypatch.setattr(grid_module, "STRICT_TYPES", True)
-    with pytest.raises(TypeError, match="is not fully typed"):
-        @tool
-        def bare(n):
-            return n
+def test_strict_types_can_be_turned_on_for_a_whole_catalog():
+    @tool
+    def bare(n):
+        return n
+    from simple_steps_core import Catalog
+    Catalog(tools=[bare])                                  # fine by default
+    with pytest.raises(TypeError, match="'bare' is not fully typed"):
+        Catalog(tools=[bare], strict=True)
 
 
 def test_a_bound_literal_is_checked_against_its_annotation():
@@ -1963,14 +1973,23 @@ def test_declaration_problems_reports_every_gap_at_once():
     assert len(found) == 3, found
 
 
-def test_a_duplicate_tool_id_warns_rather_than_raising():
-    @tool
-    def dupe_a(n):
-        return 1
-    with pytest.warns(UserWarning, match="already declared"):
+def test_two_tools_may_share_an_id_until_they_meet_in_a_catalog():
+    """Nothing is registered, so a second tool with an id replaces nothing and
+    says nothing; only a catalog holding both refuses them."""
+    import warnings as _w
+    with _w.catch_warnings():
+        _w.simplefilter("error")
+
+        @tool
+        def dupe_a(n):
+            return 1
+
         @tool(id="dupe_a")
         def dupe_b(n):
             return 2
+    from simple_steps_core import Catalog
+    with pytest.raises(ValueError, match="two different tools are named 'dupe_a'"):
+        Catalog(tools=[dupe_a, dupe_b])
 
 
 def test_redeclaring_the_same_function_does_not_warn():
