@@ -292,6 +292,41 @@ f[collapse(by="ward")](g)   =   f[map()](  gather[collapse(by="ward")](g)  )
   separate rows, several share a key, and ids are unique (V4). `group`
   writes a key column and leaves the rows alone.
 
+### 8.1 What happens to each column
+
+Following `vt` (`ward`, `temp`, rows 0–3) through the two moves:
+
+```
+vt                     gather[collapse(by="ward")](vt)            mean_temp[map()](…)
+#  ward  temp          #  #vt        ward  temp                   #  #vt        value
+0  A     37.0    →     A  [0, 1, 3]  A     [37.0, 38.5, 39.1]  →  A  [0, 1, 3]  38.2
+1  A     38.5          B  [2]        B     [36.9]                 B  [2]        36.9
+2  B     36.9
+3  A     39.1
+```
+
+| Column of the input | After the pack, `gather[collapse(by=k)]` | After the reducer's `map` |
+|---|---|---|
+| **the key** (`ward`) | one value per row, and it is also the row id `#` | gone from the variables: `map` outputs only its results. It is still `#` |
+| **each other variable** (`temp`) | a list of the group's values, in the order of `#v`; every list in a row has the same length | the reducer's parameter named after it gets the list; columns it doesn't name aren't in its output |
+| **the row id `#`** (0–3) | becomes `#vt`: the list of the group's rows | carried, as for any `map` |
+| **the input's own `#` columns** (an `expand`'s `#v`, say) | not carried: the rows are new. Reached through `#vt`, step by step; or used as the key, `by="#v"` | — |
+| **types** | `T` becomes `list[T]` | checked as `list[T]` (R-D13 e) |
+
+**So `f[collapse(by=k)]` is `f[map()]` over the pack, plus one thing: it keeps
+the key as a column** (`#  #vt  ward  value`). The key is the row id too, but
+tools never see ids, so a later step that needs `ward` as a value (a `join`
+on it, a label) needs the column. L49 checks the rest is the same.
+
+- **One key column.** A key is a single value, because it becomes a row id
+  (an `int` or a `str`). To group by two columns, make one key from them with
+  a tool (`f"{ward}/{day}"`) under `group`, and group by that.
+- **The order inside each list is the input's row order.** `sort` before
+  `collapse` decides what `first`, `last` and `gather` see.
+- **Unpacking the lists again** (`expand(columns=["temp"])`) gives back
+  `vt`'s rows, ids and origin (§6.2), because every list in a row has the same
+  length and lines up with `#vt`.
+
 A reduction loses the values on purpose. It never loses which rows it
 reduced: its `#v` lists them.
 

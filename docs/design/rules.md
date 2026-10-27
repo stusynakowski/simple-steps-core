@@ -52,8 +52,10 @@ things.
 `gather[collapse(by="ward")]` re-indexes by the key and packs: one row per
 ward, each column a list of the group's values. A reducer is then an
 ordinary `map` over those lists (`def mean_temp(temp: list[float])`), so
-`mean_temp[collapse(by="ward")]` is exactly that pack followed by that map.
-A parameter named after the key gets the key.
+`mean_temp[collapse(by="ward")]` is exactly that pack followed by that map,
+and it keeps the key as a column too (`ward`), since tools never see `#`. A
+parameter named after the key gets the key. A key is one value: to group by
+two columns, make one key from them first.
 
 ## What core can't do, by design
 

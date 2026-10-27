@@ -694,3 +694,5 @@ def test_L49_a_reduction_is_a_map_over_packed_lists(k):
     assert data(k, "direct")["value"].tolist() == data(k, "mapped")["value"].tolist()
     assert list(data(k, "direct").index) == list(data(k, "mapped").index) == ["A", "B"]
     assert data(k, "direct").loc["A", "#vt"] == data(k, "packed").loc["A", "#vt"] == [0, 1, 3]
+    assert list(data(k, "direct").columns) == ["#vt", "ward", "value"]   # collapse also keeps the key
+    assert list(data(k, "mapped").columns) == ["#vt", "value"]           # a map: only its results
