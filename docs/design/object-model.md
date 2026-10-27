@@ -414,7 +414,7 @@ k = Kernel.from_json(text, cat)      # or a saved spec
 | `resources` | the loaded instances |
 | `store` | outputs by data version. Phase 3 keeps the latest; K22 keeps what a stale reader still shows |
 | `options` | per kernel, never global: strict types, implicit `auto` |
-| `extras` | the app's additions to the kernel spec; never read by core |
+| `extras` | the app's additions, by namespace; never read by core. *As built (3d):* the same mapping as the workflow's extras |
 
 | Does | |
 |---|---|

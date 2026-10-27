@@ -127,7 +127,7 @@ tests and examples have moved onto the kernel.
 | 3a | `Catalog`: tools, resource types, built-ins, modifiers, combines; `without`, `from_modules`, `describe`. A workflow with a catalog checks every step against it (declared, re-checked or loaded) and runs the catalog's functions. Tools carry their `tags` and `extras` | done |
 | 3b | `Kernel`: a catalog, a workflow, loaded resources (built from their spec when first needed, or attached); declare, edit, rename, delete; `run` (never-run inputs first, stale ones pass through), `run_all`; `view`, `cell`; `to_json`, `from_json(text, catalog)`; a table `repr` and `_repr_html_`. The public names are exported from `simple_steps_core` | done |
 | 3c | `Problem` (a `str` with `code`, `step`, `argument`, `row`, `severity`; 33 codes in `problems.CODES`), given by every section of `check()` and `warn()` and by the catalog; `step.state`, `step.name`, `step.data`; `Output.version`, `read`, `plan`, `value_column`, `staged`, `stale`, `stale_reason`, `ran_with` (read from `meta` until 3e); `step.status` stays an alias of `state` until 3e | done |
-| 3d | specs on every object; `k.check`, `needs_run`, `on_change`, `insert`, `move`; `repr` and notebook display | |
+| 3d | `spec` on every object (`StepSpec`, `WorkflowSpec`, `ResourceSpec`, `CatalogSpec`, `KernelSpec`; `Kernel.from_spec`); `extras` on steps, resources and the workflow, saved and loaded; warnings name their step; `k.check(name, op)`; `k.needs_run()` and a *read stale* mark (a step run on a stale input is `completed`, and becomes stale only when that input's data changes); `k.on_change(callback)`; `k.insert`, `k.move` | done |
 | 3e | the tests and examples on the kernel; remove the registry, `freeze`, `grid` and the old names | |
 
 **Isolation is finished in 3e** (noted 2026-10-26). Until then, a kernel never
@@ -257,7 +257,8 @@ mismatched `try_except` default is silent (G6); the new warnings and `where`
 keeps the spread column and fails only at run (G8–G10); DataFrame returns per
 row aren't flagged (G11); no naming modifier (G12); readers aren't re-checked when an upstream's
 columns change (G13); `run` doesn't run never-run inputs first (G14); no `needs_run`, change
-callbacks or stale-read mark (G15).
+callbacks or stale-read mark (G15, done in 3d); a literal step's value isn't saved,
+so `k["x"] = [3, 1, 2]` reloads with no data (G16, for the owner to decide).
 
 - `mod.name` replaces `name=`; an undeclared dict stays one cell; kernel-wide
   naming conventions are a kernel option; one grid per step; combines number

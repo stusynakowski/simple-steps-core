@@ -17,9 +17,10 @@ catalog, workflow and resources.
 
 from __future__ import annotations
 
+import functools
 import html
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
 from .catalog import Catalog
@@ -83,6 +84,22 @@ class Resources(Mapping):
         self._loaded.pop(name, None)
 
 
+def _notifies(action: str):
+    """Tell the kernel's listeners what *action* changed, once it is done."""
+    def wrap(method):
+        @functools.wraps(method)
+        def run(self, *args, **kwargs):
+            if not self._listeners:
+                return method(self, *args, **kwargs)
+            before = self._snapshot()
+            try:
+                return method(self, *args, **kwargs)
+            finally:
+                self._tell(action, before)
+        return run
+    return wrap
+
+
 class Kernel:
     """A workflow, the catalog it may use, and the resources it has loaded."""
 
@@ -93,6 +110,7 @@ class Kernel:
         self.catalog = catalog
         self.workflow = Workflow(catalog=catalog)
         self.resources = Resources(self)
+        self._listeners: list[Callable[[dict], Any]] = []
 
     # ── steps ────────────────────────────────────────────────────────────
     def _name(self, step: str | int) -> str:
@@ -109,6 +127,7 @@ class Kernel:
             raise KeyError(f"no step {step!r}")
         return step
 
+    @_notifies("declare")
     def __setitem__(self, name: str, operation: Any) -> None:
         """Declare step *name*, or replace it. Checked and planned at once."""
         self.workflow[name] = operation
@@ -117,6 +136,7 @@ class Kernel:
         """A reference to a step, by name or position, for use in another step."""
         return self.workflow[step]
 
+    @_notifies("remove")
     def __delitem__(self, step: str | int) -> None:
         self.workflow.remove(self._name(step))
 
@@ -138,11 +158,25 @@ class Kernel:
         """The live step, by name or position."""
         return self.workflow.step(self._name(step))
 
+    @_notifies("rename")
     def rename(self, old: str, new: str) -> None:
         """Rename a step; later references follow."""
         self.workflow.rename(self._name(old), new)
 
+    @_notifies("insert")
+    def insert(self, index: int, name: str, operation: Any) -> None:
+        """Declare a new step *name* at position *index*. Refused when it would
+        read a step that comes after that position."""
+        self.workflow.insert(index, name, operation)
+
+    @_notifies("move")
+    def move(self, step: str | int, index: int) -> None:
+        """Move a step to position *index*. Refused when a valid step would then
+        read a step after it."""
+        self.workflow.move(self._name(step), index)
+
     # ── resources ────────────────────────────────────────────────────────
+    @_notifies("define")
     def define(self, name: str, type_: type, /, **settings: Any) -> ResRef:
         """Add resource *name*: a *type_* from the catalog, built from *settings*
         when a step first needs it."""
@@ -155,6 +189,13 @@ class Kernel:
         """Every step's problems, by name; empty for the good ones."""
         return self.workflow.validate()
 
+    def check(self, name: str, operation: Any) -> tuple:
+        """The problems step *name* would have, without adding it or changing
+        anything: what a proposal (from the agent, or a form) is checked with
+        before it is accepted. Empty when it would be fine."""
+        return self.workflow.check(name, operation)
+
+    @_notifies("run")
     def run(self, step: str | int) -> Step:
         """Run one step on what its inputs show now.
 
@@ -166,10 +207,69 @@ class Kernel:
             self.workflow.run(upstream, resources=self.resources)
         return self.workflow.run(name, resources=self.resources)
 
+    @_notifies("run_all")
     def run_all(self) -> "Kernel":
         """Run every valid step, in order. Stops at a failure nothing handles."""
         self.workflow.run_all(resources=self.resources)
         return self
+
+    # ── what needs running, and who to tell ──────────────────────────────
+    def _read_stale(self, name: str) -> list[str]:
+        """The inputs of a step that has run which are stale now."""
+        steps = self.workflow.steps
+        return [r for r in steps[name].operation.reads
+                if r in steps and steps[r].state == "stale"]
+
+    def needs_run(self) -> dict[str, str]:
+        """Every step that isn't up to date, in run order, with why:
+        ``staged``, ``stale: <reason>``, or ``read stale '<input>'`` for a step
+        that ran on an input that is stale. Invalid steps can't run and aren't
+        listed (see :meth:`validate`)."""
+        out: dict[str, str] = {}
+        for name, st in self.workflow.steps.items():
+            state = st.state
+            if state == "staged":
+                out[name] = "staged"
+            elif state == "stale":
+                out[name] = f"stale: {st.output.stale_reason or 'an input changed'}"
+            elif state in ("completed", "failed"):
+                stale_inputs = self._read_stale(name)
+                if stale_inputs:
+                    out[name] = f"read stale {stale_inputs[0]!r}"
+        return out
+
+    def on_change(self, callback: Callable[[dict], Any]) -> Callable[[], None]:
+        """Call *callback* after every edit or run that changes a step's formula,
+        state, problems, plan or output.
+
+        It receives ``{"action": …, "changed": [names in order], "removed":
+        [names]}``. Returns a function that stops the calls.
+        """
+        self._listeners.append(callback)
+
+        def stop() -> None:
+            if callback in self._listeners:
+                self._listeners.remove(callback)
+        return stop
+
+    def _snapshot(self) -> dict[str, tuple]:
+        return {name: (json.dumps(st.operation.to_dict(), sort_keys=True, default=str),
+                       st.state, tuple(map(str, st.problems)), repr(st.output.plan),
+                       st.output.version, st.output.stale_reason,
+                       tuple(self._read_stale(name)))
+                for name, st in self.workflow.steps.items()}
+
+    def _tell(self, action: str, before: dict[str, tuple]) -> None:
+        after = self._snapshot()
+        changed = [n for n, v in after.items() if before.get(n) != v]
+        removed = [n for n in before if n not in after]
+        if action == "move":
+            changed = changed or [n for n, o in zip(after, before) if n != o]
+        if not changed and not removed:
+            return
+        change = {"action": action, "changed": changed, "removed": removed}
+        for callback in list(self._listeners):
+            callback(change)
 
     # ── reading ──────────────────────────────────────────────────────────
     def view(self, step: str | int, rows: tuple[int, int] | None = None) -> dict:
@@ -225,7 +325,11 @@ class Kernel:
             data = st.output.data
             shape = "—" if st.output.staged else f"{data.shape[0]}×{data.shape[1]}"
             problem = st.problems[0] if st.problems else ""
-            rows.append((str(index), name, formula, st.state, shape, problem))
+            state = st.state
+            stale_inputs = self._read_stale(name) if state in ("completed", "failed") else []
+            if stale_inputs:
+                state += f" · read stale {stale_inputs[0]!r}"
+            rows.append((str(index), name, formula, state, shape, problem))
         return rows
 
     def __repr__(self) -> str:

@@ -120,11 +120,10 @@ class Workflow:
         return live
 
     # ── declaring ────────────────────────────────────────────────────────
-    def __setitem__(self, step_id: str, operation: Any) -> None:
-        _check_caller_scope()
-        existed = step_id in self.steps
-        # The app's additions stay with the step when it is re-declared.
-        kept_extras = self.steps[step_id].extras if existed else {}
+    def _as_operation(self, operation: Any) -> Any:
+        """What declaring *operation* means, before it is checked: a selection
+        becomes a select step, a bare shape verb gets its default tool. Anything
+        else is returned as it is (an Operation, or a literal value)."""
         if isinstance(operation, StepRef):
             # 008 C7 (K9): `wf["block"] = wf["p"][1:5][cols["a":"c"]]` is a
             # select step — visible, saved and re-runnable. A plain reference
@@ -166,6 +165,14 @@ class Workflow:
             operation = Operation(tool_id=default,
                                   fn=BUILTIN_TOOLS[default])[operation]
 
+        return operation
+
+    def __setitem__(self, step_id: str, operation: Any) -> None:
+        _check_caller_scope()
+        existed = step_id in self.steps
+        # The app's additions stay with the step when it is re-declared.
+        kept_extras = self.steps[step_id].extras if existed else {}
+        operation = self._as_operation(operation)
         if not isinstance(operation, Operation):
             # A bare value is a source step, and a source step's data **is its
             # output** — it arrived with the declaration, so there is nothing
@@ -208,6 +215,68 @@ class Workflow:
             self._mark_stale_dependents(step_id)
         else:
             self._recheck_readers(step_id)
+
+    def check(self, step_id: str, operation: Any) -> tuple:
+        """The problems *operation* would have as step *step_id*, without
+        declaring it: nothing in the workflow changes. A literal value has none."""
+        operation = self._as_operation(operation)
+        if not isinstance(operation, Operation):
+            return ()
+        operation = _attach_bound(operation, self.resources)
+        if self.catalog is not None:
+            operation = self.catalog.admit(operation)
+        return check(operation, self, step_id)
+
+    def move(self, step_id: str, index: int) -> None:
+        """Move step *step_id* to position *index* (a position in the new
+        order; negative counts from the end).
+
+        Refused when a step that is valid now would read a step after it. A
+        move that fixes an order is allowed, and every step is re-checked.
+        """
+        names = list(self.steps)
+        if step_id not in self.steps:
+            raise KeyError(f"no step {step_id!r}")
+        if not -len(names) <= index < len(names):
+            raise IndexError(f"no position {index}: the workflow has {len(names)} steps")
+        names.remove(step_id)
+        names.insert(index % (len(names) + 1), step_id)
+        position = {n: i for i, n in enumerate(names)}
+        for name in names:
+            st = self.steps[name]
+            if not st.valid:
+                continue
+            for read in st.operation.reads:
+                if read in position and position[read] > position[name]:
+                    raise ValueError(
+                        f"cannot move {step_id!r} to position {index}: {name!r} "
+                        f"reads {read!r}, which would come after it")
+        self.steps = {n: self.steps[n] for n in names}
+        for sid, st in self.steps.items():
+            problems = check(st.operation, self, sid)
+            if problems != st.problems:
+                st.problems = problems
+                st.output = stage(st.operation, self, problems)
+                st.warnings = warn(st.operation, self, sid)
+
+    def insert(self, index: int, step_id: str, operation: Any) -> None:
+        """Declare a new step *step_id* at position *index*."""
+        if step_id in self.steps:
+            raise ValueError(f"step {step_id!r} already exists: assign to "
+                             "replace it, or move it")
+        position = index if index >= 0 else len(self.steps) + 1 + index
+        if not 0 <= position <= len(self.steps):
+            raise IndexError(f"no position {index}: the workflow has {len(self.steps)} steps")
+        before = set(list(self.steps)[:position])
+        found = self._as_operation(operation)
+        reads = found.reads if isinstance(found, Operation) else []
+        after = [r for r in reads if r in self.steps and r not in before]
+        if after:
+            raise ValueError(f"cannot insert {step_id!r} at position {index}: it "
+                             f"reads {after[0]!r}, which would come after it")
+        self[step_id] = operation
+        if position < len(self.steps) - 1:
+            self.move(step_id, position)
 
     def _recheck_readers(self, step_id: str) -> None:
         """Re-check earlier steps that named *step_id* before it existed.
@@ -450,7 +519,8 @@ class Workflow:
                     found = found or (f"input {name} changed" if name in inputs
                                       else f"{name} changed")
                     everything = True
-                elif name in self.steps and reason(name):
+                elif name in self.steps and reason(name) \
+                        and name not in (output.meta.get("read_stale") or {}):
                     found = found or f"{name} is stale"
                     upstream_rows = partial.get(name)
                     if tracked and upstream_rows is not None:
@@ -1042,6 +1112,11 @@ class Workflow:
             tools = self.catalog.functions
         step = self.steps[step_id]
         read = self._read_stamps(step.operation) if step_id in self.steps else {}
+        # Inputs that are stale as this runs pass through as they are; this
+        # output is then up to date with them, and says it read them stale.
+        read_stale = {name: self.steps[name].output.meta.get("stale_reason")
+                      for name in read if name in self.steps
+                      and self.steps[name].output.meta.get("stale")}
         result = self._run_step(step_id, tools, resources)
         out = self.steps[step_id].output
         if not out.meta.get("staged"):
@@ -1052,6 +1127,10 @@ class Workflow:
             # What these values were computed with, so a stale value can say so
             # once the arguments are edited (009): one record per step.
             out.meta["ran_with"] = _ran_with(step.operation)
+            if read_stale:
+                out.meta["read_stale"] = read_stale
+            else:
+                out.meta.pop("read_stale", None)
             # 010 C25: for row-aligned steps, a hash of each input row's read
             # columns, so editing one row makes only its cells stale.
             row_reads = self._row_reads(step)
