@@ -45,8 +45,10 @@ can drop a trace, by dropping its `#` column.
 
 **9. Core never guesses.** It never tidies your data, never matches by
 position, and never reads meaning into an id. Uneven data stays visible: a
-`null`, a missing key (`absent`) and an empty list `[]` are three different
-things.
+`null` (a value: nothing), `absent` (no value here at all: a key a record
+lacks, a column one input of a `stack` doesn't have, the unmatched side of a
+`join`) and an empty list `[]` are three different things. A step you've
+declared but not written yet is **empty**: one cell, `"empty"`.
 
 **10. Grouping is a new index; a reduction is a map over lists.**
 `gather[collapse(by="ward")]` re-indexes by the key and packs: one row per

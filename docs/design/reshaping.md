@@ -362,10 +362,16 @@ choice that loses something is a step you can see.
 |---|---|---|
 | `"x": null` | `None`, a known value | `"x": null` |
 | no `"x"` key | `None`, in state **`absent`** | no key |
+| a column one input of a `stack` doesn't have; the unmatched side of an outer or left `join` | `None`, in state **`absent`**; the column keeps its type (an int stays an int) | — |
 | `"tags": []` | no rows; `collapse(by="#s")` still gives its record a row | `[]` |
 
 A tool given an `absent` cell gets the parameter's default if it has one,
 else `None`, as a Python call does for a missing argument.
+
+**`absent` is not empty.** An *empty step* is a step you've declared with no
+formula yet (`k.declare("x")`): a 1×1 grid holding `"empty"`, which other
+steps can be wired to before it's written. `absent` is a cell whose source
+had no value.
 
 | Uneven | Rule |
 |---|---|

@@ -164,8 +164,9 @@ The `absent` cell state (J-D1); `widen` takes every key seen (J-D2);
 `expand` never tidies (J-D3), with the built-in `as_list`; `expand` of a dict
 gives `key`, `value` rows (J-D4).
 
-- **Decided** (2026-10-27): J-D1, J-D2, J-D3 (with `as_list`), J-D4 (named
-  `gather_dict`). Nothing left to confirm.
+- **Decided** (2026-10-27): J-D1 (widened to `stack` and `join` gaps), J-D2,
+  J-D3 (with `as_list`), J-D4 (named `gather_dict`), J-D6 (`k.declare`).
+  Nothing left to confirm.
 - **Fixes:** J1, J2, J4, J5.
 - **Laws:** L23, L24, L25, L26, L27.
 - **Changes for users:** `expand` of a bare string or `None` no longer gives
@@ -229,7 +230,8 @@ alternatives and a recommendation, is in
 | R-D10 | `#` columns are grid columns, under the five guarantees | **decided** 2026-10-27; built for `expand` (step 2) | 2, 5 |
 | R-D11 | `#` is the row id; the row number has no name | **decided and built** (step 2) | 2 |
 | R-D12 | reductions: `#v` lists the group; empty values over no rows; a failed row blocks its group | **decided** 2026-10-27 (empty values built in step 1) | 5 |
-| J-D1 | a cell state `absent` | **decided** 2026-10-27 | 8 |
+| J-D1 | a cell state `absent`, for every cell whose source had no value: a key a record lacks, a column one input of a `stack` doesn't have, the unmatched side of an outer or left `join` (widened by the owner, 2026-10-27); the column keeps its type | **decided** 2026-10-27 | 8 |
+| J-D6 | the empty step: `k.declare("x")` gives a step with no formula, a 1×1 grid holding `"empty"` (the project rule), never confused with `None` or `absent` | **decided** 2026-10-27 | 8 |
 | J-D2 | `widen` takes every key seen; missing is `absent`; types kept | **decided** 2026-10-27 | 8 |
 | J-D3 | `expand` never tidies; `as_list` does it as a step | **decided** 2026-10-27, with `as_list` | 8 |
 | J-D4 | `expand` of a dict gives `key`, `value` rows; `gather_dict` (name open) packs them back | **decided** 2026-10-27, named `gather_dict` | 8 |
@@ -280,6 +282,8 @@ Found by running core, 2026-10-27. Wrong answers given silently are in bold.
 | J3 | `expand` of `[]` loses its parent for the way back | fixed (step 6) |
 | J4 | `widen(columns=…)` fails rows missing a key; ints become floats; `null` and missing look alike | step 8 |
 | J5 | `expand` of a dict gives one row holding the dict | step 8 |
+| J6 | a `stack` of grids with different columns, and the unmatched side of an outer or left `join`, give `NaN`, turn ints into floats, and say `known` (G2) | step 8: `absent`, types kept |
+| J7 | the empty step of the project rules isn't built: core can't declare a step with no formula (`k["x"] = None` makes a value step holding `None`) | step 8: `k.declare` |
 
 ## 7. For the app
 
