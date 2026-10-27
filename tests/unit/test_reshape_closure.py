@@ -340,7 +340,6 @@ def test_L22_jagged_lists_round_trip_empty_included(j):
     assert list(data(j, "back").index) == list(data(j, "r").index)
 
 
-@pytest.mark.xfail(strict=True, reason="J-D1, J-D2: widen fails rows missing a key (J4)")
 def test_L23_widen_takes_the_union_and_marks_missing_keys_absent(j):
     j["m"] = meta_rc[mod.source()]()
     j["w"] = mod.widen()(wf["m"])
@@ -353,7 +352,6 @@ def test_L23_widen_takes_the_union_and_marks_missing_keys_absent(j):
     assert out.data["x"].tolist()[:2] == [1, 3]                     # ints stay ints
 
 
-@pytest.mark.xfail(strict=True, reason="J-D1, R-D2: no pack; absent and null look alike (J4)")
 def test_L24_packing_widened_uneven_dicts_gives_them_back(j):
     j["m"] = meta_rc[mod.source()]()
     j["w"] = mod.widen()(wf["m"])
@@ -689,3 +687,31 @@ def test_L49_a_reduction_is_a_map_over_packed_lists():
     assert data(k, "direct").loc["A", "#vt"] == data(k, "packed").loc["A", "#vt"] == [0, 1, 3]
     assert list(data(k, "direct").columns) == ["#vt", "ward", "value"]   # collapse also keeps the key
     assert list(data(k, "mapped").columns) == ["#vt", "value"]           # a map: only its results
+
+
+@tool
+def visits_x_rc() -> pd.DataFrame:
+    return pd.DataFrame({"name": ["Ada"], "n": [1]})
+
+
+@tool
+def visits_y_rc() -> pd.DataFrame:
+    return pd.DataFrame({"name": ["Ben"]})
+
+
+def test_L50_stack_and_join_gaps_are_absent_and_keep_their_type():
+    """No value here (reshaping.md §9.1): a column one input of a stack lacks,
+    the unmatched side of a left join. Ints stay ints (G2)."""
+    k = Kernel(Catalog(tools=[visits_x_rc, visits_y_rc, wards_rc]))
+    k["x"] = visits_x_rc[mod.source()]()
+    k["y"] = visits_y_rc[mod.source()]()
+    k["s"] = stack(wf["x"], wf["y"])
+    k["l"] = pd.DataFrame({"ward": ["A", "C"], "n": [1, 2]})
+    k["w"] = wards_rc[mod.source()]()
+    k["j"] = join(wf["l"], wf["w"], on="ward", how="left")
+    k.run_all()
+    s = k.workflow.steps["s"].output
+    assert s.data["n"].tolist()[0] == 1 and str(s.data["n"].dtype) == "Int64"
+    assert str(s.states.at[1, "n"]) == "absent"
+    j = k.workflow.steps["j"].output
+    assert str(j.states.at[1, "head"]) == "absent" and str(j.states.at[0, "head"]) == "known"

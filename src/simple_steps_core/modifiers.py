@@ -12,6 +12,7 @@ from typing import Callable
 from typing import Sequence
 import inspect
 
+from .output import ABSENT  # noqa: E402
 from .verbs import (
     auto_,
     collapse_,
@@ -215,6 +216,14 @@ def _d_apply(fn: Callable, **literals) -> Callable:
         bound = merged if wants_everything else {
             k: v for k, v in merged.items() if k in declared
         }
+        # An absent cell (reshaping.md §9.1): the parameter's default, as for a
+        # missing argument, else None. A **kwargs tool just doesn't get the key.
+        for k in [k for k, v in bound.items() if v is ABSENT]:
+            p = parameters.get(k)
+            if wants_everything and p is None or (p is not None and p.default is not inspect.Parameter.empty):
+                del bound[k]
+            else:
+                bound[k] = None
         return fn(*leading, **bound)
 
     run.__name__ = f"apply({getattr(fn, '__name__', 'fn')})"

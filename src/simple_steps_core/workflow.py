@@ -1351,6 +1351,8 @@ class Workflow:
                 seen.add(column)
                 for row_id, from_id in zip(out.data.index, ids):
                     state = str(source.states.at[from_id, column])
+                    if state == "absent":
+                        states.at[row_id, column] = "absent"
                     if state in ("failed", "blocked"):
                         states.at[row_id, column] = "blocked"
                         note = source.notes.get(from_id, {})
@@ -1873,6 +1875,16 @@ def _carry_id_columns(operation: Operation, source: Any, output: Output) -> None
                and c not in named}
     if carried:
         output.add_id_columns(carried)
+    # Absent cells stay absent in the columns a step carries (reshaping.md §9.1).
+    rename = verb.settings.get("columns") if verb.kind == "rename" else None
+    back = {new: old for old, new in rename.items()} if isinstance(rename, dict) else {}
+    gaps: dict = {}
+    for i, c in source.absent_cells():
+        name = next((n for n, o in back.items() if o == c), c) if back else c
+        if name in output.data.columns and i in output.data.index and not (
+                verb.kind in ("map", "group") and name not in source.data.columns):
+            gaps.setdefault(name, []).append(i)
+    output.mark_absent(gaps)
 
 
 # Names used only inside functions, imported last so the modules can refer

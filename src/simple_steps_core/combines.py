@@ -53,7 +53,21 @@ def _combine_stack(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
             part.insert(m, column, _ids_as_column(
                 part, list(frame.index) if m == n else [None] * len(part)))
         parts.append(part)
-    return pd.concat(parts, axis=0, join=config.get("join", "outer"), ignore_index=True)
+    # A column one input doesn't have is absent in that input's rows, and the
+    # column keeps its type (reshaping.md §9.1, G2): the gap is filled with None
+    # before the rows meet, so pandas never turns an int into a float.
+    absent, offset = {}, 0
+    if config.get("join", "outer") == "outer":
+        union = list(dict.fromkeys(c for part in parts for c in part.columns))
+        for n, part in enumerate(parts):
+            for c in union:
+                if c not in part.columns:
+                    absent.setdefault(c, []).extend(range(offset, offset + len(part)))
+                    part[c] = pd.Series([None] * len(part), index=part.index, dtype=object)
+            parts[n] = part[union]
+            offset += len(part)
+    out = pd.concat(parts, axis=0, join=config.get("join", "outer"), ignore_index=True)
+    return _retyped(out, absent)
 
 
 def _row_lookup(frame: pd.DataFrame) -> dict:
@@ -162,6 +176,13 @@ def _rows_text(keys: list) -> str:
 def _combine_join(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
     own = own_id_columns(_input_names(frames))
     left, right = _variables_only(frames)
+    keys = config.get("on")
+    keys = {keys} if isinstance(keys, str) else set(keys or [])
+    sfx = tuple(config.get("suffixes") or ("_left", "_right"))
+    sides = []                                   # each side's columns, as named after the merge
+    for this, other, s in ((left, right, sfx[0]), (right, left, sfx[1])):
+        sides.append([c if c not in other.columns else f"{c}{s}"
+                      for c in this.columns if c not in keys])
     left = left.assign(**{own[0]: _ids_as_column(left, list(frames[0].index))})
     right = right.assign(**{own[1]: _ids_as_column(right, list(frames[1].index))})
     suffixes = tuple(config.get("suffixes") or ("_left", "_right"))
@@ -172,6 +193,22 @@ def _combine_join(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
         ids = out.pop(column)
         out.insert(own.index(column), column,
                    pd.Series([None if pd.isna(v) else v for v in ids], index=out.index, dtype=object))
+    # The side a row has no partner on is absent there, and keeps its type (§9.1).
+    absent = {}
+    for column, names in zip(own, sides):
+        missing = [i for i, v in zip(out.index, out[column]) if v is None]
+        for c in names:
+            if c in out.columns and missing:
+                absent[c] = missing
+    return _retyped(out, absent)
+
+
+def _retyped(out: pd.DataFrame, absent: dict) -> pd.DataFrame:
+    """*out* with gaps as None in typed columns (an int stays an int), and the
+    absent cells named for the step's states."""
+    for c in absent:
+        out[c] = _typed([None if _is_missing(v) else v for v in out[c]], out.index)
+    out.attrs["absent"] = absent
     return out
 
 
@@ -292,12 +329,15 @@ def _run_combine(operation: Operation, frames: list[pd.DataFrame]) -> Output:
     """Apply a combine to its (already-run) input grids — no tool, so every
     output row is trivially complete."""
     data = COMBINE[operation.tool]["apply"](frames, operation.arguments)
+    absent = data.attrs.pop("absent", {})
     records = [{"status": "completed", "error": None, "attempts": 0,
                 "seconds": 0.0} for _ in range(len(data))]
-    return Output(data=data, records=records, index=data.index,
-                  meta={"verb": operation.tool, "form": "column",
-                        "value_column": None, "n_in": None,
-                        "columns": list(data.columns)})
+    out = Output(data=data, records=records, index=data.index,
+                 meta={"verb": operation.tool, "form": "column",
+                       "value_column": None, "n_in": None,
+                       "columns": list(data.columns)})
+    out.mark_absent(absent)
+    return out
 
 
 # Names used only inside functions, imported last so the modules can refer
@@ -306,5 +346,5 @@ from .checks import columns_unknown, predicted_columns  # noqa: E402
 from .operation import Operation  # noqa: E402
 from .output import Output, VALUE_COLUMN  # noqa: E402
 from .references import StepRef  # noqa: E402
-from .output import ROW_ID, is_id_column  # noqa: E402
+from .output import ROW_ID, _is_missing, _typed, is_id_column  # noqa: E402
 from .workflow import Workflow  # noqa: E402

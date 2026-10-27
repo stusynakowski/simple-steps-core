@@ -45,7 +45,21 @@ def variables(columns: Sequence[Any]) -> list:
 #: Every state a cell can be in, mildest first, so a row's state is its
 #: worst cell's. ``stale`` is not stored: it's a step-level fact (meta) shown
 #: over known cells.
-STATES = ("known", "maybe", "pending", "blocked", "failed", "invalid")
+STATES = ("absent", "known", "maybe", "pending", "blocked", "failed", "invalid")
+
+
+class _Absent:
+    """The marker a tool's row holds for an ``absent`` cell: no value here at
+    all (reshaping.md §9.1). Turned into the parameter's default, or None."""
+
+    def __repr__(self) -> str:
+        return "ABSENT"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+ABSENT = _Absent()
 
 
 #: Which state a verb's per-unit record maps to.
@@ -124,6 +138,22 @@ class Output:
             else:
                 states = _states_frame(["known"] * len(data), data)
         self.states = states
+
+    def mark_absent(self, cells: dict) -> None:
+        """Put the cells ``{column: [row ids]}`` in state ``absent``: their
+        source had no value there (a missing key, a stack or join gap)."""
+        for column, ids in (cells or {}).items():
+            if column in self.states.columns:
+                for i in ids:
+                    if i in self.states.index:
+                        self.states.at[i, column] = "absent"
+
+    def absent_cells(self) -> set:
+        """``{(row id, column)}`` of the cells in state ``absent``."""
+        if not len(self.states.columns):
+            return set()
+        hit = self.states.eq("absent")
+        return {(i, c) for c in hit.columns for i in hit.index[hit[c]]}
 
     def add_id_columns(self, columns: dict[str, pd.Series]) -> None:
         """Put `#` columns in front of the data, each cell `known`."""

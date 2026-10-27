@@ -77,7 +77,7 @@ def _child_id(parent: Any, k: int) -> str:
     return f"{parent}.{k}"
 
 
-def _units(frame: pd.DataFrame):
+def _units(frame: pd.DataFrame, absent: Any = ()):
     """``(index, row dict)`` per row, each value as the tool should get it.
 
     Not ``iterrows``: that builds one Series per row with a single common dtype,
@@ -85,9 +85,14 @@ def _units(frame: pd.DataFrame):
     each column's own type; a missing value becomes ``None`` (008 C14).
     """
     for index, record in zip(frame.index, frame.to_dict("records")):
-        # A tool gets variables only, never a `#` column (reshaping.md §5.1).
-        yield index, {k: (None if _is_missing(v) else v) for k, v in record.items()
-                      if not is_id_column(k)}
+        # A tool gets variables only, never a `#` column (reshaping.md §5.1);
+        # an absent cell arrives as ABSENT (§9.1).
+        yield index, {k: (ABSENT if (index, k) in absent else None if _is_missing(v) else v)
+                      for k, v in record.items() if not is_id_column(k)}
+
+
+def _absent_of(source: Any) -> set:
+    return source.absent_cells() if isinstance(source, Output) else set()
 
 
 def _as_arg(row: pd.Series) -> dict:
@@ -174,7 +179,7 @@ def map_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
     frame = rows(source, axis=axis)
     blocked = _upstream_failures(source)
     values, records = [], []
-    for index, row in _units(frame):
+    for index, row in _units(frame, _absent_of(source)):
         if index in blocked:
             value, record = None, _blocked(*blocked[index])
         else:
@@ -201,7 +206,7 @@ def filter_(source: Any, fn: Callable, *, retries: int = 0,
     frame = rows(source, axis=axis)
     blocked = _upstream_failures(source)
     keep, records = [], []
-    for index, row in _units(frame):
+    for index, row in _units(frame, _absent_of(source)):
         if index in blocked:
             # 008 C10: a failed row is carried through, still failed, so the
             # failure stays visible downstream instead of being filtered away.
@@ -234,7 +239,7 @@ def group_(source: Any, fn: Callable, *, name: str = "group",
     frame = rows(source, axis=axis)
     blocked = _upstream_failures(source)
     keys, records = [], []
-    for index, row in _units(frame):
+    for index, row in _units(frame, _absent_of(source)):
         if index in blocked:
             value, record = None, _blocked(*blocked[index])
         else:
@@ -397,7 +402,7 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
     frame = rows(source, axis=axis)
     blocked = _upstream_failures(source)
     out_rows, records, ids = [], [], []
-    for index, row in _units(frame):
+    for index, row in _units(frame, _absent_of(source)):
         arg = row
         # 008 C16: each item's row id is derived from its parent's — `1.0`,
         # `1.1` — so `zip_` can line the items back up with the row they came
@@ -782,13 +787,8 @@ def _widen_cell(cell: Any, wanted: Sequence[str], explicit: bool) -> tuple[dict,
     columns.
     """
     if isinstance(cell, Mapping):
-        values = {c: cell.get(c) for c in wanted}
-        missing = [c for c in wanted if c not in cell]
-        if explicit and missing:
-            have = ", ".join(map(str, cell)) or "nothing"
-            return values, (f"KeyError: the record has no "
-                            f"{', '.join(map(repr, missing))} (it has {have})")
-        return values, None
+        # A key the record lacks is absent, never a failure (J-D2).
+        return {c: (cell[c] if c in cell else ABSENT) for c in wanted}, None
     if isinstance(cell, (list, tuple)):
         values = {c: (cell[i] if i < len(cell) else None)
                   for i, c in enumerate(wanted)}
@@ -874,11 +874,16 @@ def widen_(source: Any, fn: Callable = identity, *,
     spread = _spread_column(frame)
     if spread is not None and spread not in wanted:
         data = data.drop(columns=[spread])   # its fields are the columns now (G10)
+    absent: dict = {}
     for column in wanted:
-        data[column] = [row[column] for row in lifted]
-    return Output(data=data, records=records, index=frame.index,
-                  meta={"verb": "widen", "form": "column", "value_column": None,
-                        "n_in": len(frame), "columns": list(data.columns)})
+        values = [row[column] for row in lifted]
+        absent[column] = [i for i, v in zip(frame.index, values) if v is ABSENT]
+        data[column] = _typed([None if v is ABSENT else v for v in values], frame.index)
+    out = Output(data=data, records=records, index=frame.index,
+                 meta={"verb": "widen", "form": "column", "value_column": None,
+                       "n_in": len(frame), "columns": list(data.columns)})
+    out.mark_absent(absent)
+    return out
 
 
 def _spread_column(frame: pd.DataFrame) -> str | None:
@@ -906,7 +911,9 @@ def pack_(source: Any, fn: Callable = identity, *, columns: Sequence[str] | None
         raise ValueError(f"pack can't pack {forged[0]!r}: `#` columns are ids, not variables")
     _require_columns("pack", frame, chosen)
     data = frame[[c for c in frame.columns if c not in chosen]].copy()
-    data[name] = [{c: row.get(c) for c in chosen} for _index, row in _units(frame)]
+    # An absent cell is left out of the dict, so pack(widen(d)) is d (§9.1).
+    data[name] = [{c: row.get(c) for c in chosen if row.get(c) is not ABSENT}
+                  for _index, row in _units(frame, _absent_of(source))]
     return _column_output("pack", frame, data, source=source)
 
 
@@ -1132,6 +1139,7 @@ from .output import (  # noqa: E402
     _str_columns,
     _typed,
     _upstream_failures,
+    ABSENT,
     is_id_column,
     variables,
 )

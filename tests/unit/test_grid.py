@@ -1803,15 +1803,18 @@ def test_a_non_mapping_cell_is_a_per_unit_failure():
     assert list(wf.step("wide").output.failed.index) == [1], "re-drivable"
 
 
-def test_a_missing_field_is_a_per_unit_failure_not_a_crash():
+def test_a_missing_field_is_absent_not_a_failure():
+    """A key a record lacks is absent: no value there, and not an error
+    (reshaping.md §9.1, J-D2). The column keeps its type."""
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [{"a": 1, "b": 2}, {"a": 3}]})
     wf["wide"] = mod.widen(columns=["a", "b"], over=wf["raw"])
-    wf.run("wide")          # the failing step itself; run_all would stop here
+    wf.run("wide")
     out = wf.step("wide").output
-    assert _row_states(out) == ["known", "failed"]
-    assert "has no 'b'" in _errors(out)[1]
-    assert wf.step("wide").output.data["a"].iloc[1] == 3, "the rest still lifted"
+    assert wf.step("wide").state == "completed"
+    assert str(out.states.at[1, "b"]) == "absent"
+    assert out.data["a"].tolist() == [1, 3]
+    assert out.data["b"].iloc[0] == 2 and str(out.data["b"].dtype) == "Int64"
 
 
 def test_widen_round_trips(records):
