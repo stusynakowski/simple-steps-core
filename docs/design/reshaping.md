@@ -46,9 +46,10 @@ the laws in §10.
    input rows it was made from. Clicking a cell, "what goes stale", and
    "undo" all follow those columns back, and nothing else: core never reads
    meaning out of how an id looks, and never pairs by position.
-3. **Rows line up only when they are the same sample**, meaning they trace
-   back to the same row of one step. `zip_`, a column argument and the table
-   view check this. Anything else is refused, pointing to `join`, or to
+3. **Rows line up only when core recorded how they match**, so that every
+   row has exactly one partner: the same row, or a row and the one it came
+   from (§6). `zip_`, a column argument and the table view check this.
+   Anything else is refused, pointing to `join`, or to
    `zip_(…, match_ids=True)` when you know two grids' ids mean the same
    samples.
 4. **The shape is known from the verbs.** Each step moves one level along one
@@ -72,7 +73,7 @@ workflows.
 | A2 | no tool `S` called was given a `#` column; no tool set `S`'s ids, except a source's or a `table`'s, which are then their own origin | 1 |
 | A3 | every value in a `#v` column of `S` (or every item, for a list) is a row id of step `v`; `None` only where §5 allows it (the other side of a `stack`, the unmatched side of an outer `join`) | 2 |
 | A4 | if `S` keeps ids, each of its ids is one of its input's | 2 |
-| A5 | where `S` puts rows of two grids in one row (`zip_`, a column argument), one traces to the other through `#` columns, or the step says `match_ids=True` | 3 |
+| A5 | where `S` puts rows of two grids in one row (`zip_`, a column argument), each row has exactly one partner, through a link core recorded (one origin, or `#` columns), or the step says `match_ids=True` | 3 |
 | A6 | where `S`'s plan was exact, `S`'s variables, `#` columns and row count are the plan's | 4 |
 | A7 | every value `S` lost is the "Loses" column of its move (§3); every trace that stops at `S` is a `#` column `S` dropped or renamed | 5 |
 | A8 | where `S`'s inverse is `rebuild`, running the inverse on `S`'s output gives `S`'s input back | 5 |
@@ -153,10 +154,72 @@ to place the result, that is every cell-to-cell reshape.
   *"provenance dropped at 'x'"*, and grouping by it is refused. `#` itself
   can't be dropped: every grid has row ids.
 
-## 6. Same samples: lining rows up
+## 6. Matching rows
 
-A row id means "the same sample" only among steps whose rows come from the
-same place. That place is the rows' **origin**:
+**The rule** (owner, 2026-10-27): *core lines up row `r` of one grid with row
+`s` of another only when core itself recorded that `r` came from `s`, or they
+are the same row, so that every row has exactly one partner.* Otherwise the
+step is refused, and you `join` first, or say `match_ids=True`.
+
+Two words in it do the work:
+
+- **recorded:** the link is in a `#` column core wrote, or the two rows are
+  one row (the same id in one origin). Ids that merely look alike are not a
+  record, and neither is a column name.
+- **exactly one:** a row with no partner is refused or blocked, never
+  invented; a row with several partners is refused, because core can't
+  choose. Reduce first.
+
+So direction matters. A child knows its one parent; a parent has many
+children.
+
+### 6.1 Every case
+
+| Rows meet as | Recorded link | Partners per row | |
+|---|---|---|---|
+| one origin: `v` and `map(v)` | the same rows | exactly 1 | ✓ |
+| a child and its parent: `expand(v)`'s items and `v` | each item's `#v` | exactly 1 | ✓ each item beside its parent; a parent may repeat, or have no items |
+| a grandchild and its grandparent | `#e`, then `e`'s `#v` | exactly 1 | ✓ |
+| a parent and its children, the parent's rows leading | each parent has 0…n | 0…n | ✗ `collapse(by="#v")` first; then it is one row per parent |
+| siblings: item *j* of two `expand`s of `v` | each knows its parent, nothing links them | — | ✗ zip each with `v`; or pack the lists together and `expand(columns=[…])` them in lockstep |
+| one origin, rows missing from one: `v` and `filter(v)` | the same rows, where both have them | 0 for some rows | `zip_` ✗ refused, naming the rows; a column argument blocks those rows and runs the rest (below) |
+| two sources, or two DataFrames you assigned, whose ids look alike | none: core made neither id | — | ✗ unless `zip_(…, match_ids=True)` |
+| two sources both indexed by the same name (`patient`) | none: a name is not a link | — | ✗ `join(a, b, on="patient")`, or `match_ids=True` (owner, 2026-10-27) |
+| a `join`'s rows and one of its inputs | each row's `#a` | exactly 1 | ✓ |
+| a `table`'s rows and its input | none: the tool chose the index | — | ✗ always its own origin |
+
+**The same rule for every way rows meet:** `zip_`, a column argument, and the
+table view's lines. A column argument from a parent into its child
+(`scale[mod.map()](wf["e"], temp=wf["v"][cols["temp"]])`: each item gets its
+parent's `temp`) is the same match as `zip_(e, v)`, so it is allowed (owner,
+2026-10-27).
+
+**What needs no matching:**
+- a cell reference as an argument: one value for every row;
+- a column given to a `list`, `Series` or `DataFrame` parameter: the whole
+  column, for every row (K19);
+- `join`, which matches on a key you name and records the pairs;
+- `stack`, which puts rows below each other.
+
+**When some rows have no partner** (owner, 2026-10-27, keeping K19): no row is
+dropped or invented, ever.
+- A column argument **blocks** the rows it can't match, naming them, and the
+  other rows run.
+- A `zip_` would have to drop or invent rows, so it **refuses** the step and
+  points to `join`.
+
+**`match_ids=True`** is you vouching that two grids number the same samples
+the same way. Core then still holds you to it: the id sets must be equal,
+and of the same type (`1` is not `"1"`).
+
+**When it's checked:** whether a match is recorded is known from the verbs, so
+an unrecorded match is refused when the step is declared. Which ids are
+present is known when it runs.
+
+### 6.2 Origins
+
+A row's **origin** is the step that decided which samples the rows are. Two
+rows with the same id are the same row only within one origin.
 
 | Origin | Steps |
 |---|---|
@@ -165,30 +228,11 @@ same place. That place is the rows' **origin**:
 | **`s`'s** | `collapse(by="#s")` (§7); an `expand` that gives back packed ids (below) |
 | **its own** | `source`, a value, `sweep`, any other `collapse`, `join`, `stack`, `table` |
 
-- **`zip_` and column arguments pair rows of one origin by id**, and a child
-  with its parent (each item beside the row it came from, or a grandchild
-  beside its grandparent).
-- **Two grids of different origins are refused when the step is declared**,
-  even if their ids happen to look alike. To pair them, `join` on a key, or,
-  if you know the ids mean the same samples, `zip_(a, b, match_ids=True)`.
-- **Ids keep their type:** `1` and `"1"` are different rows.
-- **What `zip_` needs is the same samples, not the same size.** The size
-  follows from it:
-
-  | Grids | Sizes | `zip_` |
-  |---|---|---|
-  | one origin, the same rows (`v` and `map(v)`) | equal | pairs |
-  | one origin, rows missing from one (`v` and `filter(v)`) | different | refused, naming the rows; a partial match is a `join` |
-  | different origins (`v` and a `join`'s rows) | anything, equal included | refused when declared |
-  | a child and its parent (`expand(v)` and `v`) | the child's | pairs: each item beside its parent; a parent may repeat, or have no items |
-  | `match_ids=True` | equal | pairs only if the id sets are equal |
-
-  Equal size never makes a `zip_` valid on its own.
-- **Unpacking what core packed gives back the same samples.** When `expand`
-  unpacks a list that `gather` made, and no tool rewrote it on the way, the
-  items get back the ids and origin they were packed from:
-  `expand(gather(v))` is `v`'s rows. A list a tool wrote or rewrote is new to
-  core: its items get new ids (`"0.1"`, a label only) and a child origin.
+**Unpacking what core packed gives back the same samples.** When `expand`
+unpacks a list that `gather` made, and no tool rewrote it on the way, the
+items get back the ids and origin they were packed from: `expand(gather(v))`
+is `v`'s rows. A list a tool wrote or rewrote is new to core: its items get
+new ids (`"0.1"`, a label only) and a child origin.
 
 ## 7. Going back
 
@@ -330,6 +374,10 @@ Each law is one test, `test_L<n>_…`. Grouped by the guarantee it checks:
 | L36 | a column argument from another origin is refused |
 | L37 | ids keep their type: `1` and `"1"` don't pair |
 | L38 | `zip_(…, match_ids=True)` pairs equal ids, on purpose |
+| L42 | a column argument from a parent into its child gives each item its parent's value |
+| L43 | a scalar column argument from a child into its parent is refused when declared, pointing to `collapse(by="#v")` |
+| L44 | two `expand`s of one step (siblings) don't pair item by item |
+| L45 | two sources indexed by the same name don't pair; `join` on it, or `match_ids=True` |
 
 **4. The shape is known from the verbs**
 

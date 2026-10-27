@@ -52,14 +52,16 @@ becomes `variables(…)`, or says why it means every column.
 
 ### Step 4. Same samples (guarantee 3)
 
-One check, *do these two steps' rows come from the same rows?*, built on
-`Workflow.trace` and made when a step is declared. Used by `zip_`, column
-arguments and the table view. Ids keep their type: `1` is not `"1"`.
+One check, built on `Workflow.trace` and made when a step is declared:
+*does every row have exactly one partner, through a link core recorded?*
+(reshaping.md §6). Used by `zip_`, column arguments and the table view. Ids
+keep their type: `1` is not `"1"`. Column arguments learn the parent→child
+match `zip_` already has.
 
 - **Decided** (2026-10-27): R-D7, with the `match_ids=True` opt-in; R-D9,
   `table` is its own origin. Nothing left to confirm.
-- **Fixes:** M5, M6, M10, M11.
-- **Laws:** L16, L16b, L20, L36, L37, L38.
+- **Fixes:** M5, M6, M10, M11, M12, M13.
+- **Laws:** L16, L16b, L20, L36, L37, L38, L42, L43, L44, L45.
 - **Changes for users:** a `zip_` or column argument between unrelated
   steps whose ids happen to match is refused when declared. If the ids do
   mean the same samples, add `match_ids=True`; otherwise, `join`.
@@ -164,7 +166,7 @@ alternatives and a recommendation, is in
 | R-D4 | `expand(columns=[…])` unpacks several lists together and, as a reshape, carries the other columns | to confirm: refines the 2026-10-20 decision for the tool-less form | 7 |
 | R-D5 | `collapse(by="#s")` groups by the row of any earlier step | to confirm | 6 |
 | R-D6 | core never parses ids | **built** (step 2) | 2 |
-| R-D7 | `zip_` and column arguments refuse unless core knows exactly how rows match: one origin, a child and its parent, or `zip_(…, match_ids=True)`; otherwise `join` first. Checked when declared | **decided** 2026-10-27 | 4 |
+| R-D7 | rows line up only when core recorded how they match, so every row has exactly one partner: one origin, a child and its one parent, or `zip_(…, match_ids=True)`; otherwise `join` first. Checked when declared. A shared index name is not a match; missing rows block a column argument and refuse a `zip_` (as K19) | **decided** 2026-10-27 | 4 |
 | R-D8 | the plan says `inverse: rebuild \| trace \| opaque` | to confirm | 9 |
 | R-D9 | `table` is always its own origin | **decided** 2026-10-27: follows from R-D7 (a tool's index is no known match) | 4 |
 | R-D9b | `distinct` records the rows it stands for | to confirm | 5 |
@@ -194,6 +196,8 @@ Found by running core, 2026-10-27. Wrong answers given silently are in bold.
 | **M9** | **`zip_` parsed id strings: `zip_(v, expand(gather(v)))` put every row beside `v`'s row 0** | fixed (step 2): refused; pairs correctly after step 6 |
 | **M10** | **a column argument pairs rows by equal ids across unrelated steps: `label(name, head=wf["jw"][cols["head"]])` gives Ben/Dr X** | step 4 |
 | **M11** | **ids are matched as text: an int id `1` and a string id `"1"` pair as one row** | step 4 |
+| M12 | a column argument from a parent into its child fails (*"'v' has no row '0.0'"*), though `zip_` makes the same match | step 4 |
+| M13 | two `expand`s of one step are refused only for a column-name clash; renamed, they would pair item *j* with item *j* | step 4 |
 | R1 | unpacking a gathered list gives new ids, not the packed ones | step 6 |
 | R2 | no way to pack a row whatever its width | step 7 |
 | R3 | `identity` under `map` packs a row into a dict only when it has 2 or more columns | step 7 |

@@ -26,9 +26,13 @@ J-D2, J-D3 and J-D4**. They are marked ⚠. The others add behaviour or close a 
 ### ⚠ R-D7. Rows pair only when they are the same sample — decided
 
 **Decided by the owner, 2026-10-27:** *refuse the zip unless we know exactly
-how to match; or join, then run it.* Core knows how to match in three cases,
-and only these: one origin; a child and its parent (through `#v`); and
-`match_ids=True`, where the user vouches for the ids.
+how to match; or join, then run it.* Made precise: core lines up two rows
+only when it recorded how they match, so every row has exactly one partner:
+one origin, a child and its one parent (through `#v`), or `match_ids=True`,
+where the user vouches for the ids. Also decided: a shared index name
+(`patient` in both) is not a match; missing rows block a column argument and
+refuse a `zip_`, as K19 has it. Every case is in
+[reshaping.md §6.1](reshaping.md#61-every-case).
 
 **The question.** When `zip_` or a column argument lines up two grids whose
 ids look alike but come from unrelated steps, should core pair them or

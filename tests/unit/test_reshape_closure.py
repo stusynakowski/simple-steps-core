@@ -550,3 +550,73 @@ def test_L41_changing_one_row_makes_only_its_group_stale():
     k["v"] = pd.DataFrame({"ward": ["A", "A", "B"], "temp": [1.0, 2.0, 9.0]})   # ward B's row
     stale = {r["#"]: r["state"] for r in k.view("tot")["rows"]}
     assert stale == {"A": "known", "B": "stale"}
+
+
+# ── matching rows: every case (reshaping.md §6.1) ────────────────────────────
+
+@tool
+def doses_rc(name: str) -> list:
+    return [name[0] + "1", name[0] + "2"]
+
+
+@tool
+def scale_rc(value: float, temp: float) -> float:
+    return value * temp
+
+
+@tool
+def tag_rc(name: str, t: float) -> str:
+    return f"{name}:{t}"
+
+
+@tool
+def patients_a_rc() -> pd.DataFrame:
+    return pd.DataFrame({"x": [1, 2]}, index=pd.Index(["p1", "p2"], name="patient"))
+
+
+@tool
+def patients_b_rc() -> pd.DataFrame:
+    return pd.DataFrame({"y": [4, 5]}, index=pd.Index(["p2", "p1"], name="patient"))
+
+
+@pytest.fixture
+def m():
+    k = Kernel(Catalog(tools=[visits_rc, readings_rc, doses_rc, scale_rc, tag_rc,
+                              patients_a_rc, patients_b_rc]))
+    k["v"] = visits_rc[mod.source()]()
+    k["e"] = readings_rc[mod.expand()](wf["v"])
+    return k
+
+
+@pytest.mark.xfail(strict=True, reason="R-D7 (step 4): column arguments don't follow #v yet (M12)")
+def test_L42_a_column_argument_from_a_parent_reaches_each_child(m):
+    from simple_steps_core import cols
+    m["c"] = scale_rc[mod.map()](wf["e"], temp=wf["v"][cols["temp"]])
+    m.run_all()
+    assert data(m, "c").loc["0.1", "value"] == 30 * 37.0                # Ada's item 1 × Ada's temp
+
+
+@pytest.mark.xfail(strict=True, reason="R-D7 (step 4): refused only when it runs")
+def test_L43_a_scalar_argument_from_children_into_their_parent_is_refused(m):
+    from simple_steps_core import cols
+    m["c"] = tag_rc[mod.map()](wf["v"], t=wf["e"][cols["value"]])
+    assert state(m, "c") == "invalid"
+    assert any("collapse" in str(p) for p in m.workflow.steps["c"].problems)
+
+
+@pytest.mark.xfail(strict=True, reason="R-D7 (step 4): refused only for a column clash (M13)")
+def test_L44_siblings_dont_pair_item_by_item(m):
+    m["d"] = doses_rc[mod.expand(), mod.name("dose")](wf["v"])
+    m["z"] = zip_(wf["e"], wf["d"])
+    assert state(m, "z") == "invalid"
+    assert not any("is in both" in str(p) for p in m.workflow.steps["z"].problems)
+
+
+@pytest.mark.xfail(strict=True, reason="R-D7 (step 4): refused only for the shared 'patient' column")
+def test_L45_a_shared_index_name_is_not_a_match(m):
+    m["a"] = patients_a_rc[mod.source()]()
+    m["b"] = patients_b_rc[mod.source()]()
+    m["b2"] = mod.drop(columns=["patient"])(wf["b"])                # so only the ids could match
+    m["z"] = zip_(wf["a"], wf["b2"])
+    assert state(m, "z") == "invalid"
+    assert not any("is in both" in str(p) for p in m.workflow.steps["z"].problems)
