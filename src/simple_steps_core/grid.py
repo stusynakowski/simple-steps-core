@@ -59,7 +59,7 @@ __all__ = [
 
 #: Leaves first: each module only needs, while it loads, names from modules
 #: before it.
-_LOAD_ORDER = ('system_tools', 'output', 'verbs', 'modifiers', 'checks', 'catalog', 'combines', 'errors', 'operation', 'options', 'references', 'run', 'step', 'values', 'workflow')
+_LOAD_ORDER = ('system_tools', 'output', 'verbs', 'modifiers', 'checks', 'catalog', 'combines', 'errors', 'operation', 'options', 'references', 'run', 'step', 'values', 'workflow', 'kernel')
 
 #: Names rebound at run time; they are read and set on their home module.
 _LIVE = {"_FROZEN": "catalog", "STRICT_TYPES": "catalog"}
