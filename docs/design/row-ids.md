@@ -1,7 +1,7 @@
 # Row ids: the rules (K19)
 
 > Decided by the owner, 2026-10-27 (D1, D3, D4; D2 taken as recommended).
-> Being built in phase 4, in pieces: **selections — done**; **column arguments — done**;
+> Being built in phase 4, in pieces: **selections — done**; **column arguments — done**; **`zip_` — done**;
 > `zip_`; the ids new rows get. *Today* notes were run at `6435a98`. This is what makes a reference keep pointing
 > at the same row when the data shifts: selections, column arguments, `zip_`,
 > lineage, and later the row-aligned table view all rest on it.
@@ -69,9 +69,10 @@ is a column, `scale[mod.map()](wf["p"], w=wf["w"][cols["w"]])`:
 ## 5. `zip_` pairs by row id
 
 `zip_(wf["p"], wf["f"])` puts rows with the same id side by side. The two
-steps must have the same ids; otherwise it is a problem naming the ids
-missing on each side. *Today:* it pairs by position and refuses unequal
-lengths, so after a `filter` on one side it can pair the wrong rows.
+steps must have the same ids; otherwise the step fails, naming the rows that
+have no match. *Before K19* it already paired by id, strictly, except that
+grids sharing no ids at all were paired by position when their lengths
+agreed. That fallback is gone: they are refused, pointing to `join`.
 
 ## 6. What it changes
 

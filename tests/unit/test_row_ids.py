@@ -156,3 +156,31 @@ def test_under_a_whole_table_verb_a_column_stays_whole():
     k["weights"] = pd.DataFrame({"w": [10, 20, 30]})
     k["t"] = tally_r[mod.table()](wf["p"], w=wf["weights"][cols["w"]])
     assert [p.code for p in k.step("t").problems] == ["wrong_shape"]
+
+
+# ── zip_ pairs by id (K19 part 3) ────────────────────────────────────────
+# A grid that shares no row ids with another is refused, never paired by
+# position: tested with the ids new rows get (part 4), since until then every
+# source counts its rows from 0.
+
+
+def test_zip_pairs_by_id_after_one_side_was_sorted(k):
+    from simple_steps_core import zip_
+    k["t"] = mod.select(columns=["temp_c"])(wf["srt"])                  # ids 1, 2, 0
+    k["renamed"] = mod.rename(columns={"temp_c": "t"})(wf["t"])
+    k["side"] = zip_(wf["p"], wf["renamed"])
+    k.run_all()
+    data = k.step("side").data
+    assert (data["temp_c"] == data["t"]).all()                          # each row with its own
+    assert list(data.index) == [0, 1, 2]
+
+
+def test_zip_refuses_rows_one_side_doesnt_have(k):
+    from simple_steps_core import zip_
+    k["hot"] = mod.slice(start=0, stop=2)(wf["srt"])                  # ids 1, 2
+    k["renamed"] = mod.rename(columns={"name": "who", "temp_c": "t"})(wf["hot"])
+    k["side"] = zip_(wf["p"], wf["renamed"])
+    k.run("side")
+    assert k.step("side").state == "failed"
+    assert "no matching row in 'renamed'" in str(k.step("side").output.notes)
+

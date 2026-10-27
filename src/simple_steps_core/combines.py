@@ -37,8 +37,8 @@ def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
     **No row is ever dropped silently.** A row with no match fails the step,
     and so does a row of a same-level grid that nothing matched — use ``join``
     for partial matches. Only a parent grid may have rows nothing points to (a
-    row that expanded to nothing). Grids whose ids are unrelated are paired by
-    position when their lengths agree, and refused when they don't.
+    row that expanded to nothing). Grids that share no row ids are refused:
+    rows are never paired by position (K19).
     """
     names = [f.attrs.get("name") or f"input {i + 1}" for i, f in enumerate(frames)]
     depth = [max((len(_ancestors(i)) for i in f.index), default=0) for f in frames]
@@ -54,14 +54,12 @@ def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
         lookup = _row_lookup(frame)
         related = any(k in lookup or any(a in lookup for a in _ancestors(k)) for k in keys)
         if not related and len(frame):
-            if len(frame) != len(target):
-                raise ValueError(
-                    f"zip_ can't line up {names[primary]!r} ({len(target)} rows) and "
-                    f"{names[i]!r} ({len(frame)} rows): their row ids are unrelated "
-                    f"and their lengths differ. Use join to match them on a column")
-            aligned.append(frame.set_axis(target))     # unrelated ids: by position
-            picked_ids.append(list(frame.index))
-            continue
+            # K19: rows pair by id, never by position (docs/design/row-ids.md §5).
+            raise ValueError(
+                f"zip_ pairs rows by id, and {names[primary]!r} and {names[i]!r} "
+                f"share none ({_rows_text([str(x) for x in list(target)[:3]])} … vs "
+                f"{_rows_text([str(x) for x in list(frame.index)[:3]])} …). "
+                "Use join to match them on a column")
         picked, unmatched, used = [], [], set()
         for key in keys:
             match = key if key in lookup else next(
