@@ -32,10 +32,13 @@ observations ([outputs-and-reshaping.md §1](outputs-and-reshaping.md#1-the-grid
 | **cell state** | `known`, `maybe`, `pending`, `blocked`, `failed`, `invalid`. A row's state is its worst cell's |
 | **note** | per row, when there's something to say: the error, its cause, attempts, whether it was caught |
 
-**A computing step outputs only its results** (owner decision, 2026-10-20).
-`dbl[mod.map()](wf["r"])` has one column, `value`, on `r`'s row ids. To see the
-result beside its input, combine them: `zip_(wf["r"], wf["d"])`. Only `filter`
-(and the reshapes) carry the input's columns.
+**Which steps carry their input's columns** (owner, 2026-10-27). Steps that
+make new values per observation output only those values (`map`, `expand`,
+`collapse`, `sweep`, `table`): `dbl[mod.map()](wf["r"])` has one column,
+`value`, on `r`'s row ids, and `zip_` puts it beside its input. Steps that keep
+the observations and filter or label them carry the columns: `filter`, the
+reshapes and, decided for phase 4, `group`, which adds its key as one more
+column.
 
 ## 3. How a tool meets a row
 
@@ -66,7 +69,7 @@ The **shape verbs** call a tool. At most one per step. When a tool returns sever
 | `map` | `(columns…) -> value` | same | `value` | kept |
 | `filter` | `(columns…) -> bool` | at most n | the input's | kept, for rows that pass |
 | `expand` | `(columns…) -> list` | one per item | `value` | `"i.j"`: item *j* of row *i* |
-| `group` | `(columns…) -> key` | same | `group` (the key) | kept |
+| `group` | `(columns…) -> key` | same | *today* only the key, `group`; *decided for phase 4:* the input's columns plus the key (named `group`, or by `name=` / `mod.name`) | kept |
 | `collapse` | `(acc, columns…) -> acc`, or a built-in reducer | 1, or one per `by=` group | `by` column and `value` | 0…k-1 |
 | `widen` | a cell holding a record or sequence | same | one per field (`columns=`), or `c0, c1, …` for sequences | kept |
 | `table` | `(df: DataFrame) -> DataFrame` | what it returns | what it returns | what it returns |
@@ -233,7 +236,8 @@ not by stacking verbs in one step.
 
 Modifier settings are literals, never references: a setting decides a step's
 shape, and a shape that depends on data can't be planned before it runs. The
-one exception is a tool as a setting (`group(by=key_tool)`, 008 C2).
+one exception is a tool as a setting (`collapse(by=key_tool)`, 008 C2; `group(by=…)`
+goes in phase 4, since the step's own tool computes the key).
 
 ## 7. Row ids, per verb
 
@@ -258,7 +262,7 @@ Run on `86170a3`, 2026-10-26:
 
 | # | What | Run |
 |---|---|---|
-| G1 | `group(by="city")` passes declaration, then every row fails with `TypeError: 'str' object is not callable`. `by=` expects a tool; a column name should be refused when declared, or mean the column | `dbl[mod.group(by="city")](wf["r"])` |
+| G1 | `group(by="city")` passes declaration, then every row fails with `TypeError: 'str' object is not callable`. *Decided (2026-10-27):* `group` drops `by=`, since its own tool computes the key; a column name is refused when declared: *"ward is already a column: collapse(by='ward')"* | `dbl[mod.group(by="city")](wf["r"])` |
 | G2 | `stack` of grids with different columns fills `NaN` and turns integers into floats (`10.0`), against C14 (missing is `None`) | `stack(wf["r"], wf["o"])` |
 | G3 | A source tool's own index is turned into an `index` column instead of being kept as row ids | §7 |
 | G4 | `to_source()` loses forms: a literal step `[3, 1, 2]` prints as `op("identity")[mod.source()]()` (the value is missing from the text); reshapes print as `op("identity")[mod.sort(…)](…)` rather than `mod.sort(…)(…)`; a selection step prints as `mod.select(rows={…})` rather than `wf["r"][0:2]` | [step-expressions.md §5](step-expressions.md#5-printing-to_source) |

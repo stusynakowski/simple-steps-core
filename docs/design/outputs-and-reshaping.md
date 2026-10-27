@@ -51,9 +51,12 @@ Core steers towards tidy outputs: a declared record spreads into variables
 5. **Nothing is hidden.** One step does one shape change, so every
    intermediate grid can be seen, referenced and traced. Stages group steps
    for running and showing them, and hide none of them.
-6. **A computing step outputs only its results.** Input columns aren't carried
-   (owner, 2026-10-20); `zip_` puts results beside their inputs. `filter` and
-   the reshapes carry columns, since they compute nothing.
+6. **A step that makes new values outputs only those; a step that keeps the
+   observations carries their columns.** `map`, `expand`, `collapse`, `sweep`
+   and `table` output only their results (owner, 2026-10-20), and `zip_` puts
+   them beside their inputs. `filter`, the reshapes and `group` keep the
+   observations and filter or label them, so they carry the columns: `group`
+   adds its key as one more column (owner, 2026-10-27; built in phase 4).
 7. **Every column name is chosen, never collided.** Names come from the
    tool's declaration, `mod.name` (§4), or a default (`value`). Two columns
    that would share a name are a problem; nothing silently replaces another
@@ -208,7 +211,7 @@ and the **combines** run no tool.
 | Axis | Longer / wider | Shorter / narrower | Same size |
 |---|---|---|---|
 | **rows** | `expand` (one row per item), `stack` (another grid's rows), `sweep` (generated) | `filter`, `slice`, `distinct`, `collapse` (one row, or one per group) | `sort` (reorder) |
-| **columns** | `widen` (a cell's fields), `zip_` and `join` (another grid's columns) | `select`, `drop` | `rename`; `group` (replaces the columns with one key per row) |
+| **columns** | `widen` (a cell's fields), `zip_` and `join` (another grid's columns), `group` (a key column; *today* it gives only the key) | `select`, `drop` | `rename` |
 | **both** | `table`: the tool decides the grid | | |
 
 1. **One change per step.** A step reshapes along one axis once. Chains are
