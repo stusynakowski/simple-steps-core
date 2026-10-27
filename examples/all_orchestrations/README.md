@@ -66,7 +66,7 @@ need no registration — the no-tool reshapers (`select`, `drop`, `rename`,
 ## Resources (`build_resources()`)
 
 A second workflow that uses a dummy database and a dummy LLM, for the resource
-model in [docs/core-proposals/007](../../docs/core-proposals/007-mvp-resources.md).
+model in [docs/design/object-model.md §4.2](../../docs/design/object-model.md#42-resource-type-and-resource).
 Both dummies are deterministic and count their calls.
 
 **The notation:**

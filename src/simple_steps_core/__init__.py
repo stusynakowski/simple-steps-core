@@ -1,24 +1,15 @@
-"""simple-steps-core — a backend runtime for tool-first workflow execution.
+"""simple-steps-core: the engine of Simple Steps.
 
-Importing this package costs only ``pandas`` and ``pydantic``; the HTTP server,
-notebooks and the agent layer are extras.
-
-**Two models live here during the migration.** The names below are the engine
-as it is today. The grid model (docs/grid-model.md) is reached through its own
-module, and **three names mean different things in each**: ``Workflow``,
-``Operation`` and ``Step``.
-
-Import the module rather than the names, so every call site says which model it
-means::
+The grid model is the only model (docs/design/README.md). It lives in the
+``grid`` module for now; the public names move to this package when it is
+split along the object model (docs/design/cleanup-plan.md §3)::
 
     from simple_steps_core import grid
+    from simple_steps_core.grid import tool, mod, wf
 
-    wf = grid.Workflow()
-    wf["readings"] = frame
-    wf["f"] = to_fahrenheit(wf["readings"])
-
-``from simple_steps_core import Workflow`` gives the **engine's** Workflow, not
-the grid's. See docs/shape-algebra.md for where the two are converging.
+    w = grid.Workflow()
+    w["readings"] = frame
+    w["f"] = to_fahrenheit(wf["readings"])
 """
 
 from importlib.metadata import PackageNotFoundError, version as _version
@@ -28,171 +19,6 @@ try:
 except PackageNotFoundError:          # running from a source tree, not installed
     __version__ = "0.0.0.dev0"
 
-from .api.public import (
-    DEFAULT_CODECS,
-    REGISTRY,
-    App,
-    AppConfig,
-    ArgGuardrail,
-    Cell,
-    CodecRegistry,
-    CoreEngine,
-    DataEntry,
-    DataStore,
-    StepExecutionConfig,
-    StageExecutionConfig,
-    WorkflowExecutionConfig,
-    ExecutionHandle,
-    Guardrails,
-    InMemoryStore,
-    ItemOutcome,
-    MapResult,
-    Tool,
-    ToolDefinition,
-    ToolParam,
-    ToolRegistry,
-    OrchestrationConfig,
-    PayloadEnvelope,
-    ReferenceResolver,
-    RegistryFrozenError,
-    Resource,
-    ResourceCheck,
-    ResourceContainer,
-    ResourceMissingError,
-    Session,
-    SessionContext,
-    SessionManager,
-    SessionSnapshot,
-    Shape,
-    SnapshotError,
-    Step,
-    StepError,
-    StepOutput,
-    StepResult,
-    Operation,
-    StepStatus,
-    StoreBackend,
-    Stage,
-    SummaryTable,
-    ToolCall,
-    ToolUI,
-    ToolUIView,
-    ValidationError,
-    Workflow,
-    build_default_ui,
-    check_reference_types,
-    is_reference,
-    make_session_id,
-    register_tool,
-    register_orchestrators,
-    split_reference,
-    parse_reference,
-    validate_tool_call,
-    Collection,
-    ListCollection,
-    check_reiterable,
-    ResourceSpec,
-    ResourceBindingError,
-    ORCHESTRATION_RESOURCE,
-    RESOURCE_SEPARATOR,
-    orchestration_resource,
-    orchestrator_id,
-    qualify,
-    split_qualified,
-    MediaAsset,
-    MediaStore,
-    get_media_store,
-    set_media_store,
-    media_type_of,
-    is_frame,
-    items_of,
-    select_positions,
-    rows_to_frame,
-    Group,
-    Groups,
-)
+from . import grid
 
-__all__ = [
-    "__version__",
-    "DEFAULT_CODECS",
-    "REGISTRY",
-    "App",
-    "AppConfig",
-    "ArgGuardrail",
-    "Cell",
-    "CodecRegistry",
-    "CoreEngine",
-    "DataEntry",
-    "DataStore",
-    "StepExecutionConfig",
-    "StageExecutionConfig",
-    "WorkflowExecutionConfig",
-    "ExecutionHandle",
-    "Guardrails",
-    "InMemoryStore",
-    "ItemOutcome",
-    "MapResult",
-    "Tool",
-    "ToolDefinition",
-    "ToolParam",
-    "ToolRegistry",
-    "OrchestrationConfig",
-    "PayloadEnvelope",
-    "ReferenceResolver",
-    "RegistryFrozenError",
-    "Resource",
-    "ResourceCheck",
-    "ResourceContainer",
-    "ResourceMissingError",
-    "Session",
-    "SessionContext",
-    "SessionManager",
-    "SessionSnapshot",
-    "Shape",
-    "SnapshotError",
-    "Step",
-    "StepError",
-    "StepOutput",
-    "StepResult",
-    "Operation",
-    "StepStatus",
-    "StoreBackend",
-    "Stage",
-    "SummaryTable",
-    "ToolCall",
-    "ToolUI",
-    "ToolUIView",
-    "ValidationError",
-    "Workflow",
-    "is_reference",
-    "build_default_ui",
-    "check_reference_types",
-    "make_session_id",
-    "register_tool",
-    "register_orchestrators",
-    "split_reference",
-    "parse_reference",
-    "validate_tool_call",
-    "Collection",
-    "ListCollection",
-    "check_reiterable",
-    "ResourceSpec",
-    "ResourceBindingError",
-    "ORCHESTRATION_RESOURCE",
-    "RESOURCE_SEPARATOR",
-    "orchestration_resource",
-    "orchestrator_id",
-    "qualify",
-    "split_qualified",
-    "MediaAsset",
-    "MediaStore",
-    "get_media_store",
-    "set_media_store",
-    "media_type_of",
-    "is_frame",
-    "items_of",
-    "select_positions",
-    "rows_to_frame",
-    "Group",
-    "Groups",
-]
+__all__ = ["grid", "__version__"]

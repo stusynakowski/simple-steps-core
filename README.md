@@ -11,8 +11,7 @@ against a tabular grid, and keeps a per-row ledger of what happened — so a
 workflow of transcription, LLM, or model-inference steps can be authored,
 staged, validated, and re-driven a row at a time.
 
-It is a **backend library — it ships no UI** and pulls in exactly two packages,
-`pandas` and `pydantic`.
+It is a **backend library — it ships no UI** and depends on `pandas` alone.
 
 ## Install
 
@@ -72,34 +71,13 @@ pytest tests/integration/test_all_orchestrations.py   # the same, asserted
 
 | doc | what |
 |---|---|
-| [shape-algebra.md](docs/shape-algebra.md) | the concept — verbs, tidy intent, row/column conventions |
-| [object-model.md](docs/object-model.md) | the objects and how they nest (Tool → Operation → Step → Output) |
-| [grid-model.md](docs/grid-model.md) | how `grid.py` is built |
-| [defining-operations.md](docs/defining-operations.md) | the authoring grammar |
-| [writing-tools.md](docs/writing-tools.md) | writing functions the grid can drive |
-| [api-reference.md](docs/api-reference.md) | the Python import surface |
-| [integration.md](docs/integration.md) | embedding the grid core in a backend |
-| [react-api.md](docs/react-api.md) | the proposed HTTP/React contract |
-| [status.md](docs/status.md) | what is built, what is open |
-| [migration-plan.md](docs/migration-plan.md) | retiring the legacy engine onto the grid |
+| [docs/design/](docs/design/README.md) | **the redesign**: the object model, the grid model, step expressions, outputs, extensions, interactive sessions, and the plan |
+| [shape-algebra.md](docs/shape-algebra.md) | the concept: verbs, tidy intent, row/column conventions |
+| [grid-model.md](docs/grid-model.md) | how `grid.py` is built today |
+| [step-expressions.md](docs/step-expressions.md) | the step grammar, as written before the redesign |
 
-> **A note on the two models.** A legacy *engine* runtime (`CoreEngine`,
-> `OrchestrationConfig`, `MapResult`, `Server`) still ships alongside the grid
-> model and is being retired onto it ([migration-plan.md](docs/migration-plan.md)).
-> Build new work against the **grid** model, and import it as a module —
-> `Workflow`, `Operation` and `Step` mean different things in each:
->
-> ```python
-> from simple_steps_core import grid      # the grid model
-> wf = grid.Workflow()
-> ```
-
-## Not in the grid core yet
-
-The grid core is authoring + execution + serialization. Resources (dependency
-injection), media assets, guardrails/UI, an HTTP server, multi-user sessions,
-and async/concurrency are **not in it yet** — you bring the transport. See
-[migration-plan.md](docs/migration-plan.md) for the plan to land them.
+The three older docs use some retired words (ledger, `over=`, payload). They
+are folded into `docs/design/` as the redesign lands.
 
 ## Develop
 

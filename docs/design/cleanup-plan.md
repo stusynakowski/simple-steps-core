@@ -14,7 +14,7 @@ re-exports, so removing it can't break the grid.
 |---|---|
 | `src/simple_steps_core/execution/` | older engine, data store, resolver, sessions |
 | `src/simple_steps_core/operations/` | global `REGISTRY`, orchestrators, old `ResourceSpec`, UI hints |
-| `src/simple_steps_core/domain/` | older engine's data types (`media.py` is kept aside for R7) |
+| `src/simple_steps_core/domain/` | older engine's data types (`media.py` is in git at `0b8cfb1`, for R7) |
 | `src/simple_steps_core/api/`, `serving.py`, `loader.py`, `app.py`, `agent/`, `inspect.py` | old public API, HTTP server, tools-file loader, a second `App`, agent types, `SummaryTable` |
 | `src/simple_steps_core/__init__.py` | rewritten to export the new public names (§3) |
 | 21 test files under `tests/`, and `tests/unit/_pipeline_tools.py` | every test except `test_grid.py`, `test_008_asks.py`, `test_all_orchestrations.py`. The helper is used only by `test_example_pipeline.py` (older engine) |
@@ -35,7 +35,7 @@ Local clutter, not tracked: `build/`, `.coverage`, the root `__pycache__/`.
 
 | Older engine | Decision |
 |---|---|
-| `MediaAsset` / `MediaStore` | kept aside; ported as R7 in phase 4 |
+| `MediaAsset` / `MediaStore` | removed; ported as R7 in phase 4 from `domain/media.py` at `0b8cfb1` |
 | `ArgGuardrail` | dropped. Limits on arguments are the tool's job |
 | `CodecRegistry` | dropped; replaced by the output store (K22, C32) |
 | `SummaryTable` | dropped; replaced by `repr(k)` |
