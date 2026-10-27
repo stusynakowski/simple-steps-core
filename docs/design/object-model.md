@@ -3,6 +3,11 @@
 > Proposed 2026-10-26. *Today* notes say what exists at `86170a3` (checked by
 > running), so the distance to the design is visible. Where this document and
 > the code disagree, this document is the intent.
+>
+> **Build status:** `Catalog` and `Kernel` exist (phase 3a, 3b). Some *Today*
+> notes are now out of date, and some of this design isn't built yet (for
+> example, `@tool` still registers globally until 3e). What's built is tracked
+> in [cleanup-plan.md, phase 3](cleanup-plan.md#phase-3-piece-by-piece).
 
 ## 1. The words
 

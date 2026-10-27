@@ -130,6 +130,29 @@ tests and examples have moved onto the kernel.
 | 3d | specs on every object; `k.check`, `needs_run`, `on_change`, `insert`, `move`; `repr` and notebook display | |
 | 3e | the tests and examples on the kernel; remove the registry, `freeze`, `grid` and the old names | |
 
+**Isolation is finished in 3e** (noted 2026-10-26). Until then, a kernel never
+*reads* process-wide state, but core still *writes* it: `@tool` adds every
+tool to `TOOLS` and `TOOL_TAGS`, and `@resource` and `define()` add resource
+types to `RESOURCE_TYPES`. Two same-named tools in one process therefore swap
+the global entry (with a warning), which only affects workflows made without a
+catalog. 3e removes these writes, together with:
+
+- the bottom-of-module imports and fixed load order from phase 2, which break
+  if a module adds an ordinary top-level import of another; 3e replaces them
+  with plain imports;
+- the old-path tests: the 405 tests from before phase 3 run on workflows
+  without a catalog, so 3e moves them onto the kernel, where only 31 tests run
+  today.
+
+**Known limitation: a kernel's catalog is fixed** (accepted 2026-10-26). A
+catalog holds the exact functions it was made with. Editing a tool in a
+notebook and re-running its cell makes a new function: steps written with it
+are refused as *"a different function from the tool of that name"*, and
+existing steps keep running the old code. To use the edited tool, make a new
+catalog and kernel (`Kernel.from_json(k.to_json(), new_cat)` keeps the steps).
+A way to swap a kernel's catalog, marking steps whose tool changed as stale
+(K20), can be added later if tinkering needs it.
+
 ## 5. What the app changes
 
 Its pin is a fixed commit, so nothing breaks until it moves. At the move to
