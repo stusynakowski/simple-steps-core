@@ -1063,6 +1063,10 @@ def _missing_columns(operation: Operation, fn: Callable,
         annotations = {}
     for name in missing:
         kind = annotations.get(name)
+        if kind is pd.DataFrame:
+            hint = (f". {name!r} is a DataFrame: a tool that takes the whole table runs "
+                    f"under mod.table()")
+            break
         if isinstance(kind, type) and any(isinstance(t, type) and issubclass(t, kind)
                                           for t in _resource_types_of(workflow)):
             hint = (f". {name!r} is a resource ({kind.__name__}), not a column: "

@@ -53,10 +53,10 @@ ids, `#` columns, lining rows up, round trips, uneven data) has its own plan:
 |---|---|
 | **A step is re-checked when an upstream's columns change**, so a reader that lost its column is a problem, not a `TypeError` on every row. *Done (phase 4, 2026-10-27)*: a warning as soon as the input is edited (`column_will_be_missing`), the problem once it re-runs | G13 |
 | `to_source()` prints every form as written (reshapes, selections), so step ⇄ formula round-trips *Done (phase 4)* | G4 |
-| `k["x"] = None` is an empty step (1×1 `"empty"`), a placeholder line | G17 |
+| `k["x"] = None` is an empty step (1×1 `"empty"`), a placeholder line *Done (phase 4, 2026-10-27)* | G17 |
 | Row count and estimated size per output, or `unknown` with the reason; pages of 50–100 rows | K26 |
 | Column types: declared, else `unknown`, then observed or the union | K27 |
-| Missing values are `None` and integer columns stay integers (`stack`, failed rows) | G2, R8 |
+| Missing values are `None` and integer columns stay integers (`stack`, failed rows) *Done (phase 4): a gap is `absent`, ints stay ints* | G2, R8 |
 | An unrun source's planned columns come from its declared type, not a guessed `value` | K1 |
 
 ### References that follow the data
@@ -68,7 +68,7 @@ The rules, with four decisions for the owner, are in [row-ids.md](row-ids.md).
 | Selections pick rows by row id, so `wf["srt"][0]` is the same row after a sort *Done (phase 4)* | K19 |
 | A column given as an argument pairs row by row, by the parameter's type *Done (phase 4)* | K19 |
 | `zip_` pairs by row id; a source keeps the index its tool set *Done (phase 4)* | K19, G3 |
-| Each cell's lineage stored with its output, including combines and multi-value cells | K28 |
+| Each cell's lineage stored with its output, including combines and multi-value cells *Done (phase 4): the `#` columns are the row map; a cell's inputs are its row's, by the columns it read ([reshaping.md](reshaping.md) §5)* | K28 |
 | Reading an older version of a step warns, naming the step and version | K29 |
 
 ### Outputs and naming
@@ -78,7 +78,7 @@ The rules, with four decisions for the owner, are in [row-ids.md](row-ids.md).
 | A declared record type (`TypedDict`, `NamedTuple`, dataclass) spreads into one column per field | G8 |
 | `mod.name`: a name, a list, a mapping or a pattern; replaces `name=`. The last modifier that defines names wins; with none, columns keep their defaults *A single name: done (phase 4)* | G12 |
 | Kernel-wide naming conventions (`Kernel(cat, naming=…)`) | outputs-and-reshaping.md §10 |
-| `widen` reads declared fields, replaces the column it spreads, plans exactly | G9, G10 |
+| `widen` reads declared fields, replaces the column it spreads, plans exactly *Replaces the column and takes the union of keys: done (phase 4). Reading declared record types (G9): open* | G9, G10 |
 | A `try_except` default that doesn't fit the return type warns; a step that used defaults warns | G6, G7 |
 | Failure notes say where a row failed: tool, timeout, retry, breaker, expect, upstream | G7 |
 | `timeout` enforced | K18 |

@@ -257,10 +257,13 @@ def k12_whole_table_verb():
     candidates = verbs & {"table", "apply", "frame", "whole", "pipe"}
     wf = _wf()
     wf["x"] = piv[mod.collapse(over=wf["readings"])]
-    wf.run("x")
-    out = wf.step("x").output
-    err = (out.notes.get(out.data.index[0], {}).get("error") if hasattr(out, "notes")
-           else out.ledger["error"].iloc[0])
+    if wf.step("x").problems:                    # (core) refused when declared, with a hint
+        err = wf.step("x").problems[0]
+    else:
+        wf.run("x")
+        out = wf.step("x").output
+        err = (out.notes.get(out.data.index[0], {}).get("error") if hasattr(out, "notes")
+               else out.ledger["error"].iloc[0])
     return bool(candidates), (f"verbs: {sorted(verbs)}; piv[mod.collapse()] -> {str(err)[:90]}"
                               if not candidates else f"found {sorted(candidates)}")
 
