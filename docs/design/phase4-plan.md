@@ -123,7 +123,7 @@ Then phase 5 (the final docs set) starts.
 
 | | Decision | Recommended | Step |
 |---|---|---|---|
-| A-D1 | **G5:** a fold with no `initial=` | start from the reducer's empty value when it has one (as R6 did for built-ins); otherwise refuse when declared: *"add(acc, n) has no starting value: give initial="* | A |
+| A-D1 | **G5:** a fold with no `initial=` | start from the reducer's empty value when it has one (as R6 did for built-ins); otherwise refuse when declared: *"add(acc, n) has no starting value: give initial="*. Only when none is given: `initial=0`, or a reference (`initial=wf["s"][0][cols["value"]]`, even before `s` has run; it is read when the step runs) counts as given | A |
 | A-D2 | **K18:** how `timeout` is enforced | each call in a worker thread with a deadline; a call past it fails, `where: timeout`. A thread can't be stopped, so the call may finish in the background, and its result is dropped | A |
 | B-D1 | K26's page size | 50 rows, as interactive-sessions.md suggests; the host can ask for another | B |
 | C-D1 | **K25:** a resource reports its data version by | a method, `data_version()`, called before a run; a setting can't change while the resource lives | C |
