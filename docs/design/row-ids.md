@@ -1,6 +1,6 @@
 # Row ids: the rules (K19)
 
-> Decided by the owner, 2026-10-27 (D1, D3, D4; D2 taken as recommended).
+> Decided by the owner, 2026-10-27 (D1–D4).
 > Being built in phase 4, in pieces: **selections — done**; **column arguments — done**; **`zip_` — done**; **the ids new rows get — done** (2026-10-27). K19 is complete.
 > *Today* notes were run at `6435a98`, before K19. This is what makes a reference keep pointing
 > at the same row when the data shifts: selections, column arguments, `zip_`,
@@ -90,6 +90,6 @@ agreed. That fallback is gone: they are refused, pointing to `join`.
 | | Question | Decided |
 |---|---|---|
 | D1 | A slice `[a:b]`: positions or ids | **Positions**: `wf["srt"][0:2]` is the top two rows (the header isn't a row). Single rows and lists are ids |
-| D2 | A source tool's own index: its row ids | Taken as recommended: yes, when it isn't the default and is unique |
+| D2 | A source tool's own index: its row ids | **Yes** (confirmed), when it isn't the default and is unique |
 | D3 | `collapse(by=…)`'s row ids | **The key**, for its output. And a collapsed row keeps which input rows were in its group, so a change to one of them marks only that group's row stale |
 | D4 | Bump the saved format | **Yes**: version 5 (done with the selections piece) |

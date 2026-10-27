@@ -137,10 +137,10 @@ written on 2026-10-27 and set aside until then.
 
 | Feature | ID |
 |---|---|
-| `header[k]` picks one column name, or is refused; today the `[k]` is ignored | C28 |
-| A header as a step: one row per name (in a column called `column`), or one cell holding the list | open |
+| `header[k]` picks one column name, or is refused; today the `[k]` is ignored. Deferred (owner, 2026-10-27) | C28 |
+| A header as a step: one row per name (in a column called `column`), or one cell holding the list | deferred (owner, 2026-10-27) |
 | Selection steps print as written (`wf["p"][0:2]`, not `op("identity")[mod.select(…)]`) *Done (phase 4)* | G4 |
-| Possibly accept `rows[1, 3]` and `cols["a", "b"]` as lists | open |
+| `rows[1, 3]` and `cols["a", "b"]` as lists | decided: no; a list is written `rows[[1, 3]]` (owner, 2026-10-27) |
 
 ## Phase 5: documentation
 
