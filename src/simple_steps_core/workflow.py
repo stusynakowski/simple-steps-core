@@ -97,7 +97,7 @@ class Workflow:
             st.operation = operation
             if problems != st.problems or not ran:
                 st.problems = problems
-                st.output = stage(operation, self, problems)
+                st.output = stage(operation, self, problems, sid)
                 st.warnings = warn(operation, self, sid)
                 self._restage_after(sid)
             elif stale:
@@ -217,7 +217,7 @@ class Workflow:
         problems = check(operation, self, step_id)
         previous = self.steps.get(step_id)
         was_empty = previous is not None and previous.output.meta.get("empty")
-        staged = stage(operation, self, problems)
+        staged = stage(operation, self, problems, step_id)
         output = staged
         if previous is not None and not previous.output.meta.get("staged"):
             if previous.operation == operation:
@@ -283,7 +283,7 @@ class Workflow:
             problems = check(st.operation, self, sid)
             if problems != st.problems:
                 st.problems = problems
-                st.output = stage(st.operation, self, problems)
+                st.output = stage(st.operation, self, problems, sid)
                 st.warnings = warn(st.operation, self, sid)
 
     def insert(self, index: int, step_id: str, operation: Any) -> None:
@@ -317,7 +317,7 @@ class Workflow:
             problems = check(st.operation, self, sid)
             if problems != st.problems:
                 st.problems = problems
-                st.output = stage(st.operation, self, problems)
+                st.output = stage(st.operation, self, problems, sid)
                 st.warnings = warn(st.operation, self, sid)
 
     def __getitem__(self, step_id: str | int) -> StepRef:
@@ -1745,6 +1745,7 @@ class Workflow:
             step.output = resolved.run(source, tools)
             step.output.data = _str_columns(step.output.data, step_id)
             _spread_record(resolved, step.output)
+            _apply_naming(resolved, step.output, step_id)
             _carry_id_columns(resolved, source, step.output)
             found = step.output.meta.pop("warnings", None) or []
             if found:                             # said while running (J-D3)
@@ -1843,7 +1844,7 @@ class Workflow:
                           predicted_columns(other.output),
                           columns_unknown(other.output))
                 other.problems = check(other.operation, self, other.name)
-                other.output = stage(other.operation, self, other.problems)
+                other.output = stage(other.operation, self, other.problems, other.name)
                 other.warnings = warn(other.operation, self, other.name)
                 after = (other.output.meta.get("expected"), other.problems,
                          predicted_columns(other.output),
@@ -1965,7 +1966,7 @@ class Workflow:
                 operation = catalog.admit(operation)
             problems = check(operation, workflow, sid)
             workflow.steps[sid] = Step(sid, operation,
-                                       stage(operation, workflow, problems),
+                                       stage(operation, workflow, problems, sid),
                                        problems, warn(operation, workflow, sid),
                                        dict(entry.get("extras") or {}))
             # Restore this step's payload before checking the steps after it,
@@ -2061,7 +2062,7 @@ from .checks import (  # noqa: E402
 from .combines import _row_lookup, _run_combine, is_combine, own_id_columns  # noqa: E402
 from .errors import ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402
 from .problems import Problem  # noqa: E402
-from .values import _record_fields, record_return  # noqa: E402
+from .values import _record_fields, named_columns, record_return  # noqa: E402
 from .modifiers import (  # noqa: E402
     MODIFIERS,
     Modifier,
@@ -2123,9 +2124,8 @@ def _spread_record(operation: Operation, output: Output) -> None:
         kind = (output.meta.get("auto") or {}).get("verb")
     declared = record_return(kind, operation.fn)
     column = output.meta.get("value_column")
-    if declared is None or column not in output.data.columns or any(
-            m.kind == "name" for m in operation.modifiers):
-        return
+    if declared is None or column not in output.data.columns or operation.naming is not None:
+        return                                   # one name keeps the record in one cell
     cls, optional = declared
     fields = list(_record_fields(cls))
     data, states = output.data, output.states
@@ -2185,6 +2185,60 @@ def _spread_record(operation: Operation, output: Output) -> None:
 
 
 _MISSING = object()
+
+
+def _apply_naming(operation: Operation, output: Output, step_id: str) -> None:
+    """``mod.name`` as a list, a mapping or a pattern (G12), after the run: a
+    list spreads a sequence by position, a mapping renames fields, a pattern
+    renames each column the step wrote. A single name went to the verb."""
+    rule = operation.name_rule
+    if rule is None or operation.naming is not None:
+        return
+    verb = operation.shape_verb
+    kind = verb.kind if verb is not None else None
+    if kind == "auto":
+        kind = (output.meta.get("auto") or {}).get("verb")
+    declared = record_return(kind, operation.fn)
+    written = list(_record_fields(declared[0])) if declared else (
+        [output.meta.get("value_column")] if output.meta.get("value_column") else [])
+    written = [c for c in written if c in output.data.columns]
+    if not written:
+        return
+    to = rule.get("to")
+    if isinstance(to, list) and len(written) == 1:
+        # a sequence, spread by position: a row of the wrong length fails
+        column, data, states = written[0], output.data, output.states
+        notes = dict(output.meta.get("notes") or {})
+        at = list(data.columns).index(column)
+        new, new_states = data.iloc[:, :at].copy(), states.iloc[:, :at].copy()
+        values = {n: [] for n in to}
+        bad = []
+        for i in data.index:
+            cell, state = data.at[i, column], str(states.at[i, column])
+            ok = state == "known" and isinstance(cell, (list, tuple)) and len(cell) == len(to)
+            if state == "known" and not ok:
+                got = len(cell) if isinstance(cell, (list, tuple)) else 1
+                bad.append(i)
+                notes[i] = {**notes.get(i, {}), "error": f"returned {got} values for {len(to)} names"}
+            for n, k_ in enumerate(to):
+                values[k_].append(cell[n] if ok else None)
+        for k_ in to:
+            new[k_] = _typed(values[k_], data.index)
+            new_states[k_] = states[column]
+            for i in bad:
+                new_states.at[i, k_] = "failed"
+        for c in list(data.columns)[at + 1:]:
+            new[c], new_states[c] = data[c], states[c]
+        output.data, output.states = new, new_states
+        output.meta["notes"] = notes
+        written = list(to)
+        rule = {"pattern": rule.get("pattern")}
+    final = named_columns(rule, written, step_id, operation.tool)
+    rename = {old: new_ for old, new_ in zip(written, final) if old != new_}
+    if rename:
+        output.data = output.data.rename(columns=rename)
+        output.states = output.states.rename(columns=rename)
+    output.meta["value_column"] = final[0] if len(final) == 1 else None
 
 
 def _named(operation: Operation) -> str:

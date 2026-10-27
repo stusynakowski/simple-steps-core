@@ -280,6 +280,27 @@ def _record_fields(cls: Any) -> dict | None:
     return None
 
 
+def named_columns(rule: dict | None, columns: list[str], step: str | None,
+                  tool: str | None) -> list[str]:
+    """The names *columns* (what a step writes, before naming) get under the
+    last ``mod.name`` (G12, outputs-and-reshaping.md §4): a list names a
+    sequence's positions, a mapping renames fields, a pattern renames each
+    (``{field}``, ``{step}``, ``{tool}``), after a list or mapping."""
+    if not rule:
+        return list(columns)
+    to, pattern = rule.get("to"), rule.get("pattern")
+    out = list(columns)
+    if isinstance(to, str):
+        out = [to] if len(out) <= 1 else out
+    elif isinstance(to, list):
+        out = list(to)
+    elif isinstance(to, dict):
+        out = [to.get(c, c) for c in out]
+    if pattern:
+        out = [pattern.format(field=c, step=step or "", tool=tool or "") for c in out]
+    return out
+
+
 def record_return(kind: str | None, fn: Any) -> tuple[Any, bool] | None:
     """The record type a tool declares it returns per call, and whether it may
     be None: ``-> LoHi``, ``-> LoHi | None``, and under ``expand``

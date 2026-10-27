@@ -303,7 +303,11 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         if modifier.kind != "name":
             continue
         to = modifier.settings.get("to")
+        pattern = modifier.settings.get("pattern")
         verb_ = operation.shape_verbs[-1] if operation.shape_verbs else None
+        if isinstance(to, (list, dict)) or pattern is not None:
+            problems.extend(_name_form_problems(operation, to, pattern, verb_, workflow))
+            continue
         if not isinstance(to, str) or not to.strip():
             problems.append(f"mod.name needs a column name, got {to!r}")
         elif is_id_column(to):
@@ -921,6 +925,49 @@ def _group_function_types(operation: Operation, fn: Any, by: Any) -> list[str]:
     return found
 
 
+def _name_form_problems(operation: "Operation", to: Any, pattern: Any, verb: Any,
+                        workflow: "Workflow | None") -> list[str]:
+    """``mod.name`` as a list, a mapping or a pattern (G12, outputs-and-reshaping.md §4)."""
+    found = []
+    names = list(to) if isinstance(to, list) else list(to.values()) if isinstance(to, dict) else []
+    if any(not isinstance(n, str) or not n.strip() for n in names) or \
+            (isinstance(to, dict) and any(not isinstance(k, str) for k in to)):
+        return [f"mod.name needs column names, got {to!r}"]
+    if len(set(names)) < len(names):
+        found.append(f"mod.name gives two columns one name: {names!r}")
+    if any(is_id_column(n) for n in names):
+        found.append(f"mod.name can't give a name starting with {ROW_ID!r}: those are core's id columns")
+    if pattern is not None and (not isinstance(pattern, str) or not any(
+            f"{{{k}}}" in pattern for k in ("field", "step", "tool"))):
+        found.append(f"mod.name(pattern=…) needs {{field}}, {{step}} or {{tool}}, got {pattern!r}")
+    if verb is not None and verb.kind not in NAMED_VERBS and verb.kind != "auto":
+        found.append(f"{verb.kind} writes no new values, so there is nothing to name; "
+                     "to rename a column, use mod.rename in a later step")
+        return found
+    kind = verb.kind if verb is not None else None
+    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool)
+    record = record_return(kind, fn)
+    hint = _return_hint(fn)
+    if isinstance(to, list) and record is not None:
+        found.append(f"mod.name([…]) names a sequence's positions; {operation.tool}() returns a "
+                     f"record: rename its fields with a mapping, mod.name({{\"old\": \"new\"}})")
+    elif isinstance(to, list) and hint is not None and record is None and \
+            typing.get_origin(hint) not in (tuple, list) and hint not in (tuple, list):
+        found.append(f"mod.name([…]) gives {len(names)} names to one value: "
+                     f"{operation.tool}() returns {_type_name(hint)}")
+    if isinstance(to, dict):
+        if record is None and hint is not None:
+            found.append(f"mod.name({{…}}) renames a record's fields; {operation.tool}() "
+                         f"returns {_type_name(hint)}")
+        elif record is not None:
+            fields = _record_fields(record[0])
+            unknown = [k for k in to if k not in fields]
+            if unknown:
+                found.append(f"mod.name({{…}}) renames {unknown[0]!r}, which "
+                             f"{record[0].__name__} doesn't have (it has {', '.join(fields)})")
+    return found
+
+
 def _unmatched_rows(operation: Operation, workflow: "Workflow") -> list[str]:
     """Where rows would meet with no match core recorded (reshaping.md §6.1)."""
     found = []
@@ -1479,7 +1526,7 @@ def infer_verb(fn: Callable, upstream: Any, literals: dict) -> tuple[str, str]:
 
 
 def stage(operation: Operation, workflow: "Workflow | None" = None,
-          problems: tuple[str, ...] = ()) -> Output:
+          problems: tuple[str, ...] = (), step_id: str | None = None) -> Output:
     """The Output a step has before it runs — the slot, with what we know in it.
 
     An **invalid** operation stages as a single cell: it has no shape, because
@@ -1494,7 +1541,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     if _is_auto(operation) and len(operation.shape_verbs) == 1:
         # 008 N: stage as the verb it would be now, marked provisional.
         concrete, kind, why = _provisional(operation, workflow)
-        out = stage(concrete, workflow, problems)
+        out = stage(concrete, workflow, problems, step_id)
         out.meta["auto"] = {"verb": kind, "reason": why, "provisional": True}
         return out
     if problems:
@@ -1621,15 +1668,22 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         ordered += [c for c in variables(upstream_columns) if c != by_ and c not in ordered]
         payload = None
     declared_record = None
-    if payload and not any(m.kind == "name" for m in operation.modifiers):
+    if payload and operation.naming is None:      # (one name keeps a record in one cell)
         declared_record = record_return(kind, operation.fn or BUILTIN_TOOLS.get(operation.tool))
+    naming_rule = operation.name_rule if operation.naming is None else None
+    written: list = []
     if declared_record is not None:
         # a declared record: one column per field, in declared order (G8)
-        fields_ = _record_fields(declared_record[0])
-        ordered += [f for f in fields_ if f not in ordered]
+        written = list(_record_fields(declared_record[0]))
         payload = None
-    if payload and payload not in ordered:
-        ordered.append(payload)
+    elif payload:
+        written = [payload]
+        payload = None
+    named = named_columns(naming_rule, written, step_id, operation.tool) if naming_rule else written
+    rename_written = dict(zip(written, named)) if len(named) == len(written) else {}
+    ordered += [n for n in named if n not in ordered]
+    if declared_record is None and len(named) == 1:
+        payload = named[0]                   # the one column it writes, as named
     index_names = ordered
 
     # 008 K1: are these all the columns, or only the ones known so far? A
@@ -1685,11 +1739,12 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         if isinstance(mapping, dict):
             for old, new in mapping.items():
                 types[new] = upstream_types.get(old)
-    if payload and kind not in ("source",):
-        types[payload] = _payload_type(kind, fn)
+    if written and declared_record is None and kind not in ("source",):
+        for n in named:
+            types[n] = _payload_type(kind, fn) if len(named) == 1 else None
     if declared_record is not None:
         for f, t in _record_fields(declared_record[0]).items():
-            types[f] = t | None if declared_record[1] and t is not None else t
+            types[rename_written.get(f, f)] = t | None if declared_record[1] and t is not None else t
     if kind in ("source", "table") and not is_identity(fn):
         schema = _declared_schema(fn)
         if schema is not None:
@@ -1782,6 +1837,7 @@ from .values import (  # noqa: E402
     _payload_type,
     _return_hint,
     _record_fields,
+    named_columns,
     record_return,
     _shape_kind,
     _shape_problem,

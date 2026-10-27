@@ -160,3 +160,67 @@ def test_G9_widen_spreads_the_declared_fields_and_plans_them(g8):
     g8["w2"] = mod.widen()(wf["one2"])
     g8.run_all()
     assert g8.step("w2").data.to_dict("list") == {"lo": [0], "hi": [2]}
+
+
+# ── G12: mod.name as a list, a mapping or a pattern ──────────────────────────
+
+@tool
+def split_name(name: str) -> tuple[str, str]:
+    return tuple(name.split(" ")) if " " in name else (name,)
+
+
+@tool
+def to_f(n: int) -> float:
+    return n * 1.8 + 32
+
+
+@pytest.fixture
+def g12():
+    k = Kernel(Catalog(tools=[bounds, split_name, to_f]))
+    k["x"] = pd.DataFrame({"n": [1, 3]})                                # (bounds fails n = 2 on purpose)
+    k["p"] = pd.DataFrame({"name": ["Ada Lovelace", "Cy"]})
+    return k
+
+
+@pytest.mark.parametrize("naming, columns", [
+    (mod.name(pattern="{field}_c"), ["lo_c", "hi_c"]),
+    (mod.name({"lo": "low"}), ["low", "hi"]),
+    (mod.name({"lo": "low"}, pattern="{step}_{field}"), ["s_low", "s_hi"]),
+])
+def test_G12_a_mapping_or_pattern_names_a_records_fields_and_the_plan_agrees(g12, naming, columns):
+    g12["s"] = bounds[mod.map(), naming](wf["x"])
+    assert g12.step("s").plan["columns"]["names"] == columns
+    g12.run_all()
+    assert list(g12.step("s").data.columns) == columns
+
+
+def test_G12_a_list_spreads_a_sequence_and_a_wrong_length_fails_its_row(g12):
+    g12["s"] = split_name[mod.map(), mod.name(["first", "last"])](wf["p"])
+    with pytest.raises(StepFailed):
+        g12.run_all()
+    out = g12.step("s").output
+    assert out.data.loc[0, "first"] == "Ada" and out.data.loc[0, "last"] == "Lovelace"
+    assert "returned 1 values for 2 names" in str(out.notes[1])
+
+
+def test_G12_a_pattern_names_a_single_value(g12):
+    g12["f"] = to_f[mod.map(), mod.name(pattern="{field}_f")](wf["x"])
+    g12.run_all()
+    assert list(g12.step("f").data.columns) == ["value_f"]
+
+
+@pytest.mark.parametrize("naming, says", [
+    (lambda: to_f[mod.map(), mod.name(["a", "b"])], "2 names to one value"),
+    (lambda: bounds[mod.map(), mod.name(["a", "b"])], "rename its fields with a mapping"),
+    (lambda: bounds[mod.map(), mod.name({"zz": "q"})], "doesn't have"),
+    (lambda: bounds[mod.map(), mod.name(pattern="nope")], "needs {field}"),
+    (lambda: bounds[mod.map(), mod.name(["a", "a"])], "two columns one name"),
+])
+def test_G12_a_name_that_doesnt_fit_is_refused_when_declared(g12, naming, says):
+    g12["s"] = naming()(wf["x"])
+    assert says in str(g12.step("s").problems)
+
+
+def test_G12_the_formula_prints_as_written(g12):
+    g12["s"] = bounds[mod.map(), mod.name({"lo": "low"}, pattern="{field}_c")](wf["x"])
+    assert g12.step("s").formula == 'bounds[mod.map(), mod.name({"lo": "low"}, pattern="{field}_c")](wf["x"])'

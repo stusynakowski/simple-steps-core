@@ -164,8 +164,16 @@ class Operation:
     def naming(self) -> str | None:
         """The name the last naming modifier gives (``mod.name("x")``), or None.
         The last one written wins (owner, 2026-10-27)."""
-        names = [m.settings.get("to") for m in self.layers if m.kind == "name"]
-        return names[-1] if names else None
+        rule = self.name_rule
+        if rule is None or rule.get("pattern") or not isinstance(rule.get("to"), str):
+            return None                      # the other forms are applied after the run
+        return rule["to"]
+
+    @property
+    def name_rule(self) -> dict | None:
+        """The last ``mod.name``'s settings, ``{"to": …, "pattern": …}``, or None (G12)."""
+        rules = [m.settings for m in self.layers if m.kind == "name"]
+        return dict(rules[-1]) if rules else None
 
     def to_source(self) -> str:
         """The formula that builds this operation (008 P).
@@ -192,7 +200,7 @@ class Operation:
             head = f"op({_src(self.tool)})"
         if self.modifiers:
             head += "[" + ", ".join(
-                f"mod.name({_src(m.settings.get('to'))})" if m.kind == "name" else
+                _name_source(m.settings) if m.kind == "name" else
                 f"mod.{m.kind}(" + ", ".join(f"{k}={_src(v)}" for k, v in m.settings.items()) + ")"
                 for m in self.layers) + "]"
         kwargs = [f"{k}={_src(v)}" for k, v in self.arguments.items()]
@@ -524,3 +532,11 @@ from .references import (  # noqa: E402
 from .run import compile_operation  # noqa: E402
 from .values import _bind_positional, _decode_argument, _encode_argument  # noqa: E402
 from .workflow import Workflow  # noqa: E402
+
+
+def _name_source(settings: dict) -> str:
+    """``mod.name(…)`` as written: the name, list or mapping first, then a pattern."""
+    parts = [_src(settings["to"])] if settings.get("to") is not None else []
+    if settings.get("pattern"):
+        parts.append(f"pattern={_src(settings['pattern'])}")
+    return f"mod.name({', '.join(parts)})"

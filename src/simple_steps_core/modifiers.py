@@ -44,7 +44,7 @@ from .verbs import (
 # Two kinds, distinguished by what they do to the signature:
 #   shape verbs       lift it:      (a -> b)  becomes  ([a] -> Output)
 #   execution mods    preserve it:  (a -> b)  stays    (a -> b)
-def _d_name(fn: Callable, *, to: str) -> Callable:
+def _d_name(fn: Callable, *, to: Any = None, pattern: str | None = None) -> Callable:
     """``mod.name("temp_f")`` — what the step's output column is called (G12).
 
     A naming modifier wraps nothing: the name it gives is the shape verb's
@@ -368,7 +368,8 @@ PARAM_TYPES: dict[str, tuple[type, ...]] = {
     # a row id (an int, or a string such as expand's "0.1"), a list of ids,
     # or {start, stop}: a range of positions (K19)
     "rows": (int, str, list, dict),
-    "to": (str,),
+    "to": (str, list, dict),
+    "pattern": (str,),
 }
 
 
@@ -596,7 +597,8 @@ class _Mods:
                 if kind != "name" or len(given) != 1 or "to" in params:
                     raise TypeError(f"mod.{kind}() takes settings by keyword"
                                     if kind != "name" else
-                                    "mod.name() takes one name: mod.name(\"temp_f\")")
+                                    "mod.name() takes one name, a list or a mapping, then "
+                                    "pattern=: mod.name(\"temp_f\"), mod.name([\"lo\", \"hi\"])")
                 params["to"] = given[0]
             if kind == "try_except" and params.get("on") is not None:
                 # Exception classes are written as classes and saved by name.

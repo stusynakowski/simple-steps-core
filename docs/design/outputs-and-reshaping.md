@@ -155,9 +155,9 @@ for a record, or the column's own name for verbs that carry columns. So
 
 **`mod.name` replaces `name=`** on `map`, `expand`, `collapse`, `group` and
 `sweep` (decided 2026-10-27): `name=` on a verb is a problem pointing to
-`mod.name`. *Built (phase 4):* a single name, `mod.name("temp_f")`, on every
-verb that writes a value column, with the naming checks above. *Next:* the
-list, mapping and pattern forms, which come with spreading records (§3).
+`mod.name`. *Built (phase 4):* every form: a single name, a list, a mapping and a
+pattern, each checked when declared and planned exactly; and records spread
+(§3). *Next:* kernel-wide naming conventions (§10).
 
 ## 5. Inconsistent data: what each case does
 
