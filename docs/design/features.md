@@ -55,10 +55,10 @@ matching rows, round trips, uneven data) is finished:
 | **A step is re-checked when an upstream's columns change**, so a reader that lost its column is a problem, not a `TypeError` on every row. *Done (phase 4, 2026-10-27)*: a warning as soon as the input is edited (`column_will_be_missing`), the problem once it re-runs | G13 |
 | `to_source()` prints every form as written (reshapes, selections), so step ⇄ formula round-trips *Done (phase 4)* | G4 |
 | `k["x"] = None` is an empty step (1×1 `"empty"`), a placeholder line *Done (phase 4, 2026-10-27)* | G17 |
-| Row count and estimated size per output, or `unknown` with the reason; pages of 50–100 rows | K26 |
-| Column types: declared, else `unknown`, then observed or the union | K27 |
+| Row count and estimated size per output, or `unknown` with the reason; pages of 50–100 rows *Done (phase 4)* | K26 |
+| Column types: declared, else `unknown`, then observed or the union *Done (phase 4)* | K27 |
 | Missing values are `None` and integer columns stay integers (`stack`, failed rows) *Done (phase 4): a gap is `absent`, ints stay ints* | G2, R8 |
-| An unrun source's planned columns come from its declared type, not a guessed `value` | K1 |
+| An unrun source's planned columns come from its declared type, not a guessed `value` *Done* | K1 |
 
 ### References that follow the data
 
@@ -70,7 +70,7 @@ The rules, with four decisions for the owner, are in [row-ids.md](row-ids.md).
 | A column given as an argument pairs row by row, by the parameter's type *Done (phase 4)* | K19 |
 | `zip_` pairs by row id; a source keeps the index its tool set *Done (phase 4)* | K19, G3 |
 | Each cell's lineage stored with its output, including combines and multi-value cells *Done (phase 4): the `#` columns are the row map; a cell's inputs are its row's, by the columns it read ([reshaping.md](reshaping.md) §5)* | K28 |
-| Reading an older version of a step warns, naming the step and version | K29 |
+| Reading an older version of a step warns, naming the step and version *Done (phase 4)* | K29 |
 
 ### Outputs and naming
 

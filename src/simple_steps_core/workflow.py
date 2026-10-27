@@ -1783,6 +1783,12 @@ class Workflow:
             _apply_naming(resolved, step.output, step_id, self.default_name_rule(resolved))
             _carry_id_columns(resolved, source, step.output)
             found = step.output.meta.pop("warnings", None) or []
+            for read in dict.fromkeys(str(g) for g in step.operation.reads):
+                upstream = self.steps.get(read)
+                if upstream is not None and upstream.output.meta.get("stale"):
+                    found.append(f"read {read!r} while it's stale (version "
+                                 f"{upstream.output.version}): an earlier step changed since "
+                                 f"{read!r} ran; run it first for current values")
             defaulted = [i for i, n in step.output.notes.items()
                          if n.get("caught") and str(step.output.row_states.get(i)) == "known"]
             if defaulted:                         # G7: a default stood in for a result

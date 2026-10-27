@@ -1803,7 +1803,9 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         "rows": _rows_plan(kind, rule, expected if "rows" not in expect else None,
                            n_in, expect, label, upstream_name),
         "columns": _columns_plan(kind, ordered, columns_open, expect, label, upstream_name),
-        "types": {c: _type_label(types.get(c)) for c in ordered},
+        # declared, else unknown until it runs (K27)
+        "types": {c: _type_label(types.get(c)) if types.get(c) is not None else "unknown"
+                  for c in ordered},
     }
 
     records = [{"status": "staged", "error": None, "attempts": 0, "seconds": 0.0}

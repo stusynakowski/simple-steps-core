@@ -166,9 +166,15 @@ class Step:
             data = self.output.data
             plan = {"rows": {"certainty": "exact", "count": len(data)},
                     "columns": {"certainty": "exact", "names": list(data.columns)},
-                    "types": {c: _type_label(_dtype_type(data[c])) for c in data.columns}}
+                    # what was observed; a mix is the union (K27)
+                    "types": {c: _observed_label(data[c]) for c in data.columns},
+                    "size": {"certainty": "exact", "rows": len(data),     # K26
+                             "bytes": int(data.memory_usage(deep=True).sum())}}
         else:
             plan = dict(self.output.meta.get("plan") or {})
+            plan.setdefault("size", {"certainty": "unknown", "because":
+                                     f"{self.name} hasn't run: its size is known when it does",
+                                     "resolve": [f"run {self.name!r}"]})
         if inverse is not None:
             plan["inverse"] = inverse             # how to go back (reshaping.md §7)
         return plan
@@ -241,3 +247,9 @@ from .operation import Operation, _src  # noqa: E402
 from .output import Output, _plan_words  # noqa: E402
 from .specs import StepSpec  # noqa: E402
 from .values import _dtype_type, _encode_argument, _literal_problem, _type_label  # noqa: E402
+
+
+def _observed_label(series: "pd.Series") -> str:
+    """A column's observed type; ``unknown`` when there's nothing to observe."""
+    observed = _dtype_type(series)
+    return "unknown" if observed is None and not len(series.dropna()) else _type_label(observed)

@@ -637,7 +637,7 @@ def test_C5_declared_columns_and_types_are_checked_before_the_source_runs():
     assert "names 'cty'" in w.step("typo").problems[0]
     assert w.step("typed").problems == (
         "shout_008() declares city: int, but 'r' will have city as str",)
-    assert w.step("fine").plan["types"] == {"value": "any"}       # only its results
+    assert w.step("fine").plan["types"] == {"value": "unknown"}   # only its results; undeclared (K27)
 
 
 def test_C5_a_source_that_breaks_its_declared_columns_fails():
@@ -695,7 +695,10 @@ def test_C9_stated_rows_stage_and_are_checked_at_run(wf):
 
 
 def test_C9_a_step_that_ran_has_an_exact_plan(wf):
-    assert wf.step("readings").plan == {
+    plan = wf.step("readings").plan
+    size = plan.pop("size")                                # K26: rows and estimated bytes
+    assert size["certainty"] == "exact" and size["rows"] == 4 and size["bytes"] > 0
+    assert plan == {
         "rows": {"certainty": "exact", "count": 4},
         "columns": {"certainty": "exact", "names": ["city", "n"]},
         "types": {"city": "str", "n": "int"},

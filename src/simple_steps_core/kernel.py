@@ -285,9 +285,13 @@ class Kernel:
             callback(change)
 
     # ── reading ──────────────────────────────────────────────────────────
+    #: The rows a page shows when none are asked for (K26, B-D1).
+    PAGE = 50
+
     def view(self, step: str | int, rows: tuple[int, int] | None = None) -> dict:
-        """A page of a step's rows, as a UI shows them: ``rows=(start, stop)``."""
-        return self.workflow.preview(self._name(step), rows)
+        """A page of a step's rows, as a UI shows them: ``rows=(start, stop)``,
+        the first 50 when not given. ``window`` says which, and how many in all."""
+        return self.workflow.preview(self._name(step), rows if rows is not None else (0, self.PAGE))
 
     def cell(self, step: str | int, row: Any, column: str = VALUE_COLUMN) -> dict:
         """One cell: its value, type and state, and the input cells it came from.

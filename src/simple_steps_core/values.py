@@ -232,6 +232,11 @@ def _type_label(t: Any) -> str:
         return "any"
     if isinstance(t, str):
         return t
+    if typing.get_origin(t) in (typing.Union, getattr(__import__("types"), "UnionType", None)):
+        parts = [a for a in typing.get_args(t) if a is not type(None)]
+        if len(parts) > 1:                     # a union reads as one: ``int | str`` (K27)
+            label = " | ".join(_type_label(a) for a in parts)
+            return f"{label} | None" if type(None) in typing.get_args(t) else label
     admits_none, base = _optional_parts(t)
     name = _type_name(base) or "any"
     return f"{name} | None" if admits_none and base is not t else name
@@ -248,6 +253,8 @@ def _dtype_type(series: pd.Series) -> Any:
         return float
     present = series.dropna() if kind == "O" else series
     types_ = {type(v) for v in present}
+    if len(types_) > 1:                       # observed, mixed: the union (K27)
+        return typing.Union[tuple(sorted(types_, key=lambda t: t.__name__))]
     return types_.pop() if len(types_) == 1 else None
 
 

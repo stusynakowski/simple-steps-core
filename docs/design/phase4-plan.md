@@ -50,7 +50,15 @@ G7, K18. Tests in `tests/unit/test_outputs.py`. `scripts/core_asks.py`: 36 of
 - **Changes for users:** a `-> LoHi` tool's step gets columns `lo`, `hi`
   instead of one cell; a slow call under `timeout` fails.
 
-### Step B. Seeing the data truthfully
+### Step B. Seeing the data truthfully ✓
+
+*Done 2026-10-27.* K1 was already built (a declared source plans its
+columns). K26: a plan has `size`, rows and estimated bytes once run, else
+`unknown` with the reason; `k.view` shows a page of 50 rows by default
+(B-D1), and `window` says which and how many in all. K27: a type is declared,
+else `unknown` until it runs, then observed, and a mix is the union
+(`int | str`). K29: a step that read a stale step warns, naming it and its
+version. Tests in `tests/unit/test_seeing.py`.
 
 | Feature | Designed in |
 |---|---|
@@ -129,7 +137,7 @@ Then phase 5 (the final docs set) starts.
 |---|---|---|---|
 | A-D1 | **G5:** a fold with no `initial=` — **decided and built** 2026-10-27: it starts from `initial=` if given (a value or a reference), else a built-in's empty value, else its accumulator's type's (`acc: float` → `0.0`, `list` → `[]`); untyped or `X \| None` starts at `None`, and a failure there says to give `initial=`; a type with no empty value is refused when declared. Was: | start from the reducer's empty value when it has one (as R6 did for built-ins); otherwise refuse when declared: *"add(acc, n) has no starting value: give initial="*. Only when none is given: `initial=0`, or a reference (`initial=wf["s"][0][cols["value"]]`, even before `s` has run; it is read when the step runs) counts as given | A |
 | A-D2 | **K18:** how `timeout` is enforced — **decided and built** 2026-10-27, as recommended. Was: | each call in a worker thread with a deadline; a call past it fails, `where: timeout`. A thread can't be stopped, so the call may finish in the background, and its result is dropped | A |
-| B-D1 | K26's page size | 50 rows, as interactive-sessions.md suggests; the host can ask for another | B |
+| B-D1 | K26's page size — **decided and built**, as recommended. Was: | 50 rows, as interactive-sessions.md suggests; the host can ask for another | B |
 | C-D1 | **K25:** a resource reports its data version by | a method, `data_version()`, called before a run; a setting can't change while the resource lives | C |
 | D-D1 | **the autorun modifier** | design it before step D starts: triggers, chains, cost guards, pacing (interactive-sessions.md §6.2) | D |
 | D-D2 | the progress callback | `k.run(…, observe=[progress(cb)])`, one call per cell: step, row id, state, as grid-model.md §6 has it | D |
