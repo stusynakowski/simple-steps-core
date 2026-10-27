@@ -200,9 +200,9 @@ class Kernel:
             except Exception:                       # a step that can't print
                 formula = st.operation.tool_id
             data = st.output.data
-            shape = "—" if st.output.meta.get("staged") else f"{data.shape[0]}×{data.shape[1]}"
+            shape = "—" if st.output.staged else f"{data.shape[0]}×{data.shape[1]}"
             problem = st.problems[0] if st.problems else ""
-            rows.append((str(index), name, formula, st.status, shape, problem))
+            rows.append((str(index), name, formula, st.state, shape, problem))
         return rows
 
     def __repr__(self) -> str:

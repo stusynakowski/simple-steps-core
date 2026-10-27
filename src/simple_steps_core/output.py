@@ -113,6 +113,47 @@ class Output:
                 states = _states_frame(["known"] * len(data), data)
         self.states = states
 
+    # ── named fields (read from meta until phase 3e) ─────────────────────
+    @property
+    def version(self) -> str | None:
+        """A hash of the data, once the step has run. Equal data, equal version."""
+        return self.meta.get("version")
+
+    @property
+    def read(self) -> dict:
+        """``{step or "res:name": version}`` this output was computed from."""
+        return dict(self.meta.get("read") or {})
+
+    @property
+    def plan(self) -> dict:
+        """Before running: rows, columns and types, each with its certainty."""
+        return dict(self.meta.get("plan") or {})
+
+    @property
+    def value_column(self) -> str | None:
+        """The column the tool's results were written to, or None."""
+        return self.meta.get("payload")
+
+    @property
+    def staged(self) -> bool:
+        """True until the step has run."""
+        return bool(self.meta.get("staged"))
+
+    @property
+    def stale(self) -> bool:
+        """True when what this was computed from has changed since."""
+        return bool(self.meta.get("stale"))
+
+    @property
+    def stale_reason(self) -> str | None:
+        """Why it is stale: ``updated args``, ``input sick changed``, …"""
+        return self.meta.get("stale_reason") if self.stale else None
+
+    @property
+    def ran_with(self) -> dict:
+        """What the values were computed with: the formula and each argument."""
+        return dict(self.meta.get("ran_with") or {})
+
     # ── reading states ───────────────────────────────────────────────────
     @property
     def notes(self) -> dict:

@@ -51,7 +51,7 @@ import os
 k["x"] = tool(os.remove)[mod.map()](wf["p"])
 k.step("x").problems[0].code        # 'not_in_catalog'; it never runs     phase 3
 k["late"] = to_f[mod.map()](wf["later"])
-k.step("late").problems[0].code     # 'later_step'                        phase 3
+k.step("late").problems[0].code     # 'missing_step': there is no 'later' phase 3
 k.check("y", to_f[mod.map()](wf["p"]))   # () : would be fine; not added  phase 3
 
 # ── references that follow the data ────────────────────────────────────────

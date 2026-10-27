@@ -26,10 +26,11 @@ from .catalog import Catalog, bound_tool, resource, tool
 from .combines import join, stack, zip_
 from .kernel import Kernel
 from .modifiers import mod
+from .problems import Problem
 from .references import cols, res, rows, wf
 
 __all__ = [
     "Catalog", "Kernel", "tool", "resource", "bound_tool",
-    "mod", "wf", "res", "rows", "cols", "join", "stack", "zip_",
+    "mod", "wf", "res", "rows", "cols", "join", "stack", "zip_", "Problem",
     "grid", "__version__",
 ]

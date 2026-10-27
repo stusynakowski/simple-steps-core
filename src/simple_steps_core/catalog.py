@@ -741,6 +741,10 @@ def _checked_extras(extras: Mapping[str, Any] | None) -> dict:
     return dict(extras)
 
 
+def _outside(message: str) -> Problem:
+    return Problem(message, "not_in_catalog")
+
+
 class Catalog:
     """What a workflow may use: tools, resource types, modifiers and combines.
 
@@ -908,36 +912,36 @@ class Catalog:
         }
 
     # ── checking a step against it ───────────────────────────────────────
-    def problems(self, operation: Operation, workflow: Any = None) -> list[str]:
+    def problems(self, operation: Operation, workflow: Any = None) -> list[Problem]:
         """What *operation* uses that this catalog doesn't have."""
-        found: list[str] = []
+        found: list[Problem] = []
         if operation.bound_to is not None:
             decl = (workflow.resources.get(operation.bound_to.name)
                     if workflow is not None else None)
             if decl is not None and decl.type_name not in self._resource_types:
-                found.append(f"resource type {decl.type_name!r} is not in this "
-                             "workflow's catalog")
+                found.append(_outside(f"resource type {decl.type_name!r} is not in this "
+                             "workflow's catalog"))
         elif is_combine(operation):
             if operation.tool_id not in self._combines:
-                found.append(f"{operation.tool_id!r} is not in this workflow's catalog")
+                found.append(_outside(f"{operation.tool_id!r} is not in this workflow's catalog"))
         else:
             name = operation.tool_id
             if name in self._tools:
                 if operation.fn is not None and operation.fn is not self._tools[name].fn:
-                    found.append(
+                    found.append(Problem(
                         f"{name!r} is a different function from the tool of that name "
-                        "in this workflow's catalog")
+                        "in this workflow's catalog", "different_function"))
             elif name not in self._builtins:
-                found.append(f"{name!r} is not in this workflow's catalog")
+                found.append(_outside(f"{name!r} is not in this workflow's catalog"))
         for m in operation.modifiers:
             if m.kind not in self._modifiers:
-                found.append(f"modifier {m.kind!r} is not in this workflow's catalog")
+                found.append(_outside(f"modifier {m.kind!r} is not in this workflow's catalog"))
         values = [*operation.arguments.values(),
                   *(v for m in operation.modifiers for v in m.params.values())]
         for value in values:
             name = (value.id if isinstance(value, (ToolHandle, ToolRef)) else None)
             if name is not None and name not in self._tools and name not in self._builtins:
-                found.append(f"tool {name!r} is not in this workflow's catalog")
+                found.append(_outside(f"tool {name!r} is not in this workflow's catalog"))
         return found
 
     def admit(self, operation: Operation) -> Operation:
@@ -956,6 +960,7 @@ class Catalog:
 # to each other (see grid.py).
 from .system_tools import BUILTIN_TOOLS, identity  # noqa: E402
 from .checks import check  # noqa: E402
+from .problems import Problem  # noqa: E402
 from .combines import COMBINE, is_combine, join, stack, zip_  # noqa: E402
 from .modifiers import MODIFIERS, Modifier, SHAPE_VERBS, mod, modifier_catalog  # noqa: E402
 from .operation import Operation, _NESTED_OPERATION, op  # noqa: E402

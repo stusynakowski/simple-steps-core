@@ -126,7 +126,7 @@ tests and examples have moved onto the kernel.
 |---|---|---|
 | 3a | `Catalog`: tools, resource types, built-ins, modifiers, combines; `without`, `from_modules`, `describe`. A workflow with a catalog checks every step against it (declared, re-checked or loaded) and runs the catalog's functions. Tools carry their `tags` and `extras` | done |
 | 3b | `Kernel`: a catalog, a workflow, loaded resources (built from their spec when first needed, or attached); declare, edit, rename, delete; `run` (never-run inputs first, stale ones pass through), `run_all`; `view`, `cell`; `to_json`, `from_json(text, catalog)`; a table `repr` and `_repr_html_`. The public names are exported from `simple_steps_core` | done |
-| 3c | `Problem` with codes; `step.state`; named `Output` fields | |
+| 3c | `Problem` (a `str` with `code`, `step`, `argument`, `row`, `severity`; 33 codes in `problems.CODES`), given by every section of `check()` and `warn()` and by the catalog; `step.state`, `step.name`, `step.data`; `Output.version`, `read`, `plan`, `value_column`, `staged`, `stale`, `stale_reason`, `ran_with` (read from `meta` until 3e); `step.status` stays an alias of `state` until 3e | done |
 | 3d | specs on every object; `k.check`, `needs_run`, `on_change`, `insert`, `move`; `repr` and notebook display | |
 | 3e | the tests and examples on the kernel; remove the registry, `freeze`, `grid` and the old names | |
 

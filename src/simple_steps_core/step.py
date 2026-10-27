@@ -70,8 +70,25 @@ class Step:
         return not self.problems
 
     @property
+    def name(self) -> str:
+        """The step's name (its id in the workflow)."""
+        return self.step_id
+
+    @property
+    def data(self) -> "pd.DataFrame":
+        """The step's values: ``output.data``."""
+        return self.output.data
+
+    @property
     def status(self) -> str:
-        """A rollup of the cells' states — a step is only as done as its rows."""
+        """The step state. Kept as an alias of :attr:`state` until phase 3e,
+        when ``status`` becomes the step's live part (docs/design/object-model.md §3)."""
+        return self.state
+
+    @property
+    def state(self) -> str:
+        """``staged``, ``completed``, ``stale``, ``failed`` or ``invalid``: a
+        rollup of the cells' states — a step is only as done as its rows."""
         if self.problems:
             return "invalid"
         if self.output.meta.get("staged"):

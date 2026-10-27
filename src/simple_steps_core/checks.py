@@ -12,6 +12,7 @@ import pandas as pd
 import typing
 
 from .output import PAYLOAD
+from .problems import Problem, classified, coded
 
 
 def _expectation(operation: "Operation") -> dict:
@@ -238,6 +239,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         if fn is None and not is_combine(operation):
             problems.append(f"unknown tool {operation.tool_id!r}")
 
+    coded(problems, "unknown_tool")
+
     # 1b. every resource argument has to name a declared resource. Whether it
     #     is *loaded* is a run-time question: a workflow is portable, its
     #     resources are environment.
@@ -246,10 +249,14 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             if isinstance(value, ResRef) and value.name not in workflow.resources:
                 problems.append(_no_resource(value.name, workflow))
 
+    coded(problems, "unknown_resource")
+
     # 2. every modifier kind has to be in the vocabulary
     for modifier in operation.modifiers:
         if modifier.kind not in MODIFIERS:
             problems.append(f"unknown modifier {modifier.kind!r}")
+
+    coded(problems, "unknown_modifier")
 
     # 2b. a modifier's own parameters have to be ones its verb accepts. A typo
     #     here used to pass declaration and surface at run time as a TypeError
@@ -266,6 +273,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 f"{', '.join(map(repr, unknown))}; it accepts "
                 f"{', '.join(sorted(entry.accepts))}"
             )
+
+    coded(problems, "unknown_setting")
 
     # 2c. and they have to be the right *type*. `sweep` is why this matters:
     #     a swept parameter called `name` lands in the verb's own `name=`, and
@@ -306,6 +315,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 f"{modifier.kind}'s {parameter}= must be {names}, got "
                 f"{type(value).__name__}{extra}"
             )
+
+    coded(problems, "wrong_setting_type")
 
     # 2d. a verb whose literal setting is mandatory must carry it at
     #     declaration, not discover it missing at run. select/drop/sort/rename
@@ -348,6 +359,11 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 problems.append(f"{verb_.kind} gives at most {n} rows; "
                                 f"expect(rows={stated}) can't hold")
 
+    for i, p in enumerate(problems):
+        problems[i] = classified(p, (("gives exactly", "contradicts_verb"),
+                                     ("gives at most", "contradicts_verb")),
+                                 "missing_setting")
+
     # 2e. a combine (join/stack/zip) reads several grids and merges on literal
     #     config; it has no tool, so its only extra declaration checks are its
     #     arity and, for a join, its key.
@@ -381,6 +397,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                    for name, value in m.params.items()
                    if isinstance(value, StepRef)]
 
+    coded(problems, "bad_combine")
+
     # 3. a reference has to have been read from *this* workflow. A step is
     #    named by its id, so a ref borrowed from another workflow would resolve
     #    against a same-named local step — silently running the wrong data when
@@ -396,6 +414,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             f"its id, so this would resolve to *this* workflow's {name!r} — not "
             f"the step you pointed at. Read it from this workflow."
         )
+
+    coded(problems, "foreign_reference")
 
     # 4. a reference has to name an existing, valid, non-circular step
     for label, ref in references:
@@ -419,6 +439,14 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             problems.append(f"{label} {name!r} comes after {step_id!r}; a step "
                             "can only read earlier steps")
 
+    for i, p in enumerate(problems):
+        problems[i] = classified(p, (("is itself", "self_reference"),
+                                     ("which is invalid", "invalid_input"),
+                                     ("which is not an earlier step", "missing_step"),
+                                     ("is circular", "circular"),
+                                     ("comes after", "later_step")),
+                                 "missing_step")
+
     # 5. at most one shape verb per step (§11). Two shape changes inside one
     #    step make an intermediate grid with no cell address, so a unit that
     #    fails there cannot be inspected or re-run.
@@ -431,11 +459,15 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             "keeps a cell address you can re-drive."
         )
 
+    coded(problems, "two_shape_verbs")
+
     # 6. the column verbs apply no tool (source may: it can compute its grid)
     for kind in ("select", "drop", "widen", "slice", "rename",
                  "sort", "distinct"):
         if any(m.kind == kind for m in operation.modifiers) and not is_identity(fn):
             problems.append(f"{kind} applies no tool; use map to compute")
+
+    coded(problems, "verb_takes_no_tool")
 
     # 6b. select and drop must name columns the input will actually have
     verb = operation.shape_verb
@@ -480,6 +512,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 f"collapse groups by {by!r}, which {upstream_name!r} does not have "
                 f"(it has {', '.join(map(str, available))})")
 
+    coded(problems, "missing_column")
+
     # 6c. a payload column must not silently replace an input column (008
     #     C13). Checked against the columns predicted *present*, which is sound
     #     even while the full set is still open. Only an explicit `name=` is
@@ -496,6 +530,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 f"{verb.kind} writes {written!r}, which {upstream_name} already "
                 f"has; choose another name (name=…), or say replace=True")
 
+    coded(problems, "column_clash")
+
     # 6e. a tool in a setting (008 C2): only where the verb takes one, and it
     #     must be registered, so the saved `{"$tool": id}` resolves on load.
     for modifier in operation.modifiers:
@@ -508,6 +544,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                     and value.id not in BUILTIN_TOOLS:
                 problems.append(f"{modifier.kind}'s {name}= names tool "
                                 f"{value.id!r}, which is not registered")
+
+    coded(problems, "bad_tool_setting")
 
     # 6c'. a reference argument arrives whole, shaped by the parameter's type
     #      (008 C1) — a shape that can't convert is refused here, not on every row.
@@ -530,6 +568,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             problem = _shape_problem(kind, annotations[name], name, value.id)
             if problem:
                 problems.append(problem)
+
+    coded(problems, "wrong_shape")
 
     # 6f. a selection is checked against what is already known about its step
     #     (008 C7.7, C7.11): a column name it lacks, a position past the end.
@@ -558,6 +598,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             except SelectionError as exc:
                 problems.append(f"{label}: {exc}")
 
+    coded(problems, "bad_selection")
+
     # 6d. a bound value is a literal or a reference — anything else is refused
     #     here, not when the workflow is saved (008 C11).
     for name, value in operation.arguments.items():
@@ -573,6 +615,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             problem = _literal_problem(value)
             if problem:
                 problems.append(f"{modifier.kind}'s {name}=: {problem}")
+
+    coded(problems, "bad_argument")
 
     # 7. bound literals have to be parameters the tool accepts — the reactive
     #    argument check, done against the signature rather than at run time.
@@ -590,11 +634,15 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                         f"{operation.tool_id}() takes no argument {name!r}; "
                         f"it accepts {', '.join(list(parameters)[1:]) or '(none)'}"
                     )
+    coded(problems, "unknown_argument")
+
     # 8. the values the tool requires have to exist as columns upstream.
     #    This is only possible because a tool declares what it needs by name —
     #    with a `def score(row)` convention there is nothing to check against.
     if fn is not None and workflow is not None and not problems:
         problems.extend(_missing_columns(operation, fn, workflow))
+
+    coded(problems, "missing_column")
 
     # 9. declared types have to match what is actually there — the bound
     #    literals always, the upstream's dtypes once it has run. This is what
@@ -602,7 +650,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     if fn is not None and not problems:
         problems.extend(_type_mismatches(operation, fn, workflow))
 
-    return tuple(problems)
+    coded(problems, "wrong_type")
+    return tuple(p.at(step_id) for p in problems)
 
 
 def warn(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str, ...]:
@@ -616,12 +665,12 @@ def warn(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str,
     into a problem) when the upstream runs. Warnings never stop a run.
     """
     if workflow is None or operation.input is None:
-        return ()
+        return _warnings([])
     if _is_auto(operation) and len(operation.shape_verbs) == 1:
         operation, _, _ = _provisional(operation, workflow)
     verb = operation.shape_verb
     if verb is None or verb.kind in ("source", "sweep"):
-        return ()
+        return _warnings([])
     notes: list[str] = []
     # 008 C12: a keyword that matches no named parameter lands in **kwargs,
     # unchecked — a typo there would otherwise pass silently.
@@ -670,19 +719,19 @@ def warn(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str,
     upstream = workflow.steps.get(str(operation.input))
     # Only predict while the upstream is staged; once it runs, `check` is exact.
     if upstream is None or not upstream.output.meta.get("staged"):
-        return tuple(notes)
+        return _warnings(notes)
     fn = operation.fn or TOOLS.get(operation.tool_id) \
         or BUILTIN_TOOLS.get(operation.tool_id)
     if isinstance(fn, ToolHandle):
         fn = fn.fn
     if fn is None:
-        return tuple(notes)
+        return _warnings(notes)
     try:
         parameters = list(inspect.signature(fn).parameters.values())
     except (TypeError, ValueError):
-        return tuple(notes)
+        return _warnings(notes)
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
-        return tuple(notes)                       # takes the whole row; nothing to expect
+        return _warnings(notes)                       # takes the whole row; nothing to expect
     if verb.kind in ("collapse", "table"):
         parameters = parameters[1:]     # the verb supplies the accumulator / the grid
     predicted = set(rows(upstream.output).columns) | set(operation.arguments)
@@ -704,8 +753,25 @@ def warn(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str,
             f"expects {', '.join(map(repr, present))} from {up!r}, "
             f"unconfirmed until it runs"
         )
-    return tuple(notes + warnings)
+    return _warnings(notes + warnings)
 
+
+
+#: How a warning's message says which kind it is.
+_WARNING_KINDS = (
+    ("isn't a named parameter", "unchecked_argument"),
+    ("are positions", "rows_by_position"),
+    ("column of", "argument_overrides_column"),
+    ("writes", "output_overwrites_column"),
+    ("likely missing", "likely_missing_column"),
+    ("unconfirmed until it runs", "unconfirmed_column"),
+)
+
+
+def _warnings(notes: list[str]) -> tuple[Problem, ...]:
+    """*notes* as warnings, each with its code."""
+    return tuple(classified(n, _WARNING_KINDS, "problem", severity="warning")
+                 for n in notes)
 
 def _missing_columns(operation: Operation, fn: Callable,
                      workflow: "Workflow") -> list[str]:
