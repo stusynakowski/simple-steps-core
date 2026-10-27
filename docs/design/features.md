@@ -50,7 +50,7 @@ Each is confirmed before it lands, and gets a probe.
 | Feature | ID |
 |---|---|
 | **A step is re-checked when an upstream's columns change**, so a reader that lost its column is a problem, not a `TypeError` on every row. *Done (phase 4, 2026-10-27)*: a warning as soon as the input is edited (`column_will_be_missing`), the problem once it re-runs | G13 |
-| `to_source()` prints every form as written (reshapes, selections), so step ⇄ formula round-trips | G4 |
+| `to_source()` prints every form as written (reshapes, selections), so step ⇄ formula round-trips *Done (phase 4)* | G4 |
 | `k["x"] = None` is an empty step (1×1 `"empty"`), a placeholder line | G17 |
 | Row count and estimated size per output, or `unknown` with the reason; pages of 50–100 rows | K26 |
 | Column types: declared, else `unknown`, then observed or the union | K27 |
@@ -137,7 +137,7 @@ written on 2026-10-27 and set aside until then.
 |---|---|
 | `header[k]` picks one column name, or is refused; today the `[k]` is ignored | C28 |
 | A header as a step: one row per name (in a column called `column`), or one cell holding the list | open |
-| Selection steps print as written (`wf["p"][0:2]`, not `op("identity")[mod.select(…)]`) | G4 |
+| Selection steps print as written (`wf["p"][0:2]`, not `op("identity")[mod.select(…)]`) *Done (phase 4)* | G4 |
 | Possibly accept `rows[1, 3]` and `cols["a", "b"]` as lists | open |
 
 ## Phase 5: documentation

@@ -101,18 +101,14 @@ def _notifies(action: str):
 
 
 def _formula(step: Step) -> str:
-    """How a step is written: its formula, or the value a literal step holds."""
-    if step.literal is not NO_LITERAL:
-        value = step.literal
-        if hasattr(value, "shape") and hasattr(value, "columns"):
-            return f"<{type(value).__name__} {value.shape[0]}×{value.shape[1]}>"
-        text = repr(value)
-        return text if len(text) <= 60 else text[:57] + "..."
+    """A step's formula for the table: ``step.formula``, a long literal cut short."""
     try:
-        return step.operation.to_source()
+        text = step.formula
     except Exception:                               # a step that can't print
         return step.operation.tool
-
+    if step.literal is not NO_LITERAL and len(text) > 60:
+        return text[:57] + "..."
+    return text
 
 class Kernel:
     """A workflow, the catalog it may use, and the resources it has loaded."""

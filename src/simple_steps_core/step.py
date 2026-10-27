@@ -109,6 +109,18 @@ class Step:
         return not self.problems
 
     @property
+    def formula(self) -> str:
+        """How the step is written: the value a literal step was declared
+        with, or its operation's formula (``op.to_source()``). A DataFrame
+        assigned in Python is data, shown as ``<DataFrame 3×2>``."""
+        if self.literal is not NO_LITERAL:
+            value = self.literal
+            if isinstance(value, pd.DataFrame):
+                return f"<DataFrame {value.shape[0]}×{value.shape[1]}>"
+            return repr(value)
+        return self.operation.to_source()
+
+    @property
     def data(self) -> "pd.DataFrame":
         """The step's values: ``output.data``."""
         return self.output.data

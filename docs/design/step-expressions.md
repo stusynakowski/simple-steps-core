@@ -79,14 +79,24 @@ operation (the round trip the app tests). Canonical means: verb always written
 (an inferred step prints `mod.auto()`), modifiers in written order, keyword
 arguments.
 
-*Today* three forms don't print as they're written (grid-model.md G4), so
-the round trip loses them:
+**A step's formula** is `step.formula`: a literal step's value, or its
+operation's `to_source()`. Since phase 4 (G4, 2026-10-27), every form prints as
+it is written, and declaring the printed formula gives back the same step
+(tested for each form in `tests/unit/test_formulas.py`):
 
-| Written | Prints today | Should print |
-|---|---|---|
-| `[3, 1, 2]` | `op("identity")[mod.source()]()` (the value is lost) | `[3, 1, 2]` |
-| `mod.sort(by="n")(wf["r"])` | `op("identity")[mod.sort(by="n")](wf["r"])` | `mod.sort(by="n")(wf["r"])` |
-| `wf["r"][0:2]` | `op("identity")[mod.select(rows={"start": 0, "stop": 2})](wf["r"])` | `wf["r"][0:2]` |
+| Written | Prints |
+|---|---|
+| `[3, 1, 2]` | `[3, 1, 2]` |
+| `mod.sort(by="n")(wf["r"])` | `mod.sort(by="n")(wf["r"])` (likewise `drop`, `rename`, `slice`, `distinct`, `widen`) |
+| `wf["r"][0:2]`, `wf["r"][1][cols["n"]]`, `wf["r"].header`, … | as written |
+| `mod.select(columns=["n"])(wf["r"])` | `wf["r"][cols["n"]]`: the same step, so one printed form |
+| `mod.select(columns=wf["which"])(wf["r"])` | as written: a reference as a setting isn't a selection |
+| `wf["r"].header[1]` | `mod.select(rows=1, columns={"header": True})(wf["r"])`, until C28 settles what `header[k]` means |
+| `count[mod.collapse()](wf["r"])` | `op("count")[mod.collapse()](wf["r"])`: built-in tools print through `op` |
+| `join(a, b, on="id")` | with its defaults spelled out (`how="inner"`, `suffixes=[…]`) |
+
+A DataFrame assigned in Python prints as `<DataFrame 3×2>`: it is data, not a
+formula.
 
 ## 6. What an expression can't contain, and why
 

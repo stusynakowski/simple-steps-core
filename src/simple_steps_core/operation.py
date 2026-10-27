@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import field
+from dataclasses import replace
 from typing import Any
 from typing import Callable
 import json
@@ -160,6 +161,9 @@ class Operation:
         arguments by keyword, selections rows first then ``cols``. Evaluated
         with :func:`formula_names`, it gives back an equal Operation.
         """
+        written = self._as_written()
+        if written is not None:
+            return written
         if is_combine(self):
             grids = ", ".join(_src(g) for g in self.inputs)
             name = "zip_" if self.tool == "zip" else self.tool
@@ -188,6 +192,38 @@ class Operation:
             rest = "[" + base[1] if len(base) > 1 else ""
             return f"{base[0]}.bind({', '.join(kwargs)}){rest}"
         return head
+
+    def _as_written(self) -> str | None:
+        """A reshape as it is written (G4), or None for every other operation.
+
+        ``mod.sort(by="n")(wf["r"])``, not ``op("identity")[mod.sort(by="n")](…)``;
+        and a ``select`` that a selection can say, as the selection:
+        ``wf["p"][0:2][cols["name":"temp_c"]]``. Declaring what this returns
+        gives back the same step.
+        """
+        if (self.tool != "identity" or self.bound_to is not None or self.arguments
+                or len(self.modifiers) != 1 or not isinstance(self.input, StepRef)
+                or self.input.selected):
+            return None
+        m = self.modifiers[0]
+        if m.kind not in _RESHAPES:
+            return None
+        rows_, columns = m.settings.get("rows"), m.settings.get("columns")
+        # Only plain selections print as one; a reference as a setting (C1,
+        # mod.select(columns=wf["cols"])) keeps the mod.select form.
+        plain = ((rows_ is None or (isinstance(rows_, (int, list, dict))
+                                    and not isinstance(rows_, bool)))
+                 and (columns is None or isinstance(columns, (list, tuple, dict))))
+        if m.kind == "select" and plain and set(m.settings) <= {"rows", "columns"}:
+            if isinstance(columns, (list, tuple)):
+                columns = {"names": list(columns)}
+            if columns == {"positions": {"start": None, "stop": None}}:
+                columns = None                      # every column: a plain copy
+            # header[k] drops its rows when printed (C28): say it explicitly.
+            if not (isinstance(columns, dict) and columns.get("header") and rows_ is not None):
+                return _src(replace(self.input, rows=rows_, columns=columns))
+        settings = ", ".join(f"{k}={_src(v)}" for k, v in m.settings.items())
+        return f"mod.{m.kind}({settings})({_src(self.input)})"
 
     def check(self, workflow: "Workflow | None" = None,
               step_id: str | None = None) -> tuple[str, ...]:
@@ -369,6 +405,10 @@ class Operation:
         stack = "".join(f"{m!r} ∘ " for m in self.layers)
         src = f" over={self.input.id!r}" if isinstance(self.input, StepRef) else ""
         return f"<Operation {stack}{self.tool}{src}>"
+
+
+#: The verbs that run no tool, and so print as ``mod.<verb>(…)(wf["x"])``.
+_RESHAPES = frozenset({"select", "drop", "rename", "sort", "slice", "distinct", "widen"})
 
 
 def _with_tool(value: Any, table: dict) -> Any:
