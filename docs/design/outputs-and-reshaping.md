@@ -211,7 +211,7 @@ and the **combines** run no tool.
 | Axis | Longer / wider | Shorter / narrower | Same size |
 |---|---|---|---|
 | **rows** | `expand` (one row per item), `stack` (another grid's rows), `sweep` (generated) | `filter`, `slice`, `distinct`, `collapse` (one row, or one per group) | `sort` (reorder) |
-| **columns** | `widen` (a cell's fields), `zip_` and `join` (another grid's columns), `group` (a key column; *today* it gives only the key) | `select`, `drop` | `rename` |
+| **columns** | `widen` (a cell's fields), `zip_` and `join` (another grid's columns), `group` (a key column) | `select`, `drop` | `rename` |
 | **both** | `table`: the tool decides the grid | | |
 
 1. **One change per step.** A step reshapes along one axis once. Chains are

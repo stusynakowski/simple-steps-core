@@ -227,15 +227,14 @@ def filter_(source: Any, fn: Callable, *, retries: int = 0,
 
 
 def group_(source: Any, fn: Callable, *, name: str = "group",
-           retries: int = 0, axis: str = "rows", replace: bool = False,
-           by: Callable | None = None) -> Output:
-    """``group_by`` — mark each row with a key. n rows in, n rows out.
+           retries: int = 0, axis: str = "rows", replace: bool = False) -> Output:
+    """``group`` — label each row with a key. n rows in, n rows out.
 
-    No nesting: reduction is :func:`collapse_` with ``by=name``. ``by=`` a
-    registered tool computes the key instead of the step's own tool (008 C2).
+    The output is the input's rows and columns, on their row ids, plus the key
+    *fn* returns for each row, as column *name* (owner, 2026-10-27). With
+    *replace*, the key takes the place of the input column of that name.
+    Grouping itself is :func:`collapse_` with ``by=name``.
     """
-    if by is not None:
-        fn = _d_apply(by)
     frame = rows(source, axis=axis)
     blocked = _upstream_failures(source)
     keys, records = [], []
@@ -247,10 +246,9 @@ def group_(source: Any, fn: Callable, *, name: str = "group",
         keys.append(value)
         records.append(record)
 
-    # Only the key, on the input's row ids (owner decision, 2026-10-20): pair
-    # it with the rows it labels by `zip_(wf["in"], wf["keys"])`.
-    data = pd.DataFrame(index=frame.index)
-    data[name] = _typed(keys, frame.index)
+    # The rows it labels, with their key beside them (owner, 2026-10-27).
+    data = frame.copy()
+    data[name] = _typed(keys, frame.index)       # replaces in place, or appends
     return Output(data=data, records=records, index=frame.index,
                   meta={"verb": "group", "form": "column", "value_column": name,
                         "key": name, "n_in": len(frame)})

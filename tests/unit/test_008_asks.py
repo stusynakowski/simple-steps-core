@@ -141,20 +141,26 @@ def test_N2_an_explicit_argument_beats_a_same_named_column_with_a_warning(wf):
     assert not any("overrides" in w for w in wf.step("y").warnings)
 
 
-def test_C13_a_step_that_computes_is_only_its_results(wf):
-    """Owner decision (2026-10-20): map, group and expand output only what the
-    tool produced, so no output can replace an input column — C13's problem
-    can't arise. `replace=` is still accepted (saved files carry it)."""
+def test_C13_an_output_never_silently_replaces_an_input_column(wf):
+    """map and expand output only what the tool produced (owner, 2026-10-20),
+    so they can't replace an input column. group carries its input's columns
+    and adds its key (owner, 2026-10-27), so a key named like an input column
+    is refused, unless replace=True says to replace it."""
     @tool
     def twice_008(n) -> list:
         return [n, n]
     wf["m"] = dbl_008[mod.map(name="n")](wf["readings"])
-    wf["g"] = dbl_008[mod.group(name="n", replace=True)](wf["readings"])
     wf["e"] = twice_008[mod.expand()](wf["readings"])
+    wf["clash"] = dbl_008[mod.group(name="n")](wf["readings"])
+    wf["g"] = dbl_008[mod.group(name="n", replace=True)](wf["readings"])
+    assert [p.code for p in wf.step("clash").problems] == ["column_clash"]
+    assert "group's key 'n' would replace the 'n' column" in wf.step("clash").problems[0]
+    wf.remove("clash")
     wf.run_all()
-    for sid, column in (("m", "n"), ("g", "n"), ("e", "value")):
+    for sid, columns in (("m", ["n"]), ("e", ["value"]), ("g", ["city", "n"])):
         assert wf.step(sid).problems == ()
-        assert list(wf.step(sid).output.data.columns) == [column], sid
+        assert list(wf.step(sid).output.data.columns) == columns, sid
+    assert list(wf.step("g").output.data["n"]) == [2, 4, 6, 4]           # the key
     assert list(wf.step("readings").output.data["n"]) == [1, 2, 3, 2]   # untouched
 
 

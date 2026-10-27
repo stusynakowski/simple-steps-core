@@ -78,7 +78,7 @@ Each is confirmed before it lands, and gets a probe.
 | A `try_except` default that doesn't fit the return type warns; a step that used defaults warns | G6, G7 |
 | Failure notes say where a row failed: tool, timeout, retry, breaker, expect, upstream | G7 |
 | `timeout` enforced | K18 |
-| `group` labels rows: the input's columns plus its key, so `collapse(by="key")` follows directly; `group(by=…)` is dropped and a column name refused when declared (owner, 2026-10-27) | G1 |
+| `group` labels rows: the input's columns plus its key, so `collapse(by="key")` follows directly; `group(by=…)` is dropped and a column name refused when declared (owner, 2026-10-27). *Done (phase 4)* | G1 |
 | `collapse` with an accumulator and no `initial=` | G5 |
 
 ### Sessions

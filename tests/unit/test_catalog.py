@@ -161,7 +161,7 @@ def test_a_removed_modifier_or_combine_is_a_problem(cat):
 
 def test_a_tool_given_as_a_setting_must_be_in_the_catalog(cat):
     w = fever(cat)
-    w["g"] = to_f_c[mod.group(by=key_c)](wf["p"])
+    w["g"] = to_f_c[mod.collapse(by=key_c)](wf["p"])
     assert "tool 'key_c' is not in this workflow's catalog" in w.step("g").problems
 
 

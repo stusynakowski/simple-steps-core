@@ -74,9 +74,11 @@ def test_rename_changes_names_keeps_values(wf):
 
 
 # ── group -> collapse: the stratified summary ───────────────────────────
-def test_group_marks_rows_without_nesting(wf):
+def test_group_labels_rows_and_keeps_their_columns(wf):
     bucketed = wf.step("bucketed").output.data
-    assert "bucket" in bucketed.columns and len(bucketed) == 4
+    assert list(bucketed.columns) == ["city", "n", "score", "bucket"]
+    assert len(bucketed) == 4
+    assert list(bucketed.index) == list(wf.step("scored").output.data.index)
 
 
 def test_collapse_by_group_sums_per_city(wf):

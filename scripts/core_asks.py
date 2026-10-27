@@ -344,16 +344,19 @@ def n2_literal_beats_column():
 
 
 def c13_output_replaces_input():
-    # (core) Owner decision, 2026-10-20: map, group and expand output only the
-    # tool's result, so no output can replace an input column at all.
+    # (core) map and expand output only the tool's result (owner, 2026-10-20);
+    # group carries its input's columns plus its key (owner, 2026-10-27), so a
+    # key named like an input column is refused unless replace=True.
     wf = _wf()
     wf["m"] = dbl[mod.map(name="n")](wf["readings"])
     wf["g"] = dbl[mod.group(name="n")](wf["readings"])
+    clash = [p.code for p in wf.step("g").problems] == ["column_clash"]
+    wf["g"] = dbl[mod.group(name="n", replace=True)](wf["readings"])
     wf.run_all()
     columns = {sid: list(wf.step(sid).output.data.columns) for sid in ("m", "g")}
     untouched = list(wf.step("readings").output.data["n"]) == [1, 2, 3, 2]
-    return columns == {"m": ["n"], "g": ["n"]} and untouched, (
-        f"outputs -> {columns}; input n untouched: {untouched}")
+    return columns == {"m": ["n"], "g": ["city", "n"]} and untouched and clash, (
+        f"outputs -> {columns}; clash refused: {clash}; input n untouched: {untouched}")
 
 
 def o_missing_required_setting():

@@ -148,9 +148,8 @@ def build() -> Workflow:
     wf["renamed"] = mod.rename(over=wf["scored"], columns={"n": "count"})
 
     # ── group -> collapse: the stratified-summary chain ─────────────────
-    # group is only the key, on each row's id; zip_ pairs every row with it
-    wf["bucket"] = label_city[mod.group(over=wf["scored"], name="bucket")]
-    wf["bucketed"] = zip_(wf["scored"], wf["bucket"])
+    # group labels each row with its key and keeps the row's columns
+    wf["bucketed"] = label_city[mod.group(over=wf["scored"], name="bucket")]  # city, n, score, bucket
     wf["per_city"] = add_n[mod.collapse(by="bucket", over=wf["bucketed"], initial=0)]
 
     # ── collapse to one row — a builtin reducer and a registry reducer ──

@@ -21,7 +21,6 @@ from simple_steps_core import (
     Step,
     tool,
     wf as unbound_wf,
-    zip_,
 )
 from simple_steps_core.catalog import catalog
 from simple_steps_core.checks import (
@@ -2118,10 +2117,9 @@ def test_collapse_by_stages_as_one_per_group_not_one_cell(three):
 
     wf = Workflow()
     wf["raw"] = three
-    wf["g"] = hemi[mod.group(name="h")](wf["raw"])          # only the key
-    wf["gz"] = zip_(wf["raw"], wf["g"])            # rows + their key
+    wf["g"] = hemi[mod.group(name="h")](wf["raw"])          # the rows, plus their key
     wf.run_all()
-    wf["c"] = sum_up[mod.collapse(by="h", over=wf["gz"])]
+    wf["c"] = sum_up[mod.collapse(by="h", over=wf["g"])]
     assert "one cell per group" in wf.step("c").describe()
     wf.run("c")
     assert wf.step("c").describe().endswith("2 cells")

@@ -37,8 +37,8 @@ make new values per observation output only those values (`map`, `expand`,
 `collapse`, `sweep`, `table`): `dbl[mod.map()](wf["r"])` has one column,
 `value`, on `r`'s row ids, and `zip_` puts it beside its input. Steps that keep
 the observations and filter or label them carry the columns: `filter`, the
-reshapes and, decided for phase 4, `group`, which adds its key as one more
-column.
+reshapes and `group`, which adds its key as one more column (built in phase
+4, 2026-10-27).
 
 ## 3. How a tool meets a row
 
@@ -69,7 +69,7 @@ The **shape verbs** call a tool. At most one per step. When a tool returns sever
 | `map` | `(columns…) -> value` | same | `value` | kept |
 | `filter` | `(columns…) -> bool` | at most n | the input's | kept, for rows that pass |
 | `expand` | `(columns…) -> list` | one per item | `value` | `"i.j"`: item *j* of row *i* |
-| `group` | `(columns…) -> key` | same | *today* only the key, `group`; *decided for phase 4:* the input's columns plus the key (named `group`, or by `name=` / `mod.name`) | kept |
+| `group` | `(columns…) -> key` | same | the input's columns plus the key (`group`, or named with `name=`); a key named like an input column is refused unless `replace=True` | kept |
 | `collapse` | `(acc, columns…) -> acc`, or a built-in reducer | 1, or one per `by=` group | `by` column and `value` | 0…k-1 |
 | `widen` | a cell holding a record or sequence | same | one per field (`columns=`), or `c0, c1, …` for sequences | kept |
 | `table` | `(df: DataFrame) -> DataFrame` | what it returns | what it returns | what it returns |
@@ -262,7 +262,7 @@ Run on `86170a3`, 2026-10-26:
 
 | # | What | Run |
 |---|---|---|
-| G1 | `group(by="city")` passes declaration, then every row fails with `TypeError: 'str' object is not callable`. *Decided (2026-10-27):* `group` drops `by=`, since its own tool computes the key; a column name is refused when declared: *"ward is already a column: collapse(by='ward')"* | `dbl[mod.group(by="city")](wf["r"])` |
+| G1 | `group(by="city")` passes declaration, then every row fails with `TypeError: 'str' object is not callable`. *Done (phase 4, 2026-10-27):* `group` drops `by=`, since its own tool computes the key; a column name is refused when declared: *"ward is already a column: collapse(by='ward')"* | `dbl[mod.group(by="city")](wf["r"])` |
 | G2 | `stack` of grids with different columns fills `NaN` and turns integers into floats (`10.0`), against C14 (missing is `None`) | `stack(wf["r"], wf["o"])` |
 | G3 | A source tool's own index is turned into an `index` column instead of being kept as row ids | §7 |
 | G4 | `to_source()` loses forms: a literal step `[3, 1, 2]` prints as `op("identity")[mod.source()]()` (the value is missing from the text); reshapes print as `op("identity")[mod.sort(…)](…)` rather than `mod.sort(…)(…)`; a selection step prints as `mod.select(rows={…})` rather than `wf["r"][0:2]` | [step-expressions.md §5](step-expressions.md#5-printing-to_source) |

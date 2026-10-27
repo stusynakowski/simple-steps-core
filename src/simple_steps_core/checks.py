@@ -268,7 +268,19 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         entry = MODIFIERS.get(modifier.kind)
         if entry is None or entry.accepts is None:
             continue
-        unknown = [name for name in modifier.settings if name not in entry.accepts]
+        if modifier.kind == "group" and "by" in modifier.settings:
+            # Owner, 2026-10-27: group's key is what its own tool returns.
+            by = modifier.settings["by"]
+            if isinstance(by, str):
+                problems.append(
+                    f"{by!r} is already a column: collapse(by={by!r}) groups by "
+                    "it. group labels rows with a key its own tool computes")
+            else:
+                problems.append(
+                    "group's key is what the step's own tool returns: write "
+                    "<key tool>[mod.group()](…), not group(by=…)")
+        unknown = [name for name in modifier.settings if name not in entry.accepts
+                   and not (modifier.kind == "group" and name == "by")]
         if unknown:
             problems.append(
                 f"{modifier.kind} takes no parameter "
@@ -522,15 +534,17 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     #     refused: the default payload overwriting the previous step's default
     #     payload is how `map` over `map` chains, so that is a warning instead
     #     (see `warn`).
-    if (verb is not None and verb.kind in ()      # 008 C13: no verb carries
-            and workflow is not None and not verb.settings.get("replace")
-            and "name" in verb.settings):
-        written = verb.settings["name"]
+    # group carries its input's columns and adds its key (owner, 2026-10-27),
+    # so a key named like an input column would replace it.
+    if (verb is not None and verb.kind == "group"
+            and workflow is not None and not verb.settings.get("replace")):
+        written = verb.settings.get("name", DEFAULT_PAYLOAD["group"])
         upstream_name = str(operation.input) if operation.input is not None else "the input"
         if written in workflow._known_columns(operation):
             problems.append(
-                f"{verb.kind} writes {written!r}, which {upstream_name} already "
-                f"has; choose another name (name=…), or say replace=True")
+                f"group's key {written!r} would replace the {written!r} column "
+                f"{upstream_name!r} already has; name the key (name=…), or say "
+                "replace=True")
 
     coded(problems, "column_clash")
 
@@ -1016,7 +1030,7 @@ DEFAULT_PAYLOAD: dict[str, str | None] = {
 #: ``collapse`` and ``sweep`` build their rows from scratch; ``select`` keeps a
 #: chosen subset, so it predicts its columns exactly and gets its own branch in
 #: :func:`stage`.
-CARRIES_COLUMNS: frozenset[str] = frozenset({"filter"})
+CARRIES_COLUMNS: frozenset[str] = frozenset({"filter", "group"})
 
 
 #: §3's rows column, as data: what each verb does to the input's row count.
@@ -1324,7 +1338,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         columns_open = not is_identity(fn)
     elif kind == "table":
         columns_open = True             # what the tool returns — unless declared
-    elif kind in ("sweep", "select", "collapse", "map", "group", "expand"):
+    elif kind in ("sweep", "select", "collapse", "map", "expand"):
         columns_open = False            # these build their columns themselves
     else:
         columns_open = (workflow._columns_open(operation)
