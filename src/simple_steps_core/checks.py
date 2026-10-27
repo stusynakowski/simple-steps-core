@@ -11,7 +11,7 @@ import inspect
 import pandas as pd
 import typing
 
-from .output import PAYLOAD
+from .output import VALUE_COLUMN
 from .problems import Problem, classified, coded
 
 
@@ -20,7 +20,7 @@ def _expectation(operation: "Operation") -> dict:
     out: dict = {}
     for m in operation.modifiers:
         if m.kind == "expect":
-            out.update(m.params)
+            out.update(m.settings)
     return out
 
 
@@ -108,7 +108,7 @@ def _output_mismatch(operation: "Operation", data: pd.DataFrame) -> str | None:
         fn = operation.fn
         schema = _declared_schema(fn) if fn is not None else None
         if schema is not None and list(schema) != list(data.columns):
-            return (f"{operation.tool_id} declares columns {', '.join(schema)}; "
+            return (f"{operation.tool} declares columns {', '.join(schema)}; "
                     f"it returned {', '.join(map(str, data.columns)) or 'none'}")
     n = len(data)
     if isinstance(expect.get("rows"), int) and n != expect["rows"]:
@@ -179,15 +179,15 @@ def _worst(states: set, stale: Any = False) -> str:
 def _is_tool_verb(kind: Any, op_: Any) -> bool:
     """Does this verb apply a real tool to each row (rather than copy cells)?"""
     if kind in ("map", "group", "filter", "expand"):
-        return not is_identity(op_.fn or BUILTIN_TOOLS.get(op_.tool_id))
+        return not is_identity(op_.fn or BUILTIN_TOOLS.get(op_.tool))
     return False
 
 
 def _source_column(op_: Any, column: Any) -> Any:
     """The input column a no-tool step copied *column* from (a rename's old name)."""
     verb = op_.shape_verb
-    if verb is not None and verb.kind == "rename" and isinstance(verb.params.get("columns"), dict):
-        for old, new in verb.params["columns"].items():
+    if verb is not None and verb.kind == "rename" and isinstance(verb.settings.get("columns"), dict):
+        for old, new in verb.settings["columns"].items():
             if new == column:
                 return old
     return column
@@ -235,11 +235,11 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             problems.append(_bound_problem(operation, workflow))
     else:
         fn = operation.fn \
-            or BUILTIN_TOOLS.get(operation.tool_id)
+            or BUILTIN_TOOLS.get(operation.tool)
         outside = any(getattr(p, "code", None) in ("not_in_catalog", "different_function")
                       for p in problems)
         if fn is None and not is_combine(operation) and not outside:
-            problems.append(f"unknown tool {operation.tool_id!r}")
+            problems.append(f"unknown tool {operation.tool!r}")
 
     coded(problems, "unknown_tool")
 
@@ -268,7 +268,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         entry = MODIFIERS.get(modifier.kind)
         if entry is None or entry.accepts is None:
             continue
-        unknown = [name for name in modifier.params if name not in entry.accepts]
+        unknown = [name for name in modifier.settings if name not in entry.accepts]
         if unknown:
             problems.append(
                 f"{modifier.kind} takes no parameter "
@@ -284,9 +284,9 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     for modifier in operation.modifiers:
         overrides = PARAM_TYPES_BY_VERB.get(modifier.kind, {})
         for parameter, expected in {**PARAM_TYPES, **overrides}.items():
-            if parameter not in modifier.params:
+            if parameter not in modifier.settings:
                 continue
-            value = modifier.params[parameter]
+            value = modifier.settings[parameter]
             if isinstance(value, StepRef):
                 # 008 C1: checked against the value once the step holds one;
                 # until then the reference is resolved at run.
@@ -326,7 +326,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     #     it here instead, like every other declaration check.
     for modifier in operation.modifiers:
         for required in _required_settings(modifier.kind):
-            if not modifier.params.get(required) and modifier.params.get(required) != 0:
+            if not modifier.settings.get(required) and modifier.settings.get(required) != 0:
                 problems.append(
                     f"{modifier.kind} needs {required}= — it has no default, "
                     f"so a step without it cannot run"
@@ -334,8 +334,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
 
     # 2d'. select chooses rows, columns or both — it needs at least one.
     for modifier in operation.modifiers:
-        if modifier.kind == "select" and not modifier.params.get("columns") \
-                and modifier.params.get("rows") is None:
+        if modifier.kind == "select" and not modifier.settings.get("columns") \
+                and modifier.settings.get("rows") is None:
             problems.append("select needs columns= or rows= — what to keep")
 
     # 2d''. mod.expect states something, and never what core knows is false
@@ -351,7 +351,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         rule = ROWS_RULE.get(verb_.kind) if verb_ is not None else None
         stated = expect.get("rows")
         if isinstance(stated, int) and verb_ is not None:
-            if rule == "one" and not verb_.params.get("by") and stated != 1:
+            if rule == "one" and not verb_.settings.get("by") and stated != 1:
                 problems.append(f"{verb_.kind} gives exactly 1 row; "
                                 f"expect(rows={stated}) can't hold")
             elif n is not None and rule == "same" and stated != n:
@@ -370,15 +370,15 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     #     config; it has no tool, so its only extra declaration checks are its
     #     arity and, for a join, its key.
     if is_combine(operation):
-        spec = COMBINE[operation.tool_id]
+        spec = COMBINE[operation.tool]
         if len(operation.grids) < spec["min_inputs"]:
             problems.append(
-                f"{operation.tool_id} needs at least {spec['min_inputs']} grids "
+                f"{operation.tool} needs at least {spec['min_inputs']} grids "
                 f"to combine, got {len(operation.grids)}"
             )
-        if operation.tool_id == "join" and not operation.arguments.get("on"):
+        if operation.tool == "join" and not operation.arguments.get("on"):
             problems.append("join needs on= — the key column(s) to merge on")
-        if operation.tool_id == "zip" and workflow is not None:
+        if operation.tool == "zip" and workflow is not None:
             # 010 C22: a column both grids have would keep one silently.
             clash = _zip_clash([(str(g), workflow._predicted_of(str(g)))
                                 for g in operation.grids])
@@ -396,7 +396,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                    if isinstance(value, StepRef)]
     references += [(f"{m.kind}'s {name}=", value)
                    for m in operation.modifiers
-                   for name, value in m.params.items()
+                   for name, value in m.settings.items()
                    if isinstance(value, StepRef)]
 
     coded(problems, "bad_combine")
@@ -478,12 +478,12 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     if (verb is not None and verb.kind in ("select", "drop", "rename", "sort",
                                            "distinct")
             and workflow is not None
-            and (verb.params.get("columns") or verb.params.get("by"))
-            and not (isinstance(verb.params.get("columns"), (list, tuple))
-                     and ROW_ID in verb.params["columns"] and verb.kind == "select")
-            and not any(isinstance(verb.params.get(k), StepRef)
-                        or (verb.kind == "select" and isinstance(verb.params.get(k), dict))
-                        or _is_tool_value(verb.params.get(k))
+            and (verb.settings.get("columns") or verb.settings.get("by"))
+            and not (isinstance(verb.settings.get("columns"), (list, tuple))
+                     and ROW_ID in verb.settings["columns"] and verb.kind == "select")
+            and not any(isinstance(verb.settings.get(k), StepRef)
+                        or (verb.kind == "select" and isinstance(verb.settings.get(k), dict))
+                        or _is_tool_value(verb.settings.get(k))
                         for k in ("columns", "by"))
             # 008 K1: while the input's columns are not known yet (a tool-backed
             # source that has not run, or anything downstream of one), a name
@@ -491,8 +491,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             # the step is re-checked when its input runs.
             and not workflow._columns_open(operation)):
         available = workflow._known_columns(operation)
-        by = verb.params.get("by")
-        named = list(verb.params.get("columns") or
+        by = verb.settings.get("by")
+        named = list(verb.settings.get("columns") or
                      ([by] if isinstance(by, str) else by) or ())
         if available:
             missing = [c for c in named if c not in available]
@@ -504,10 +504,10 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
 
     # 6b'. collapse(by=…) groups by a column the input must have (010 C23).
     if (verb is not None and verb.kind == "collapse" and workflow is not None
-            and isinstance(verb.params.get("by"), str)
+            and isinstance(verb.settings.get("by"), str)
             and not workflow._columns_open(operation)):
         available = workflow._known_columns(operation)
-        by = verb.params["by"]
+        by = verb.settings["by"]
         if available and by not in available:
             upstream_name = str(operation.input) if operation.input is not None else "the input"
             problems.append(
@@ -523,9 +523,9 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     #     payload is how `map` over `map` chains, so that is a warning instead
     #     (see `warn`).
     if (verb is not None and verb.kind in ()      # 008 C13: no verb carries
-            and workflow is not None and not verb.params.get("replace")
-            and "name" in verb.params):
-        written = verb.params["name"]
+            and workflow is not None and not verb.settings.get("replace")
+            and "name" in verb.settings):
+        written = verb.settings["name"]
         upstream_name = str(operation.input) if operation.input is not None else "the input"
         if written in workflow._known_columns(operation):
             problems.append(
@@ -537,7 +537,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     # 6e. a tool in a setting (008 C2): only where the verb takes one, and it
     #     must be registered, so the saved `{"$tool": id}` resolves on load.
     for modifier in operation.modifiers:
-        for name, value in modifier.params.items():
+        for name, value in modifier.settings.items():
             if not _is_tool_value(value) or isinstance(value, StepRef):
                 continue
             if name not in TOOL_SETTINGS.get(modifier.kind, ()):
@@ -580,11 +580,11 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         selections = [(f"argument {n!r}", v) for n, v in operation.arguments.items()
                       if isinstance(v, StepRef) and v.selected]
         if verb is not None and verb.kind == "select" and operation.input is not None \
-                and (isinstance(verb.params.get("columns"), dict)
-                     or verb.params.get("rows") is not None):
+                and (isinstance(verb.settings.get("columns"), dict)
+                     or verb.settings.get("rows") is not None):
             selections.append(("select", StepRef(
-                str(operation.input), rows=verb.params.get("rows"),
-                columns=verb.params.get("columns"))))
+                str(operation.input), rows=verb.settings.get("rows"),
+                columns=verb.settings.get("columns"))))
         for label, ref in selections:
             step = workflow.steps.get(ref.id)
             if step is None or not step.valid:
@@ -606,14 +606,14 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     # 6d. a bound value is a literal or a reference — anything else is refused
     #     here, not when the workflow is saved (008 C11).
     for name, value in operation.arguments.items():
-        if isinstance(value, (StepRef, ResRef, ToolRef, ToolHandle)):
+        if isinstance(value, (StepRef, ResRef, ToolRef, Tool)):
             continue
         problem = _literal_problem(value)
         if problem:
             problems.append(f"{name}: {problem}")
     for modifier in operation.modifiers:
-        for name, value in modifier.params.items():
-            if isinstance(value, (StepRef, ResRef, ToolRef, ToolHandle)) or callable(value):
+        for name, value in modifier.settings.items():
+            if isinstance(value, (StepRef, ResRef, ToolRef, Tool)) or callable(value):
                 continue                   # tools in settings: C2's check
             problem = _literal_problem(value)
             if problem:
@@ -634,7 +634,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             for name in operation.arguments:
                 if name not in parameters:
                     problems.append(
-                        f"{operation.tool_id}() takes no argument {name!r}; "
+                        f"{operation.tool}() takes no argument {name!r}; "
                         f"it accepts {', '.join(list(parameters)[1:]) or '(none)'}"
                     )
     coded(problems, "unknown_argument")
@@ -685,12 +685,12 @@ def warn(operation: Operation, workflow: "Workflow | None" = None,
         for name in operation.arguments:
             if name not in named:
                 notes.append(f"{name}= isn't a named parameter of "
-                             f"{operation.tool_id}; it lands in **{open_} unchecked")
+                             f"{operation.tool}; it lands in **{open_} unchecked")
     # 008 C7: a row position reads a different row next run when the step it
     # reads doesn't fix its row order.
     for ref in [*operation.arguments.values(),
-                *(StepRef(str(operation.input), rows=verb.params.get("rows"))
-                  if verb.kind == "select" and verb.params.get("rows") is not None
+                *(StepRef(str(operation.input), rows=verb.settings.get("rows"))
+                  if verb.kind == "select" and verb.settings.get("rows") is not None
                   else None,)]:
         if not isinstance(ref, StepRef) or ref.rows is None:
             continue
@@ -711,8 +711,8 @@ def warn(operation: Operation, workflow: "Workflow | None" = None,
                 f"{name}={shown} overrides the {name!r} column of "
                 f"{str(operation.input)!r} for every row; drop the argument "
                 f"to use the column")
-    if (verb.kind in () and "name" not in verb.params    # 008 C13: none carry
-            and not verb.params.get("replace")):
+    if (verb.kind in () and "name" not in verb.settings    # 008 C13: none carry
+            and not verb.settings.get("replace")):
         written = DEFAULT_PAYLOAD.get(verb.kind)
         if written in workflow._known_columns(operation):
             # 008 C13, the default-name case: allowed, but said out loud.
@@ -725,8 +725,8 @@ def warn(operation: Operation, workflow: "Workflow | None" = None,
     if upstream is None or not upstream.output.meta.get("staged"):
         return _warnings(notes, step_id)
     fn = operation.fn \
-        or BUILTIN_TOOLS.get(operation.tool_id)
-    if isinstance(fn, ToolHandle):
+        or BUILTIN_TOOLS.get(operation.tool)
+    if isinstance(fn, Tool):
         fn = fn.fn
     if fn is None:
         return _warnings(notes, step_id)
@@ -835,7 +835,7 @@ def _missing_columns(operation: Operation, fn: Callable,
                     f"bind it with {name}=res[\"<name>\"]")
             break
     return [
-        f"{operation.tool_id}() needs {', '.join(repr(m) for m in missing)}, "
+        f"{operation.tool}() needs {', '.join(repr(m) for m in missing)}, "
         f"which {str(operation.input) if operation.input is not None else 'the input'!r} does not have "
         f"(it has {', '.join(sorted(available)) or 'no columns'}){hint}"
     ]
@@ -875,14 +875,14 @@ def _type_mismatches(operation: Operation, fn: Callable,
             if decl is not None and decl.type is not None and \
                     _type_fits(decl.type, parameter.annotation) is False:
                 problems.append(
-                    f"{operation.tool_id}() declares {name}: "
+                    f"{operation.tool}() declares {name}: "
                     f"{_type_name(parameter.annotation)}, but it is bound to "
                     f"resource {value.name!r} ({decl.type.__name__})"
                 )
             continue
         if _value_fits(value, parameter.annotation) is False:
             problems.append(
-                f"{operation.tool_id}() declares {name}: "
+                f"{operation.tool}() declares {name}: "
                 f"{_type_name(parameter.annotation)}, but it is bound to "
                 f"{value!r} ({type(value).__name__})"
             )
@@ -907,7 +907,7 @@ def _type_mismatches(operation: Operation, fn: Callable,
                 continue
             if _declared_fits(column_type, parameter.annotation) is False:
                 problems.append(
-                    f"{operation.tool_id}() declares {parameter.name}: "
+                    f"{operation.tool}() declares {parameter.name}: "
                     f"{_type_name(parameter.annotation)}, but "
                     f"{str(operation.input)!r} will have {parameter.name} as "
                     f"{_type_label(column_type)}")
@@ -940,14 +940,14 @@ def _type_mismatches(operation: Operation, fn: Callable,
             # used to force.
             problems.append(
                 f"{upstream_name}.{parameter.name} can be None, but "
-                f"{operation.tool_id}() takes {parameter.name}: "
+                f"{operation.tool}() takes {parameter.name}: "
                 f"{_type_name(parameter.annotation)}; accept "
                 f"{_type_name(parameter.annotation)} | None, or filter the "
                 "Nones first")
             continue
         if _column_fits(series, base) is False:
             problems.append(
-                f"{operation.tool_id}() declares {parameter.name}: "
+                f"{operation.tool}() declares {parameter.name}: "
                 f"{_type_name(parameter.annotation)}, but "
                 f"{str(operation.input) if operation.input is not None else 'the input'!r} has "
                 f"{parameter.name} as {frame[parameter.name].dtype}"
@@ -966,7 +966,7 @@ DEFAULT_PAYLOAD: dict[str, str | None] = {
     # the rearranging verbs write nothing new at all.
     "slice": None, "rename": None, "sort": None, "distinct": None,
     "group": "group",
-    "map": PAYLOAD, "collapse": PAYLOAD, "expand": PAYLOAD, "sweep": PAYLOAD,
+    "map": VALUE_COLUMN, "collapse": VALUE_COLUMN, "expand": VALUE_COLUMN, "sweep": VALUE_COLUMN,
     "table": None,
 }
 
@@ -1035,11 +1035,11 @@ def predicted_columns(output: Output) -> list[str]:
 def _as_tool_function(fn: Any) -> Any:
     """What a tool looks like to a step — never with ``self`` (008 M).
 
-    Accepts a plain function, a ``ToolHandle``, a resource method taken from
+    Accepts a plain function, a ``Tool``, a resource method taken from
     its class (``DB.lookup``) or a ``(type, "method")`` pair. A method's
     ``self`` is the instance, not a column, so it is dropped.
     """
-    if isinstance(fn, ToolHandle):
+    if isinstance(fn, Tool):
         return fn.fn
     if isinstance(fn, tuple) and len(fn) == 2 and isinstance(fn[0], type):
         cls, name = fn
@@ -1176,12 +1176,12 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     if problems:
         kind = operation.shape_verb.kind if operation.shape_verb else None
         return Output(
-            data=pd.DataFrame({PAYLOAD: [None]}, index=[0]),
+            data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0]),
             records=[{"status": "invalid", "error": problems[0],
                              "attempts": 0, "seconds": 0.0}], index=[0],
-            meta={"verb": kind, "form": "scalar", "payload": PAYLOAD,
+            meta={"verb": kind, "form": "scalar", "payload": VALUE_COLUMN,
                   "staged": True, "problems": problems, "n_in": None,
-                  "expected": None, "rows_rule": None, "columns": [PAYLOAD]},
+                  "expected": None, "rows_rule": None, "columns": [VALUE_COLUMN]},
         )
     if is_combine(operation):
         return _stage_combine(operation, workflow)
@@ -1190,9 +1190,9 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     # 008 C1/C2: a setting that reads a step, or is a tool, has no value until
     # run. Stage as though it were absent, and say the columns are not known.
     unsettled = verb is not None and any(
-        isinstance(v, StepRef) or _is_tool_value(v) for v in verb.params.values())
+        isinstance(v, StepRef) or _is_tool_value(v) for v in verb.settings.values())
     if unsettled:
-        verb = Modifier(verb.kind, {k: v for k, v in verb.params.items()
+        verb = Modifier(verb.kind, {k: v for k, v in verb.settings.items()
                                     if not isinstance(v, StepRef) and not _is_tool_value(v)})
 
     known = workflow._known_index(operation) if workflow is not None else None
@@ -1204,10 +1204,10 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     #     opposite case: its count is fully determined by its own parameter
     #     lists, with no upstream involved at all.
     swept = 0
-    if kind == "collapse" and verb.params.get("by"):
+    if kind == "collapse" and verb.settings.get("by"):
         rule = "per_group"
     elif kind == "sweep":
-        lists = [v for k, v in verb.params.items()
+        lists = [v for k, v in verb.settings.items()
                  if k not in ("name", "over", "retries")]
         if lists and all(isinstance(v, (list, tuple)) for v in lists):
             swept = 1
@@ -1227,8 +1227,8 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         index, expected = [], None
 
     # The column this step is going to write, honouring an explicit `name=`.
-    payload = (PAYLOAD if kind is None
-               else verb.params.get("name", DEFAULT_PAYLOAD.get(kind, PAYLOAD)))
+    payload = (VALUE_COLUMN if kind is None
+               else verb.settings.get("name", DEFAULT_PAYLOAD.get(kind, VALUE_COLUMN)))
 
     # The full column set this step will produce, as far as is knowable —
     # carried-through columns plus whatever it writes. This is what a
@@ -1241,7 +1241,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     # appended, which is exactly what the verbs do to the frame.
     ordered: list[str] = []
     if kind == "select":
-        chosen = verb.params.get("columns")
+        chosen = verb.settings.get("columns")
         if isinstance(chosen, dict) or chosen is None:
             try:
                 ordered = _resolve_columns(list(upstream_columns), chosen, "the input")
@@ -1250,23 +1250,23 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         else:
             ordered = list(chosen)
     elif kind == "drop":
-        removed = set(verb.params.get("columns") or [])
+        removed = set(verb.settings.get("columns") or [])
         ordered = [c for c in upstream_columns if c not in removed]
     elif kind == "rename":
-        mapping = verb.params.get("columns") or {}
+        mapping = verb.settings.get("columns") or {}
         ordered = [mapping.get(c, c) for c in upstream_columns]
     elif kind in ("slice", "sort", "distinct"):
         ordered = list(upstream_columns)
     elif kind == "widen":
         ordered = list(upstream_columns)
-        ordered += [c for c in (verb.params.get("columns") or [])
+        ordered += [c for c in (verb.settings.get("columns") or [])
                     if c not in ordered]
     elif kind in CARRIES_COLUMNS:
         ordered = list(upstream_columns)
     elif kind == "sweep":
-        ordered = [k for k in verb.params if k not in ("name", "over", "retries")]
-    elif kind == "collapse" and verb.params.get("by"):
-        ordered = [verb.params["by"]]
+        ordered = [k for k in verb.settings if k not in ("name", "over", "retries")]
+    elif kind == "collapse" and verb.settings.get("by"):
+        ordered = [verb.settings["by"]]
     if payload and payload not in ordered:
         ordered.append(payload)
     index_names = ordered
@@ -1276,12 +1276,12 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     # verb that carries its input's columns through inherits that.
     if unsettled and kind in ("select", "drop", "rename", "widen"):
         columns_open = True
-    elif kind == "select" and not isinstance(verb.params.get("columns"), (list, tuple)):
+    elif kind == "select" and not isinstance(verb.settings.get("columns"), (list, tuple)):
         # a range or position selection over columns not known yet
         columns_open = workflow._columns_open(operation) if workflow is not None else False
     elif kind == "source":
         fn = operation.fn \
-            or BUILTIN_TOOLS.get(operation.tool_id)
+            or BUILTIN_TOOLS.get(operation.tool)
         columns_open = not is_identity(fn)
     elif kind == "table":
         columns_open = True             # what the tool returns — unless declared
@@ -1294,12 +1294,12 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     # 008 C5/C9: what a step will produce, as far as is known — and how sure.
     # Column types come from the input (carried), the tool's return (payload),
     # a source's declared schema, or `mod.expect`.
-    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool_id)
-    label = operation.tool_id
+    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool)
+    label = operation.tool
     upstream_types = workflow._column_types(operation) if workflow is not None else {}
     types: dict = {c: upstream_types.get(c) for c in ordered}
     if kind == "rename":
-        mapping = verb.params.get("columns") or {}
+        mapping = verb.settings.get("columns") or {}
         if isinstance(mapping, dict):
             for old, new in mapping.items():
                 types[new] = upstream_types.get(old)
@@ -1331,7 +1331,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     index_names = ordered
     return Output(
         data=pd.DataFrame({c: pd.Series([None] * len(index), index=index, dtype=object)
-                           for c in index_names or [PAYLOAD]}, index=index),
+                           for c in index_names or [VALUE_COLUMN]}, index=index),
         records=records, index=index,
         meta={"verb": kind, "form": "scalar" if kind is None else "column",
               "payload": payload, "staged": True, "problems": (),
@@ -1345,7 +1345,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
 # to each other (see grid.py).
 from .system_tools import BUILTIN_TOOLS, is_identity  # noqa: E402
 from .catalog import (  # noqa: E402
-    ToolHandle,
+    Tool,
     _bound_problem,
     _bound_tools,
     _looks_like_method,

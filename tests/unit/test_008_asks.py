@@ -149,8 +149,8 @@ def test_N1_a_union_parameter_accepts_a_bound_literal(wf):
 
 
 def test_O_a_missing_required_setting_is_a_problem_without_a_workflow():
-    blob = {"tool_id": "scale_008", "input": None, "arguments": {},
-            "modifiers": [{"kind": "retry", "params": {}}, {"kind": "map", "params": {}}]}
+    blob = {"tool": "scale_008", "input": None, "arguments": {},
+            "modifiers": [{"kind": "retry", "settings": {}}, {"kind": "map", "settings": {}}]}
     problems = grid.check(grid.Operation.from_dict(blob, {"scale_008": scale_008.fn}))
     assert problems == ("retry needs times= — it has no default, so a step "
                         "without it cannot run",)
@@ -183,8 +183,8 @@ def test_K5_a_string_over_is_refused_in_python():
     with pytest.raises(TypeError, match=r"pass wf\['readings'\]"):
         mod.map(over="readings")
     # JSON keeps string ids
-    op_ = grid.Operation.from_dict({"tool_id": "scale_008", "input": "readings",
-                                    "arguments": {}, "modifiers": [{"kind": "map", "params": {}}]})
+    op_ = grid.Operation.from_dict({"tool": "scale_008", "input": "readings",
+                                    "arguments": {}, "modifiers": [{"kind": "map", "settings": {}}]})
     assert str(op_.input) == "readings"
 
 
@@ -255,7 +255,7 @@ def test_C10_a_bad_reference_is_a_declaration_problem_that_names_its_root():
     w = Workflow()
     w["a"] = scale_008[mod.map()](w["nope"])          # no KeyError
     w["c"] = scale_008[mod.map()](w["a"])
-    assert w.step("a").status == "invalid"
+    assert w.step("a").state == "invalid"
     assert "not an earlier step" in w.step("a").problems[0]
     assert "root cause: a: input 'nope'" in w.step("c").problems[0]
     assert w.root_cause("c") == ("a", "input 'nope', which is not an earlier step")
@@ -317,10 +317,10 @@ def test_C10_fixing_the_root_marks_what_it_blocked_stale(failing):
     failing["b"] = plus1_008[mod.map()](failing["a"])
     failing.run_all()
     failing.run("a")                                   # same result: still fresh
-    assert failing.step("b").status != "stale"
+    assert failing.step("b").state != "stale"
     failing["a"] = risky_008[mod.map(), mod.try_except(default=0)](failing["r"])
     failing.run("a")                                   # the fix changes a's data
-    assert failing.step("b").status == "stale"
+    assert failing.step("b").state == "stale"
     assert failing.step("b").output.values == [101, None, 301]   # old data kept
 
 
@@ -377,16 +377,19 @@ def test_C11_a_non_literal_is_refused_at_declaration(wf):
         "weight: a date isn't a literal; pass a str ('2024-01-01'), or make it a step",)
 
 
-def test_K17_v3_is_written_older_versions_load_and_newer_is_refused(wf):
-    assert json.loads(wf.to_json())["version"] == 3
-    v1 = {"version": 1, "steps": [{"step_id": "r", "operation": {
-        "tool_id": "scale_008", "input": None, "arguments": {"weight": 2},
-        "modifiers": [{"kind": "map", "params": {}}]}}]}
-    for version in (1, 2):
-        loaded = Workflow.from_dict({**v1, "version": version})
-        assert loaded.step("r").operation.arguments == {"weight": 2}
-    with pytest.raises(ValueError, match="reads versions 1 to 3"):
-        Workflow.from_dict({**v1, "version": 4})
+def test_K17_v4_is_written_and_other_versions_are_refused_clearly(wf):
+    """Files from before the redesign aren't loaded (decided 2026-10-26)."""
+    assert json.loads(wf.to_json())["version"] == 4
+    v4 = {"version": 4, "steps": [{"name": "r", "operation": {
+        "tool": "scale_008", "input": None, "arguments": {"weight": 2},
+        "modifiers": [{"kind": "map", "settings": {}}]}}]}
+    loaded = Workflow.from_dict(v4, TOOLS_008)
+    assert loaded.step("r").operation.arguments == {"weight": 2}
+    for older in (1, 2, 3):
+        with pytest.raises(ValueError, match="before the redesign; this core reads version 4"):
+            Workflow.from_dict({**v4, "version": older})
+    with pytest.raises(ValueError, match="this core reads version 4. Upgrade"):
+        Workflow.from_dict({**v4, "version": 5})
 
 
 def test_C1_a_reference_in_a_setting_resolves_and_goes_stale(wf):
@@ -395,7 +398,7 @@ def test_C1_a_reference_in_a_setting_resolves_and_goes_stale(wf):
     wf.run_all()
     assert wf.step("s").output.data.to_dict("list") == {"city": ["SF", "NYC", "SF", "LA"]}
     wf["cols"] = ["n"]
-    assert wf.step("s").status == "stale"
+    assert wf.step("s").state == "stale"
     assert _reload(wf).step("s").operation == wf.step("s").operation
 
 
@@ -436,7 +439,7 @@ def test_C2_a_tool_in_a_setting_runs_and_round_trips(wf):
     assert list(wf.step("s").output.data["n"]) == [3, 2, 2, 1]
     assert wf.step("c").output.data.to_dict("list") == {
         "first_letter_008": ["S", "N", "L"], "value": [4, 2, 2]}
-    assert json.loads(wf.to_json())["steps"][1]["operation"]["modifiers"][0]["params"] == {
+    assert json.loads(wf.to_json())["steps"][1]["operation"]["modifiers"][0]["settings"] == {
         "by": {"$tool": "neg_n_008"}}
     # The tools are defined here, not at the top of the module, so they are
     # named when reloading: nothing is registered to find them by (K24).
@@ -598,7 +601,7 @@ def test_C5_a_source_that_breaks_its_declared_columns_fails():
     w = Workflow()
     w["r"] = liar_008[mod.source()](path="x")
     w.run("r")
-    assert w.step("r").status == "failed"
+    assert w.step("r").state == "failed"
     assert w.step("r").output.notes[0]["error"] == (
         "liar_008 declares columns city, n; it returned town")
 
@@ -673,15 +676,15 @@ def test_an_uncaught_failure_stops_run_all(two_branches):
     err = stopped.value
     assert (err.step_id, err.cell, err.error) == ("a", 1, "ValueError: boom")
     assert "b" in err.not_run and "The run stopped" in str(err)
-    assert w.step("ok").status == "completed"              # kept
-    assert w.step("b").status == "staged" and CALLS["plus1"] == 0
+    assert w.step("ok").state == "completed"              # kept
+    assert w.step("b").state == "staged" and CALLS["plus1"] == 0
 
 
 def test_a_single_run_records_the_failure_without_raising(two_branches):
     w = two_branches
     w["a"] = risky_008[mod.map()](w["r"])
     w.run("a")
-    assert w.step("a").status == "failed"
+    assert w.step("a").state == "failed"
 
 
 def test_try_except_with_a_default_completes_the_row(two_branches):
@@ -690,7 +693,7 @@ def test_try_except_with_a_default_completes_the_row(two_branches):
     w["b"] = plus1_008[mod.map()](w["a"])
     w.run_all()
     a = w.step("a").output
-    assert a.values == [100, 0, 300] and w.step("a").status == "completed"
+    assert a.values == [100, 0, 300] and w.step("a").state == "completed"
     assert a.notes[1] == {"error": "caught ValueError: boom; used the default",
                           "caught": True}
     assert a.row_states[1] == "known"                     # completed with the default
@@ -702,7 +705,7 @@ def test_try_except_without_a_default_lets_the_run_continue(two_branches):
     w["a"] = risky_008[mod.map(), mod.try_except()](w["r"])
     w["b"] = plus1_008[mod.map()](w["a"])
     w.run_all()                                            # does not raise
-    assert w.step("a").status == "failed"
+    assert w.step("a").state == "failed"
     assert w.step("b").output.notes[1]["cause"] == "a[1]: ValueError: boom"
     assert CALLS["plus1"] == 2
 
@@ -711,7 +714,7 @@ def test_try_except_default_none_is_a_value_not_no_default(two_branches):
     w = two_branches
     w["a"] = risky_008[mod.map(), mod.try_except(default=None)](w["r"])
     w.run_all()
-    assert w.step("a").status == "completed"
+    assert w.step("a").state == "completed"
     assert w.step("a").output.values == [100, None, 300]
 
 
@@ -729,7 +732,7 @@ def test_try_except_saves_its_settings_by_name(two_branches):
     w = two_branches
     w["a"] = risky_008[mod.map(), mod.try_except(default=0, on=[ValueError])](w["r"])
     saved = json.loads(w.to_json())["steps"][-1]["operation"]["modifiers"]
-    assert {"kind": "try_except", "params": {"default": 0, "on": ["ValueError"]}} in saved
+    assert {"kind": "try_except", "settings": {"default": 0, "on": ["ValueError"]}} in saved
     back = Workflow.from_json(w.to_session_json(), TOOLS_008)
     back.run_all()
     assert back.step("a").output.values == [100, 0, 300]
@@ -747,7 +750,7 @@ def test_a_failing_source_stops_the_run_or_is_caught():
         w.run_all()
     w["src"] = broken_008[mod.source(), mod.try_except(default=[])](path="x")
     w.run("src")
-    assert w.step("src").status == "completed"
+    assert w.step("src").state == "completed"
 
 
 # ── Phase 5: the boundary — C3, K12, M, P, N, C12 ───────────────────────
@@ -760,7 +763,7 @@ def test_C3_functions_instead_of_globals():
     # K24: nothing is registered, so there is no list of every declared tool.
     assert not hasattr(grid, "declared_tools") and not hasattr(grid, "resource_types")
     out = grid.map_(grid.grid(pd.DataFrame({"n": [1]})), scale_008.fn, name="s")
-    assert grid.payload_column(out) == "s"
+    assert grid.value_column(out) == "s"
 
 
 def test_C3_a_modifier_is_checked_on_its_own():
@@ -1021,17 +1024,17 @@ def test_009_equal_data_has_an_equal_version():
 
 def test_009_an_identical_rerun_leaves_readers_fresh(chain):
     chain.run("a")
-    assert chain.step("b").status == "completed"
+    assert chain.step("b").state == "completed"
 
 
 def test_009_changed_data_makes_readers_stale_and_keeps_their_data(chain):
     chain["r"] = pd.DataFrame({"n": [5, 6]})
-    assert chain.step("a").status == "stale"
-    assert chain.step("b").status == "stale"            # stale through a
+    assert chain.step("a").state == "stale"
+    assert chain.step("b").state == "stale"            # stale through a
     assert chain.step("a").output.values == [10, 20]    # old data still readable
     chain["r"] = pd.DataFrame({"n": [1, 2]})            # back to what a read
-    assert chain.step("a").status == "completed"
-    assert chain.step("b").status == "completed"
+    assert chain.step("a").state == "completed"
+    assert chain.step("b").state == "completed"
 
 
 def test_009_a_changed_resource_makes_its_readers_stale():
@@ -1049,25 +1052,25 @@ def test_009_a_changed_resource_makes_its_readers_stale():
     w["x"] = scaled_009[mod.map()](w["r"], s=grid.res["s"])
     w.run_all(resources={"s": Scaler009(2)})
     w.define("s", Scaler009, k=2)                       # same settings: fresh
-    assert w.step("x").status == "completed"
+    assert w.step("x").state == "completed"
     w.define("s", Scaler009, k=3)
-    assert w.step("x").status == "stale"
+    assert w.step("x").state == "stale"
 
 
 def test_009_stamps_and_staleness_survive_a_saved_session(chain):
     chain["r"] = pd.DataFrame({"n": [5, 6]})
     back = Workflow.from_json(chain.to_session_json(), TOOLS_008)
-    assert back.step("a").status == "stale"
+    assert back.step("a").state == "stale"
     assert back.step("a").output.meta["read"] == chain.step("a").output.meta["read"]
     back.run_all()
-    assert back.step("b").status == "completed"
+    assert back.step("b").state == "completed"
     assert back.step("a").output.values == [50, 60]
 
 
 def test_009_an_output_saved_without_stamps_keeps_the_old_rule(chain):
     del chain.step("a").output.meta["read"]
     chain["r"] = pd.DataFrame({"n": [1, 2]})            # same data
-    assert chain.step("a").status == "stale"            # legacy: any change marks it
+    assert chain.step("a").state == "stale"            # legacy: any change marks it
 
 
 # ── 009 step 3: auto — its default breaker, implicit auto, direct calls, setting ──
@@ -1130,7 +1133,7 @@ def test_009_the_breaker_can_be_undone_or_changed(spent):
     w.run("stated")
     assert spent["calls"] == 10
     assert json.loads(w.to_json())["steps"][1]["operation"]["modifiers"] == [
-        {"kind": "breaker", "params": {"after": None}}, {"kind": "auto", "params": {}}]
+        {"kind": "breaker", "settings": {"after": None}}, {"kind": "auto", "settings": {}}]
 
 
 def test_009_try_except_never_swallows_a_breaker_stop(spent):
@@ -1276,7 +1279,7 @@ def test_009_a_failed_and_a_blocked_cell(wf):
 def test_009_an_invalid_step_says_why(wf):
     wf["bad"] = score_009[mod.map()](wf["nope"])
     view = wf.preview("bad")
-    assert view["status"] == "invalid"
+    assert view["state"] == "invalid"
     assert view["markers"][0]["text"] == "‹can't run — input 'nope', which is not an earlier step›"
 
 
@@ -1296,7 +1299,7 @@ def test_009_a_zip_carries_each_cells_state(failing):
     view = failing.step("view").output
     assert [str(v) for v in view.states.loc[1]] == ["known", "blocked"]   # n known, value blocked
     assert view.notes[1]["cause"] == "a[1]: ValueError: boom"
-    assert failing.step("view").status == "failed"           # shown, but the run went on
+    assert failing.step("view").state == "failed"           # shown, but the run went on
 
 
 def test_009_printing_an_output_shows_states_and_notes(failing):
@@ -1451,7 +1454,7 @@ def test_C22_zip_columns_known_only_at_run_are_checked_then():
     w2["a"] = pd.DataFrame({"n": [1]})
     w2["b"] = pd.DataFrame({"n": [2]})
     frames = [w2.step("a").output.data.copy(), w2.step("b").output.data.copy()]
-    frames[0].attrs["step_id"], frames[1].attrs["step_id"] = "a", "b"
+    frames[0].attrs["name"], frames[1].attrs["name"] = "a", "b"
     with pytest.raises(ValueError, match="'n' is in both 'a' and 'b'"):
         grid._combine_zip(frames, {})                       # the run-time guard
 
@@ -1536,7 +1539,7 @@ def rows3():
 
 def test_C25_editing_one_input_row_makes_only_its_cells_stale(rows3):
     rows3["r"] = pd.DataFrame({"city": ["SF", "NYC", "LA"], "n": [1, 20, 3]})
-    assert rows3.step("s").status == "stale"
+    assert rows3.step("s").state == "stale"
     assert rows3.stale_rows("s") == [1] and rows3.stale_rows("t") == [1]    # flows on
     assert [r["state"] for r in rows3.preview("s")["rows"]] == ["known", "stale", "known"]
     assert rows3.cell("s", 0, "value")["state"] == "known"
@@ -1545,7 +1548,7 @@ def test_C25_editing_one_input_row_makes_only_its_cells_stale(rows3):
 
 def test_C25_an_unread_column_changing_leaves_it_fresh(rows3):
     rows3["r"] = pd.DataFrame({"city": ["SF", "BOS", "LA"], "n": [1, 2, 3]})
-    assert rows3.step("s").status == "completed" and rows3.stale_rows("s") == []
+    assert rows3.step("s").state == "completed" and rows3.stale_rows("s") == []
 
 
 def test_C25_rows_added_or_an_argument_change_make_every_row_stale(rows3):

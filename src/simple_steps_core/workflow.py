@@ -25,7 +25,7 @@ class Workflow:
     def __init__(self, catalog: "Catalog | None" = None) -> None:
         self.steps: dict[str, Step] = {}
         #: Declared resources, by name — the declarations, never the objects.
-        self.resources: dict[str, ResourceDecl] = {}
+        self.resources: dict[str, Resource] = {}
         #: What this workflow may use. With a catalog, every step is checked
         #: against it and runs the catalog's functions; without one, the
         #: process-wide registry is used (until phase 3 removes it).
@@ -77,7 +77,7 @@ class Workflow:
                             + "; ".join(problems) + ".")
         resource(type_)
         existed = name in self.resources
-        self.resources[name] = ResourceDecl(name, type_, dict(settings),
+        self.resources[name] = Resource(name, type_, dict(settings),
                                             type_.__name__)
         self._recheck_users(name, stale=existed)
         self._refresh_staleness()
@@ -124,7 +124,7 @@ class Workflow:
     def _literal_step(step_id: str, value: Any, extras: dict) -> Step:
         """A step declared as a value: a source whose data is its output,
         completed as soon as it exists."""
-        step = Step(step_id, Operation(tool_id="identity", fn=identity)[mod.source()],
+        step = Step(step_id, Operation(tool="identity", fn=identity)[mod.source()],
                     source_(value), extras=extras, literal=value)
         step.output.meta["version"] = _data_version(step.output.data)
         step.output.meta["read"] = {}
@@ -147,7 +147,7 @@ class Workflow:
                                         else columns)
             if not selection:
                 selection["columns"] = {"positions": {"start": None, "stop": None}}
-            operation = Operation(tool_id="identity", fn=identity)[
+            operation = Operation(tool="identity", fn=identity)[
                 mod.select(**selection)](replace(operation, rows=None, columns=None))
         if isinstance(operation, Modifier):
             # A bare shape verb is a complete step: it applies the tool that
@@ -172,7 +172,7 @@ class Workflow:
                     f"{operation.kind!r} needs a tool: it is {why}. "
                     f"Write <tool>[mod.{operation.kind}(...)] instead."
                 )
-            operation = Operation(tool_id=default,
+            operation = Operation(tool=default,
                                   fn=BUILTIN_TOOLS[default])[operation]
 
         return operation
@@ -372,7 +372,7 @@ class Workflow:
             raise ValueError(f"step {new!r} already exists")
         self.steps = {(new if sid == old else sid): st
                       for sid, st in self.steps.items()}
-        self.steps[new].step_id = new
+        self.steps[new].name = new
         for st in self.steps.values():
             op = st.operation
             changed = False
@@ -388,14 +388,14 @@ class Workflow:
             new_mods = []
             for m in op.modifiers:
                 params = {}
-                for key, value in m.params.items():
+                for key, value in m.settings.items():
                     if isinstance(value, StepRef) and str(value) == old:
                         params[key], changed = replace(value, id=new, workflow=self), True
                     else:
                         params[key] = value
                 new_mods.append(Modifier(m.kind, params))
             if changed:
-                st.operation = Operation(op.tool_id, tuple(new_mods), new_args,
+                st.operation = Operation(op.tool, tuple(new_mods), new_args,
                                          op.fn, new_input, bound_to=op.bound_to)
 
     def _mark_stale_dependents(self, step_id: str) -> None:
@@ -624,7 +624,7 @@ class Workflow:
         if step is None or step.output.meta.get("staged"):
             return None
         # So a failure downstream can name the cell it came from (`a[1]`).
-        step.output.meta["step_id"] = step.step_id
+        step.output.meta["name"] = step.name
         return step.output
 
     def _value_if_known(self, ref: StepRef) -> Any:
@@ -654,7 +654,7 @@ class Workflow:
         step = self.steps[step_id]
         out, plan = step.output, step.plan
         staged = bool(out.meta.get("staged"))
-        summary = {"step": step_id, "status": step.status, "summary": step.describe(),
+        summary = {"step": step_id, "state": step.state, "summary": step.describe(),
                    "formula": step.operation.to_source()}
         if not step.valid:
             root, why = self.root_cause(step_id) or (step_id, step.problems[0])
@@ -736,7 +736,7 @@ class Workflow:
         """
         view = self.preview(step_id)
         base = {"step": step_id, "row": row, "column": column}
-        if view["status"] == "invalid":
+        if view["state"] == "invalid":
             return {**base, "state": "missing", "because": view["problems"][0]}
         names = [c["name"] for c in view["columns"]]
         plan = self.steps[step_id].plan
@@ -836,7 +836,7 @@ class Workflow:
         entries: list[dict] = []
 
         if is_combine(op_):
-            if op_.tool_id == "zip":
+            if op_.tool == "zip":
                 for g in op_.grids:
                     if column in self._predicted_of(str(g)):
                         entries.append(self._input_entry(str(g), row_id, [column], None))
@@ -844,7 +844,7 @@ class Workflow:
             else:
                 entries += [{"step": str(g), "id": None, "columns": [], "argument": None,
                              "state": "unknown", "values": {},
-                             "because": f"{op_.tool_id} doesn't keep row links yet"}
+                             "because": f"{op_.tool} doesn't keep row links yet"}
                             for g in op_.grids]
             return entries
 
@@ -874,14 +874,14 @@ class Workflow:
                 entries.append({"resource": value.name, "argument": name,
                                 "state": "loaded at run"})
         for m in op_.modifiers:
-            for name, value in m.params.items():
+            for name, value in m.settings.items():
                 if isinstance(value, StepRef):
                     entries.append(self._reference_entry(value, f"{m.kind}.{name}"))
         return entries
 
     def _columns_bound(self, op_: Operation, source: str, kind: str) -> list[str]:
         """The input columns a tool reads: its parameters the input supplies by name."""
-        fn = op_.fn or BUILTIN_TOOLS.get(op_.tool_id)
+        fn = op_.fn or BUILTIN_TOOLS.get(op_.tool)
         columns = self._predicted_of(source)
         try:
             parameters = list(_signature(fn).parameters.values()) if fn else []
@@ -1036,9 +1036,9 @@ class Workflow:
             if failed:
                 index = failed[0]
                 note = step.output.notes.get(index, {})
-                return (f"argument {name!r} reads {step.step_id}, which has a failed "
-                        f"cell {step.step_id}[{index}]",
-                        note.get("cause") or f"{step.step_id}[{index}]: {note.get('error')}")
+                return (f"argument {name!r} reads {step.name}, which has a failed "
+                        f"cell {step.name}[{index}]",
+                        note.get("cause") or f"{step.name}[{index}]: {note.get('error')}")
         return None
 
     # ── running ──────────────────────────────────────────────────────────
@@ -1063,12 +1063,12 @@ class Workflow:
         returned unchanged.
         """
         settings_refs = any(isinstance(v, StepRef)
-                            for m in operation.modifiers for v in m.params.values())
+                            for m in operation.modifiers for v in m.settings.values())
         if operation.bound_to is None and not settings_refs and not any(
                 isinstance(v, (StepRef, ResRef)) for v in operation.arguments.values()):
             return operation
         fn_for_types = operation.fn \
-            or BUILTIN_TOOLS.get(operation.tool_id)
+            or BUILTIN_TOOLS.get(operation.tool)
         try:
             annotations = {k: p.annotation
                            for k, p in _signature(fn_for_types).parameters.items()}
@@ -1091,15 +1091,15 @@ class Workflow:
         fn = operation.fn
         if operation.bound_to is not None:
             instance = self._live(operation.bound_to.name, resources)
-            fn = getattr(instance, operation.tool_id.rsplit(".", 1)[-1])
+            fn = getattr(instance, operation.tool.rsplit(".", 1)[-1])
         modifiers = tuple(
             Modifier(m.kind, {k: (_ref_value(_apply_selection(
                                       self.steps[v.id].output.data, v.rows,
                                       v.columns, v.id), None, v.id)
                                   if isinstance(v, StepRef) else v)
-                              for k, v in m.params.items()})
+                              for k, v in m.settings.items()})
             for m in operation.modifiers)
-        return Operation(operation.tool_id, modifiers, resolved,
+        return Operation(operation.tool, modifiers, resolved,
                          fn, operation.input)
 
     def run(self, step_id: str, tools: dict[str, Callable] | None = None,
@@ -1163,7 +1163,7 @@ class Workflow:
             )
         if step.operation.shape_verb and step.operation.shape_verb.kind == "source":
             tool = (step.operation.fn
-                    or BUILTIN_TOOLS.get(step.operation.tool_id))
+                    or BUILTIN_TOOLS.get(step.operation.tool))
             if not is_identity(tool):
                 # A tool source computes its grid from a no-input tool.
                 step.output = self._resolve_arguments(
@@ -1194,11 +1194,11 @@ class Workflow:
             frames = []
             for g in step.operation.inputs:
                 frame = rows(self.steps[str(g)].output).copy(deep=False)
-                frame.attrs["step_id"] = str(g)        # so an error can name it
+                frame.attrs["name"] = str(g)        # so an error can name it
                 frames.append(frame)
             try:
                 step.output = _run_combine(step.operation, frames)
-                if step.operation.tool_id == "zip":
+                if step.operation.tool == "zip":
                     self._carry_zip_states(step)
             except ValueError as exc:
                 # A zip_ that would drop rows, a join on a missing key: the step
@@ -1289,7 +1289,7 @@ class Workflow:
         while changed:
             wave: set[str] = set()
             for other in self.steps.values():
-                if other.step_id in changed:
+                if other.name in changed:
                     continue
                 if not other.output.meta.get("staged"):
                     continue                       # already has real data
@@ -1302,14 +1302,14 @@ class Workflow:
                 before = (other.output.meta.get("expected"), other.problems,
                           predicted_columns(other.output),
                           columns_unknown(other.output))
-                other.problems = check(other.operation, self, other.step_id)
+                other.problems = check(other.operation, self, other.name)
                 other.output = stage(other.operation, self, other.problems)
-                other.warnings = warn(other.operation, self, other.step_id)
+                other.warnings = warn(other.operation, self, other.name)
                 after = (other.output.meta.get("expected"), other.problems,
                          predicted_columns(other.output),
                          columns_unknown(other.output))
                 if after != before:
-                    wave.add(other.step_id)
+                    wave.add(other.name)
             changed = wave
 
     def _upstream_ids(self, step_id: str, _seen: set[str] | None = None) -> set[str]:
@@ -1387,26 +1387,32 @@ class Workflow:
         With *catalog*, tools and resource types come from it alone, and every
         step is checked against it.
         """
-        version = blob.get("version", 1)
+        version = blob.get("version")
         if not isinstance(version, int) or version > FORMAT_VERSION:
             # 008 K17: an older core must refuse a newer file, never strip it.
             raise ValueError(
                 f"this workflow was saved in format version {version!r}; this "
-                f"core reads versions 1 to {FORMAT_VERSION}. Upgrade "
+                f"core reads version {FORMAT_VERSION}. Upgrade "
                 "simple-steps-core to load it.")
+        if version < FORMAT_VERSION:
+            # Decided 2026-10-26: files from before the redesign aren't loaded.
+            raise ValueError(
+                f"this workflow was saved in format version {version}, before "
+                f"the redesign; this core reads version {FORMAT_VERSION} only. "
+                "Rebuild it and save it again.")
         workflow = cls(catalog=catalog)
         if catalog is not None:
             tools, known = catalog.functions, catalog.resource_types
         else:
             known = dict(resource_types or {})
         for name, entry in (blob.get("resources") or {}).items():
-            workflow.resources[name] = ResourceDecl(
+            workflow.resources[name] = Resource(
                 name, known.get(entry["type"]), dict(entry.get("settings") or {}),
                 entry["type"], entry.get("source", "defined"),
                 dict(entry.get("extras") or {}))
         workflow.extras = dict(blob.get("extras") or {})
         for entry in blob["steps"]:
-            sid = entry["step_id"]
+            sid = entry["name"]
             if "literal" in entry:
                 # A literal is the step's recipe: the step comes back with it.
                 workflow.steps[sid] = cls._literal_step(
@@ -1458,7 +1464,7 @@ from .system_tools import (  # noqa: E402
 from .catalog import (  # noqa: E402
     Catalog,
     _checked_extras,
-    ResourceDecl,
+    Resource,
     _attach_bound,
     _settings,
     _signature,

@@ -14,13 +14,13 @@ import pandas as pd
 
 def _resolve_tool_setting(value: Any, table: dict) -> Any:
     """A ``$tool`` setting as its function; anything else unchanged."""
-    if isinstance(value, ToolHandle):
+    if isinstance(value, Tool):
         return value.fn
     if isinstance(value, ToolRef):
         if value.id not in table:
             raise KeyError(f"setting names tool {value.id!r}, which is not registered")
         found = table[value.id]
-        return found.fn if isinstance(found, ToolHandle) else found
+        return found.fn if isinstance(found, Tool) else found
     return value
 
 
@@ -82,7 +82,7 @@ def _with_verb(operation: Operation, kind: str) -> Operation:
 
 def _resolve_auto(operation: Operation, upstream: Any) -> tuple[Operation, str, str]:
     """(concrete operation, verb, reason) for an ``auto`` step over *upstream*."""
-    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool_id)
+    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool)
     if fn is None:
         return _with_verb(operation, "map"), "map", "the tool isn't known; assuming per row"
     kind, why = infer_verb(fn, upstream, operation.arguments)
@@ -113,8 +113,8 @@ def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Calla
     the function would have produced at definition time.
     """
     table = {**BUILTIN_TOOLS, **tools}
-    if operation.tool_id not in table:
-        raise KeyError(f"unknown tool {operation.tool_id!r}; have {sorted(table)}")
+    if operation.tool not in table:
+        raise KeyError(f"unknown tool {operation.tool!r}; have {sorted(table)}")
     if _is_auto(operation):
         # 008 N: the verb is picked from the data this call receives.
         def run_auto(source: Any) -> Any:
@@ -125,18 +125,18 @@ def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Calla
     # something a verb can drive, and it carries the bound literals inside
     # every modifier, so a retry re-runs the same call and a map passes them to
     # every item.
-    fn = _d_apply(table[operation.tool_id], **operation.arguments)
+    fn = _d_apply(table[operation.tool], **operation.arguments)
     for modifier in operation.modifiers:               # innermost first
         # 008 C2: a tool named in a setting is resolved from the same table.
         modifier = Modifier(modifier.kind, {
-            k: _resolve_tool_setting(v, table) for k, v in modifier.params.items()})
+            k: _resolve_tool_setting(v, table) for k, v in modifier.settings.items()})
         factory = DECORATORS.get(modifier.kind)
         if factory is None:
             raise KeyError(
                 f"no decorator registered for modifier {modifier.kind!r}; "
                 f"known: {sorted(DECORATORS)}"
             )
-        fn = factory(fn, **modifier.params)
+        fn = factory(fn, **modifier.settings)
     return fn
 
 
@@ -144,7 +144,7 @@ def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Calla
 # to each other (see grid.py).
 from .system_tools import BUILTIN_TOOLS  # noqa: E402
 from .catalog import (  # noqa: E402
-    ToolHandle,
+    Tool,
     _signature,
     _type_fits,
 )

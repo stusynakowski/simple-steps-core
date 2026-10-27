@@ -55,7 +55,7 @@ class StepSpec:
     literal: dict | None = None
 
     def to_dict(self) -> dict:
-        out = {"step_id": self.name, "operation": _plain(self.operation)}
+        out = {"name": self.name, "operation": _plain(self.operation)}
         if self.literal is not None:
             out["literal"] = _plain(self.literal)
         if self.extras:

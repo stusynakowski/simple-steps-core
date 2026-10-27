@@ -40,7 +40,7 @@ def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
     row that expanded to nothing). Grids whose ids are unrelated are paired by
     position when their lengths agree, and refused when they don't.
     """
-    names = [f.attrs.get("step_id") or f"input {i + 1}" for i, f in enumerate(frames)]
+    names = [f.attrs.get("name") or f"input {i + 1}" for i, f in enumerate(frames)]
     depth = [max((len(_ancestors(i)) for i in f.index), default=0) for f in frames]
     primary = max(range(len(frames)), key=lambda i: (depth[i], -i))
     target = frames[primary].index
@@ -132,12 +132,12 @@ COMBINE: dict[str, dict] = {
 
 def is_combine(operation: Operation) -> bool:
     """True for a ``join``/``stack``/``zip`` — a multi-grid operation."""
-    return operation.tool_id in COMBINE
+    return operation.tool in COMBINE
 
 
 def _combine_op(kind: str, grids: tuple, config: dict) -> Operation:
     refs = tuple(g if isinstance(g, StepRef) else StepRef(str(g)) for g in grids)
-    return Operation(tool_id=kind, arguments=config,
+    return Operation(tool=kind, arguments=config,
                      input=refs[0] if refs else None, inputs=refs)
 
 
@@ -165,7 +165,7 @@ def join(left: Any, right: Any, *, on: Any = None, how: str = "inner",
 
 def _combine_columns(operation: Operation, schemas: list[list[str]]) -> list[str]:
     """Predicted output columns of a combine, folded from its inputs' schemas."""
-    if operation.tool_id == "join":
+    if operation.tool == "join":
         on = operation.arguments.get("on")
         keys = [on] if isinstance(on, str) else list(on or [])
         suffixes = operation.arguments.get("suffixes") or ["_left", "_right"]
@@ -191,7 +191,7 @@ def _combine_columns(operation: Operation, schemas: list[list[str]]) -> list[str
 
 def _stage_combine(operation: Operation, workflow: "Workflow | None") -> Output:
     """Stage a combine from its inputs' predicted schemas and row counts."""
-    spec = COMBINE[operation.tool_id]
+    spec = COMBINE[operation.tool]
     steps = ([] if workflow is None
              else [workflow.steps.get(str(g)) for g in operation.inputs])
     schemas: list[list[str]] = []
@@ -214,10 +214,10 @@ def _stage_combine(operation: Operation, workflow: "Workflow | None") -> Output:
     records = [{"status": "staged", "error": None, "attempts": 0, "seconds": 0.0}
                for _ in index]
     return Output(
-        data=pd.DataFrame({c: [None] * len(index) for c in columns or [PAYLOAD]},
+        data=pd.DataFrame({c: [None] * len(index) for c in columns or [VALUE_COLUMN]},
                           index=index),
         records=records, index=index,
-        meta={"verb": operation.tool_id, "form": "column", "payload": None,
+        meta={"verb": operation.tool, "form": "column", "payload": None,
               "staged": True, "problems": (), "n_in": None, "expected": expected,
               "rows_rule": rule, "columns": columns, "columns_open": columns_open},
     )
@@ -226,11 +226,11 @@ def _stage_combine(operation: Operation, workflow: "Workflow | None") -> Output:
 def _run_combine(operation: Operation, frames: list[pd.DataFrame]) -> Output:
     """Apply a combine to its (already-run) input grids — no tool, so every
     output row is trivially complete."""
-    data = COMBINE[operation.tool_id]["apply"](frames, operation.arguments)
+    data = COMBINE[operation.tool]["apply"](frames, operation.arguments)
     records = [{"status": "completed", "error": None, "attempts": 0,
                 "seconds": 0.0} for _ in range(len(data))]
     return Output(data=data, records=records, index=data.index,
-                  meta={"verb": operation.tool_id, "form": "column",
+                  meta={"verb": operation.tool, "form": "column",
                         "payload": None, "n_in": None,
                         "columns": list(data.columns)})
 
@@ -239,7 +239,7 @@ def _run_combine(operation: Operation, frames: list[pd.DataFrame]) -> Output:
 # to each other (see grid.py).
 from .checks import columns_unknown, predicted_columns  # noqa: E402
 from .operation import Operation  # noqa: E402
-from .output import Output, PAYLOAD  # noqa: E402
+from .output import Output, VALUE_COLUMN  # noqa: E402
 from .references import StepRef  # noqa: E402
 from .verbs import _ancestors  # noqa: E402
 from .workflow import Workflow  # noqa: E402

@@ -24,7 +24,7 @@ from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
 from .catalog import Catalog
-from .output import PAYLOAD
+from .output import VALUE_COLUMN
 from .specs import KernelSpec
 from .references import ResRef, StepRef
 from .step import NO_LITERAL, Step
@@ -111,7 +111,7 @@ def _formula(step: Step) -> str:
     try:
         return step.operation.to_source()
     except Exception:                               # a step that can't print
-        return step.operation.tool_id
+        return step.operation.tool
 
 
 class Kernel:
@@ -290,7 +290,7 @@ class Kernel:
         """A page of a step's rows, as a UI shows them: ``rows=(start, stop)``."""
         return self.workflow.preview(self._name(step), rows)
 
-    def cell(self, step: str | int, row: int, column: str = PAYLOAD) -> dict:
+    def cell(self, step: str | int, row: int, column: str = VALUE_COLUMN) -> dict:
         """One cell: its value, type and state, and the input cells it came from."""
         return self.workflow.cell(self._name(step), row, column)
 

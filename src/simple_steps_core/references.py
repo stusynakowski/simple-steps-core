@@ -384,7 +384,7 @@ def _deref(value: Any) -> Any:
         if value.selected:
             return f"{value.id}[rows={value.rows!r}, columns={value.columns!r}]"
         return value.id
-    if isinstance(value, ToolHandle):
+    if isinstance(value, Tool):
         return ToolRef(value.id)
     if isinstance(value, dict):
         return {k: _deref(v) for k, v in value.items()}
@@ -428,7 +428,7 @@ _UNKNOWN = object()
 
 def _is_tool_value(value: Any) -> bool:
     """A tool given as a setting (008 C2): a registered tool or a reference to one."""
-    return isinstance(value, (ToolRef, ToolHandle)) or (
+    return isinstance(value, (ToolRef, Tool)) or (
         callable(value) and not isinstance(value, (type, StepRef, ResRef)))
 
 
@@ -463,10 +463,10 @@ class ResRef:
 
     name: str
 
-    def __getattr__(self, method: str) -> "BoundToolHandle":
+    def __getattr__(self, method: str) -> "BoundTool":
         if method.startswith("_"):
             raise AttributeError(method)
-        return BoundToolHandle(self, method)
+        return BoundTool(self, method)
 
     def __str__(self) -> str:
         return self.name
@@ -493,7 +493,7 @@ res = _Res()
 
 # Names used only inside functions, imported last so the modules can refer
 # to each other (see grid.py).
-from .catalog import BoundToolHandle, ToolHandle  # noqa: E402
+from .catalog import BoundTool, Tool  # noqa: E402
 from .errors import SelectionError  # noqa: E402
 from .output import ROW_ID  # noqa: E402
 from .verbs import _rows_frame  # noqa: E402

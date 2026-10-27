@@ -500,7 +500,7 @@ class Modifier:
     """
 
     kind: str
-    params: dict = field(default_factory=dict)
+    settings: dict = field(default_factory=dict)
 
     def __call__(self, source: Any, /, **literals) -> "Operation":
         """``mod.select(columns=["n"])(wf["r"])`` — a verb that needs no tool, applied.
@@ -513,7 +513,7 @@ class Modifier:
         if default is None or self.kind in ("map", "filter", "group"):
             raise TypeError(
                 f"{self.kind!r} needs a tool: write <tool>[mod.{self.kind}(...)](…)")
-        return Operation(tool_id=default, fn=BUILTIN_TOOLS[default])[self](
+        return Operation(tool=default, fn=BUILTIN_TOOLS[default])[self](
             source, **literals)
 
     def __eq__(self, other: Any) -> bool:
@@ -527,7 +527,7 @@ class Modifier:
         if not isinstance(other, Modifier):
             return NotImplemented
         return (self.kind == other.kind
-                and _deref(self.params) == _deref(other.params))
+                and _deref(self.settings) == _deref(other.settings))
 
     @property
     def cls(self) -> str:
@@ -542,7 +542,7 @@ class Modifier:
     def __repr__(self) -> str:
         # Flattened, for the same reason __eq__ is: how a step was named is not
         # part of what this modifier says, so a repr must not depend on it.
-        args = ", ".join(f"{k}={v!r}" for k, v in _deref(self.params).items())
+        args = ", ".join(f"{k}={v!r}" for k, v in _deref(self.settings).items())
         return f"{self.kind}({args})"
 
 

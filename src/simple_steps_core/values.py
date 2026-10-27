@@ -372,7 +372,7 @@ def _column_fits(series: pd.Series, annotation: Any) -> bool | None:
 #: - 3 (009): implicit steps save ``mod.auto()``; the ``breaker`` modifier;
 #:   session outputs save ``data``, ``states`` and ``notes`` (no ledger), with
 #:   data-hash ``version`` and ``read`` stamps in their meta.
-FORMAT_VERSION = 3
+FORMAT_VERSION = 4
 
 
 #: The tags a saved value can carry. A literal dict that happens to use one of
@@ -430,9 +430,9 @@ def _bind_positional(operation: "Operation", source: Any, values: tuple,
     columns are not known, the first parameter (the row's own value). A
     ``res[…]`` takes the first free parameter its declared type fits.
     """
-    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool_id)
+    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool)
     if fn is None:
-        raise TypeError(f"{operation.tool_id}: pass these arguments by keyword "
+        raise TypeError(f"{operation.tool}: pass these arguments by keyword "
                         "— its parameters are not known here")
     parameters = [p for p in _signature(fn).parameters.values()
                   if p.kind in (inspect.Parameter.POSITIONAL_ONLY,
@@ -458,7 +458,7 @@ def _bind_positional(operation: "Operation", source: Any, values: tuple,
             target = fits[0] if fits else None
             if target is None:
                 raise TypeError(
-                    f"{operation.tool_id}: no free parameter fits res[{value.name!r}]"
+                    f"{operation.tool}: no free parameter fits res[{value.name!r}]"
                     + ("" if decl else " (declare it first with wf.define)")
                     + "; pass it by keyword")
         else:
@@ -466,7 +466,7 @@ def _bind_positional(operation: "Operation", source: Any, values: tuple,
             if target is None:
                 names = ", ".join(p.name for p in parameters) or "(none)"
                 raise TypeError(
-                    f"{operation.tool_id}() has no free parameter left for "
+                    f"{operation.tool}() has no free parameter left for "
                     f"{value!r}; it takes {names}. Pass it by keyword.")
         bound[target.name] = value
         free.remove(target)
@@ -487,7 +487,7 @@ def _encode_argument(value: Any) -> Any:
         return {"$res": value.name}
     if isinstance(value, ToolRef):
         return {"$tool": value.id}
-    if isinstance(value, ToolHandle):
+    if isinstance(value, Tool):
         return {"$tool": value.id}
     if isinstance(value, bool) or value is None or isinstance(value, str):
         return value
@@ -685,7 +685,7 @@ def _decode_output(blob: dict) -> Output:
 # to each other (see grid.py).
 from .system_tools import BUILTIN_TOOLS  # noqa: E402
 from .catalog import (  # noqa: E402
-    ToolHandle,
+    Tool,
     _signature,
     _type_fits,
 )

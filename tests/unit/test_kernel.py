@@ -65,26 +65,26 @@ def test_a_kernel_needs_a_catalog():
 
 def test_declaring_checks_and_plans_without_running(k):
     assert k.validate() == {"p": (), "sick": (), "f": ()}
-    assert [s.status for s in k.steps] == ["staged"] * 3
+    assert [s.state for s in k.steps] == ["staged"] * 3
     assert len(k) == 3 and list(k) == ["p", "sick", "f"] and "f" in k
 
 
 def test_run_runs_inputs_that_never_ran_first(k):
     k.run("f")
-    assert [s.status for s in k.steps] == ["completed"] * 3
+    assert [s.state for s in k.steps] == ["completed"] * 3
     assert values(k, "f") == [100.76]
 
 
 def test_a_stale_input_passes_through_as_it_is(k):
     k.run_all()
     k["sick"] = feverish_k[mod.filter()](wf["p"], limit=37)
-    assert k.step("sick").status == "stale"
+    assert k.step("sick").state == "stale"
     k.run("f")
     # f is computed from what sick shows: its old output, one row.
     assert values(k, "f") == [100.76]
-    assert k.step("sick").status == "stale"
+    assert k.step("sick").state == "stale"
     k.run("sick")
-    assert k.step("f").status == "stale"
+    assert k.step("f").state == "stale"
     k.run("f")
     assert values(k, "f") == [100.76, 98.78]
 
@@ -151,7 +151,7 @@ def test_saving_and_loading_against_a_catalog(k, cat):
     text = k.to_json()
     assert '"value"' not in text                     # a spec, no output data
     loaded = Kernel.from_json(text, cat)
-    assert [s.status for s in loaded.steps] == ["staged"] * 3
+    assert [s.state for s in loaded.steps] == ["staged"] * 3
     loaded.run("f")
     assert values(loaded, "f") == [100.76]
     smaller = Kernel.from_json(text, cat.without("to_f_k"))

@@ -129,7 +129,7 @@ def test_step_state_and_data(k):
     k["s"] = scale_p[mod.map()](wf["r"], weight=10)
     assert k.step("s").state == "staged" and k.step("s").name == "s"
     k.run("s")
-    assert k.step("s").state == "completed" == k.step("s").status
+    assert k.step("s").state == "completed" == k.step("s").state
     assert k.step("s").data["value"].tolist() == [10, 20]
 
 
@@ -146,3 +146,14 @@ def test_output_fields_say_what_a_result_was_computed_from(k):
     k["s"] = scale_p[mod.map()](wf["r"], weight=2)
     out = k.step("s").output
     assert out.stale and out.stale_reason == "updated args"
+
+
+def test_status_is_the_steps_live_part_and_state_its_string(k):
+    from simple_steps_core.step import StepStatus
+    k["s"] = scale_p[mod.map()](wf["r"], weight=10)
+    k.run("s")
+    status = k.step("s").status
+    assert isinstance(status, StepStatus)
+    assert status.state == "completed" == k.step("s").state
+    assert status.output is k.step("s").output and status.problems == ()
+    assert status.ran_with["formula"] == 'scale_p[mod.map()](wf["r"], weight=10)'

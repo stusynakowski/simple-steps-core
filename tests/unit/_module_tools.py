@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from simple_steps_core.catalog import ToolHandle
+from simple_steps_core.catalog import Tool
 
 
 class module_tools(Mapping):
@@ -18,7 +18,7 @@ class module_tools(Mapping):
         self._scope = scope
 
     def _tools(self) -> dict:
-        return {v.id: v.fn for v in self._scope.values() if isinstance(v, ToolHandle)}
+        return {v.id: v.fn for v in self._scope.values() if isinstance(v, Tool)}
 
     def __getitem__(self, key):
         return self._tools()[key]

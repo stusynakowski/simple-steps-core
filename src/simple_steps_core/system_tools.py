@@ -52,8 +52,8 @@ def identity(**row: Any) -> Any:
     column = row.pop("column", None)
     if column is not None:
         return row[column]
-    if PAYLOAD in row:
-        return row[PAYLOAD]
+    if VALUE_COLUMN in row:
+        return row[VALUE_COLUMN]
     if len(row) == 1:
         return next(iter(row.values()))
     return row
@@ -124,4 +124,4 @@ DEFAULT_TOOL: dict[str, str] = {
 
 # Names used only inside functions, imported last so the modules can refer
 # to each other (see grid.py).
-from .output import PAYLOAD  # noqa: E402
+from .output import VALUE_COLUMN  # noqa: E402

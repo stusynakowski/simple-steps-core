@@ -37,7 +37,7 @@ def _tools(scope: dict | None = None) -> dict:
     """The tools this script defines, by name (and any in *scope*): @tool
     registers nothing, so reloading a workflow by name needs them passed."""
     found = {**globals(), **(scope or {})}
-    return {v.id: v.fn for v in found.values() if isinstance(v, grid.ToolHandle)}
+    return {v.id: v.fn for v in found.values() if isinstance(v, grid.Tool)}
 
 
 @tool
@@ -94,7 +94,7 @@ def _input_of(operation) -> str:
     ref = blob.get("input")
     if isinstance(ref, dict):
         return ref.get("$ref")
-    return blob["modifiers"][-1]["params"].get("over")
+    return blob["modifiers"][-1]["settings"].get("over")
 
 
 def _try(fn: Callable):
@@ -115,7 +115,7 @@ def k1_unrun_source_columns():
     wf["score"] = scale[mod.map(name="score")](wf["readings"])
     wf["scored"] = grid.zip_(wf["readings"], wf["score"])
     wf["picked"] = mod.select(over=wf["scored"], columns=["city", "score"])
-    declared = wf.step("picked").status
+    declared = wf.step("picked").state
     wf.run_all()
     got = wf.step("picked").output.data.to_dict("list")
     done = got == {"city": ["SF", "NYC", "SF", "LA"], "score": [10, 20, 30, 20]}
@@ -142,7 +142,7 @@ def k3_operation_as_input():
     wf["x"] = built
     wf.run("x")
     return False, (f"accepted; ran as {wf.steps['x'].operation.to_dict()['modifiers'][-1]['kind']}, "
-                   f"status {wf.step('x').status}, data {wf.step('x').output.data.to_dict('list')}")
+                   f"status {wf.step('x').state}, data {wf.step('x').output.data.to_dict('list')}")
 
 
 def k4_over_twice():
@@ -262,17 +262,17 @@ def k16_results_store():
 
 
 def k17_json_version():
-    # (core) the app's probe could only say "check by hand"; this checks it:
-    # the new format is written, v1 still loads, a newer file is refused.
+    # (core) K17 asked to keep v1 loadable; the owner decided (2026-10-26)
+    # that files from before the redesign aren't loaded. Done now means: the
+    # current format is written, and older and newer files are refused clearly.
     blob = json.loads(_wf().to_json())
-    v1 = {"version": 1, "steps": [{"step_id": "r", "operation": {
-        "tool_id": "scale", "input": None, "arguments": {"weight": 2},
-        "modifiers": [{"kind": "map", "params": {}}]}}]}
-    _, v1_err = _try(lambda: grid.Workflow.from_dict(v1))
-    _, v3_err = _try(lambda: grid.Workflow.from_dict({**v1, "version": 99}))
-    done = blob.get("version", 1) > 1 and v1_err is None and v3_err is not None
-    return done, (f"to_json version = {blob.get('version')!r}; v1 loads: {v1_err is None}; "
-                  f"newer refused: {v3_err is not None}")
+    current = blob.get("version")
+    old = {**blob, "version": 1}
+    _, old_err = _try(lambda: grid.Workflow.from_dict(old))
+    _, new_err = _try(lambda: grid.Workflow.from_dict({**blob, "version": 99}))
+    done = current == 4 and old_err is not None and new_err is not None
+    return done, (f"to_json version = {current!r}; v1 refused: {old_err is not None}; "
+                  f"newer refused: {new_err is not None}")
 
 
 def k18_timeout_enforced():
@@ -333,8 +333,8 @@ def c13_output_replaces_input():
 
 
 def o_missing_required_setting():
-    blob = {"tool_id": "scale", "input": None, "arguments": {},
-            "modifiers": [{"kind": "retry", "params": {}}, {"kind": "map", "params": {}}]}
+    blob = {"tool": "scale", "input": None, "arguments": {},
+            "modifiers": [{"kind": "retry", "settings": {}}, {"kind": "map", "settings": {}}]}
     operation = grid.Operation.from_dict(blob)
     problems = grid.check(operation)
     return any("times" in p for p in problems), f"check(retry without times) -> {problems or '()'}"
@@ -386,7 +386,7 @@ def c10_failure_flows_downstream():
     dtype = str(wf.step("a").output.data["value"].dtype)
     done = (not wf.step("bad").valid and calls["n"] == 2 and dtype == "Int64"
             and cause == "a[1]: ValueError: boom")
-    return done, f"bad ref -> {wf.step('bad').status}; a: {dtype}; plus1 calls {calls['n']}; cause {cause!r}"
+    return done, f"bad ref -> {wf.step('bad').state}; a: {dtype}; plus1 calls {calls['n']}; cause {cause!r}"
 
 
 def c14_missing_is_none():
@@ -543,7 +543,7 @@ def stop_on_failure():
     wf["a"] = risky[mod.map()](wf["readings"])
     wf["b"] = I[mod.select(columns=["value"])](wf["a"])     # a map step holds only `value`
     _, err = _try(wf.run_all)
-    stopped = err is not None and "StepFailed" in err and wf.step("b").status == "staged"
+    stopped = err is not None and "StepFailed" in err and wf.step("b").state == "staged"
     wf["a"] = risky[mod.map(), mod.try_except(default=0)](wf["readings"])
     _, err2 = _try(wf.run_all)
     return stopped and err2 is None, (f"uncaught -> {(err or 'no stop')[:70]}; "
@@ -553,7 +553,7 @@ def stop_on_failure():
 def c3_public_functions():
     # declared_tools, resource_types and freeze read or closed the process-wide
     # registry, which K24 removed: a Catalog says what a workflow may use.
-    wanted = ["builtin_tools", "shape_verbs", "payload_column", "check_modifier",
+    wanted = ["builtin_tools", "shape_verbs", "value_column", "check_modifier",
               "Catalog"]
     missing = [n for n in wanted if not hasattr(grid, n)]
     if missing:

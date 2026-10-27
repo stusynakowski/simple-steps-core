@@ -45,7 +45,7 @@ def k(cat):
 def test_every_object_has_a_spec(k):
     step = k.step("f").spec
     assert isinstance(step, StepSpec) and step.name == "f"
-    assert step.operation["tool_id"] == "to_f_s"
+    assert step.operation["tool"] == "to_f_s"
     assert isinstance(k.workflow.spec, WorkflowSpec)
     assert [s.name for s in k.workflow.spec.steps] == ["p", "f"]
     resource_spec = k.workflow.resources["thermo"].spec

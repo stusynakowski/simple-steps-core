@@ -189,7 +189,7 @@ def test_positional_access_and_catalog(wf):
 # ── every declared step is valid and completed ──────────────────────────
 def test_the_whole_workflow_is_valid_and_done(wf):
     assert all(not p for p in wf.validate().values())
-    assert all(st.status == "completed" for st in wf.steps.values())
+    assert all(st.state == "completed" for st in wf.steps.values())
 
 
 # ── failure: the ledger keeps every unit, failed ones re-drivable ───────
@@ -256,7 +256,7 @@ def test_T1_5_running_without_the_resource_is_a_clear_problem():
     del live["llm"]
     with pytest.raises(pipeline.grid.ResourceNotLoaded, match="'llm'"):
         wf.run("summaries", resources=live)
-    assert wf.step("summaries").status == "staged"   # the tool never ran
+    assert wf.step("summaries").state == "staged"   # the tool never ran
 
 
 def test_T1_6_T1_8_wrong_type_unknown_name_unmarked_method_are_refused():
@@ -278,7 +278,7 @@ def test_T1_7_a_subclass_fits_its_base(res_run):
 def test_T1_9_saves_the_declaration_never_the_object():
     import json
     blob = pipeline.build_resources().to_dict()
-    ops = {e["step_id"]: e["operation"] for e in blob["steps"]}
+    ops = {e["name"]: e["operation"] for e in blob["steps"]}
     assert ops["summaries"]["arguments"] == {"llm": {"$res": "llm"}}
     assert blob["resources"]["llm"] == {"source": "defined", "type": "FakeLLM",
                                         "settings": {"model": "fake-1"}}
@@ -298,8 +298,8 @@ def test_T1_10_T2_4_reloads_and_runs(res_run):
 def test_T1_11_redefining_a_resource_marks_its_readers_stale(res_run):
     wf, live = res_run
     wf.define("llm", pipeline.FakeLLM, model="fake-2")
-    assert wf.step("summaries").status == "stale"
-    assert wf.step("regions").status == "completed"      # does not use llm
+    assert wf.step("summaries").state == "stale"
+    assert wf.step("regions").state == "completed"      # does not use llm
     live["llm"] = pipeline.FakeLLM(model="fake-2")
     wf.run("summaries", resources=live)
     assert wf.step("summaries").output.values == ["[fake-2] A", "[fake-2] B"]
@@ -307,7 +307,7 @@ def test_T1_11_redefining_a_resource_marks_its_readers_stale(res_run):
 
 def test_T2_1_T2_2_bound_tools_run_on_their_instance(res_run):
     wf, _ = res_run
-    assert wf.step("regions_bound").operation.tool_id == "FakeDB.lookup"
+    assert wf.step("regions_bound").operation.tool == "FakeDB.lookup"
     assert wf.step("regions_bound").output.values == ["west", "east", "west", "west"]
     assert wf.step("inferred").output.values == ["west", "east", "west", "west"]
     assert wf.step("hello").output.data.iloc[0, 0] == "[fake-1] HI"

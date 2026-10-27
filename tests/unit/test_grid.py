@@ -191,7 +191,7 @@ def test_step_refs_never_survive_into_the_export():
     stored = score[mod.map(over=StepRef("videos"))]
     assert isinstance(stored.input, StepRef)
     assert stored.to_dict()["input"] == {"$ref": "videos"}
-    assert stored.to_dict()["modifiers"][0]["params"] == {}
+    assert stored.to_dict()["modifiers"][0]["settings"] == {}
     json.dumps(stored.to_dict())
 
 
@@ -374,7 +374,7 @@ def test_source_can_compute_from_a_no_input_tool():
     wf = Workflow()
     wf["raw"] = load_rows.bind(path="x.csv")[mod.source()]
     assert wf.step("raw").problems == ()           # a source may compute its grid
-    assert wf.step("raw").status == "staged"       # it has to run, unlike a literal
+    assert wf.step("raw").state == "staged"       # it has to run, unlike a literal
     wf.run_all()
     assert wf.step("raw").output.data["n"].tolist() == [1, 2]
     # it is in the workflow, so the full session round-trips the computed grid
@@ -394,12 +394,12 @@ def test_reassigning_an_upstream_marks_dependents_stale():
     wf["r"] = pd.DataFrame({"n": [1, 2, 3]})
     wf["s"] = times10(wf["r"])
     wf.run_all()
-    assert wf.step("s").status == "completed"
+    assert wf.step("s").state == "completed"
     wf["r"] = pd.DataFrame({"n": [9, 9]})           # reassign the upstream
-    assert wf.step("s").status == "stale"           # outdated, not recomputed
+    assert wf.step("s").state == "stale"           # outdated, not recomputed
     assert wf.step("s").output.values == [10, 20, 30], "data left untouched"
     wf.run("s")
-    assert wf.step("s").status == "completed"
+    assert wf.step("s").state == "completed"
     assert wf.step("s").output.values == [90, 90]
 
 
@@ -546,7 +546,7 @@ def test_a_bare_shape_verb_is_a_complete_step():
     wf = Workflow()
     wf["xs"] = pd.DataFrame({"n": [1, 2, 3, 4]})
     wf["all"] = mod.collapse(over=wf["xs"])
-    assert wf.step("all").operation.tool_id == "gather"
+    assert wf.step("all").operation.tool == "gather"
     wf.run_all()
     assert wf.step("all").output.item() == [1, 2, 3, 4]
 
@@ -595,7 +595,7 @@ def test_a_bare_modifier_no_longer_becomes_a_source_step():
     wf["xs"] = pd.DataFrame({"n": [1, 2]})
     wf["flat"] = mod.expand(over=wf["xs"])
     assert wf.step("flat").operation.shape_verb.kind == "expand"
-    assert wf.step("flat").operation.tool_id == "identity"
+    assert wf.step("flat").operation.tool == "identity"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -913,7 +913,7 @@ def test_a_bare_value_declares_a_source_step(three):
     wf["raw"] = three
     step = wf.step("raw")
     assert isinstance(step, Step)
-    assert step.operation.tool_id == "identity"
+    assert step.operation.tool == "identity"
     assert step.operation.shape_verb.kind == "source"
 
 
@@ -922,7 +922,7 @@ def test_a_source_step_is_born_completed(three):
     wf = Workflow()
     wf["raw"] = three
     step = wf.step("raw")
-    assert step.status == "completed"
+    assert step.state == "completed"
     assert list(step.output.data["n"]) == [1, 2, 3]
 
 
@@ -950,7 +950,7 @@ def test_declaring_stages_both_halves(three):
     wf["scored"] = score[mod.map(over=wf["raw"])]
     step = wf.step("scored")
     assert isinstance(step.output, Output)
-    assert step.status == "staged"
+    assert step.state == "staged"
 
 
 def test_cardinality_propagates_before_anything_runs(three):
@@ -973,9 +973,9 @@ def test_running_populates_and_is_manual(three):
     wf["raw"] = three
     wf["scored"] = score[mod.map(over=wf["raw"])]
     wf.run("raw")
-    assert wf.step("scored").status == "staged", "running raw must not compute scored"
+    assert wf.step("scored").state == "staged", "running raw must not compute scored"
     wf.run("scored")
-    assert wf.step("scored").status == "completed"
+    assert wf.step("scored").state == "completed"
     assert wf.step("scored").output.values == [10, 20, 30]
 
 
@@ -1016,7 +1016,7 @@ def test_run_all_orders_the_chain(three):
     wf["c"] = again[mod.map(over=wf["b"])]
     wf.run_all()
     assert wf.step("c").output.values == [11, 21, 31]
-    assert all(s.status == "completed" for s in wf.steps.values())
+    assert all(s.state == "completed" for s in wf.steps.values())
 
 
 def test_run_all_skips_invalid_steps_without_failing(three):
@@ -1025,8 +1025,8 @@ def test_run_all_skips_invalid_steps_without_failing(three):
     wf["good"] = score[mod.map(over=wf["raw"])]
     wf["bad"] = score.bind(nope=1)[mod.map(over=wf["raw"])]
     wf.run_all()
-    assert wf.step("good").status == "completed"
-    assert wf.step("bad").status == "invalid"
+    assert wf.step("good").state == "completed"
+    assert wf.step("bad").state == "invalid"
 
 
 def test_cardinality_propagates_transitively(three):
@@ -1078,7 +1078,7 @@ def test_a_mistyped_argument_is_caught_at_declaration(three):
     wf["raw"] = three
     wf["oops"] = score.bind(wieght=2)[mod.map(over=wf["raw"])]
     step = wf.step("oops")
-    assert not step.valid and step.status == "invalid"
+    assert not step.valid and step.state == "invalid"
     assert "takes no argument 'wieght'" in step.problems[0]
 
 
@@ -1208,7 +1208,7 @@ def test_bad_steps_stay_in_the_workflow_but_cannot_run(three):
 def test_any_bare_value_becomes_a_source_step():
     wf = Workflow()
     wf["xs"] = [1, 2, 3]
-    assert wf.step("xs").status == "completed"
+    assert wf.step("xs").state == "completed"
     # A list is one cell, not one row per element — reshape with expand.
     assert len(wf.step("xs").output.data) == 1
     assert wf.step("xs").output.data["value"].iloc[0] == [1, 2, 3]
@@ -1248,10 +1248,10 @@ def test_the_light_export_is_structure_only(ran):
     blob = ran.to_dict()
     assert set(blob) == {"version", "steps"}
     assert blob["steps"][1]["operation"] == {
-        "tool_id": "score",
+        "tool": "score",
         "input": {"$ref": "raw"},
         "arguments": {},
-        "modifiers": [{"kind": "map", "params": {}}],
+        "modifiers": [{"kind": "map", "settings": {}}],
     }
 
 
@@ -1271,7 +1271,7 @@ def test_light_round_trip_reproduces_structure_but_not_counts(ran):
 def test_full_round_trip_restores_payloads_and_staging(ran):
     back = Workflow.from_json(ran.to_session_json(), {"score": score.fn})
     assert back.step("scored").output.values == [10, 20, 30]
-    assert back.step("scored").status == "completed"
+    assert back.step("scored").state == "completed"
     assert back.step("raw").describe() == "source identity · 3 cells"
 
 
@@ -1300,10 +1300,10 @@ def test_staging_is_a_pure_function_of_the_steps(three):
 
 
 def test_loading_runs_the_same_checks_as_declaring():
-    blob = {"version": 1, "steps": [
-        {"step_id": "bad", "operation": {"tool_id": "score", "arguments": {},
-                                         "modifiers": [{"kind": "map",
-                                                        "params": {"over": "nope"}}]}},
+    blob = {"version": 4, "steps": [
+        {"name": "bad", "operation": {"tool": "score", "arguments": {},
+                                      "input": {"$ref": "nope"},
+                                      "modifiers": [{"kind": "map", "settings": {}}]}},
     ]}
     back = Workflow.from_dict(blob, {"score": score.fn})
     assert not back.step("bad").valid
@@ -1323,7 +1323,7 @@ def test_an_unexportable_payload_says_so(three):
 
 
 def test_exports_are_json(ran):
-    assert json.loads(ran.to_json())["version"] == 3
+    assert json.loads(ran.to_json())["version"] == 4
     full = json.loads(ran.to_session_json())
     assert "inputs" not in full, "one payload map, not two"
     assert full["outputs"]["raw"]["data"]["kind"] == "frame"
@@ -1576,7 +1576,7 @@ def test_a_reloaded_workflow_has_no_stale_provenance(ran):
     """from_dict rebuilds refs as plain strings, so an import is never self-flagged."""
     back = Workflow.from_json(ran.to_session_json(), TOOLS)
     assert all(p == () for p in back.validate().values())
-    assert all(not isinstance(m.params.get("over"), StepRef)
+    assert all(not isinstance(m.settings.get("over"), StepRef)
                for step in back.steps.values()
                for m in step.operation.modifiers)
 
@@ -1693,7 +1693,7 @@ def test_a_downstream_step_of_an_empty_expand_still_validates_and_runs():
     wf["after"] = dbl[mod.map()](wf["gone"])
     assert wf.step("after").problems == ()
     wf.run("after")
-    assert wf.step("after").status == "completed"
+    assert wf.step("after").state == "completed"
 
 
 def test_a_step_that_ran_to_zero_rows_reports_completed():
@@ -1706,9 +1706,9 @@ def test_a_step_that_ran_to_zero_rows_reports_completed():
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"n": [1, 2]})
     wf["gone"] = nothing[mod.expand()](wf["raw"])
-    assert wf.step("gone").status == "staged", "before running"
+    assert wf.step("gone").state == "staged", "before running"
     wf.run("gone")
-    assert wf.step("gone").status == "completed", "ran, and legitimately empty"
+    assert wf.step("gone").state == "completed", "ran, and legitimately empty"
 
 
 def test_a_filter_that_keeps_nothing_agrees_with_expand():
@@ -1721,7 +1721,7 @@ def test_a_filter_that_keeps_nothing_agrees_with_expand():
     wf["raw"] = pd.DataFrame({"n": [1, 2], "city": ["a", "b"]})
     wf["none"] = never[mod.filter()](wf["raw"])
     wf.run("none")
-    assert wf.step("none").status == "completed"
+    assert wf.step("none").state == "completed"
     assert list(wf.step("none").output.data.columns) == ["n", "city"]
 
 
@@ -1745,7 +1745,7 @@ def test_widen_lifts_fields_into_columns(records):
     assert list(out["city"]) == ["SF", "NYC"]
     assert list(out["temp"]) == [18.0, 31.0]
     assert list(out.index) == list(records.index), "1:1, index preserved"
-    assert wf.step("wide").status == "completed"
+    assert wf.step("wide").state == "completed"
 
 
 def test_widen_predicts_its_columns_exactly(records):
@@ -1826,7 +1826,7 @@ def test_widen_round_trips(records):
     assert list(back.step("wide").output.data.columns) == ["value", "city", "temp"]
     assert back.to_dict()["steps"][1]["operation"]["input"] == {"$ref": "raw"}
     assert back.to_dict()["steps"][1]["operation"]["modifiers"] == [
-        {"kind": "widen", "params": {"columns": ["city", "temp"]}}
+        {"kind": "widen", "settings": {"columns": ["city", "temp"]}}
     ]
 
 
@@ -1899,7 +1899,7 @@ def test_expand_refuses_a_dataframe_instead_of_yielding_column_names():
     wf["seed"] = pd.DataFrame({"n": [1]})
     wf["e"] = frame[mod.expand()](wf["seed"])
     wf.run("e")
-    assert wf.step("e").status == "failed"
+    assert wf.step("e").state == "failed"
     assert "yields its column names" in _errors(wf.step("e").output)[0]
 
 

@@ -39,7 +39,7 @@ class Operation:
     first (§1.1), and :attr:`layers` gives it back in written order.
     """
 
-    tool_id: str
+    tool: str
     modifiers: tuple[Modifier, ...] = ()
     arguments: dict = field(default_factory=dict)
     #: The undecorated function, when this came from a ``@tool`` handle — so a
@@ -75,7 +75,7 @@ class Operation:
         ids = [str(g) for g in self.grids]
         ids += [str(v) for v in self.arguments.values() if isinstance(v, StepRef)]
         # 008 C1: a setting may read a step too — `select(columns=wf["cols"])`.
-        ids += [str(v) for m in self.modifiers for v in m.params.values()
+        ids += [str(v) for m in self.modifiers for v in m.settings.values()
                 if isinstance(v, StepRef)]
         return ids
 
@@ -101,7 +101,7 @@ class Operation:
                 f"zip_ (over= got a {type(over).__name__})")
         new_input = self.input if over is None else (
             over if isinstance(over, StepRef) else StepRef(over))
-        return Operation(self.tool_id,
+        return Operation(self.tool,
                          self.modifiers + (Modifier(kind, params),),
                          self.arguments, self.fn, new_input,
                          bound_to=self.bound_to)
@@ -127,7 +127,7 @@ class Operation:
                     f"mod.retry(times=...); got {type(modifier).__name__}. "
                     "Modifiers are data; a plain decorator would not serialize."
                 )
-            operation = operation._add(modifier.kind, **modifier.params)
+            operation = operation._add(modifier.kind, **modifier.settings)
         return operation
 
     @property
@@ -162,19 +162,19 @@ class Operation:
         """
         if is_combine(self):
             grids = ", ".join(_src(g) for g in self.inputs)
-            name = "zip_" if self.tool_id == "zip" else self.tool_id
+            name = "zip_" if self.tool == "zip" else self.tool
             config = "".join(f", {k}={_src(v)}" for k, v in self.arguments.items())
             return f"{name}({grids}{config})"
         if self.bound_to is not None:
-            head = f"res[{_src(self.bound_to.name)}].{self.tool_id.rsplit('.', 1)[-1]}"
-        elif (self.fn is not None and self.tool_id not in BUILTIN_TOOLS
-              and self.tool_id.isidentifier()):
-            head = self.tool_id
+            head = f"res[{_src(self.bound_to.name)}].{self.tool.rsplit('.', 1)[-1]}"
+        elif (self.fn is not None and self.tool not in BUILTIN_TOOLS
+              and self.tool.isidentifier()):
+            head = self.tool
         else:
-            head = f"op({_src(self.tool_id)})"
+            head = f"op({_src(self.tool)})"
         if self.modifiers:
             head += "[" + ", ".join(
-                f"mod.{m.kind}(" + ", ".join(f"{k}={_src(v)}" for k, v in m.params.items()) + ")"
+                f"mod.{m.kind}(" + ", ".join(f"{k}={_src(v)}" for k, v in m.settings.items()) + ")"
                 for m in self.layers) + "]"
         kwargs = [f"{k}={_src(v)}" for k, v in self.arguments.items()]
         verb = self.shape_verb.kind if self.shape_verb else None
@@ -196,7 +196,7 @@ class Operation:
 
     def bind(self, **literals) -> "Operation":
         """Add bound arguments — literals, or a StepRef to read another step's value."""
-        return Operation(self.tool_id, self.modifiers,
+        return Operation(self.tool, self.modifiers,
                          {**self.arguments, **literals}, self.fn, self.input,
                          bound_to=self.bound_to)
 
@@ -209,11 +209,11 @@ class Operation:
         nothing and does not drag payloads along.
         """
         blob = {
-            "tool_id": self.tool_id,
+            "tool": self.tool,
             "input": _encode_ref(self.input),          # {"$ref": id} or null — the data
             "arguments": {k: _encode_argument(v) for k, v in self.arguments.items()},
             "modifiers": [{"kind": m.kind,
-                           "params": {k: _encode_argument(v) for k, v in m.params.items()}}
+                           "settings": {k: _encode_argument(v) for k, v in m.settings.items()}}
                           for m in self.modifiers],     # literal-only
         }
         if self.inputs:                                 # a combine reads many grids
@@ -227,14 +227,10 @@ class Operation:
                   ) -> "Operation":
         """Rebuild an Operation from :meth:`to_dict`, re-attaching its function."""
         table = {**BUILTIN_TOOLS, **(tools or {})}
-        fn = table.get(blob["tool_id"])
-        # Legacy (v1) stored the input as `over` inside a modifier; hoist it.
-        modifiers, hoisted = [], None
+        fn = table.get(blob["tool"])
+        modifiers = []
         for m in blob["modifiers"]:
-            params = dict(m["params"])
-            over = params.pop("over", None)
-            if over is not None:
-                hoisted = over
+            params = dict(m["settings"])
             modifiers.append(Modifier(m["kind"], {k: _with_tool(_decode_argument(v), table)
                                                   for k, v in params.items()}))
         arguments = {k: _decode_argument(v)
@@ -242,14 +238,14 @@ class Operation:
         inputs = tuple(_decode_ref(g) for g in blob.get("inputs") or ())
         bound_to = _decode_argument(blob.get("bound_to"))
         return cls(
-            tool_id=blob["tool_id"],
+            tool=blob["tool"],
             modifiers=tuple(modifiers),
             arguments=arguments,
             # A bound tool's function comes from its resource type, never from
             # a tool table; the workflow attaches it once it knows the type.
             fn=None if bound_to is not None
-            else (fn.fn if isinstance(fn, ToolHandle) else fn),
-            input=_decode_ref(blob.get("input", hoisted)),
+            else (fn.fn if isinstance(fn, Tool) else fn),
+            input=_decode_ref(blob.get("input")),
             inputs=inputs,
             bound_to=bound_to,
         )
@@ -261,7 +257,7 @@ class Operation:
         Keyword arguments here are **bound literals**, exactly as
         :meth:`bind` would set them — ``score[mod.map()](ref, weight=2)`` and
         ``score.bind(weight=2)[mod.map()](ref)`` are the same Operation.
-        ``ToolHandle.__call__`` already accepted them; this is the other half.
+        ``Tool.__call__`` already accepted them; this is the other half.
         *source* is positional-only so a tool may still have a parameter of its
         own called ``source``.
 
@@ -295,7 +291,7 @@ class Operation:
                     and operation.shape_verb.kind in ("source", "sweep"):
                 # Nothing to read: `tool[mod.source()](prompt="hi")` only binds.
                 return operation
-            raise TypeError(f"{self.tool_id}: pass the data to apply it to, "
+            raise TypeError(f"{self.tool}: pass the data to apply it to, "
                             "or a step reference to wire it")
         return operation.run(source)
 
@@ -309,7 +305,7 @@ class Operation:
                 f"this step already reads {str(self.input)!r} (over=), and the "
                 f"call passes {ref.id!r} too. Give the input once: in the call, "
                 f"or as over=, not both.")
-        based = Operation(self.tool_id, self.modifiers,
+        based = Operation(self.tool, self.modifiers,
                           self.arguments, self.fn, ref, bound_to=self.bound_to)
         if based.bound_to is not None and based.fn is None \
                 and ref.workflow is not None:
@@ -334,7 +330,7 @@ class Operation:
         """
         if self.resources:
             raise TypeError(
-                f"{self.tool_id} uses resource(s) "
+                f"{self.tool} uses resource(s) "
                 f"{', '.join(map(repr, self.resources))}, which only a workflow "
                 "can supply: wf.run(step_id, resources={name: object})."
             )
@@ -347,12 +343,12 @@ class Operation:
             )
         table = {**BUILTIN_TOOLS, **(tools or {})}
         if self.fn is not None:
-            table.setdefault(self.tool_id, self.fn)
-        if self.tool_id not in table:
+            table.setdefault(self.tool, self.fn)
+        if self.tool not in table:
             raise KeyError(
-                f"cannot run {self.tool_id!r}: this Operation names its tool "
+                f"cannot run {self.tool!r}: this Operation names its tool "
                 f"by id, so pass the function — "
-                f"run(source, tools={{{self.tool_id!r}: fn}}). "
+                f"run(source, tools={{{self.tool!r}: fn}}). "
                 "Operations built from a @tool handle carry it already."
             )
         return compile_operation(self, table)(source)
@@ -365,7 +361,7 @@ class Operation:
         # named (same reason __eq__ flattens it).
         stack = "".join(f"{m!r} ∘ " for m in self.layers)
         src = f" over={self.input.id!r}" if isinstance(self.input, StepRef) else ""
-        return f"<Operation {stack}{self.tool_id}{src}>"
+        return f"<Operation {stack}{self.tool}{src}>"
 
 
 def _with_tool(value: Any, table: dict) -> Any:
@@ -373,13 +369,13 @@ def _with_tool(value: Any, table: dict) -> Any:
     left as a name when the table doesn't have it (``check`` then says so)."""
     if isinstance(value, ToolRef) and value.id in table:
         found = table[value.id]
-        return found if isinstance(found, ToolHandle) else ToolHandle(found, value.id)
+        return found if isinstance(found, Tool) else Tool(found, value.id)
     return value
 
 
 def op(tool_id: str, **arguments) -> Operation:
     """Start building an Operation for the tool named *tool_id*."""
-    return Operation(tool_id=tool_id, arguments=arguments)
+    return Operation(tool=tool_id, arguments=arguments)
 
 
 def _src(value: Any) -> str:
@@ -417,7 +413,7 @@ def _src(value: Any) -> str:
         return text
     if isinstance(value, ResRef):
         return f"res[{_src(value.name)}]"
-    if isinstance(value, (ToolRef, ToolHandle)):
+    if isinstance(value, (ToolRef, Tool)):
         return value.id
     if isinstance(value, str):
         return json.dumps(value, ensure_ascii=False)
@@ -449,7 +445,7 @@ def _src(value: Any) -> str:
 # Names used only inside functions, imported last so the modules can refer
 # to each other (see grid.py).
 from .system_tools import BUILTIN_TOOLS  # noqa: E402
-from .catalog import ToolHandle, _attach_bound  # noqa: E402
+from .catalog import Tool, _attach_bound  # noqa: E402
 from .checks import check  # noqa: E402
 from .combines import is_combine  # noqa: E402
 from .modifiers import Modifier  # noqa: E402

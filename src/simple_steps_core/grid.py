@@ -34,11 +34,11 @@ __all__ = [
     "modifier_catalog",
     "op", "Modifier", "Operation",
     "join", "stack", "zip_", "COMBINE", "is_combine",
-    "tool", "ToolHandle", "StepRef", "Step", "Workflow", "check", "warn", "stage",
+    "tool", "Tool", "StepRef", "Step", "Workflow", "check", "warn", "stage",
     "wf", "res", "ResRef", "bound_tool", "cols", "Rows", "Cols", "SelectionError",
     "RESERVED_NAMES", "FORMAT_VERSION", "ToolRef", "StepFailed",
     "builtin_tools", "shape_verbs",
-    "payload_column", "check_modifier", "formula_names",
+    "value_column", "check_modifier", "formula_names",
     "resource",
     "resource_entry", "resource_catalog", "ResourceNotLoaded",
     "annotation_problems", "declaration_problems",
@@ -50,7 +50,7 @@ __all__ = [
     "mod",
     "DECORATORS", "MODIFIERS", "ModifierKind", "SHAPE_VERBS", "is_shape",
     "compile_operation",
-    "PAYLOAD", "STATES", "ROW_ID",
+    "VALUE_COLUMN", "STATES", "ROW_ID",
 ]
 
 #: Leaves first: each module only needs, while it loads, names from modules

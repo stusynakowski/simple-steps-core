@@ -464,16 +464,16 @@ def main() -> None:
         print(f"  res[{name!r}] = {decl.type_name}({decl.settings})")
     for sid in ("regions", "summaries", "tiny_summaries", "regions_bound",
                 "inferred"):
-        print(f"  {sid:15} {res_wf.step(sid).operation.tool_id:14} "
+        print(f"  {sid:15} {res_wf.step(sid).operation.tool:14} "
               f"{res_wf.step(sid).output.values}")
     print(f"  {'hello':15} {'FakeLLM.complete':14} "
           f"{res_wf.step('hello').output.data.iloc[0, 0]!r}  (a source: one cell)")
     print(f"  one instance each: db.reads={live['db'].reads}, "
           f"llm.calls={live['llm'].calls}, tiny.calls={live['tiny'].calls}")
     blob = res_wf.to_dict()
-    saved = {e["step_id"]: e["operation"] for e in blob["steps"]}
+    saved = {e["name"]: e["operation"] for e in blob["steps"]}
     print("  saved: summaries →", saved["summaries"]["arguments"],
-          "| regions_bound →", saved["regions_bound"]["tool_id"],
+          "| regions_bound →", saved["regions_bound"]["tool"],
           saved["regions_bound"]["bound_to"],
           "| res['llm'] →", blob["resources"]["llm"])
 

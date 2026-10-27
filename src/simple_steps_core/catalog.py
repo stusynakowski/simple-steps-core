@@ -126,7 +126,7 @@ def tool_entry(tool_id: str, fn: Callable, origin: str) -> dict:
         })
 
     return {
-        "tool_id": tool_id,
+        "tool": tool_id,
         "description": doc.split("\n", 1)[0] if doc else "",
         "origin": origin,
         "params": params,
@@ -156,18 +156,18 @@ def catalog(tools: dict[str, Callable] | None = None) -> dict[str, dict]:
         entries[name] = tool_entry(name, fn, "builtin")
         entries[name]["tags"] = []
     for name, fn in sorted((tools or {}).items()):
-        entries[name] = tool_entry(name, fn.fn if isinstance(fn, ToolHandle) else fn,
+        entries[name] = tool_entry(name, fn.fn if isinstance(fn, Tool) else fn,
                                    "declared")
         entries[name]["tags"] = list(getattr(fn, "tags", ()))
     return entries
 
 
-class BoundToolHandle:
+class BoundTool:
     """``res["db"].lookup`` — a bound tool waiting for its brackets.
 
     The method is found on the resource's **declared type** once the step is in
     a workflow; until then its tool id is ``"?.lookup"``. Brackets and parens
-    work exactly as on a :class:`ToolHandle`.
+    work exactly as on a :class:`Tool`.
     """
 
     def __init__(self, ref: ResRef, method: str):
@@ -175,7 +175,7 @@ class BoundToolHandle:
         self.id = f"?.{method}"
 
     def _start(self) -> "Operation":
-        return Operation(tool_id=self.id, bound_to=self.ref)
+        return Operation(tool=self.id, bound_to=self.ref)
 
     def bind(self, **literals) -> "Operation":
         return self._start().bind(**literals)
@@ -375,7 +375,7 @@ def resource_catalog(types_: dict[str, type] | None = None) -> dict[str, dict]:
 
 
 @dataclass
-class ResourceDecl:
+class Resource:
     """How a workflow declared a resource — what is saved, never the object."""
 
     name: str
@@ -423,10 +423,10 @@ def _attach_bound(operation: "Operation", resources: dict) -> "Operation":
     if operation.bound_to is None:
         return operation
     decl = resources.get(operation.bound_to.name)
-    method = operation.tool_id.rsplit(".", 1)[-1]
+    method = operation.tool.rsplit(".", 1)[-1]
     if decl is None or decl.type is None or method not in _bound_tools(decl.type):
         return replace(operation, fn=None)
-    return replace(operation, tool_id=f"{decl.type.__name__}.{method}",
+    return replace(operation, tool=f"{decl.type.__name__}.{method}",
                    fn=_method_view(decl.type, method))
 
 
@@ -439,7 +439,7 @@ def _no_resource(name: str, workflow: "Workflow") -> str:
 def _bound_problem(operation: "Operation", workflow: "Workflow | None") -> str:
     """Why a bound tool's method could not be found."""
     name = operation.bound_to.name
-    method = operation.tool_id.rsplit(".", 1)[-1]
+    method = operation.tool.rsplit(".", 1)[-1]
     if workflow is None:
         return (f"{method} is bound to resource {name!r}, which only a workflow "
                 "can declare")
@@ -453,7 +453,7 @@ def _bound_problem(operation: "Operation", workflow: "Workflow | None") -> str:
     return f"{method} is not a tool of {decl.type.__name__}; its tools are: {tools}"
 
 
-class ToolHandle:
+class Tool:
     """What ``@tool`` returns: the plain function, plus a name and brackets.
 
     **Parens run, brackets decorate** — the same contract a bracket-decorator
@@ -506,10 +506,10 @@ class ToolHandle:
         every item. A value may be a :class:`StepRef`: a *value reference*
         (K10), kept as the ref and resolved to that step's value at run.
         """
-        return Operation(tool_id=self.id, arguments=dict(literals), fn=self.fn)
+        return Operation(tool=self.id, arguments=dict(literals), fn=self.fn)
 
     def _start(self) -> Operation:
-        return Operation(tool_id=self.id, fn=self.fn)
+        return Operation(tool=self.id, fn=self.fn)
 
     def __getitem__(self, modifiers: Any) -> Operation:
         """``transcribe[mod.map(over=videos), mod.retry(times=2)]`` — decorate.
@@ -533,10 +533,10 @@ def shape_verbs() -> tuple[str, ...]:
     return tuple(SHAPE_VERBS)
 
 
-def payload_column(output: Any) -> str | None:
+def value_column(output: Any) -> str | None:
     """The column a step (or Output) writes its tool's results to, or None.
 
-    008 C3: read this instead of assuming ``PAYLOAD`` — a step may name its
+    008 C3: read this instead of assuming ``VALUE_COLUMN`` — a step may name its
     payload (``name=``), and some verbs write none.
     """
     if isinstance(output, Step):
@@ -552,7 +552,7 @@ def check_modifier(kind: str, params: dict | None = None) -> tuple[str, ...]:
     """
     params = dict(params or {})
     params.pop("over", None)
-    return check(Operation(tool_id="identity", fn=identity,
+    return check(Operation(tool="identity", fn=identity,
                            modifiers=(Modifier(kind, params),)))
 
 
@@ -561,7 +561,7 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
          extras: Mapping[str, Any] | None = None):
     """Make a plain function a tool. Usable bare or with arguments.
 
-    It returns the :class:`ToolHandle` and registers it nowhere: a tool is used
+    It returns the :class:`Tool` and registers it nowhere: a tool is used
     by putting it in a :class:`Catalog`. *id* names it (the function's name
     otherwise); *tags* are free labels; *extras* are the app's additions, by
     namespace.
@@ -576,7 +576,7 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
         raise TypeError("tags= takes a list of strings, e.g. tags=['rowmap']")
     extras = _checked_extras(extras)
 
-    def make(f: Callable, tool_id: str | None) -> ToolHandle:
+    def make(f: Callable, tool_id: str | None) -> Tool:
         if _looks_like_method(f):
             # @tool on a method used to replace it with a handle that never
             # receives `self`, breaking the method and registering a global
@@ -586,7 +586,7 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
                 "on a resource instance (res[\"name\"]." + f.__name__ + "); "
                 "@tool is for free functions."
             )
-        handle = ToolHandle(f, tool_id)
+        handle = Tool(f, tool_id)
         reserved = _reserved_problem(handle.id, "tool")
         if reserved:
             raise ValueError(f"cannot declare tool {handle.id!r}: {reserved}")
@@ -641,7 +641,7 @@ def formula_names(tools: dict[str, Callable] | None = None) -> dict[str, Any]:
                              "stack": stack, "zip_": zip_}
     for tool_id, fn in (tools or {}).items():
         if tool_id.isidentifier():
-            names[tool_id] = fn if isinstance(fn, ToolHandle) else ToolHandle(fn, tool_id)
+            names[tool_id] = fn if isinstance(fn, Tool) else Tool(fn, tool_id)
     return names
 
 
@@ -691,9 +691,9 @@ class Catalog:
 
     def __init__(self, tools: Iterable[Any] = (), resources: Iterable[type] = (), *,
                  strict: bool = False):
-        found: dict[str, ToolHandle] = {}
+        found: dict[str, Tool] = {}
         for item in tools:
-            if not isinstance(item, ToolHandle):
+            if not isinstance(item, Tool):
                 name = getattr(item, "__name__", repr(item))
                 raise TypeError(
                     f"{name} is not a tool. Decorate it with @tool, then pass it "
@@ -733,7 +733,7 @@ class Catalog:
         tools_, kinds = [], []
         for module in modules:
             for value in vars(module).values():
-                if isinstance(value, ToolHandle):
+                if isinstance(value, Tool):
                     tools_.append(value)
                 elif (isinstance(value, type) and value.__module__ == module.__name__
                       and value.__dict__.get("__simple_steps_resource__")):
@@ -758,7 +758,7 @@ class Catalog:
 
     # ── what it holds ────────────────────────────────────────────────────
     @property
-    def tools(self) -> dict[str, ToolHandle]:
+    def tools(self) -> dict[str, Tool]:
         """The developer's tools, by name."""
         return dict(self._tools)
 
@@ -866,10 +866,10 @@ class Catalog:
                 found.append(_outside(f"resource type {decl.type_name!r} is not in this "
                              "workflow's catalog"))
         elif is_combine(operation):
-            if operation.tool_id not in self._combines:
-                found.append(_outside(f"{operation.tool_id!r} is not in this workflow's catalog"))
+            if operation.tool not in self._combines:
+                found.append(_outside(f"{operation.tool!r} is not in this workflow's catalog"))
         else:
-            name = operation.tool_id
+            name = operation.tool
             if name in self._tools:
                 if operation.fn is not None and operation.fn is not self._tools[name].fn:
                     found.append(Problem(
@@ -881,9 +881,9 @@ class Catalog:
             if m.kind not in self._modifiers:
                 found.append(_outside(f"modifier {m.kind!r} is not in this workflow's catalog"))
         values = [*operation.arguments.values(),
-                  *(v for m in operation.modifiers for v in m.params.values())]
+                  *(v for m in operation.modifiers for v in m.settings.values())]
         for value in values:
-            name = (value.id if isinstance(value, (ToolHandle, ToolRef)) else None)
+            name = (value.id if isinstance(value, (Tool, ToolRef)) else None)
             if name is not None and name not in self._tools and name not in self._builtins:
                 found.append(_outside(f"tool {name!r} is not in this workflow's catalog"))
         return found
@@ -894,7 +894,7 @@ class Catalog:
         (that is a problem :meth:`problems` reports)."""
         if operation.bound_to is not None or is_combine(operation):
             return operation
-        fn = self.functions.get(operation.tool_id)
+        fn = self.functions.get(operation.tool)
         if fn is None or (operation.fn is not None and operation.fn is not fn):
             return operation
         return replace(operation, fn=fn)

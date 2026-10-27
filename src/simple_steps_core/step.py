@@ -49,6 +49,18 @@ def _row_fps(frame: pd.DataFrame, columns: list) -> dict:
 
 
 
+@dataclass(frozen=True)
+class StepStatus:
+    """What is live about a step: its output, its state, its problems and
+    warnings, and what its values were computed with."""
+
+    output: "Output"
+    state: str
+    problems: tuple = ()
+    warnings: tuple = ()
+    ran_with: dict = field(default_factory=dict)
+
+
 class _NoLiteral:
     """The :attr:`Step.literal` of a step that wasn't declared as a literal."""
 
@@ -68,7 +80,7 @@ class Step:
     writing a ledger row by row is 69x slower than building it once.
     """
 
-    step_id: str
+    name: str
     operation: Operation
     output: Output
     problems: tuple[str, ...] = ()
@@ -89,7 +101,7 @@ class Step:
         saved = None
         if self.literal is not NO_LITERAL and _literal_problem(self.literal) is None:
             saved = {"value": _encode_argument(self.literal)}
-        return StepSpec(self.step_id, self.operation.to_dict(),
+        return StepSpec(self.name, self.operation.to_dict(),
                         _checked_extras(self.extras), saved)
 
     @property
@@ -97,20 +109,16 @@ class Step:
         return not self.problems
 
     @property
-    def name(self) -> str:
-        """The step's name (its id in the workflow)."""
-        return self.step_id
-
-    @property
     def data(self) -> "pd.DataFrame":
         """The step's values: ``output.data``."""
         return self.output.data
 
     @property
-    def status(self) -> str:
-        """The step state. Kept as an alias of :attr:`state` until phase 3e,
-        when ``status`` becomes the step's live part (docs/design/object-model.md §3)."""
-        return self.state
+    def status(self) -> "StepStatus":
+        """The step's live part: what running its spec produced
+        (docs/design/object-model.md §3). A live step is its spec plus this."""
+        return StepStatus(self.output, self.state, tuple(self.problems),
+                          tuple(self.warnings), self.output.ran_with)
 
     @property
     def state(self) -> str:
@@ -168,7 +176,7 @@ class Step:
         if not self.valid:
             return f"invalid · {self.problems[0]}"
         if is_combine(self.operation):
-            kind = self.operation.tool_id
+            kind = self.operation.tool
             if not self.output.meta.get("staged"):
                 n = len(self.output.data)
                 return f"{kind} · {n} cell{'' if n == 1 else 's'}"
@@ -177,7 +185,7 @@ class Step:
                 return f"{kind} · {expected} cells"
             return f"{kind} · unknown count from {len(self.operation.inputs)} grids"
         verb = self.output.meta.get("verb")
-        tool = self.operation.tool_id
+        tool = self.operation.tool
         if verb in ("source", "table") and self.output.meta.get("staged"):
             return f"{verb} {tool} · {_plan_words(self.plan)}"
         if not self.output.meta.get("staged"):
@@ -205,7 +213,7 @@ class Step:
         return f"{verb} {tool} · unknown count from {n_in} rows"
 
     def __repr__(self) -> str:
-        return f"<Step {self.step_id!r} {self.status} · {self.describe()}>"
+        return f"<Step {self.name!r} {self.state} · {self.describe()}>"
 
 
 # Names used only inside functions, imported last so the modules can refer

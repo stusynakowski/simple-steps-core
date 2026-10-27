@@ -17,7 +17,7 @@ import time
 import traceback
 
 from .system_tools import identity
-from .output import PAYLOAD
+from .output import VALUE_COLUMN
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -53,11 +53,11 @@ def _rows_frame(value: Any, *, axis: str = "rows") -> pd.DataFrame:
             )
         return value
     if isinstance(value, pd.Series):
-        return value.to_frame(name=PAYLOAD)
+        return value.to_frame(name=VALUE_COLUMN)
     # One cell. `[value]` wraps the whole value — a list lands in a single cell,
     # not one row per element — so `rows([1, 2, 3])` is a 1x1 grid holding the
     # list. `expand` is how you turn that cell into rows.
-    return pd.DataFrame({PAYLOAD: [value]})
+    return pd.DataFrame({VALUE_COLUMN: [value]})
 
 
 def _row_key(key: Callable) -> Callable:
@@ -166,7 +166,7 @@ def _call(fn: Callable, arg: dict, retries: int) -> tuple[Any, dict]:
 # ─────────────────────────────────────────────────────────────────────────
 # The verbs
 # ─────────────────────────────────────────────────────────────────────────
-def map_(source: Any, fn: Callable, *, name: str = PAYLOAD,
+def map_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
          retries: int = 0, axis: str = "rows", replace: bool = False) -> Output:
     """``map`` — n rows in, n rows out: **only** *fn*'s result, one column.
 
@@ -257,7 +257,7 @@ def group_(source: Any, fn: Callable, *, name: str = "group",
 
 
 def collapse_(source: Any, fn: Callable, *, by: str | None = None,
-              initial: Any = None, name: str = PAYLOAD) -> Output:
+              initial: Any = None, name: str = VALUE_COLUMN) -> Output:
     """``summarise`` — reduce to one row, or one row per ``by`` group.
 
     *fn* takes ``(accumulator, row_dict)``. With ``by`` it runs per group and
@@ -278,7 +278,7 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
     else:
         if by not in frame.columns:
             # 010 C23: a step that fails, with the reason — not a bare KeyError.
-            sid = (source.meta.get("step_id") if isinstance(source, Output) else None) or "the input"
+            sid = (source.meta.get("name") if isinstance(source, Output) else None) or "the input"
             raise SelectionError(
                 f"collapse groups by {by!r}, which {sid!r} does not have "
                 f"(it has {', '.join(map(str, frame.columns)) or 'no columns'})")
@@ -325,7 +325,7 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
                         "n_in": len(frame)})
 
 
-def expand_(source: Any, fn: Callable, *, name: str = PAYLOAD,
+def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
             retries: int = 0, axis: str = "rows", replace: bool = False) -> Output:
     """``unnest`` — each unit yields an iterable; results are concatenated.
 
@@ -417,11 +417,11 @@ def table_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
     meta = {"verb": "table", "form": "grid", "payload": None, "n_in": len(frame)}
     if blocked:
         record = _blocked(*next(iter(blocked.values())))
-        return Output(data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
+        return Output(data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
                       records=[record], index=[0], meta=meta)
     value, record = _call(fn, frame, retries)
     if record["status"] != "completed":
-        return Output(data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
+        return Output(data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
                       records=[record], index=[0], meta=meta)
     if isinstance(value, pd.Series):
         value = value.to_frame()
@@ -432,7 +432,7 @@ def table_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
             record = {**record, "status": "failed",
                       "error": f"TypeError: table expects a DataFrame back, got "
                                f"{type(value).__name__}"}
-            return Output(data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
+            return Output(data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
                           records=[record], index=[0], meta=meta)
     data = _normalize_missing(_own_index(_str_columns(value, "the table"), "the table"))
     records = [{**record, "unit": "table"} for _ in range(len(data))]
@@ -451,7 +451,7 @@ def auto_(source: Any, fn: Callable) -> Output:
     raise RuntimeError("auto is resolved to a concrete verb before it runs")
 
 
-def sweep_(fn: Callable, *, name: str = PAYLOAD, retries: int = 0,
+def sweep_(fn: Callable, *, name: str = VALUE_COLUMN, retries: int = 0,
            **params: Sequence[Any]) -> Output:
     """``expand_grid`` — run *fn* over the cross product of named parameters.
 
@@ -592,7 +592,7 @@ def select_(source: Any, fn: Callable = identity, *,
     if isinstance(columns, dict) or row_sel is not None:
         # 008 C7/K9: every selection form; kept rows keep their ids.
         data = _apply_selection(frame, row_sel, columns or None,
-                                (source.meta.get("step_id") if isinstance(source, Output)
+                                (source.meta.get("name") if isinstance(source, Output)
                                  else None) or "the input")
         return _column_output("select", frame, data, index=data.index, source=source)
     _require_columns("select", frame, columns)
@@ -917,7 +917,7 @@ def source_(value: Any, fn: Callable = identity, **_params) -> Output:
 
 def _source_failure(error: str, caught: Any) -> Output:
     return Output(
-        data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
+        data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
         records=[{"status": "failed", "error": error, "attempts": 1,
                          "seconds": 0.0, "caught": caught}], index=[0],
         meta={"verb": "source", "form": "scalar", "payload": None})

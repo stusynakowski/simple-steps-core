@@ -14,7 +14,7 @@ import pandas as pd
 
 
 #: Default name for the column holding whatever a tool returned.
-PAYLOAD = "value"
+VALUE_COLUMN = "value"
 
 
 #: The row-number column, ``#``: 0…n-1 down every step's grid, in order. It's
@@ -388,10 +388,10 @@ def _failed_output(operation: Any, error: str) -> "Output":
     """A step that could not produce a grid: one failed cell saying why."""
     kind = operation.shape_verb.kind if operation.shape_verb else None
     return Output(
-        data=pd.DataFrame({PAYLOAD: [None]}, index=[0], dtype=object),
+        data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
         records=[{"status": "failed", "error": error, "attempts": 0,
                          "seconds": 0.0}], index=[0],
-        meta={"verb": kind, "form": "scalar", "payload": PAYLOAD})
+        meta={"verb": kind, "form": "scalar", "payload": VALUE_COLUMN})
 
 
 def _upstream_failures(source: Any) -> dict:
@@ -406,7 +406,7 @@ def _upstream_failures(source: Any) -> dict:
         return {}
     if source.meta.get("blocked_all"):
         return {index: source.meta["blocked_all"] for index in source.data.index}
-    sid = source.meta.get("step_id") or "input"
+    sid = source.meta.get("name") or "input"
     out = {}
     for row_id in source.ids_in("failed", "blocked"):
         note = source.notes.get(row_id, {})
