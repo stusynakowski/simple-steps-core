@@ -316,7 +316,7 @@ def test_R8_C10_a_failed_cell_keeps_the_type_and_blocks_its_row(failing):
     assert CALLS["plus1"] == 2                            # never called for row 1
     assert b.row_states[1] == "blocked"                   # the tool wasn't called
     assert b.notes[1] == {"error": "upstream cell a[1] failed",
-                          "cause": "a[1]: ValueError: boom"}
+                          "cause": "a[1]: ValueError: boom", "where": "upstream"}
 
 
 def test_C10_the_root_cause_travels_through_every_verb(failing):
@@ -1346,7 +1346,7 @@ def test_009_an_output_is_data_states_and_meta(failing):
     out = failing.step("a").output
     assert out.states.shape == out.data.shape
     assert list(out.row_states) == ["known", "failed", "known"]
-    assert out.notes == {1: {"error": "ValueError: boom", "caught": True}}   # only row 1
+    assert out.notes == {1: {"error": "ValueError: boom", "where": "tool", "caught": True}}   # only row 1
     assert out.meta["version"] and "ledger" not in vars(out)
 
 
@@ -1375,7 +1375,7 @@ def test_009_states_and_notes_survive_a_saved_session(failing):
     back = Workflow.from_json(failing.to_session_json(), TOOLS_008)
     out = back.step("a").output
     assert list(out.row_states) == ["known", "failed", "known"]
-    assert out.notes == {1: {"error": "ValueError: boom", "caught": True}}   # id stays an int
+    assert out.notes == {1: {"error": "ValueError: boom", "where": "tool", "caught": True}}   # id stays an int
 
 
 

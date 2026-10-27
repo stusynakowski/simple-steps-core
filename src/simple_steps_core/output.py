@@ -95,6 +95,8 @@ def _from_records(records: Sequence[dict], index: Sequence[Any], data: pd.DataFr
             state = _RECORD_STATE.get(status, "known")
         by_id[row_id] = state
         note = {k: record[k] for k in ("error", "cause") if record.get(k)}
+        if status == "failed" and record.get("where"):
+            note["where"] = record["where"]        # which layer gave up (G7)
         if record.get("caught"):
             note["caught"] = True
         if record.get("attempts") not in (None, 0, 1):
@@ -471,7 +473,7 @@ def _upstream_failures(source: Any) -> dict:
 def _blocked(error: str, cause: str) -> dict:
     """The record of a unit that was not run because its input failed."""
     return {"status": "failed", "error": error, "attempts": 0, "seconds": 0.0,
-            "cause": cause}
+            "cause": cause, "where": "upstream"}
 
 
 def _note_text(note: dict | None) -> str:

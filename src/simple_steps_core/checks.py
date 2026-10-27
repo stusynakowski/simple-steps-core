@@ -767,6 +767,41 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
 
 def warn(operation: Operation, workflow: "Workflow | None" = None,
          step_id: str | None = None) -> tuple[str, ...]:
+    """A step's warnings when declared: its modifiers (G6, G7), then what it
+    expects of its input's columns."""
+    return _warnings(_modifier_notes(operation), step_id) + \
+        _column_warnings(operation, workflow, step_id)
+
+
+#: How a modifier written before the verb covers the whole step (G7).
+_WHOLE_STEP = {"retry": "retries the whole step: if any row fails, every row runs again",
+               "timeout": "times the whole step, not each call",
+               "try_except": "catches a failure of the whole step, not of each row",
+               "breaker": "counts the whole step as one call"}
+
+
+def _modifier_notes(operation: Operation) -> list[str]:
+    """G6: a ``try_except`` default that doesn't fit the tool's return type.
+    G7: an execution modifier written before the verb covers the whole step."""
+    notes: list[str] = []
+    written = list(operation.layers)
+    at = next((i for i, m in enumerate(written) if m.is_shape), None)
+    verb = written[at].kind if at is not None else None
+    for i, m in enumerate(written):
+        if at is not None and i < at and m.kind in _WHOLE_STEP:
+            notes.append(f"{m.kind} is written before {verb}, so it {_WHOLE_STEP[m.kind]}; "
+                         f"to cover each row, write it after {verb}")
+        if m.kind == "try_except" and "default" in m.settings and operation.fn is not None:
+            default, hint = m.settings["default"], _return_hint(operation.fn)
+            if default is not None and hint is not None and _value_fits(default, hint) is False:
+                notes.append(f"default {default!r} is {type(default).__name__}, but "
+                             f"{operation.tool} returns {_type_name(hint)}; the column will be "
+                             f"{_type_name(hint)} | {type(default).__name__}")
+    return notes
+
+
+def _column_warnings(operation: Operation, workflow: "Workflow | None" = None,
+                     step_id: str | None = None) -> tuple[str, ...]:
     """Non-blocking column expectations, before the upstream has run (005 C).
 
     The hard column check (:func:`_missing_columns`) only fires once the upstream
@@ -1053,6 +1088,8 @@ def _required_columns(operation: Operation, verb: Any) -> list[str]:
 
 #: How a warning's message says which kind it is.
 _WARNING_KINDS = (
+    ("is written before", "modifier_order"),
+    ("the column will be", "default_type"),
     ("edited formula won't produce", "column_will_be_missing"),
     ("isn't a named parameter", "unchecked_argument"),
     ("are positions", "rows_by_position"),

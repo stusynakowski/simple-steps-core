@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import field
+import threading
 from typing import Any
 from typing import Callable
 from typing import Sequence
@@ -63,6 +64,8 @@ def _d_retry(fn: Callable, *, times: int) -> Callable:
                 return fn(x)
             except Exception as exc:
                 last = exc
+        # Every attempt failed: the note says retry gave up, and how often (G7).
+        last.where, last.attempts = "retry", times + 1
         raise last
     run.__name__ = f"retry({getattr(fn, '__name__', 'fn')})"
     return run
@@ -161,10 +164,36 @@ def _d_expect(fn: Callable, *, rows: int | None = None, min_rows: int | None = N
     return fn
 
 
+class TimedOut(Exception):
+    """A call ran past its ``timeout``. Its note says ``where: timeout``."""
+
+    where = "timeout"
+
+
 def _d_timeout(fn: Callable, *, seconds: float) -> Callable:
-    """Placeholder: records intent. Real enforcement needs the async engine."""
-    def run(x):
-        return fn(x)
+    """``mod.timeout(seconds=1)`` — a call past *seconds* fails (K18).
+
+    The call runs in a worker thread with a deadline (phase4-plan.md A-D2).
+    Python can't stop a thread, so a call past it may finish in the
+    background; its result is dropped, and the row has failed already.
+    """
+    def run(*args, **kwargs):
+        box: dict = {}
+
+        def work():
+            try:
+                box["value"] = fn(*args, **kwargs)
+            except BaseException as exc:   # handed back to the caller's thread
+                box["error"] = exc
+
+        worker = threading.Thread(target=work, daemon=True)
+        worker.start()
+        worker.join(seconds)
+        if worker.is_alive():
+            raise TimedOut(f"took longer than {seconds}s")
+        if "error" in box:
+            raise box["error"]
+        return box["value"]
     run.__name__ = f"timeout({getattr(fn, '__name__', 'fn')})"
     return run
 

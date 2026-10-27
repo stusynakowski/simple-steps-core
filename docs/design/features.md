@@ -80,9 +80,9 @@ The rules, with four decisions for the owner, are in [row-ids.md](row-ids.md).
 | `mod.name`: a name, a list, a mapping or a pattern; replaces `name=`. The last modifier that defines names wins; with none, columns keep their defaults *Done (phase 4): every form* | G12 |
 | Kernel-wide naming conventions (`Kernel(cat, naming=…)`) *Done (phase 4)* | outputs-and-reshaping.md §10 |
 | `widen` reads declared fields, replaces the column it spreads, plans exactly *Done (phase 4): replaces the column, takes the union of keys, and reads declared record types* | G9, G10 |
-| A `try_except` default that doesn't fit the return type warns; a step that used defaults warns | G6, G7 |
-| Failure notes say where a row failed: tool, timeout, retry, breaker, expect, upstream | G7 |
-| `timeout` enforced | K18 |
+| A `try_except` default that doesn't fit the return type warns; a step that used defaults warns *Done (phase 4)* | G6, G7 |
+| Failure notes say where a row failed: tool, timeout, retry, breaker, expect, upstream *Done (phase 4), all but expect* | G7 |
+| `timeout` enforced *Done (phase 4)* | K18 |
 | `group` labels rows: the input's columns plus its key, so `collapse(by="key")` follows directly; `group(by=…)` is dropped and a column name refused when declared (owner, 2026-10-27). *Done (phase 4)* | G1 |
 | `collapse` with an accumulator and no `initial=` *Done (phase 4): it starts from its accumulator type's empty value, or is refused when declared* | G5 |
 

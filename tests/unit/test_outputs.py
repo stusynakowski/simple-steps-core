@@ -263,3 +263,61 @@ def test_G12_a_kernel_case_warns_and_never_renames():
 def test_G12_a_kernel_without_naming_saves_as_before():
     k = Kernel(Catalog(tools=[toF]))
     assert "naming" not in k.to_json()
+
+
+# ── K18: timeout is enforced; G7: a failure says where; G6, G7: warnings ─────
+
+import time  # noqa: E402
+
+
+@tool
+def slow(n: int) -> int:
+    time.sleep(0.4 if n == 2 else 0)
+    return n
+
+
+@tool
+def risky(n: int) -> int:
+    if n == 2:
+        raise ValueError("boom")
+    return n
+
+
+@pytest.fixture
+def k18():
+    k = Kernel(Catalog(tools=[slow, risky]))
+    k["x"] = pd.DataFrame({"n": [1, 2, 3]})
+    return k
+
+
+def test_K18_a_call_past_its_timeout_fails_and_says_where(k18):
+    k18["t"] = slow[mod.map(), mod.try_except(), mod.timeout(seconds=0.05)](wf["x"])
+    started = time.perf_counter()
+    k18.run_all()
+    assert time.perf_counter() - started < 0.35                       # didn't wait for the slow call
+    note = k18.step("t").output.notes[1]
+    assert note["where"] == "timeout" and "took longer than 0.05s" in note["error"]
+    assert k18.step("t").data["value"].tolist()[0::2] == [1, 3]
+
+
+def test_G7_a_failure_says_which_layer_gave_up(k18):
+    k18["r"] = risky[mod.map(), mod.try_except(), mod.retry(times=2)](wf["x"])
+    k18["rn"] = mod.rename(columns={"value": "n"})(wf["r"])
+    k18["u"] = risky[mod.map()](wf["rn"])                              # reads the failed row
+    k18.run_all()
+    assert k18.step("r").output.notes[1]["where"] == "retry"
+    assert k18.step("r").output.notes[1]["attempts"] == 3
+    assert k18.step("u").output.notes[1]["where"] == "upstream"
+
+
+def test_G6_a_default_that_doesnt_fit_the_return_type_warns(k18):
+    k18["d"] = risky[mod.map(), mod.try_except(default="n/a")](wf["x"])
+    assert [w.code for w in k18.step("d").warnings] == ["default_type"]
+    k18.run_all()
+    assert any("used try_except's default" in str(w) for w in k18.step("d").warnings)
+
+
+def test_G7_a_modifier_before_the_verb_says_it_covers_the_whole_step(k18):
+    k18["o"] = risky[mod.retry(times=2), mod.map()](wf["x"])
+    assert [w.code for w in k18.step("o").warnings] == ["modifier_order"]
+    assert "retries the whole step" in str(k18.step("o").warnings[0])

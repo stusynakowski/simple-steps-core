@@ -147,18 +147,22 @@ def _call(fn: Callable, arg: dict, retries: int) -> tuple[Any, dict]:
                            "attempts": attempt + 1,
                            "seconds": round(time.perf_counter() - started, 6)}
         except _Tolerated as exc:
+            cause = exc.__cause__
             return None, {"status": "failed", "error": str(exc),
-                          "attempts": attempt + 1, "caught": True,
+                          "attempts": getattr(cause, "attempts", attempt + 1), "caught": True,
+                          "where": getattr(cause, "where", "tool"),
                           "seconds": round(time.perf_counter() - started, 6)}
         except _Stopped as exc:
             # The breaker tripped earlier in this step: not run, nothing spent.
             return None, {"status": "failed", "error": str(exc), "attempts": 0,
-                          "seconds": 0.0}
+                          "where": "breaker", "seconds": 0.0}
         except Exception as exc:
             if attempt >= retries:
+                # Where it failed (G7): the tool, or the layer that gave up on it.
                 return None, {"status": "failed",
                               "error": f"{type(exc).__name__}: {exc}",
-                              "attempts": attempt + 1,
+                              "attempts": getattr(exc, "attempts", attempt + 1),
+                              "where": getattr(exc, "where", "tool"),
                               "seconds": round(time.perf_counter() - started, 6),
                               "traceback": traceback.format_exc()}
             attempt += 1

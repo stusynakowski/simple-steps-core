@@ -31,7 +31,11 @@ green, and it is committed. *Today* lines were run at `39835bc`.
 
 ## 3. The path
 
-### Step A. Outputs, finished
+### Step A. Outputs, finished ✓
+
+*Done 2026-10-27*: G5, G8, G9, G12 (every form, and kernel-wide naming), G6,
+G7, K18. Tests in `tests/unit/test_outputs.py`. `scripts/core_asks.py`: 36 of
+39.
 
 | Feature | Designed in | Today |
 |---|---|---|
@@ -39,8 +43,8 @@ green, and it is committed. *Today* lines were run at `39835bc`.
 | **G8** a declared record type (`-> LoHi`) spreads into one column per field ✓ | outputs-and-reshaping.md §3 (decided 2026-10-26) | built, under `map`, `expand` (`-> list[LoHi]`), `collapse`, `sweep`, `auto`; each row held to it (§5); one name keeps it in one cell |
 | **G9** `widen` reads declared record types, so its plan is exact ✓ | outputs-and-reshaping.md §6 | built |
 | **G12** `mod.name` as a list, a mapping or a pattern; kernel-wide naming conventions ✓ | outputs-and-reshaping.md §4, §10 (decided 2026-10-26) | built: `Kernel(cat, naming=Naming(pattern=…, case=…))`, saved with the kernel |
-| **G6, G7** a `try_except` default that doesn't fit the return type warns; a step that used defaults warns; a failure note says *where* it failed | grid-model.md §5.1, §5.2 (decided 2026-10-26) | silent; notes have no `where` |
-| **K18** `timeout` is enforced | grid-model.md §6 | ignored: a 0.3 s call with `timeout=0.05` runs to the end |
+| **G6, G7** a `try_except` default that doesn't fit the return type warns; a step that used defaults warns; a failure note says *where* it failed ✓ | grid-model.md §5.1, §5.2 (decided 2026-10-26) | built; also, a modifier written before the verb warns that it covers the whole step |
+| **K18** `timeout` is enforced ✓ | grid-model.md §6 | built: a worker thread with a deadline (A-D2); a late call fails, `where: timeout` |
 
 - **Decide:** G5 (A-D1) and K18 (A-D2), §5. The rest is decided.
 - **Changes for users:** a `-> LoHi` tool's step gets columns `lo`, `hi`
@@ -124,7 +128,7 @@ Then phase 5 (the final docs set) starts.
 | | Decision | Recommended | Step |
 |---|---|---|---|
 | A-D1 | **G5:** a fold with no `initial=` — **decided and built** 2026-10-27: it starts from `initial=` if given (a value or a reference), else a built-in's empty value, else its accumulator's type's (`acc: float` → `0.0`, `list` → `[]`); untyped or `X \| None` starts at `None`, and a failure there says to give `initial=`; a type with no empty value is refused when declared. Was: | start from the reducer's empty value when it has one (as R6 did for built-ins); otherwise refuse when declared: *"add(acc, n) has no starting value: give initial="*. Only when none is given: `initial=0`, or a reference (`initial=wf["s"][0][cols["value"]]`, even before `s` has run; it is read when the step runs) counts as given | A |
-| A-D2 | **K18:** how `timeout` is enforced | each call in a worker thread with a deadline; a call past it fails, `where: timeout`. A thread can't be stopped, so the call may finish in the background, and its result is dropped | A |
+| A-D2 | **K18:** how `timeout` is enforced — **decided and built** 2026-10-27, as recommended. Was: | each call in a worker thread with a deadline; a call past it fails, `where: timeout`. A thread can't be stopped, so the call may finish in the background, and its result is dropped | A |
 | B-D1 | K26's page size | 50 rows, as interactive-sessions.md suggests; the host can ask for another | B |
 | C-D1 | **K25:** a resource reports its data version by | a method, `data_version()`, called before a run; a setting can't change while the resource lives | C |
 | D-D1 | **the autorun modifier** | design it before step D starts: triggers, chains, cost guards, pacing (interactive-sessions.md §6.2) | D |

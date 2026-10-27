@@ -1783,6 +1783,11 @@ class Workflow:
             _apply_naming(resolved, step.output, step_id, self.default_name_rule(resolved))
             _carry_id_columns(resolved, source, step.output)
             found = step.output.meta.pop("warnings", None) or []
+            defaulted = [i for i, n in step.output.notes.items()
+                         if n.get("caught") and str(step.output.row_states.get(i)) == "known"]
+            if defaulted:                         # G7: a default stood in for a result
+                found.append(f"{len(defaulted)} row{'s' if len(defaulted) != 1 else ''} "
+                             f"used try_except's default; the notes keep the errors")
             if found:                             # said while running (J-D3)
                 step.warnings = tuple(dict.fromkeys(
                     [*step.warnings, *(Problem(w, "run_warning", step=step_id, severity="warning")

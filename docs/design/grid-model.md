@@ -133,7 +133,7 @@ reducers `count`, `total`, `gather`, `first`, `last` for `collapse`.
 | `mod.try_except(default=d)` | `known`, holding `d`; the note keeps the error | `completed`, **with a warning** naming how many rows used the default | no |
 | `mod.try_except(on=["ValueError"], …)` | as above, for those errors; others are not handled | | |
 
-*Today* all of this holds except the warning.
+*Today* all of this holds, the warning included (G7, phase 4).
 
 **The default's type.** A default becomes a value in the column, so it must fit
 the column's type (the tool's declared return type, K27):
@@ -145,8 +145,7 @@ the column's type (the tool's declared return type, K27):
 | doesn't fit (`"n/a"` for `-> int`) | `int \| str` | a **warning when declared**: *"default 'n/a' is str, but risky returns int; the column will be int \| str"*. In strict mode, a problem |
 | the tool's return type is unknown | the observed type of the other rows, joined with the default's | nothing extra |
 
-*Today* a default that doesn't fit is accepted silently: `default="n/a"` on
-`-> int` makes the column `object`, with no warning (G6).
+*Built (phase 4):* a default that doesn't fit warns when declared (G6).
 
 ### 5.2 Where an error happened
 
@@ -162,8 +161,8 @@ which layer gave up, not only the exception:
 | `expect` | the output broke what `expect` promised |
 | `upstream` | `blocked`: an input row failed; the note names the step and row |
 
-*Today* notes have the error, `cause`, `caught`, `attempts` and `unit`, but no
-`where`.
+*Built (phase 4):* every failed row's note has `where` (G7): `tool`,
+`timeout`, `retry` (with `attempts`), `breaker` or `upstream`.
 
 ## 6. Modifiers are decorators, applied at run time
 

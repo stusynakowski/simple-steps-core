@@ -47,6 +47,8 @@ CODES: dict[str, str] = {
     "wrong_type": "a value's type doesn't match what the tool declares",
     "empty_input": "a step reads an empty step: one declared with no expression yet",
     "naming_case": "a column a step writes doesn't follow the kernel's naming case",
+    "modifier_order": "an execution modifier written before the verb covers the whole step, not each row",
+    "default_type": "a try_except default doesn't fit the tool's return type",
     "run_warning": "something a step met while it ran: rows that held no list, fields a record didn't declare",
     "not_a_list": "expand was given rows holding no list (None): they gave no rows",
     "unmatched_rows": "rows of two grids would meet with no match core recorded: join, or zip_(…, match_ids=True)",
