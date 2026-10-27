@@ -407,7 +407,8 @@ def _upstream_failures(source: Any) -> dict:
     if source.meta.get("blocked_all"):
         return {index: source.meta["blocked_all"] for index in source.data.index}
     sid = source.meta.get("name") or "input"
-    out = {}
+    # K19: rows a column argument has no row for: (error, cause) each.
+    out = dict(source.meta.get("blocked_rows") or {})
     for row_id in source.ids_in("failed", "blocked"):
         note = source.notes.get(row_id, {})
         out[row_id] = (f"upstream cell {sid}[{row_id}] failed",

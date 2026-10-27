@@ -531,13 +531,16 @@ def test_C7_a_selection_as_an_argument_converts_by_type(prices):
 
     @tool
     def total_f_008(n, prices: float) -> float:
-        return n
+        return n + prices
 
     prices["l"] = total_l_008[mod.map()](prices["o"], prices=prices["p"][cols["price"]])
     prices["f"] = total_f_008[mod.map()](prices["o"], prices=prices["p"][cols["price"]])
-    assert "is a column" in prices.step("f").problems[0]
     prices.run("l")
-    assert prices.step("l").output.values == [151.0, 152.0]
+    assert prices.step("l").output.values == [151.0, 152.0]      # a list: the whole column
+    # K19: a float takes one value per row, from the row with the same id.
+    assert prices.step("f").problems == ()
+    prices.run("f")
+    assert prices.step("f").output.values == [11.0, 22.0]
 
 
 def test_C7_refusals(prices):

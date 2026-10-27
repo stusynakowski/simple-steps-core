@@ -94,3 +94,65 @@ def test_selections_by_id_print_and_read_back(k, text):
     names_ = formula_names(k.catalog.functions)
     k["s"] = eval(text, {"__builtins__": {}}, names_)
     assert k.step("s").formula == text
+
+
+# ── a column as an argument pairs row by row, by id (K19 part 2) ─────────
+@tool
+def scale_r(temp_c: float, w: float = 1) -> float:
+    return round(temp_c * w, 1)
+
+
+@tool
+def scale_untyped_r(temp_c, w=1):
+    return round(temp_c * w, 1)
+
+
+@tool
+def sum_ws_r(temp_c: float, ws: list) -> float:
+    return sum(ws)
+
+
+@pytest.fixture
+def kw():
+    k = Kernel(Catalog(tools=[patients_r, scale_r, scale_untyped_r, sum_ws_r]))
+    k["p"] = patients_r[mod.source()]()
+    k["weights"] = pd.DataFrame({"w": [10, 20, 30]})
+    k["warm"] = mod.sort(by="temp_c", ascending=False)(wf["p"])   # ids 1, 2, 0
+    return k
+
+
+@pytest.mark.parametrize("tool_", [scale_r, scale_untyped_r])
+def test_a_column_pairs_with_the_rows_that_share_its_ids(kw, tool_):
+    kw["s"] = tool_[mod.map()](wf["warm"], w=wf["weights"][cols["w"]])
+    assert kw.step("s").problems == ()
+    kw.run_all()
+    # Ben (id 1) x 20, Cy (id 2) x 30, Ada (id 0) x 10, in the sorted order.
+    assert kw.step("s").data["value"].tolist() == [764.0, 1113.0, 366.0]
+    assert list(kw.step("s").data.index) == [1, 2, 0]
+
+
+def test_a_list_parameter_still_gets_the_whole_column(kw):
+    kw["s"] = sum_ws_r[mod.map()](wf["p"], ws=wf["weights"][cols["w"]])
+    kw.run_all()
+    assert kw.step("s").data["value"].tolist() == [60, 60, 60]
+
+
+def test_a_row_the_column_has_no_value_for_is_blocked_with_the_reason(kw):
+    kw["few"] = pd.DataFrame({"w": [10, 20]})                     # no row 2
+    kw["s"] = scale_r[mod.map()](wf["p"], w=wf["few"][cols["w"]])
+    kw.run_all()                                                  # doesn't stop the run
+    out = kw.step("s").output
+    assert out.data["value"].tolist()[:2] == [366.0, 764.0]
+    assert list(out.row_states) == ["known", "known", "blocked"]
+    assert out.notes[2]["cause"] == "w: 'few' has no row 2"
+
+
+def test_under_a_whole_table_verb_a_column_stays_whole():
+    @tool
+    def tally_r(rows: pd.DataFrame, w: float) -> pd.DataFrame:
+        return rows
+    k = Kernel(Catalog(tools=[patients_r, tally_r]))
+    k["p"] = patients_r[mod.source()]()
+    k["weights"] = pd.DataFrame({"w": [10, 20, 30]})
+    k["t"] = tally_r[mod.table()](wf["p"], w=wf["weights"][cols["w"]])
+    assert [p.code for p in k.step("t").problems] == ["wrong_shape"]

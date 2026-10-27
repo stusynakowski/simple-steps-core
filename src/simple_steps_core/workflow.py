@@ -620,6 +620,23 @@ class Workflow:
         index = step.output.data.index
         return index if len(index) or not step.output.meta.get("staged") else None
 
+    def _with_paired_columns(self, source: Output, paired: dict) -> Output:
+        """*source* with each paired argument as a column, row by row by id
+        (K19). A row the argument has no value for is blocked, saying so."""
+        data = source.data.copy()
+        states = source.states.copy()
+        blocked = {}
+        for name, ref in paired.items():
+            column = _apply_selection(self.steps[ref.id].output.data, ref.rows,
+                                      ref.columns, ref.id).iloc[:, 0]
+            data[name] = column.reindex(data.index)
+            states[name] = _state_column(["known"] * len(data), data.index)
+            for row in data.index:
+                if row not in column.index and row not in blocked:
+                    why = f"{name}: {ref.id!r} has no row {row!r}"
+                    blocked[row] = (why, why)
+        return Output(data, states, {**source.meta, "blocked_rows": blocked})
+
     def _input_for(self, operation: Operation) -> Any | None:
         """The upstream Output this operation reads, once that step has run."""
         if operation.input is None:
@@ -1210,13 +1227,22 @@ class Workflow:
                 step.output = _failed_output(step.operation, str(exc))
             self._restage_after(step_id)
             return step
+        # K19: a column argument a row-wise verb takes one value from is
+        # paired with the input by row id: it joins the input as a column.
+        paired = _paired_arguments(step.operation, self)
+        to_resolve = step.operation
+        if paired:
+            to_resolve = replace(step.operation, arguments={
+                k: v for k, v in step.operation.arguments.items() if k not in paired})
         try:
-            resolved = self._resolve_arguments(step.operation, resources)
+            resolved = self._resolve_arguments(to_resolve, resources)
+            source = self._input_for(resolved)
+            if paired and source is not None:
+                source = self._with_paired_columns(source, paired)
         except SelectionError as exc:
             step.output = _failed_output(step.operation, str(exc))
             self._restage_after(step_id)
             return step
-        source = self._input_for(resolved)
         chosen = None
         if _is_auto(resolved):
             # 008 N: the verb is picked from the data the step really gets.
@@ -1484,6 +1510,7 @@ from .catalog import (  # noqa: E402
     resource_problems,
 )
 from .checks import (  # noqa: E402
+    _paired_arguments,
     ROWS_RULE,
     ROW_ALIGNED,
     _is_tool_verb,
@@ -1507,6 +1534,7 @@ from .modifiers import (  # noqa: E402
 )
 from .operation import Operation, _src  # noqa: E402
 from .output import (  # noqa: E402
+    _state_column,
     Output,
     ROW_ID,
     _data_version,

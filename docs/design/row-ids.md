@@ -1,7 +1,7 @@
 # Row ids: the rules (K19)
 
 > Decided by the owner, 2026-10-27 (D1, D3, D4; D2 taken as recommended).
-> Being built in phase 4, in pieces: **selections — done**; column arguments;
+> Being built in phase 4, in pieces: **selections — done**; **column arguments — done**;
 > `zip_`; the ids new rows get. *Today* notes were run at `6435a98`. This is what makes a reference keep pointing
 > at the same row when the data shifts: selections, column arguments, `zip_`,
 > lineage, and later the row-aligned table view all rest on it.
@@ -61,8 +61,9 @@ is a column, `scale[mod.map()](wf["p"], w=wf["w"][cols["w"]])`:
 | a scalar (`float`, `str`, …) or untyped | **one value per row: the row with the same id** | typed: refused (`wrong_shape`); untyped: the whole list for every row |
 | `list`, `Series`, `DataFrame` | the whole column, for every row | as proposed |
 
-- A row whose id isn't in the argument's step fails, with the note *"row 3
-  isn't in 'w'"*; the other rows run.
+- A row whose id isn't in the argument's step isn't run: it is `blocked`,
+  with the cause *"w: 'few' has no row 2"*. The other rows run, and the run
+  doesn't stop (as for a row whose input failed).
 - Under `table` and `collapse` a column stays whole.
 
 ## 5. `zip_` pairs by row id

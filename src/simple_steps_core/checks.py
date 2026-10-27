@@ -571,8 +571,9 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             annotations = {k: p.annotation for k, p in _signature(fn).parameters.items()}
         except (TypeError, ValueError):
             annotations = {}
+        paired = _paired_arguments(operation, workflow)
         for name, value in operation.arguments.items():
-            if not isinstance(value, StepRef) or name not in annotations:
+            if not isinstance(value, StepRef) or name not in annotations or name in paired:
                 continue
             # 008 C7: a selection's shape is known from how it is written; a
             # whole step's only once it holds data.
@@ -789,6 +790,35 @@ def warn(operation: Operation, workflow: "Workflow | None" = None,
         )
     return _warnings(notes + warnings, step_id)
 
+
+
+#: The verbs that call their tool once per row, so a column given as an
+#: argument can be paired with the input row by row (K19).
+_ROW_BY_ROW = frozenset({"map", "filter", "expand", "group"})
+
+
+def _paired_arguments(operation: Operation, workflow: "Workflow | None") -> dict:
+    """The arguments that pair with the input row by row, name → reference
+    (K19, docs/design/row-ids.md §4): a column, given to a parameter that
+    takes one value (or is untyped), under a verb that runs once per row."""
+    if workflow is None:
+        return {}
+    op_ = operation
+    if _is_auto(op_) and len(op_.shape_verbs) == 1:
+        op_, _, _ = _provisional(op_, workflow)
+    verb = op_.shape_verb
+    if verb is None or verb.kind not in _ROW_BY_ROW:
+        return {}
+    fn = op_.fn or BUILTIN_TOOLS.get(op_.tool)
+    if isinstance(fn, Tool):
+        fn = fn.fn
+    try:
+        annotations = {k: p.annotation for k, p in _signature(fn).parameters.items()}
+    except (TypeError, ValueError):
+        return {}
+    return {name: value for name, value in op_.arguments.items()
+            if isinstance(value, StepRef) and _selection_kind(value) == "column"
+            and name in annotations and _wants(annotations[name]) in (None, "scalar")}
 
 
 def _required_columns(operation: Operation, verb: Any) -> list[str]:
@@ -1437,6 +1467,7 @@ from .references import (  # noqa: E402
 )
 from .run import _is_auto, _provisional  # noqa: E402
 from .values import (  # noqa: E402
+    _wants,
     _TYPE_NAMES,
     _column_fits,
     _declared_schema,
