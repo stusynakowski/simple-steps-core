@@ -45,6 +45,7 @@ CODES: dict[str, str] = {
     "missing_column": "a column the step needs won't be in its input",
     "column_clash": "an output column would replace an input column",
     "wrong_type": "a value's type doesn't match what the tool declares",
+    "unmatched_rows": "rows of two grids would meet with no match core recorded: join, or zip_(…, match_ids=True)",
     "wrong_shape": "a referenced argument's shape (cell, row, column, table) doesn't fit the parameter's type",
     "problem": "anything not covered by another code",
     # warnings

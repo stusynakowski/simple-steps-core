@@ -537,10 +537,16 @@ def test_C7_a_selection_as_an_argument_converts_by_type(prices):
     prices["f"] = total_f_008[mod.map()](prices["o"], prices=prices["p"][cols["price"]])
     prices.run("l")
     assert prices.step("l").output.values == [151.0, 152.0]      # a list: the whole column
-    # K19: a float takes one value per row, from the row with the same id.
-    assert prices.step("f").problems == ()
-    prices.run("f")
-    assert prices.step("f").output.values == [11.0, 22.0]
+    # A float takes one value per row, from its partner row: o is unrelated
+    # to p, so it has none (R-D7) ...
+    assert [p.code for p in prices.step("f").problems] == ["unmatched_rows"]
+    # ... while a step of p's rows pairs by id (K19).
+    prices["q"] = mod.rename(columns={"qty": "n"})(prices["p"])
+    prices["fq"] = total_f_008[mod.map()](prices["q"], prices=prices["p"][cols["price"]])
+    assert prices.step("fq").problems == ()
+    prices.run("q")
+    prices.run("fq")
+    assert prices.step("fq").output.values == [11.0, 22.0, 33.0, 44.0, 55.0]
 
 
 def test_C7_refusals(prices):
@@ -1004,13 +1010,17 @@ def test_009_zip_never_drops_a_row(r3):
 
 
 def test_009_zip_of_loaded_tables_pairs_by_id_and_refuses_extra_rows():
-    """Loaded tables all get ids 0…n-1, so they pair by id; a longer one is refused."""
+    """Loaded tables all get ids 0…n-1, but core didn't make them the same
+    rows: zip_ refuses unless you vouch (R-D7). Vouched, they pair by id, and a
+    longer one is refused."""
     w = Workflow()
     w["a"] = pd.DataFrame({"x": [1, 2]})
     w["b"] = pd.DataFrame({"y": [3, 4]})
     w["c"] = pd.DataFrame({"z": [5, 6, 7]})
-    w["ab"] = zip_(w["a"], w["b"])
-    w["ac"] = zip_(w["a"], w["c"])
+    w["unsaid"] = zip_(w["a"], w["b"])
+    assert w.step("unsaid").state == "invalid"
+    w["ab"] = zip_(w["a"], w["b"], match_ids=True)
+    w["ac"] = zip_(w["a"], w["c"], match_ids=True)
     w.run("ab")
     w.run("ac")
     assert w.step("ab").output.data.to_dict("list") == {"x": [1, 2], "y": [3, 4]}

@@ -661,14 +661,21 @@ class Workflow:
         data = source.data.copy()
         states = source.states.copy()
         blocked = {}
+        here = source.meta.get("name")
         for name, ref in paired.items():
             column = _apply_selection(self.steps[ref.id].output.data, ref.rows,
                                       ref.columns, ref.id).iloc[:, 0]
-            data[name] = column.reindex(data.index)
+            # Each row's partner: the same row, or the row it came from (a
+            # parent's value reaches each of its children), by following `#`
+            # columns. Ids match exactly.
+            partners = (self.trace(here, list(data.index), ref.id) if here else None) \
+                or list(data.index)
+            data[name] = [column[p] if p is not None and p in column.index else None
+                          for p in partners]
             states[name] = _state_column(["known"] * len(data), data.index)
-            for row in data.index:
-                if row not in column.index and row not in blocked:
-                    why = f"{name}: {ref.id!r} has no row {row!r}"
+            for row, p in zip(data.index, partners):
+                if (p is None or p not in column.index) and row not in blocked:
+                    why = f"{name}: {ref.id!r} has no row {_plain(row if p is None else p)!r}"
                     blocked[row] = (why, why)
         return Output(data, states, {**source.meta, "blocked_rows": blocked})
 
@@ -1036,8 +1043,8 @@ class Workflow:
                 if extra:
                     found.append(f"A4 {step_id}: row {_plain(extra[0])!r} isn't a row of {str(op_.input)!r}")
         meeting = []
-        if is_combine(op_) and op_.tool == "zip":
-            grids = [str(g) for g in op_.grids]
+        if is_combine(op_) and op_.tool == "zip" and not op_.arguments.get("match_ids"):
+            grids = [str(g) for g in op_.grids]   # (match_ids=True: the user vouched)
             meeting = [(a, b) for n, a in enumerate(grids) for b in grids[n + 1:]]
         elif op_.input is not None:
             meeting = [(str(op_.input), ref.id) for ref in _paired_arguments(op_, self).values()]
@@ -1051,6 +1058,14 @@ class Workflow:
                 and rows_["count"] != len(data):
             found.append(f"A6 {step_id}: planned {rows_['count']} rows, got {len(data)}")
         return found
+
+    def _reaches(self, a: str, b: str) -> bool:
+        """Does each row of step *a* have one row of step *b* it came from, or is
+        it that row? (A child reaches its parent; a parent doesn't reach its
+        children: it has several.)"""
+        if self._same_ids(a) & self._same_ids(b):
+            return True
+        return a in self.steps and self.trace(a, list(self.steps[a].output.data.index), b) is not None
 
     def _matched(self, a: str, b: str) -> bool:
         """Did core record how rows of steps *a* and *b* match (reshaping.md §6)?"""
@@ -1113,9 +1128,8 @@ class Workflow:
                       if c in out.states.columns}
             return {**entry, "rows": [_plain(i) for i in ids],
                     "state": _worst(states, out.meta.get("stale")), "values": {}}
-        lookup = _row_lookup(out.data)
-        key = str(row_id)
-        match = key if row_id is not None and key in lookup else None
+        lookup = _row_lookup(out.data)           # exact: 1 is not "1"
+        match = row_id if row_id is not None and row_id in lookup else None
         if match is None:
             return {**entry, "state": "missing", "values": {}}
         input_id = lookup[match]

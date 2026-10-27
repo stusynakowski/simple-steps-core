@@ -28,8 +28,8 @@ def _combine_stack(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
 
 
 def _row_lookup(frame: pd.DataFrame) -> dict:
-    """str(row id) → row id, to match ids across grids whatever their type."""
-    return {str(i): i for i in frame.index}
+    """row id → row id. Ids match exactly: ``1`` is not ``"1"`` (reshaping.md §6)."""
+    return {i: i for i in frame.index}
 
 
 def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
@@ -47,7 +47,7 @@ def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
     rows are never paired by position (K19).
     """
     names = [f.attrs.get("name") or f"input {i + 1}" for i, f in enumerate(frames)]
-    traces = [f.attrs.get("traces") or {} for f in frames]
+    traces = [{} if config.get("match_ids") else (f.attrs.get("traces") or {}) for f in frames]
 
     def finer(i: int, j: int) -> bool:
         """Do *i*'s rows come from *j*'s, and not the other way round?"""
@@ -59,7 +59,7 @@ def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
     primary = max(range(len(frames)),
                   key=lambda i: (sum(finer(i, j) for j in range(len(frames))), -i))
     target = frames[primary].index
-    keys = [str(t) for t in target]
+    keys = list(target)
     aligned, picked_ids = [], []
     for i, frame in enumerate(frames):
         if i == primary:
@@ -68,8 +68,7 @@ def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
             continue
         lookup = _row_lookup(frame)
         traced = traces[primary].get(i)
-        wanted = ([None if t is None else str(t) for t in traced] if traced is not None
-                  else keys)
+        wanted = list(traced) if traced is not None else keys
         related = any(k in lookup for k in wanted if k is not None)
         if not related and len(frame):
             # K19: rows pair by id, never by position (docs/design/row-ids.md §5).
@@ -125,7 +124,8 @@ def _zip_clash(named: list[tuple[str, list]]) -> str | None:
     return None
 
 
-def _rows_text(keys: list[str]) -> str:
+def _rows_text(keys: list) -> str:
+    keys = [str(k) for k in keys]
     shown = ", ".join(keys[:5]) + ("…" if len(keys) > 5 else "")
     return f"row{'s' if len(keys) > 1 else ''} {shown}"
 
@@ -165,11 +165,16 @@ def stack(*grids: Any, join: str = "outer") -> Operation:
     return _combine_op("stack", grids, {"join": join})
 
 
-def zip_(*grids: Any) -> Operation:
-    """Join grids **by position**, row *i* with row *i* — a horizontal concat.
-    Refuses grids of unequal length. Named ``zip_`` so it does not shadow the
-    builtin ``zip``."""
-    return _combine_op("zip", grids, {})
+def zip_(*grids: Any, match_ids: bool = False) -> Operation:
+    """Put grids side by side, each row beside the rows it matches.
+
+    Rows match only as core recorded it (docs/design/reshaping.md §6): the
+    same rows (one origin), or a row and the one it came from. Anything else
+    is refused when the step is declared. ``match_ids=True`` is you vouching
+    that the grids number the same samples the same way: their ids must then
+    be the same set, of the same type. Named ``zip_`` so it does not shadow
+    the builtin ``zip``."""
+    return _combine_op("zip", grids, {"match_ids": True} if match_ids else {})
 
 
 def join(left: Any, right: Any, *, on: Any = None, how: str = "inner",

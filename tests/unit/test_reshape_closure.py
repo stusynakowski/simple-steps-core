@@ -239,7 +239,6 @@ def test_L15_a_joined_cell_traces_to_its_pair(k):
     assert all(i["state"] == "known" for i in inputs)
 
 
-@pytest.mark.xfail(strict=True, reason="R-D7: no origins; counted ids pair by accident (M5)")
 def test_L16_zip_across_origins_is_refused_when_declared(k):
     k["jw"] = join(wf["w"], wf["v"], on="ward")
     k["jn"] = mod.select(columns=["head"])(wf["jw"])
@@ -247,7 +246,6 @@ def test_L16_zip_across_origins_is_refused_when_declared(k):
     assert state(k, "z") == "invalid"
 
 
-@pytest.mark.xfail(strict=True, reason="R-D7: refused when it runs (M9 fixed), not yet when declared")
 def test_L16b_items_a_tool_rewrote_dont_pair_with_the_packed_rows(k):
     k["packed"] = gather[mod.collapse()](wf["t"])
     k["rev"] = backwards_rc[mod.map()](wf["packed"])
@@ -282,7 +280,6 @@ def test_L19_distinct_traces_to_every_row_it_stands_for(k):
     assert inp["rows"] == [0, 1, 3]
 
 
-@pytest.mark.xfail(strict=True, reason="R-D7, R-D9: table keeps the tool's index (M6)")
 def test_L20_a_table_is_its_own_origin(k):
     k["tb"] = reorder_rc[mod.table()](wf["v"])                      # ids 0…3, other rows
     k["names"] = mod.select(columns=["name"])(wf["v"])
@@ -506,7 +503,6 @@ def strs_rc() -> pd.DataFrame:
     return pd.DataFrame({"y": ["a", "b"]}, index=["1", "2"])
 
 
-@pytest.mark.xfail(strict=True, reason="R-D7 (step 4): column arguments pair equal ids across origins (M10)")
 def test_L36_a_column_argument_from_another_origin_is_refused():
     k = Kernel(Catalog(tools=[visits_rc, wards_rc, label_rc]))
     k["v"] = visits_rc[mod.source()]()
@@ -517,7 +513,6 @@ def test_L36_a_column_argument_from_another_origin_is_refused():
     assert state(k, "lab") == "invalid"
 
 
-@pytest.mark.xfail(strict=True, reason="R-D7 (step 4): ids are matched as text, so 1 pairs with '1' (M11)")
 def test_L37_ids_keep_their_type():
     k = Kernel(Catalog(tools=[ints_rc, strs_rc]))
     k["a"] = ints_rc[mod.source()]()
@@ -527,7 +522,6 @@ def test_L37_ids_keep_their_type():
     assert state(k, "z") == "failed"
 
 
-@pytest.mark.xfail(strict=True, reason="R-D7 (step 4): no match_ids opt-in")
 def test_L38_match_ids_pairs_equal_ids_on_purpose():
     k = Kernel(Catalog(tools=[ints_rc]))
     k["a"] = ints_rc[mod.source()]()
@@ -588,7 +582,6 @@ def m():
     return k
 
 
-@pytest.mark.xfail(strict=True, reason="R-D7 (step 4): column arguments don't follow #v yet (M12)")
 def test_L42_a_column_argument_from_a_parent_reaches_each_child(m):
     from simple_steps_core import cols
     m["c"] = scale_rc[mod.map()](wf["e"], temp=wf["v"][cols["temp"]])
@@ -596,7 +589,6 @@ def test_L42_a_column_argument_from_a_parent_reaches_each_child(m):
     assert data(m, "c").loc["0.1", "value"] == 30 * 37.0                # Ada's item 1 × Ada's temp
 
 
-@pytest.mark.xfail(strict=True, reason="R-D7 (step 4): refused only when it runs")
 def test_L43_a_scalar_argument_from_children_into_their_parent_is_refused(m):
     from simple_steps_core import cols
     m["c"] = tag_rc[mod.map()](wf["v"], t=wf["e"][cols["value"]])
@@ -604,7 +596,6 @@ def test_L43_a_scalar_argument_from_children_into_their_parent_is_refused(m):
     assert any("collapse" in str(p) for p in m.workflow.steps["c"].problems)
 
 
-@pytest.mark.xfail(strict=True, reason="R-D7 (step 4): refused only for a column clash (M13)")
 def test_L44_siblings_dont_pair_item_by_item(m):
     m["d"] = doses_rc[mod.expand(), mod.name("dose")](wf["v"])
     m["z"] = zip_(wf["e"], wf["d"])
@@ -612,7 +603,6 @@ def test_L44_siblings_dont_pair_item_by_item(m):
     assert not any("is in both" in str(p) for p in m.workflow.steps["z"].problems)
 
 
-@pytest.mark.xfail(strict=True, reason="R-D7 (step 4): refused only for the shared 'patient' column")
 def test_L45_a_shared_index_name_is_not_a_match(m):
     m["a"] = patients_a_rc[mod.source()]()
     m["b"] = patients_b_rc[mod.source()]()

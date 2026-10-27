@@ -24,10 +24,11 @@ comes off.
 |---|---|---|
 | 1 ✓ | reducers give their empty value over no rows (R6); `k.cell` takes a row id (M7) | `8d622ed` |
 | 2 ✓ | `#` is the row id (R-D11, R8); `expand` writes `#v` and steps that keep ids carry it (R-D10); rows are followed back through `#` columns, never by parsing ids (R-D6, M8, M9) | `b2ac908`, `45b547a`, `464e423` |
-| 3 ✓ | the invariant check runs on every step of every test (`tests/conftest.py`, `Workflow.check_invariants`); it found and fixed P1–P3 and S1–S6 (§6); A5 is reported, enforced from step 4 | this commit |
+| 3 ✓ | the invariant check runs on every step of every test (`tests/conftest.py`, `Workflow.check_invariants`); it found and fixed P1–P3 and S1–S6 (§6) | `e2761d9` |
+| 4 ✓ | rows meet only through a recorded match, checked when declared (R-D7): `zip_` and column arguments; `zip_(…, match_ids=True)`; ids match exactly; a parent's value reaches each child; A5 is enforced in every test | this commit |
 
-**19 of the 48 law tests hold:** L2, L7–L11, L14, L17, L18, L28–L30, L34,
-L35, L39, L41, L46–L48. The other 29 are marked with the step that fixes
+**29 of the 48 law tests hold:** L2, L7–L11, L14, L16, L16b, L17, L18, L20,
+L28–L30, L34–L39, L41–L48. The other 19 are marked with the step that fixes
 them. L40 (the property test) is built in step 10.
 
 ## 3. The path
@@ -61,7 +62,13 @@ becomes `variables(…)`, or says why it means every column.
   tests into failures now, before the next steps build on them. Each one it
   finds becomes a finding in §6.
 
-### Step 4. Same samples (guarantee 3)
+### Step 4. Same samples (guarantee 3) ✓
+
+*Done 2026-10-27.* Six existing tests paired unrelated steps by equal ids
+(K19's earlier behaviour). They now show the rule: the unrelated pairing is
+refused when declared, with the hint, and a matched version still pairs.
+
+What was planned:
 
 One check, built on `Workflow.trace` and made when a step is declared:
 *does every row have exactly one partner, through a link core recorded?*
@@ -202,15 +209,15 @@ Found by running core, 2026-10-27. Wrong answers given silently are in bold.
 | M2 | `collapse(by=…)`'s groups are kept in a note, not a `#` column (per-group staleness works from the note: L41) | step 5 |
 | M3 | `distinct` traces a kept row only to itself | step 5 |
 | M4 | `join` and `stack` trace to whole steps | step 5 |
-| **M5** | **`zip_(v, select(join(w, v)))` puts Ben beside Dr X: counted ids pair by accident** | step 4 |
-| M6 | `table` keeps the tool's index, so its rows claim to be its input's rows | step 4 |
+| **M5** | **`zip_(v, select(join(w, v)))` puts Ben beside Dr X: counted ids pair by accident** | fixed (step 4) |
+| M6 | `table` keeps the tool's index, so its rows claim to be its input's rows | fixed (step 4) |
 | M7 | `k.cell` took a position | fixed (step 1) |
 | **M8** | **lineage parsed id strings: a source with ids `a`, `a.1` traced an `expand`'s rows to the wrong parent** | fixed (step 2) |
 | **M9** | **`zip_` parsed id strings: `zip_(v, expand(gather(v)))` put every row beside `v`'s row 0** | fixed (step 2): refused; pairs correctly after step 6 |
-| **M10** | **a column argument pairs rows by equal ids across unrelated steps: `label(name, head=wf["jw"][cols["head"]])` gives Ben/Dr X** | step 4 |
-| **M11** | **ids are matched as text: an int id `1` and a string id `"1"` pair as one row** | step 4 |
-| M12 | a column argument from a parent into its child fails (*"'v' has no row '0.0'"*), though `zip_` makes the same match | step 4 |
-| M13 | two `expand`s of one step are refused only for a column-name clash; renamed, they would pair item *j* with item *j* | step 4 |
+| **M10** | **a column argument pairs rows by equal ids across unrelated steps: `label(name, head=wf["jw"][cols["head"]])` gives Ben/Dr X** | fixed (step 4) |
+| **M11** | **ids are matched as text: an int id `1` and a string id `"1"` pair as one row** | fixed (step 4) |
+| M12 | a column argument from a parent into its child fails (*"'v' has no row '0.0'"*), though `zip_` makes the same match | fixed (step 4) |
+| M13 | two `expand`s of one step are refused only for a column-name clash; renamed, they would pair item *j* with item *j* | fixed (step 4) |
 | P1 | a row selection's plan claimed its input's row count, exactly (`wf["srt"][0:2]` planned 3 rows, got 2) | fixed (step 3) |
 | P2 | `widen()` with no `columns=` planned exactly `['value']` | fixed (step 3): its columns are planned as unknown until it runs |
 | P3 | `collapse(by=a_tool)` planned exactly 1 row and `['value']` | fixed (step 3): one row per group, columns unknown until it runs |

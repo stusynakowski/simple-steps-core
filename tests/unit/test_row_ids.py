@@ -112,23 +112,34 @@ def sum_ws_r(temp_c: float, ws: list) -> float:
     return sum(ws)
 
 
+@tool
+def weight_r(name: str) -> int:
+    return {"Ada": 10, "Ben": 20, "Cy": 30}[name]
+
+
 @pytest.fixture
 def kw():
-    k = Kernel(Catalog(tools=[patients_r, scale_r, scale_untyped_r, sum_ws_r]))
+    k = Kernel(Catalog(tools=[patients_r, scale_r, scale_untyped_r, sum_ws_r, weight_r]))
     k["p"] = patients_r[mod.source()]()
-    k["weights"] = pd.DataFrame({"w": [10, 20, 30]})
+    k["weights"] = pd.DataFrame({"w": [10, 20, 30]})              # unrelated to p
+    k["wts"] = weight_r[mod.map(), mod.name("w")](wf["p"])         # p's rows: Ada 10, Ben 20, Cy 30
     k["warm"] = mod.sort(by="temp_c", ascending=False)(wf["p"])   # ids 1, 2, 0
     return k
 
 
 @pytest.mark.parametrize("tool_", [scale_r, scale_untyped_r])
 def test_a_column_pairs_with_the_rows_that_share_its_ids(kw, tool_):
-    kw["s"] = tool_[mod.map()](wf["warm"], w=wf["weights"][cols["w"]])
+    """Within one origin a column argument pairs by id, wherever a sort put the
+    rows; from an unrelated step it is refused (R-D7, reshaping.md §6)."""
+    kw["s"] = tool_[mod.map()](wf["warm"], w=wf["wts"][cols["w"]])
     assert kw.step("s").problems == ()
     kw.run_all()
     # Ben (id 1) x 20, Cy (id 2) x 30, Ada (id 0) x 10, in the sorted order.
     assert kw.step("s").data["value"].tolist() == [764.0, 1113.0, 366.0]
     assert list(kw.step("s").data.index) == [1, 2, 0]
+    kw["u"] = tool_[mod.map()](wf["warm"], w=wf["weights"][cols["w"]])
+    assert [p.code for p in kw.step("u").problems] == ["unmatched_rows"]
+    assert "match_ids=True" in kw.step("u").problems[0]
 
 
 def test_a_list_parameter_still_gets_the_whole_column(kw):
@@ -138,7 +149,7 @@ def test_a_list_parameter_still_gets_the_whole_column(kw):
 
 
 def test_a_row_the_column_has_no_value_for_is_blocked_with_the_reason(kw):
-    kw["few"] = pd.DataFrame({"w": [10, 20]})                     # no row 2
+    kw["few"] = mod.slice(stop=2)(wf["wts"])                      # p's rows 0, 1: no row 2
     kw["s"] = scale_r[mod.map()](wf["p"], w=wf["few"][cols["w"]])
     kw.run_all()                                                  # doesn't stop the run
     out = kw.step("s").output
@@ -217,12 +228,14 @@ def test_zip_refuses_grids_that_share_no_row_ids_rather_than_pair_by_position():
     k = Kernel(Catalog(tools=[patients_r, notes_r]))
     k["p"] = patients_r[mod.source()]()                          # ids 0, 1, 2
     k["n"] = notes_r[mod.source()]()                             # ids Ada, Ben, Cy: same length
-    k["side"] = zip_(wf["p"], wf["n"])
+    k["side"] = zip_(wf["p"], wf["n"])                            # unrelated: refused when declared
+    assert k.step("side").state == "invalid"
+    assert "join(p, n" in k.step("side").problems[0]
+    k["vouched"] = zip_(wf["p"], wf["n"], match_ids=True)         # vouched, but the ids differ
     from simple_steps_core.errors import StepFailed
-    with pytest.raises(StepFailed, match="share none"):            # the run stops on it
+    with pytest.raises(StepFailed, match="share none"):
         k.run_all()
-    assert k.step("side").state == "failed"
-    assert "Use join" in str(k.step("side").output.notes)
+    assert "Use join" in str(k.step("vouched").output.notes)
 
 
 BASE = {"name": ["Ada", "Ben", "Cy", "Di"], "ward": ["A", "B", "A", "B"],

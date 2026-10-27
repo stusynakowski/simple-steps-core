@@ -620,6 +620,12 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
 
     coded(problems, "wrong_shape")
 
+    # 6g. rows of two grids meet only as core recorded they match: the same
+    #     rows, or a row and the one it came from (reshaping.md §6, R-D7).
+    if workflow is not None:
+        problems.extend(_unmatched_rows(operation, workflow))
+    coded(problems, "unmatched_rows")
+
     # 6f. a selection is checked against what is already known about its step
     #     (008 C7.7, C7.11): a column name it lacks, a position past the end.
     if workflow is not None:
@@ -826,6 +832,44 @@ def warn(operation: Operation, workflow: "Workflow | None" = None,
 #: The verbs that call their tool once per row, so a column given as an
 #: argument can be paired with the input row by row (K19).
 _ROW_BY_ROW = frozenset({"map", "filter", "expand", "group"})
+
+
+def _unmatched_rows(operation: Operation, workflow: "Workflow") -> list[str]:
+    """Where rows would meet with no match core recorded (reshaping.md §6.1)."""
+    found = []
+    if is_combine(operation) and operation.tool == "zip":
+        if operation.arguments.get("match_ids"):
+            return []                       # you vouched; the ids are checked when it runs
+        grids = [str(g) for g in operation.grids]
+        for n, a in enumerate(grids):
+            for b in grids[n + 1:]:
+                if a in workflow.steps and b in workflow.steps and not workflow._matched(a, b):
+                    found.append(
+                        f"zip_: {a!r} and {b!r} don't come from the same rows, so core "
+                        f"doesn't know how they match. To match on a column: "
+                        f"join({a}, {b}, on=…); if their ids mean the same samples: "
+                        f"zip_({a}, {b}, match_ids=True)")
+        return found
+    if operation.input is None:
+        return found
+    source = str(operation.input)
+    for name, ref in _paired_arguments(operation, workflow).items():
+        if ref.id not in workflow.steps or source not in workflow.steps:
+            continue
+        if workflow._reaches(source, ref.id):
+            continue
+        if workflow._reaches(ref.id, source):
+            found.append(
+                f"{name}: each row of {source!r} has several rows of {ref.id!r}, so core "
+                f"can't choose one. Reduce them first: collapse(by=\"#{source}\"); "
+                f"or take the whole column with a list parameter")
+        else:
+            found.append(
+                f"{name}: the rows of {ref.id!r} aren't the rows of {source!r}, so core "
+                f"doesn't know how they match. join them, or zip_({source}, {ref.id}, "
+                f"match_ids=True) if their ids mean the same samples, and read the "
+                f"column from that")
+    return found
 
 
 def _paired_arguments(operation: Operation, workflow: "Workflow | None") -> dict:

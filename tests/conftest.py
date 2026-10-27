@@ -12,11 +12,9 @@ import pytest
 
 from simple_steps_core.workflow import Workflow
 
-#: Checks not yet enforced, with the step of docs/design/reshaping-plan.md that
-#: enforces them. A5 (rows of two grids meet only through a recorded match) is
-#: what step 4 (R-D7) builds; until then the tests that zip unrelated steps
-#: break it, and are listed in the plan.
-PENDING = {"A5": "step 4"}
+#: Checks not yet enforced, with the step of docs/design/reshaping-plan.md
+#: that enforces them. Empty: every check is enforced.
+PENDING: dict[str, str] = {}
 
 
 def pytest_configure(config):
