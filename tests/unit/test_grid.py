@@ -2161,7 +2161,7 @@ def test_a_labelled_index_is_the_row_ids_and_kept_as_a_column(three):
     assert list(wf.step("s").output.data.index) == ["p", "q"]
     back = Workflow.from_json(wf.to_session_json(), TOOLS)
     assert list(back.step("s").output.data.index) == ["p", "q"]
-    assert list(back.step("raw").output.view()["#"]) == [0, 1]
+    assert list(back.step("raw").output.view()["#"]) == ["p", "q"]
 
 
 # ─────────────────────────────────────────────────────────────────────────

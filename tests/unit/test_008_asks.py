@@ -1614,9 +1614,9 @@ def test_C25_row_staleness_survives_a_saved_session(rows3):
 
 
 # ── "#" is the row-id column (2026-10-23) ───────────────────────────────
-def test_hash_is_the_row_number_0_to_n_minus_1_on_every_step(wf):
-    """'#' always counts 0…n-1 down the grid — even after a filter, whose rows
-    still link to the input rows they came from (internally, by id)."""
+def test_hash_is_the_row_id_on_every_step(wf):
+    """'#' is each row's id (reshaping.md R-D11) — after a filter, the ids of
+    the input rows it kept; the row's position on screen is `position`."""
     @tool
     def big_hash(n: int) -> bool:
         return n > 1
@@ -1624,8 +1624,9 @@ def test_hash_is_the_row_number_0_to_n_minus_1_on_every_step(wf):
     wf["k"] = big_hash[mod.filter()](wf["readings"])        # keeps input rows 1, 2, 3
     wf["s"] = scale_008[mod.map()](wf["k"])
     wf.run_all()
-    assert list(wf.step("s").output.view()["#"]) == [0, 1, 2]
-    assert [r["#"] for r in wf.preview("s")["rows"]] == [0, 1, 2]
+    assert list(wf.step("s").output.view()["#"]) == [1, 2, 3]
+    assert [r["#"] for r in wf.preview("s")["rows"]] == [1, 2, 3]
+    assert [r["position"] for r in wf.preview("s")["rows"]] == [0, 1, 2]
     cell = wf.cell("s", 0, "value")                          # '#0' of s
     assert cell["inputs"][0]["step"] == "k" and cell["inputs"][0]["row"] == 0
     assert wf.cell("k", 0, "n")["inputs"][0]["row"] == 1     # k's #0 is readings' #1
@@ -1646,7 +1647,7 @@ def test_a_tables_own_index_is_its_row_ids():
     w["q"] = pd.DataFrame({"n": [7]}, index=[10])                    # unnamed
     assert list(w.step("p").output.data.index) == ["a", "b"]
     assert w.step("p").output.view()[["#", "code", "n"]].to_dict("list") == {
-        "#": [0, 1], "code": ["a", "b"], "n": [5, 6]}
+        "#": ["a", "b"], "code": ["a", "b"], "n": [5, 6]}
     assert list(w.step("q").output.data.index) == [10]
     assert list(w.step("q").output.data.columns) == ["n"]
     w["dup"] = pd.DataFrame({"n": [1, 2]}, index=[7, 7])             # not unique

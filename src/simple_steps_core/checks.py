@@ -306,7 +306,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         if not isinstance(to, str) or not to.strip():
             problems.append(f"mod.name needs a column name, got {to!r}")
         elif to == ROW_ID:
-            problems.append(f"{ROW_ID!r} is the row number; name the column something else")
+            problems.append(f"{ROW_ID!r} is the row id; name the column something else")
         elif verb_ is not None and verb_.kind not in NAMED_VERBS and verb_.kind != "auto":
             problems.append(
                 f"{verb_.kind} writes no new values, so there is nothing to name; "

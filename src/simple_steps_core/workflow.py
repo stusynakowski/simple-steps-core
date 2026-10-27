@@ -764,7 +764,7 @@ class Workflow:
                         cell.update({k: v for k, v in note.items() if k in ("error", "cause")})
                     cells[str(c)] = cell
                 row_state = str(row_states[row_id])
-                result.append({ROW_ID: position, "position": position, "id": _plain(row_id),
+                result.append({ROW_ID: _plain(row_id), "position": position, "id": _plain(row_id),
                                "state": "stale" if stale and row_state == "known" else row_state,
                                "cells": cells})
             return result
@@ -775,7 +775,7 @@ class Workflow:
         if not index and ROWS_RULE.get(verb) == "at_most":
             known = self._known_index(step.operation)
             index, state = (list(known) if known is not None else []), "maybe"
-        return [{ROW_ID: i, "position": i, "id": _plain(row_id), "state": state,
+        return [{ROW_ID: _plain(row_id), "position": i, "id": _plain(row_id), "state": state,
                  "cells": {c: {"state": state, "type": types.get(c, "any")} for c in names}}
                 for i, row_id in enumerate(index)]
 

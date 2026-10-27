@@ -17,10 +17,10 @@ import pandas as pd
 VALUE_COLUMN = "value"
 
 
-#: The row-number column, ``#``: 0…n-1 down every step's grid, in order. It's
-#: what a user sees, clicks and references (``cols["#"]``, ``rows[…]``,
-#: ``wf.cell(step, row, …)``). Reserved: a table can't bring its own. Each
-#: row's *link* to its input row is the DataFrame index, kept internal.
+#: The row-id column, ``#``: each row's id, the DataFrame index, shown and
+#: referenced as a column (``cols["#"]``; docs/design/reshaping.md R-D11).
+#: Reserved: a table can't bring its own. The row *number*, a row's position
+#: on screen, has no name.
 ROW_ID = "#"
 
 
@@ -203,7 +203,7 @@ class Output:
             out.loc[which, "state"] = "stale"
         if self.notes:
             out["note"] = [_note_text(self.notes.get(i)) for i in out.index]
-        out.insert(0, ROW_ID, range(len(out)))
+        out.insert(0, ROW_ID, list(out.index))
         return out.reset_index(drop=True)
 
     # ── the two halves ───────────────────────────────────────────────────

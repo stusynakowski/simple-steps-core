@@ -89,7 +89,7 @@ def test_name_on_the_verb_is_retired(k):
 
 @pytest.mark.parametrize("step, message", [
     (lambda: hot_n[mod.filter(), mod.name("x")](wf["p"]), "filter writes no new values"),
-    (lambda: to_f_n[mod.map(), mod.name("#")](wf["p"]), "'#' is the row number"),
+    (lambda: to_f_n[mod.map(), mod.name("#")](wf["p"]), "'#' is the row id"),
     (lambda: to_f_n[mod.map(), mod.name("")](wf["p"]), "mod.name needs a column name"),
 ])
 def test_a_bad_name_is_a_problem(k, step, message):

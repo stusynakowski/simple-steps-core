@@ -264,7 +264,7 @@ def _apply_selection(frame: pd.DataFrame, row_sel: Any, col_sel: Any,
     if col_sel is not None:
         wanted = _resolve_columns(list(out.columns), col_sel, step_id)
         if ROW_ID in wanted:
-            out = out.assign(**{ROW_ID: range(len(out))})  # the row numbers, 0…n-1
+            out = out.assign(**{ROW_ID: list(out.index)})  # the row ids (R-D11)
         out = out[wanted]
     if row_sel is not None:
         n = len(out)

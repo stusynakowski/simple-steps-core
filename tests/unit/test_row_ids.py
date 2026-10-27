@@ -260,3 +260,14 @@ def test_a_new_group_makes_the_whole_step_stale(kc):
     kc["p"] = pd.DataFrame({**BASE, "ward": ["A", "B", "C", "B"]})          # Cy: a new ward
     assert kc.step("per_ward").state == "stale"
     assert kc.workflow.stale_rows("per_ward") is None
+
+
+def test_hash_is_the_row_id_not_the_row_number(k):
+    """`#` is the row id (reshaping.md R-D11): after a sort it follows the rows."""
+    from simple_steps_core import cols
+    k["ids"] = wf["srt"][cols["#"]]
+    k.run_all()
+    assert k.step("ids").data["#"].tolist() == [1, 2, 0]           # Ben, Cy, Ada
+    assert k.step("srt").output.view()["#"].tolist() == [1, 2, 0]
+    assert [r["#"] for r in k.view("srt")["rows"]] == [1, 2, 0]
+    assert [r["position"] for r in k.view("srt")["rows"]] == [0, 1, 2]
