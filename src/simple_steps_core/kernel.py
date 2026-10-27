@@ -214,7 +214,8 @@ class Kernel:
         titles = ("#", "step", "formula", "state", "shape", "problem")
         widths = [max(len(t), *(len(r[i]) for r in rows)) for i, t in enumerate(titles)]
         widths[-1] = len(titles[-1])                # the last column isn't padded
-        line = lambda cells: "  ".join(c.ljust(w) for c, w in zip(cells, widths)).rstrip()
+        def line(cells: tuple[str, ...]) -> str:
+            return "  ".join(c.ljust(w) for c, w in zip(cells, widths)).rstrip()
         return "\n".join([head, line(titles), *(line(r) for r in rows)])
 
     def _repr_html_(self) -> str:
