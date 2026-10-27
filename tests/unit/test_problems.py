@@ -92,7 +92,7 @@ def test_reading_a_later_step_is_later_step_and_an_invalid_one_is_invalid_input(
     k["b"] = scale_p[mod.map()](wf["r"])
     k["a"] = scale_p[mod.map()](wf["b"])            # a now reads b, which comes after it
     assert first(k, "a").code == "later_step"
-    k["b"] = scale_p[mod.map(name="n")](wf["a"])    # b reads a, which is invalid
+    k["b"] = scale_p[mod.map(), mod.name("n")](wf["a"])    # b reads a, which is invalid
     assert first(k, "b").code == "invalid_input"
     assert "root cause: a: input 'b' comes after 'a'" in first(k, "b")
 

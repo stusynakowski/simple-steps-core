@@ -136,7 +136,7 @@ def k1_unrun_source_columns():
     # map. The same deferral is checked through zip_, which carries both.
     wf = Workflow()
     wf["readings"] = to_rows.bind(data=DATA)[mod.source()]
-    wf["score"] = scale[mod.map(name="score")](wf["readings"])
+    wf["score"] = scale[mod.map(), mod.name("score")](wf["readings"])
     wf["scored"] = zip_(wf["readings"], wf["score"])
     wf["picked"] = mod.select(over=wf["scored"], columns=["city", "score"])
     declared = wf.step("picked").state
@@ -348,10 +348,10 @@ def c13_output_replaces_input():
     # group carries its input's columns plus its key (owner, 2026-10-27), so a
     # key named like an input column is refused unless replace=True.
     wf = _wf()
-    wf["m"] = dbl[mod.map(name="n")](wf["readings"])
-    wf["g"] = dbl[mod.group(name="n")](wf["readings"])
+    wf["m"] = dbl[mod.map(), mod.name("n")](wf["readings"])
+    wf["g"] = dbl[mod.group(), mod.name("n")](wf["readings"])
     clash = [p.code for p in wf.step("g").problems] == ["column_clash"]
-    wf["g"] = dbl[mod.group(name="n", replace=True)](wf["readings"])
+    wf["g"] = dbl[mod.group(replace=True), mod.name("n")](wf["readings"])
     wf.run_all()
     columns = {sid: list(wf.step(sid).output.data.columns) for sid in ("m", "g")}
     untouched = list(wf.step("readings").output.data["n"]) == [1, 2, 3, 2]
@@ -611,7 +611,7 @@ def n_auto_modifier():
 
 def p_to_source():
     wf = _wf()
-    operation = scale[mod.map(name="s"), mod.retry(times=2)](wf["readings"], weight=2)
+    operation = scale[mod.map(), mod.name("s"), mod.retry(times=2)](wf["readings"], weight=2)
     if not hasattr(operation, "to_source"):
         return False, "Operation.to_source does not exist"
     text = operation.to_source()

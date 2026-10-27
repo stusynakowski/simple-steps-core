@@ -150,8 +150,10 @@ for a record, or the column's own name for verbs that carry columns. So
 `to_f[mod.map(name="a"), mod.name("b")]` writes `b`.
 
 **`mod.name` replaces `name=`** on `map`, `expand`, `collapse`, `group` and
-`sweep`, so there is one way to name outputs (recommended; for the owner to
-confirm). *Today* naming is `name=` on each verb, for a single column only.
+`sweep` (decided 2026-10-27): `name=` on a verb is a problem pointing to
+`mod.name`. *Built (phase 4):* a single name, `mod.name("temp_f")`, on every
+verb that writes a value column, with the naming checks above. *Next:* the
+list, mapping and pattern forms, which come with spreading records (§3).
 
 ## 5. Inconsistent data: what each case does
 

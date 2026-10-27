@@ -202,7 +202,8 @@ def test_carried_function_is_not_part_of_the_data():
 # The modifier vocabulary is one table
 # ─────────────────────────────────────────────────────────────────────────
 def test_shape_verbs_and_decorators_derive_from_modifiers():
-    assert set(SHAPE_VERBS) | {"retry", "timeout", "expect", "try_except", "breaker"} == set(MODIFIERS)
+    assert set(SHAPE_VERBS) | {"retry", "timeout", "expect", "try_except", "breaker",
+                               "name"} == set(MODIFIERS)
     assert set(DECORATORS) == set(MODIFIERS)
 
 
@@ -739,7 +740,7 @@ def test_staged_prediction_matches_what_actually_appears(three):
 def test_naming_the_payload_column_is_predicted_too(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["scored"] = score[mod.map(name="score")](wf["raw"])
+    wf["scored"] = score[mod.map(), mod.name("score")](wf["raw"])
     assert predicted_columns(wf.step("scored").output) == ["score"]
     wf.run_all()
     assert list(wf.step("scored").output.data.columns) == ["score"]
@@ -1436,7 +1437,7 @@ def test_dtype_checking_uses_declared_types_before_the_upstream_runs():
 
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"celsius": [1.0, 2.0]})
-    wf["f"] = to_f[mod.map(over=wf["raw"], name="fahrenheit")]
+    wf["f"] = to_f[mod.map(over=wf["raw"]), mod.name("fahrenheit")]
     wf["bad"] = needs_text[mod.map(over=wf["f"])]
     assert wf.step("bad").problems == (
         "needs_text() declares fahrenheit: str, but 'f' will have fahrenheit as float",)
@@ -1587,7 +1588,7 @@ def test_a_stale_ref_into_an_imported_workflow_is_refused(ran):
 
 def test_an_imported_workflow_extends_with_its_own_refs(ran):
     imported = Workflow.from_json(ran.to_session_json(), TOOLS)
-    imported["late"] = score[mod.map(name="again")](imported["raw"])
+    imported["late"] = score[mod.map(), mod.name("again")](imported["raw"])
     assert imported.step("late").problems == ()
     imported.run("late")
     assert imported.step("late").output.values == [10, 20, 30]
@@ -1610,7 +1611,7 @@ def test_a_session_round_trip_preserves_dtypes():
                               "city": ["SF", "NYC"],
                               "n": [1, 2],
                               "flag": [True, False]})
-    wf["f"] = to_f[mod.map(name="fahrenheit")](wf["raw"])
+    wf["f"] = to_f[mod.map(), mod.name("fahrenheit")](wf["raw"])
     wf.run_all()
 
     back = Workflow.from_json(wf.to_session_json(), TOOLS)
@@ -1764,7 +1765,7 @@ def test_a_downstream_tool_binds_to_a_widened_field(records):
     wf["raw"] = records
     wf["wide"] = mod.widen(columns=["city", "temp"], over=wf["raw"])
     wf.run("wide")
-    wf["f"] = to_f[mod.map(name="fahrenheit")](wf["wide"])
+    wf["f"] = to_f[mod.map(), mod.name("fahrenheit")](wf["wide"])
     assert wf.step("f").problems == ()
     wf.run("f")
     assert wf.step("f").output.values == [64.4, 87.8]
@@ -2089,8 +2090,9 @@ def test_a_swept_parameter_cannot_shadow_the_verbs_own(three):
         return name
     wf = Workflow()
     wf["s"] = labelled[mod.sweep(name=["a", "b"])]
-    assert "must be str, got list" in wf.step("s").problems[0]
-    assert "collides with the verb's own" in wf.step("s").problems[0]
+    found = " / ".join(wf.step("s").problems)
+    assert "sweep's name= is retired" in found                # the output is named with mod.name
+    assert "collides with the verb's own" in found            # and name can't be swept
 
 
 def test_a_bool_does_not_satisfy_an_int_parameter(three):
@@ -2117,7 +2119,7 @@ def test_collapse_by_stages_as_one_per_group_not_one_cell(three):
 
     wf = Workflow()
     wf["raw"] = three
-    wf["g"] = hemi[mod.group(name="h")](wf["raw"])          # the rows, plus their key
+    wf["g"] = hemi[mod.group(), mod.name("h")](wf["raw"])          # the rows, plus their key
     wf.run_all()
     wf["c"] = sum_up[mod.collapse(by="h", over=wf["g"])]
     assert "one cell per group" in wf.step("c").describe()

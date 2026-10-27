@@ -265,6 +265,11 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     #     from `map_()`, which is the one validation gap `arguments` did not
     #     have. `sweep` accepts anything, because its parameters are the data.
     for modifier in operation.modifiers:
+        if modifier.kind in NAMED_VERBS and "name" in modifier.settings:
+            # Owner, 2026-10-26: mod.name is the one way to name an output.
+            problems.append(
+                f"{modifier.kind}'s name= is retired: name the output with "
+                f"mod.name({_src(modifier.settings['name'])}) after the verb")
         entry = MODIFIERS.get(modifier.kind)
         if entry is None or entry.accepts is None:
             continue
@@ -280,7 +285,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                     "group's key is what the step's own tool returns: write "
                     "<key tool>[mod.group()](…), not group(by=…)")
         unknown = [name for name in modifier.settings if name not in entry.accepts
-                   and not (modifier.kind == "group" and name == "by")]
+                   and not (modifier.kind == "group" and name == "by")
+                   and not (modifier.kind in NAMED_VERBS and name == "name")]
         if unknown:
             problems.append(
                 f"{modifier.kind} takes no parameter "
@@ -289,6 +295,23 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             )
 
     coded(problems, "unknown_setting")
+
+    # 2b'. a naming modifier names a column a verb writes (G12): a name, not
+    #      empty, not the row number, on a verb that writes a value column.
+    for modifier in operation.modifiers:
+        if modifier.kind != "name":
+            continue
+        to = modifier.settings.get("to")
+        verb_ = operation.shape_verbs[-1] if operation.shape_verbs else None
+        if not isinstance(to, str) or not to.strip():
+            problems.append(f"mod.name needs a column name, got {to!r}")
+        elif to == ROW_ID:
+            problems.append(f"{ROW_ID!r} is the row number; name the column something else")
+        elif verb_ is not None and verb_.kind not in NAMED_VERBS and verb_.kind != "auto":
+            problems.append(
+                f"{verb_.kind} writes no new values, so there is nothing to name; "
+                "to rename a column, use mod.rename in a later step")
+    coded(problems, "bad_name")
 
     # 2c. and they have to be the right *type*. `sweep` is why this matters:
     #     a swept parameter called `name` lands in the verb's own `name=`, and
@@ -1446,12 +1469,13 @@ from .combines import (  # noqa: E402
 from .errors import SelectionError  # noqa: E402
 from .modifiers import (  # noqa: E402
     MODIFIERS,
+    NAMED_VERBS,
     Modifier,
     PARAM_TYPES,
     PARAM_TYPES_BY_VERB,
     _required_settings,
 )
-from .operation import Operation  # noqa: E402
+from .operation import _src, Operation  # noqa: E402
 from .output import Output, ROW_ID, STATES  # noqa: E402
 from .references import (  # noqa: E402
     ResRef,

@@ -49,13 +49,13 @@ def test_group_keeps_the_rows_and_columns_and_adds_the_key(k):
 
 
 def test_the_key_is_named_with_name(k):
-    k["g"] = band_g[mod.group(name="band")](wf["p"])
+    k["g"] = band_g[mod.group(), mod.name("band")](wf["p"])
     k.run("g")
     assert list(k.step("g").data.columns) == ["name", "ward", "temp_c", "band"]
 
 
 def test_collapse_follows_group_directly(k):
-    k["g"] = band_g[mod.group(name="band")](wf["p"])
+    k["g"] = band_g[mod.group(), mod.name("band")](wf["p"])
     k["per_band"] = Operation(tool="count")[mod.collapse(by="band")](wf["g"])
     k.run_all()
     assert k.step("per_band").data.to_dict("list") == {"band": ["normal", "fever"],
@@ -63,15 +63,15 @@ def test_collapse_follows_group_directly(k):
 
 
 def test_the_plan_before_running_is_the_inputs_columns_plus_the_key(k):
-    k["g"] = band_g[mod.group(name="band")](wf["p"])
+    k["g"] = band_g[mod.group(), mod.name("band")](wf["p"])
     columns = k.step("g").output.plan["columns"]
     assert columns["names"] == ["name", "ward", "temp_c", "band"]
 
 
 def test_a_key_named_like_an_input_column_is_refused_unless_replace(k):
-    k["g"] = band_g[mod.group(name="ward")](wf["p"])
+    k["g"] = band_g[mod.group(), mod.name("ward")](wf["p"])
     assert [p.code for p in k.step("g").problems] == ["column_clash"]
-    k["g"] = band_g[mod.group(name="ward", replace=True)](wf["p"])
+    k["g"] = band_g[mod.group(replace=True), mod.name("ward")](wf["p"])
     k.run("g")
     data = k.step("g").data
     assert list(data.columns) == ["name", "ward", "temp_c"]
@@ -88,13 +88,13 @@ def test_by_a_column_name_is_refused_and_points_to_collapse(k):
 def test_by_a_tool_is_refused_the_steps_own_tool_is_the_key(k):
     k["g"] = band_g[mod.group(by=initial_g)](wf["p"])
     assert "write <key tool>[mod.group()]" in k.step("g").problems[0]
-    k["g"] = initial_g[mod.group(name="initial")](wf["p"])
+    k["g"] = initial_g[mod.group(), mod.name("initial")](wf["p"])
     k.run("g")
     assert k.step("g").data["initial"].tolist() == ["A", "B", "C", "D"]
 
 
 def test_a_row_whose_key_failed_is_failed_and_keeps_its_columns(k):
-    k["g"] = risky_g[mod.group(name="flag"), mod.try_except()](wf["p"])
+    k["g"] = risky_g[mod.group(), mod.name("flag"), mod.try_except()](wf["p"])
     k.run("g")
     out = k.step("g").output
     assert list(out.data.columns) == ["name", "ward", "temp_c", "flag"]

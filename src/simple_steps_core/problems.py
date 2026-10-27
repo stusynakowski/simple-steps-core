@@ -28,6 +28,7 @@ CODES: dict[str, str] = {
     "bad_tool_setting": "a setting names a tool where none is taken, or a tool that doesn't fit",
     "bad_combine": "a combine's inputs or settings don't fit together",
     "contradicts_verb": "an expectation contradicts what the verb produces",
+    "bad_name": "a naming modifier names nothing, or names a column badly",
     "two_shape_verbs": "more than one shape verb in one step",
     "verb_takes_no_tool": "the verb applies no tool, but one was given",
     # references

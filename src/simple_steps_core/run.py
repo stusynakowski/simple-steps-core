@@ -126,7 +126,10 @@ def compile_operation(operation: Operation, tools: dict[str, Callable]) -> Calla
     # every modifier, so a retry re-runs the same call and a map passes them to
     # every item.
     fn = _d_apply(table[operation.tool], **operation.arguments)
+    verbs = operation.shape_verbs
     for modifier in operation.modifiers:               # innermost first
+        if verbs and modifier is verbs[-1]:
+            modifier = operation.shape_verb            # with its name (G12)
         # 008 C2: a tool named in a setting is resolved from the same table.
         modifier = Modifier(modifier.kind, {
             k: _resolve_tool_setting(v, table) for k, v in modifier.settings.items()})

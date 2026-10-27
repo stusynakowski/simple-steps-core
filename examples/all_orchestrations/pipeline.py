@@ -133,7 +133,7 @@ def build() -> Workflow:
     # ── map — n rows in, n rows out, and ONLY the tool's result ─────────
     # A map step is its results: `score` holds one column. Each row keeps its
     # input row's id, so `zip_` puts the readings and their scores side by side.
-    wf["score"] = scale[mod.map(over=wf["readings"], name="score")]
+    wf["score"] = scale[mod.map(over=wf["readings"]), mod.name("score")]
     wf["scored"] = zip_(wf["readings"], wf["score"])    # city, n, score
 
     # ── the row-axis reshapers (no tool runs) ───────────────────────────
@@ -149,7 +149,7 @@ def build() -> Workflow:
 
     # ── group -> collapse: the stratified-summary chain ─────────────────
     # group labels each row with its key and keeps the row's columns
-    wf["bucketed"] = label_city[mod.group(over=wf["scored"], name="bucket")]  # city, n, score, bucket
+    wf["bucketed"] = label_city[mod.group(over=wf["scored"]), mod.name("bucket")]  # city, n, score, bucket
     wf["per_city"] = add_n[mod.collapse(by="bucket", over=wf["bucketed"], initial=0)]
 
     # ── collapse to one row — a builtin reducer and a registry reducer ──
@@ -157,8 +157,8 @@ def build() -> Workflow:
     wf["sum_n"] = add_n[mod.collapse(over=wf["readings"], initial=0)]
 
     # ── expand (unnest longer) and the expand -> widen chain ────────────
-    wf["bursts"] = fan_out[mod.expand(over=wf["readings"], name="item")]
-    wf["coords"] = make_coords[mod.expand(over=wf["readings"], name="value")]
+    wf["bursts"] = fan_out[mod.expand(over=wf["readings"]), mod.name("item")]
+    wf["coords"] = make_coords[mod.expand(over=wf["readings"]), mod.name("value")]
     wf["spread"] = mod.widen(over=wf["coords"], columns=["axis", "val"])
 
     # ── widen (unnest wider) straight off a column of records ───────────
@@ -168,7 +168,7 @@ def build() -> Workflow:
     wf["grid_search"] = grid_cell[mod.sweep(model=["a", "b"], window=[7, 30])]
 
     # ── execution modifiers — shape-preserving, order is semantics ──────
-    wf["robust"] = scale[mod.map(over=wf["readings"], name="score"),
+    wf["robust"] = scale[mod.map(over=wf["readings"]), mod.name("score"),
                          mod.retry(times=2), mod.timeout(seconds=5)]
 
     # ── auto — pass a reference, no verb; the orchestration is chosen ───
@@ -188,7 +188,7 @@ def build() -> Workflow:
     wf["from_dict"] = mod.widen(over=wf["a_dict"], columns=["x", "y"])  # dict → cols
 
     # ── a column of tuples widens positionally (auto c0, c1) ──
-    wf["pairs"] = make_pair[mod.map(over=wf["readings"], name="value")]
+    wf["pairs"] = make_pair[mod.map(over=wf["readings"]), mod.name("value")]
     wf["split"] = mod.widen(over=wf["pairs"])       # no columns= → c0, c1
 
     # ── builtin reducers over a single-column grid ──
@@ -199,7 +199,7 @@ def build() -> Workflow:
     wf["last_n"] = op("last")[mod.collapse(over=wf["ns"])]       # 2
 
     # ── chained fan-out: map over a map step ──
-    wf["again"] = scale[mod.map(over=wf["scored"], name="again")]
+    wf["again"] = scale[mod.map(over=wf["scored"]), mod.name("again")]
 
     # ── combine verbs — read more than one grid (operation constructors) ──
     # These are not modifiers: a combine is a function of its grids, so it is
@@ -236,7 +236,7 @@ def failure() -> Workflow:
     """
     wf = Workflow()
     wf["readings"] = readings()
-    wf["out"] = risky[mod.map(over=wf["readings"], name="out"),
+    wf["out"] = risky[mod.map(over=wf["readings"]), mod.name("out"),
                       mod.try_except(on=[ValueError]), mod.retry(times=1)]
     return wf.run_all()
 
@@ -250,7 +250,7 @@ def validation() -> Workflow:
     """
     wf = Workflow()
     wf["readings"] = readings()
-    wf["scored"] = scale[mod.map(over=wf["readings"], name="score")]   # valid, staged
+    wf["scored"] = scale[mod.map(over=wf["readings"]), mod.name("score")]   # valid, staged
     wf["bad_arg"] = scale.bind(nope=1)[mod.map(over=wf["readings"])]   # unknown param
     wf["dangling"] = scale[mod.map(over=unbound_wf["nowhere"])]          # missing upstream
     return wf

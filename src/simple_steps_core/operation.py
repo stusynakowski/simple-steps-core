@@ -149,9 +149,23 @@ class Operation:
 
     @property
     def shape_verb(self) -> Modifier | None:
-        """The outermost shape verb — the one that decides the final shape."""
+        """The outermost shape verb — the one that decides the final shape —
+        with the name a naming modifier gives its output column, if any (G12).
+        """
         verbs = self.shape_verbs
-        return verbs[-1] if verbs else None
+        if not verbs:
+            return None
+        verb, named = verbs[-1], self.naming
+        if named is not None and verb.kind in NAMED_VERBS:
+            return Modifier(verb.kind, {**verb.settings, "name": named})
+        return verb
+
+    @property
+    def naming(self) -> str | None:
+        """The name the last naming modifier gives (``mod.name("x")``), or None.
+        The last one written wins (owner, 2026-10-27)."""
+        names = [m.settings.get("to") for m in self.layers if m.kind == "name"]
+        return names[-1] if names else None
 
     def to_source(self) -> str:
         """The formula that builds this operation (008 P).
@@ -178,6 +192,7 @@ class Operation:
             head = f"op({_src(self.tool)})"
         if self.modifiers:
             head += "[" + ", ".join(
+                f"mod.name({_src(m.settings.get('to'))})" if m.kind == "name" else
                 f"mod.{m.kind}(" + ", ".join(f"{k}={_src(v)}" for k, v in m.settings.items()) + ")"
                 for m in self.layers) + "]"
         kwargs = [f"{k}={_src(v)}" for k, v in self.arguments.items()]
@@ -498,7 +513,7 @@ from .system_tools import BUILTIN_TOOLS  # noqa: E402
 from .catalog import Tool, _attach_bound  # noqa: E402
 from .checks import check  # noqa: E402
 from .combines import is_combine  # noqa: E402
-from .modifiers import Modifier  # noqa: E402
+from .modifiers import NAMED_VERBS, Modifier  # noqa: E402
 from .references import (  # noqa: E402
     ResRef,
     StepRef,

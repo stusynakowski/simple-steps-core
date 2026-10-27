@@ -42,6 +42,16 @@ from .verbs import (
 # Two kinds, distinguished by what they do to the signature:
 #   shape verbs       lift it:      (a -> b)  becomes  ([a] -> Output)
 #   execution mods    preserve it:  (a -> b)  stays    (a -> b)
+def _d_name(fn: Callable, *, to: str) -> Callable:
+    """``mod.name("temp_f")`` — what the step's output column is called (G12).
+
+    A naming modifier wraps nothing: the name it gives is the shape verb's
+    output column (see :attr:`Operation.shape_verb`). The last one written wins
+    (owner, 2026-10-27).
+    """
+    return fn
+
+
 def _d_retry(fn: Callable, *, times: int) -> Callable:
     """Preserves the signature; retries whatever it wraps."""
     def run(x):
@@ -318,6 +328,8 @@ MODIFIERS: dict[str, ModifierKind] = {k.name: k for k in (
     _kind("auto",     "shape", _lift(auto_), auto_),
     # execution modifiers — shape-preserving
     _kind("retry",    "execution", _d_retry, _d_retry),
+    # naming — what the output column is called; it wraps nothing (G12)
+    _kind("name",     "naming", _d_name, _d_name),
     _kind("timeout",  "execution", _d_timeout, _d_timeout),
     _kind("expect",   "execution", _d_expect, _d_expect),
     _kind("try_except", "execution", _d_try_except, _d_try_except),
@@ -345,7 +357,12 @@ PARAM_TYPES: dict[str, tuple[type, ...]] = {
     # a row id (an int, or a string such as expand's "0.1"), a list of ids,
     # or {start, stop}: a range of positions (K19)
     "rows": (int, str, list, dict),
+    "to": (str,),
 }
+
+
+#: The verbs that write a value column, which a naming modifier names (G12).
+NAMED_VERBS = frozenset({"map", "expand", "collapse", "group", "sweep"})
 
 
 #: Where one verb means something different by the same parameter name.
@@ -562,7 +579,14 @@ class _Mods:
                 "Modifier kinds are declared in MODIFIERS; add one there."
             )
 
-        def make(**params) -> Modifier:
+        def make(*given, **params) -> Modifier:
+            if given:
+                # mod.name("temp_f"): the one modifier that takes its value first.
+                if kind != "name" or len(given) != 1 or "to" in params:
+                    raise TypeError(f"mod.{kind}() takes settings by keyword"
+                                    if kind != "name" else
+                                    "mod.name() takes one name: mod.name(\"temp_f\")")
+                params["to"] = given[0]
             if kind == "try_except" and params.get("on") is not None:
                 # Exception classes are written as classes and saved by name.
                 on = params["on"]

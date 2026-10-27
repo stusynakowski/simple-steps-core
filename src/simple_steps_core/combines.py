@@ -100,7 +100,7 @@ def _zip_clash(named: list[tuple[str, list]]) -> str | None:
         for c in columns:
             if c in owner and owner[c] != name:
                 return (f"zip_: {c!r} is in both {owner[c]!r} and {name!r}; rename "
-                        f"one (mod.map(name=…) or mod.rename)")
+                        f"one (mod.name(…) or mod.rename)")
             owner.setdefault(c, name)
     return None
 

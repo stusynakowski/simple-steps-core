@@ -149,10 +149,10 @@ def test_C13_an_output_never_silently_replaces_an_input_column(wf):
     @tool
     def twice_008(n) -> list:
         return [n, n]
-    wf["m"] = dbl_008[mod.map(name="n")](wf["readings"])
+    wf["m"] = dbl_008[mod.map(), mod.name("n")](wf["readings"])
     wf["e"] = twice_008[mod.expand()](wf["readings"])
-    wf["clash"] = dbl_008[mod.group(name="n")](wf["readings"])
-    wf["g"] = dbl_008[mod.group(name="n", replace=True)](wf["readings"])
+    wf["clash"] = dbl_008[mod.group(), mod.name("n")](wf["readings"])
+    wf["g"] = dbl_008[mod.group(replace=True), mod.name("n")](wf["readings"])
     assert [p.code for p in wf.step("clash").problems] == ["column_clash"]
     assert "group's key 'n' would replace the 'n' column" in wf.step("clash").problems[0]
     wf.remove("clash")
@@ -907,7 +907,7 @@ def test_P_to_source_round_trips(wf):
     wf["cfg"] = ["n"]
     wf["p"] = pd.DataFrame({"a": [1], "b": [2], "c": [3]})
     ops = [
-        scale_008[mod.map(name="s"), mod.retry(times=2)](wf["readings"], weight=2),
+        scale_008[mod.map(), mod.name("s"), mod.retry(times=2)](wf["readings"], weight=2),
         op("identity")[mod.select(columns=wf["cfg"])](wf["readings"]),
         scale_008.bind(weight=(1, 2))[mod.map(), mod.try_except(default={1: "x"},
                                                                 on=[ValueError])](wf["readings"]),
@@ -921,7 +921,7 @@ def test_P_to_source_round_trips(wf):
         text = operation.to_source()
         assert eval(text, {"__builtins__": {}}, names) == operation, text
     assert ops[0].to_source() == (
-        'scale_008[mod.map(name="s"), mod.retry(times=2)](wf["readings"], weight=2)')
+        'scale_008[mod.map(), mod.name("s"), mod.retry(times=2)](wf["readings"], weight=2)')
 
 
 def test_C12_kwargs_tools_warn_and_say_so():
@@ -1479,10 +1479,10 @@ def load_010(path: str) -> pd.DataFrame:
 def test_C22_zip_refuses_a_column_both_grids_have():
     w = Workflow()
     w["r"] = pd.DataFrame({"city": ["SF", "NYC", "LA"], "n": [1, 0, 2]})
-    w["d"] = double_n_010[mod.map(name="n")](w["r"])
+    w["d"] = double_n_010[mod.map(), mod.name("n")](w["r"])
     w["z"] = zip_(w["r"], w["d"])
     assert w.step("z").problems == (
-        "zip_: 'n' is in both 'r' and 'd'; rename one (mod.map(name=…) or mod.rename)",)
+        "zip_: 'n' is in both 'r' and 'd'; rename one (mod.name(…) or mod.rename)",)
     with pytest.raises(ValueError, match="is invalid and cannot run"):
         w.run("z")
 
@@ -1490,7 +1490,7 @@ def test_C22_zip_refuses_a_column_both_grids_have():
 def test_C22_zip_columns_known_only_at_run_are_checked_then():
     w = Workflow()
     w["src"] = load_010[mod.source()](path="x")
-    w["d"] = double_n_010[mod.map(name="n")](w["src"])
+    w["d"] = double_n_010[mod.map(), mod.name("n")](w["src"])
     w["z"] = zip_(w["src"], w["d"])
     assert w.step("z").problems == ()                       # src's columns not known yet
     w.run("src")
