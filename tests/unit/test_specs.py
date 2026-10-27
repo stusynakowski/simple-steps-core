@@ -52,8 +52,9 @@ def test_every_object_has_a_spec(k):
     assert (resource_spec.name, resource_spec.type, resource_spec.settings) == (
         "thermo", "Thermo", {"unit": "F"})
     assert isinstance(k.spec, KernelSpec)
-    assert k.spec.catalog.tools == {"patients_s": {"extras": {}},
-                                    "to_f_s": {"extras": {"simple_steps.ui": {"temp_c": "slider"}}}}
+    assert k.spec.catalog.tools == {
+        "patients_s": {"hash": patients_s.hash, "extras": {}},
+        "to_f_s": {"hash": to_f_s.hash, "extras": {"simple_steps.ui": {"temp_c": "slider"}}}}
     assert k.spec.catalog.resource_types == ("Thermo",)
 
 

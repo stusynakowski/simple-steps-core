@@ -36,6 +36,9 @@ class Workflow:
         self.catalog = catalog
         #: The app's additions to the workflow, by namespace. Saved, never read.
         self.extras: dict = {}
+        #: The data version each resource last reported (K25), by name: asked
+        #: of resources whose type defines ``data_version()``, before a run.
+        self.data_versions: dict[str, str] = {}
         #: The kernel's naming conventions (outputs-and-reshaping.md §10), or None.
         self.naming = naming
 
@@ -465,12 +468,88 @@ class Workflow:
             step.output.meta["version"] = _data_version(step.output.data)
         return step.output.meta["version"]
 
-    def _resource_version(self, name: str) -> str | None:
+    def _resource_version(self, name: str, data: bool = True) -> str | None:
+        """Its spec (never its secrets or extras), its type's code, and the data
+        version it last reported (K25): a change in any makes its users stale."""
         decl = self.resources.get(name)
         if decl is None:
             return None
-        return hashlib.sha1(json.dumps(decl.to_dict(), sort_keys=True,
+        spec = {k: v for k, v in decl.to_dict().items() if k != "extras"}
+        if self.catalog is not None:
+            spec["code"] = self.catalog.type_hash(decl.type_name)
+        if data and name in self.data_versions:
+            spec["data"] = self.data_versions[name]
+        return hashlib.sha1(json.dumps(spec, sort_keys=True,
                                        default=repr).encode()).hexdigest()[:12]
+
+    # ── identity (K20) ───────────────────────────────────────────────
+    def identity(self) -> dict[str, dict]:
+        """What each step is made of, for its id: ``{name: {"recipe", "tool",
+        "resources", "inputs", "id"}}``, in order. Extras are never in it.
+
+        ``recipe`` hashes the step's operation (or literal); ``tool`` is its
+        tool's code hash; ``resources`` the specs of those it uses, never their
+        secrets; ``inputs`` the ids of the steps it reads, so a step's id
+        changes when anything upstream of it does.
+        """
+        out: dict[str, dict] = {}
+        for name, st in self.steps.items():
+            try:
+                recipe = {"operation": st.operation.to_dict()}
+                if st.literal is not NO_LITERAL and _literal_problem(st.literal) is None:
+                    recipe["literal"] = _encode_argument(st.literal)
+            except Exception as error:
+                # A step that can't be saved (a lambda) can't be reproduced: no
+                # id, for it or for anything that reads it.
+                out[name] = {"id": None, "why": str(error)}
+                continue
+            upstream = [r for r in st.operation.reads if r in out and out[r]["id"] is None]
+            if upstream:
+                out[name] = {"id": None, "why": f"it reads {upstream[0]!r}, which has no id"}
+                continue
+            parts = {
+                "recipe": _short_hash(recipe),
+                "tool": self._tool_hash(st.operation),
+                "resources": {r: self._resource_version(r, data=False)
+                              for r in sorted(st.operation.resources)},
+                "inputs": {r: out[r]["id"] if r in out else None
+                           for r in sorted(st.operation.reads)},
+            }
+            parts["id"] = _short_hash(parts)
+            out[name] = parts
+        return out
+
+    def recipe_id(self) -> str:
+        """The workflow's id: its steps' ids, its resources and its naming."""
+        ids = self.identity()
+        missing = [(n, p["why"]) for n, p in ids.items() if p["id"] is None]
+        if missing:
+            raise PayloadError(f"step {missing[0][0]!r} has no id: {missing[0][1]}")
+        return _short_hash({
+            "steps": [[n, p["id"]] for n, p in ids.items()],
+            "resources": {r: self._resource_version(r, data=False) for r in sorted(self.resources)},
+            "naming": self.naming.to_dict() if self.naming is not None else None})
+
+    def _ask_data_versions(self, operation: Operation,
+                           resources: Mapping[str, Any] | None) -> None:
+        """K25: ask the resources *operation* uses for their data version, just
+        before it runs (building them, as the run would). One that can't be
+        built is left to the run to report."""
+        from .catalog import data_version
+        for name in operation.resources:
+            try:
+                obj = resources[name] if resources is not None else None
+            except Exception:
+                continue
+            version = data_version(obj) if obj is not None else None
+            if version is not None:
+                self.data_versions[name] = version
+
+    def _tool_hash(self, operation: Operation) -> str | None:
+        """The hash of the tool *operation* runs, from the catalog (K20)."""
+        if self.catalog is None or is_identity(operation.fn):
+            return None
+        return self.catalog.hash_of(operation.tool)
 
     def _read_stamps(self, operation: Operation) -> dict:
         """The versions of everything *operation* reads, as of now."""
@@ -538,6 +617,10 @@ class Workflow:
                 return None
             if output.meta.get("edited"):
                 memo[sid] = "updated args"
+                return memo[sid]
+            ran_tool = output.meta.get("tool_hash")
+            if ran_tool is not None and ran_tool != self._tool_hash(step.operation):
+                memo[sid] = "tool changed"
                 return memo[sid]
             read = output.meta.get("read")
             if read is None:                       # saved before stamps: keep its flag
@@ -1612,6 +1695,7 @@ class Workflow:
         if tools is None and self.catalog is not None:
             tools = self.catalog.functions
         step = self.steps[step_id]
+        self._ask_data_versions(step.operation, resources)
         read = self._read_stamps(step.operation) if step_id in self.steps else {}
         # Inputs that are stale as this runs pass through as they are; this
         # output is then up to date with them, and says it read them stale.
@@ -1628,6 +1712,9 @@ class Workflow:
             # What these values were computed with, so a stale value can say so
             # once the arguments are edited (009): one record per step.
             out.meta["ran_with"] = _ran_with(step.operation)
+            tool_hash = self._tool_hash(step.operation)
+            if tool_hash is not None:
+                out.meta["tool_hash"] = tool_hash
             if read_stale:
                 out.meta["read_stale"] = read_stale
             else:
@@ -2040,6 +2127,12 @@ class Workflow:
         return f"<Workflow {len(self.steps)} step(s): {list(self.steps)}>"
 
 
+def _short_hash(value: Any) -> str:
+    """A 16-digit hash of plain data, the same in every process."""
+    text = json.dumps(value, sort_keys=True, default=repr)
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
 def _carry_id_columns(operation: Operation, source: Any, output: Output) -> None:
     """Give a step that keeps ids its input's `#` columns (reshaping.md §5.1).
 
@@ -2106,7 +2199,7 @@ from .checks import (  # noqa: E402
     _tool_parameters,
 )
 from .combines import _row_lookup, _run_combine, is_combine, own_id_columns  # noqa: E402
-from .errors import ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402
+from .errors import PayloadError, ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402
 from .problems import Problem  # noqa: E402
 from .values import _record_fields, named_columns, record_return  # noqa: E402
 from .modifiers import (  # noqa: E402
@@ -2141,6 +2234,7 @@ from .references import (  # noqa: E402
 from .run import _is_auto, _resolve_auto  # noqa: E402
 from .specs import WorkflowSpec  # noqa: E402
 from .step import (  # noqa: E402
+    NO_LITERAL,
     Step,
     _changes_text,
     _ran_with,
@@ -2148,6 +2242,8 @@ from .step import (  # noqa: E402
 )
 from .values import (  # noqa: E402
     _decode_argument,
+    _encode_argument,
+    _literal_problem,
     FORMAT_VERSION,
     _decode_output,
     _dtype_type,

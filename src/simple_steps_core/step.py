@@ -93,6 +93,9 @@ class Step:
     #: The value a literal step was declared with (``k["x"] = [3, 1, 2]``), or
     #: :data:`NO_LITERAL`. Kept so the step's spec can save it.
     literal: Any = field(default=NO_LITERAL, repr=False, compare=False)
+    #: Its id (K20): a hash of its recipe, its tool's code, the resources it
+    #: uses and its inputs' ids. Set by ``k.step`` and ``k.steps``.
+    id: str | None = field(default=None, repr=False, compare=False)
 
     @property
     def spec(self) -> "StepSpec":

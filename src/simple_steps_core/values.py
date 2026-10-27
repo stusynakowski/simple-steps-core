@@ -14,12 +14,47 @@ import types
 import typing
 
 
+class _SecretMark:
+    """The mark :data:`Secret` puts on a setting's annotation."""
+
+    def __repr__(self) -> str:
+        return "secret"
+
+
+SECRET = _SecretMark()
+
+
+class Secret:
+    """A resource setting that is never saved, hashed or shown (R3).
+
+    ``def __init__(self, url: str, password: Secret[str])``: the password
+    builds the resource, and nothing else sees it. A loaded kernel doesn't
+    have it: define the resource again with it, or attach a built object.
+    """
+
+    def __class_getitem__(cls, item: Any) -> Any:
+        return typing.Annotated[item, SECRET]
+
+
+def is_secret(annotation: Any) -> bool:
+    """Is *annotation* ``Secret[…]``?"""
+    return typing.get_origin(annotation) is typing.Annotated \
+        and any(m is SECRET for m in annotation.__metadata__)
+
+
+def _unsecret(annotation: Any) -> Any:
+    """``Secret[str]`` → ``str``; anything else as it is."""
+    return typing.get_args(annotation)[0] if is_secret(annotation) else annotation
+
+
 def _type_name(annotation: Any) -> str | None:
     """A readable name for an annotation — ``None`` when there is not one."""
     if annotation is inspect.Parameter.empty:
         return None
     if isinstance(annotation, str):                  # from __future__ annotations
         return annotation
+    if is_secret(annotation):
+        return f"Secret[{_type_name(_unsecret(annotation))}]"
     return (getattr(annotation, "__name__", None)
             or str(annotation).replace("typing.", ""))
 
@@ -119,6 +154,7 @@ def declaration_problems(fn: Callable, tool_id: str) -> list[str]:
 
 def _value_fits(value: Any, annotation: Any) -> bool | None:
     """Does one literal fit an annotation? ``None`` when it cannot be decided."""
+    annotation = _unsecret(annotation)
     if typing.get_origin(annotation) in (typing.Union, types.UnionType):
         # `dict | None` is a types.UnionType — itself a class, so the generic
         # isinstance below used to refuse every value (008 N1). A union fits
@@ -604,6 +640,7 @@ _LITERAL_TYPES = (str, int, float, bool, type(None), list, dict, tuple)
 
 def _literal_annotation(annotation: Any) -> bool:
     """Can a setting with this annotation hold only literals?"""
+    annotation = _unsecret(annotation)
     if annotation is inspect.Parameter.empty or annotation is Any \
             or isinstance(annotation, str):
         return True                       # undeclared or unresolvable: allowed

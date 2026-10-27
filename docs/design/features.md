@@ -100,9 +100,9 @@ The rules, with four decisions for the owner, are in [row-ids.md](row-ids.md).
 
 | Feature | ID |
 |---|---|
-| Tool hashes; `k.id`, `k.run_id`, `k.step(…).id`; `k.diff(other)`; a changed tool marks its steps stale | K20 |
-| A resource may report a data version, which marks its users stale | K25 |
-| Secret resource settings, left out of saves and hashes | R3 |
+| Tool hashes; `k.id`, `k.run_id`, `k.step(…).id`; `k.diff(other)`; a changed tool marks its steps stale *Done (phase 4, 2026-10-27)* | K20 |
+| A resource may report a data version, which marks its users stale *Done (phase 4, 2026-10-27): an optional `data_version()` method, asked before a run* | K25 |
+| Secret resource settings, left out of saves and hashes *Done (phase 4, 2026-10-27): `Secret[str]`, also never shown* | R3 |
 | Tools that aren't deterministic: a `seed` literal recommended | K20 |
 
 ### Storage

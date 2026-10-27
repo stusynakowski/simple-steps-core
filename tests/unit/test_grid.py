@@ -932,8 +932,10 @@ def test_a_workflow_is_only_steps(three):
     assert not hasattr(wf, "inputs")
     # `resources` holds declarations (type + literal settings), never payloads;
     # `catalog` says what the workflow may use and `extras` holds the app's
-    # additions, `naming` the kernel's naming conventions; none of them is data.
-    assert list(vars(wf)) == ["steps", "resources", "catalog", "extras", "naming"]
+    # additions, `naming` the kernel's naming conventions, `data_versions` the
+    # versions resources reported (K25); none of them is data.
+    assert list(vars(wf)) == ["steps", "resources", "catalog", "extras",
+                              "data_versions", "naming"]
 
 
 def test_running_a_source_step_is_a_no_op(three):

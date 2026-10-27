@@ -12,6 +12,7 @@ from typing import Any
 from typing import Callable
 from typing import Iterable
 from typing import Sequence
+import hashlib
 import inspect
 import types
 import typing
@@ -389,13 +390,63 @@ class Resource:
     extras: dict = field(default_factory=dict)
 
     @property
+    def secrets(self) -> tuple[str, ...]:
+        """The names of its ``Secret[…]`` settings (R3)."""
+        return secret_settings(self.type) if self.type is not None else ()
+
+    @property
     def spec(self) -> "ResourceSpec":
-        """What is needed to build this resource: its type's name and settings."""
-        return ResourceSpec(self.name, self.type_name, dict(self.settings),
+        """What is needed to build this resource: its type's name and settings.
+
+        Never its secrets: the spec is what is saved, hashed and shown.
+        """
+        hidden = self.secrets
+        return ResourceSpec(self.name, self.type_name,
+                            {k: v for k, v in self.settings.items() if k not in hidden},
                             _checked_extras(self.extras), self.source)
 
     def to_dict(self) -> dict:
         return self.spec.to_dict()
+
+    def __repr__(self) -> str:
+        hidden = self.secrets
+        shown = ", ".join(f"{k}={'•••' if k in hidden else repr(v)}"
+                          for k, v in self.settings.items())
+        return f"Resource({self.name!r}, {self.type_name}({shown}))"
+
+
+def code_hash(name: str, obj: Any) -> str:
+    """The hash of a tool or a resource type: its name, its source (its
+    compiled code when the source can't be read) and the version of the
+    library it comes from."""
+    try:
+        source = inspect.getsource(obj)
+    except (OSError, TypeError):
+        code = getattr(obj, "__code__", None)
+        source = repr((code.co_code, code.co_consts)) if code is not None else repr(obj)
+    module = getattr(obj, "__module__", None) or ""
+    library = module.split(".", 1)[0]
+    try:
+        from importlib.metadata import version
+        library += " " + version(library)
+    except Exception:                               # not an installed package
+        pass
+    text = "\0".join((name, source, library))
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def secret_settings(cls: type) -> tuple[str, ...]:
+    """The settings of *cls* declared ``Secret[…]``."""
+    return tuple(p.name for p in _settings(cls) if is_secret(p.annotation))
+
+
+def data_version(obj: Any) -> str | None:
+    """A resource's own data version (K25): ``obj.data_version()`` when its type
+    defines one, as text; None when it doesn't. It is asked before each run."""
+    method = getattr(obj, "data_version", None)
+    if not callable(method):
+        return None
+    return str(method())
 
 
 def _type_fits(cls: type, annotation: Any) -> bool | None:
@@ -471,11 +522,23 @@ class Tool:
         self.id = tool_id or fn.__name__
         self.__doc__ = fn.__doc__
         self.__name__ = self.id
+        self._hash: str | None = None
         #: Free labels, from ``@tool(tags=…)``.
         self.tags: tuple[str, ...] = ()
         #: The app's additions, by namespace, from ``@tool(extras=…)``. Core
         #: keeps them and never reads them (docs/design/extensions.md).
         self.extras: dict = {}
+
+    @property
+    def hash(self) -> str:
+        """``sha256(name, source, library + version)``, first 16 hex digits (K20).
+
+        Computed once. Its tags and extras aren't in it: two tools that differ
+        only there are the same code.
+        """
+        if self._hash is None:
+            self._hash = code_hash(self.id, self.fn)
+        return self._hash
 
     def __call__(self, *args, **kwargs) -> Any:
         """Apply the tool to its input — running it, or wiring it into a step.
@@ -726,6 +789,28 @@ class Catalog:
         self._builtins = frozenset(BUILTIN_TOOLS)
         self._modifiers = frozenset(MODIFIERS)
         self._combines = frozenset(COMBINE)
+        # K20: hashed once, as the catalog is built.
+        for item in found.values():
+            item.hash
+        self._type_hashes = {name: code_hash(name, kind) for name, kind in kinds.items()}
+
+    def hash_of(self, name: str) -> str | None:
+        """The hash of the code a step names: a tool's, a bound tool's resource
+        type's, or core's version for a built-in, a modifier or a combine.
+        None for a name not in this catalog."""
+        if name in self._tools:
+            return self._tools[name].hash
+        type_name = name.split(".", 1)[0]
+        if "." in name and type_name in self._type_hashes:
+            return self._type_hashes[type_name]
+        if name in self._builtins or name in self._modifiers or name in self._combines:
+            from . import __version__
+            return hashlib.sha256(f"simple_steps_core {__version__}".encode()).hexdigest()[:16]
+        return None
+
+    def type_hash(self, type_name: str) -> str | None:
+        """The hash of resource type *type_name*'s code; None when not in it."""
+        return self._type_hashes.get(type_name)
 
     @classmethod
     def from_modules(cls, *modules: types.ModuleType, strict: bool = False) -> "Catalog":
@@ -754,6 +839,8 @@ class Catalog:
         out._builtins = self._builtins - set(names)
         out._modifiers = self._modifiers - set(names)
         out._combines = self._combines - set(names)
+        out._type_hashes = {k: v for k, v in self._type_hashes.items()
+                            if k in out._resource_types}
         return out
 
     # ── what it holds ────────────────────────────────────────────────────
@@ -826,7 +913,8 @@ class Catalog:
     def spec(self) -> "CatalogSpec":
         """The names this catalog allows, and each tool's extras. Never code."""
         return CatalogSpec(
-            tools={name: {"extras": dict(t.extras)} for name, t in sorted(self._tools.items())},
+            tools={name: {"hash": t.hash, "extras": dict(t.extras)}
+                   for name, t in sorted(self._tools.items())},
             resource_types=tuple(sorted(self._resource_types)),
             builtins=tuple(sorted(self._builtins)),
             modifiers=tuple(sorted(self._modifiers)),
@@ -925,6 +1013,7 @@ from .step import Step  # noqa: E402
 from .values import (  # noqa: E402
     _json_safe,
     _literal_annotation,
+    is_secret,
     _open_keywords,
     _type_name,
     annotation_problems,

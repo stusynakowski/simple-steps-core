@@ -43,9 +43,10 @@ from .problems import Problem  # noqa: E402
 from .references import cols, res, rows, wf  # noqa: E402
 from .specs import CatalogSpec, KernelSpec, Naming, ResourceSpec, StepSpec, WorkflowSpec  # noqa: E402
 from .step import Step, StepStatus  # noqa: E402
+from .values import Secret  # noqa: E402
 
 __all__ = [
-    "Catalog", "Kernel", "Tool", "tool", "resource", "bound_tool",
+    "Catalog", "Kernel", "Tool", "tool", "resource", "bound_tool", "Secret",
     "mod", "wf", "res", "rows", "cols", "join", "stack", "zip_",
     "Operation", "Step", "StepStatus", "Output", "Problem",
     "ResourceSpec", "StepSpec", "WorkflowSpec", "CatalogSpec", "KernelSpec", "Naming",

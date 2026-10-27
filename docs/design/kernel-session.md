@@ -178,9 +178,10 @@ k2.run_all()                            # the same data again
 | `extras` on steps, resources, the workflow | the app's notes, colours, widgets; kept, never read, never hashed | built |
 | an app's saved workflow, in plain Python | `Kernel.from_json(app_file, Catalog.from_modules(app_tools))` runs the same steps; extras are kept and ignored ([extensions.md §1](extensions.md#1-the-guarantee)) | built |
 | resources | built from their spec the first time a step needs them; `k.resources.attach(name, obj)` hands over one the host built | built |
-| secret settings, left out of saves and hashes | `Secret[str]` | planned (R3) |
+| secret settings, left out of saves, hashes and display | `password: Secret[str]` (`from simple_steps_core import Secret`); a loaded kernel asks for it again: define the resource with it, or attach an object | built (R3) |
 | saving outputs with the spec, so a reloaded kernel opens with its data | a pluggable output store | planned (C32) |
-| `k.id`, `k.run_id`, `k.diff(other)`; a changed tool marks its steps stale | hashes of specs and tool source | planned (K20) |
+| `k.id`, `k.run_id`, `k.step(…).id`, `k.diff(other)`; a changed tool marks its steps stale | `tool.hash` is `sha256(name, source, library + version)`; a step id hashes its recipe, its tool, its resources and its inputs' ids; `k.id` the steps, resources and naming; `run_id` adds the data. Never extras or secrets. `diff` says per step: `added`, `removed`, `recipe`, `tool`, `resource r`, `input s` | built (K20) |
+| a resource whose data changes | its type defines `data_version()`; asked before a run, a new one makes its users `stale: resource r changed` | built (K25) |
 | two kernels in one process | share nothing: own catalog, workflow, resources | built |
 
 ## 6. One kernel per session

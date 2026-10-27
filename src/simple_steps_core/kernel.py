@@ -24,6 +24,7 @@ from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
 from .catalog import Catalog
+from .errors import ResourceNotLoaded
 from .output import VALUE_COLUMN
 from .specs import Naming, KernelSpec
 from .references import ResRef, StepRef
@@ -53,6 +54,13 @@ class Resources(Mapping):
             if decl.type is None:
                 raise KeyError(f"resource {name!r} is a {decl.type_name}, which is "
                                "not in this kernel's catalog")
+            missing = [s for s in decl.secrets if s not in decl.settings]
+            if missing:
+                raise ResourceNotLoaded(
+                    f"resource {name!r} needs its secret {', '.join(map(repr, missing))}, "
+                    "which is never saved: define it again with it "
+                    f"(k.define({name!r}, {decl.type_name}, …)), or attach a built "
+                    f"object (k.resources.attach({name!r}, obj))")
             self._loaded[name] = decl.type(**decl.settings)
         return self._loaded[name]
 
@@ -165,11 +173,102 @@ class Kernel:
     @property
     def steps(self) -> list[Step]:
         """The steps, in order."""
+        ids = self.workflow.identity()
+        for name, st in self.workflow.steps.items():
+            st.id = ids[name]["id"]
         return list(self.workflow.steps.values())
 
     def step(self, step: str | int) -> Step:
         """The live step, by name or position."""
-        return self.workflow.step(self._name(step))
+        name = self._name(step)
+        st = self.workflow.step(name)
+        st.id = self.workflow.identity()[name]["id"]
+        return st
+
+    # ── identity (K20) ───────────────────────────────────────────────────
+    @property
+    def id(self) -> str:
+        """The recipe's id: its steps, resources and naming, and the code of the
+        tools its steps use. Never extras, secrets or data: two kernels with
+        the same id compute the same thing."""
+        return self.workflow.recipe_id()
+
+    @property
+    def run_id(self) -> str:
+        """The id of what this kernel holds now: :attr:`id`, plus each step's
+        data version (or its state, when it holds no up-to-date data) and the
+        resources' data versions."""
+        held = {}
+        for name, st in self.workflow.steps.items():
+            state = st.state
+            held[name] = self.workflow.version(name) if state == "completed" else state
+        from .workflow import _short_hash
+        return _short_hash({"id": self.id, "steps": held,
+                            "resources": dict(sorted(self.workflow.data_versions.items()))})
+
+    def diff(self, other: "Kernel") -> dict:
+        """What differs between this kernel and *other*, by step name; empty
+        when they are the same recipe holding the same data.
+
+        ``steps``: ``{name: why}``, where why is ``added`` (only in *other*),
+        ``removed``, ``recipe`` (its operation or literal), ``tool`` (its
+        tool's code), ``resource <r>``, or ``input <s>`` (only something
+        upstream differs). ``resources``: ``{name: added | removed | changed}``.
+        ``naming``: when the conventions differ. ``data``: steps both have run
+        to different data. Extras are never compared.
+        """
+        mine, theirs = self.workflow.identity(), other.workflow.identity()
+        steps: dict[str, str] = {}
+        for name in [*mine, *(n for n in theirs if n not in mine)]:
+            a, b = mine.get(name), theirs.get(name)
+            if a is None or b is None:
+                steps[name] = "added" if a is None else "removed"
+            elif a["id"] != b["id"]:
+                if a["recipe"] != b["recipe"]:
+                    steps[name] = "recipe"
+                elif a["tool"] != b["tool"]:
+                    steps[name] = "tool"
+                elif a["resources"] != b["resources"]:
+                    changed = [r for r in {**a["resources"], **b["resources"]}
+                               if a["resources"].get(r) != b["resources"].get(r)]
+                    steps[name] = f"resource {changed[0]}"
+                else:
+                    changed = [r for r in {**a["inputs"], **b["inputs"]}
+                               if a["inputs"].get(r) != b["inputs"].get(r)]
+                    steps[name] = f"input {changed[0]}"
+        out: dict[str, Any] = {}
+        if steps:
+            out["steps"] = steps
+        resources = {}
+        for name in sorted({*self.workflow.resources, *other.workflow.resources}):
+            a = self.workflow._resource_version(name, data=False)
+            b = other.workflow._resource_version(name, data=False)
+            if a != b:
+                resources[name] = "added" if a is None else "removed" if b is None else "changed"
+        if resources:
+            out["resources"] = resources
+        if self.naming != other.naming:
+            out["naming"] = {"mine": self.naming, "theirs": other.naming}
+        data = [name for name in mine if name in theirs
+                and self.workflow.steps[name].state == "completed"
+                and other.workflow.steps[name].state == "completed"
+                and self.workflow.version(name) != other.workflow.version(name)]
+        if data:
+            out["data"] = data
+        return out
+
+    def _ask_data_versions(self) -> None:
+        """K25: ask each built resource whose type defines ``data_version()``
+        for it, so steps that used older data are stale before anything runs."""
+        from .catalog import data_version
+        changed = False
+        for name in self.resources.loaded:
+            version = data_version(self.resources._loaded[name])
+            if version is not None and self.workflow.data_versions.get(name) != version:
+                self.workflow.data_versions[name] = version
+                changed = True
+        if changed:
+            self.workflow._refresh_staleness()
 
     @_notifies("rename")
     def rename(self, old: str, new: str) -> None:
@@ -216,6 +315,7 @@ class Kernel:
         An input that is stale passes through as it is.
         """
         name = self._name(step)
+        self._ask_data_versions()
         for upstream in dict.fromkeys(self.workflow.pending(name)):
             self.workflow.run(upstream, resources=self.resources)
         return self.workflow.run(name, resources=self.resources)
@@ -223,6 +323,7 @@ class Kernel:
     @_notifies("run_all")
     def run_all(self) -> "Kernel":
         """Run every valid step, in order. Stops at a failure nothing handles."""
+        self._ask_data_versions()
         self.workflow.run_all(resources=self.resources)
         return self
 
@@ -238,6 +339,7 @@ class Kernel:
         ``staged``, ``stale: <reason>``, or ``read stale '<input>'`` for a step
         that ran on an input that is stale. Invalid steps can't run and aren't
         listed (see :meth:`validate`)."""
+        self._ask_data_versions()
         out: dict[str, str] = {}
         for name, st in self.workflow.steps.items():
             state = st.state
