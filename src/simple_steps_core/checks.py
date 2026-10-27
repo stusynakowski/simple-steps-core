@@ -1524,6 +1524,8 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         ordered = [k for k in verb.settings if k not in ("name", "over", "retries")]
     elif kind == "collapse" and verb.settings.get("by"):
         ordered = [verb.settings["by"]]
+    elif kind == "expand" and verb.settings.get("columns"):
+        ordered, payload = variables(upstream_columns), None   # a reshape: keeps the grid's columns
     if kind == "collapse" and reducer_form(operation.fn or BUILTIN_TOOLS.get(operation.tool)) == "per_column":
         # A built-in reducer: one column per variable, under its own name (R-D1).
         by_ = verb.settings.get("by")

@@ -967,9 +967,15 @@ class Workflow:
         names, seen = {step_id}, step_id
         while seen in self.steps:
             op_ = self.steps[seen].operation
-            if not keeps_ids(self._kind(seen), op_.shape_verb) or op_.input is None:
+            restored = self._restore_column(seen)
+            if restored is not None:             # its items are the packed rows again
+                seen = self._id_source(restored)
+            elif not keeps_ids(self._kind(seen), op_.shape_verb) or op_.input is None:
                 break
-            seen = str(op_.input)
+            else:
+                seen = str(op_.input)
+            if seen is None or seen in names:
+                break
             names.add(seen)
         return names
 
@@ -1011,6 +1017,9 @@ class Workflow:
                 if found is not None:
                     return found
         op_ = step.operation
+        restored = self._restore_column(step_id)
+        if restored is not None and self._id_source(restored) is not None:
+            return self._trace(self._id_source(restored), ids, target, depth + 1)
         if keeps_ids(self._kind(step_id), op_.shape_verb) and op_.input is not None:
             return self._trace(str(op_.input), ids, target, depth + 1)
         if is_combine(op_) and op_.tool == "zip":
@@ -1109,6 +1118,56 @@ class Workflow:
             if x in self.steps and self.trace(x, list(self.steps[x].output.data.index), y) is not None:
                 return True               # a child and the step its rows came from
         return False
+
+    def _packed_by(self, step_id: str, column: str, depth: int = 0) -> str | None:
+        """The `#` list that lines up with list *column* of *step_id*, when core
+        packed it and no tool has touched it since; else None (reshaping.md
+        §6.2). Decided from the verbs, so the plan knows before anything runs."""
+        step = self.steps.get(step_id)
+        if step is None or depth > len(self.steps):
+            return None
+        if is_id_column(column):                 # unpacking a `#` list itself
+            return column if self._lists_rows(step_id, column) else None
+        op_ = step.operation
+        kind = self._kind(step_id)
+        found = None
+        if kind == "collapse" and op_.input is not None:
+            fn = op_.fn or BUILTIN_TOOLS.get(op_.tool)
+            if _base(fn) is BUILTIN_TOOLS["gather"] and column != op_.shape_verb.settings.get("by"):
+                found = f"{ROW_ID}{op_.input}"
+        elif is_combine(op_) and op_.tool == "zip":
+            for g in op_.grids:
+                if column in self._predicted_of(str(g)):
+                    found = self._packed_by(str(g), column, depth + 1)
+                    break
+        elif kind == "rename" and op_.input is not None:
+            mapping = op_.shape_verb.settings.get("columns") or {}
+            old = next((o for o, n in mapping.items() if n == column), column) \
+                if isinstance(mapping, dict) else None
+            found = self._packed_by(str(op_.input), old, depth + 1) if old else None
+        elif kind in ("select", "drop", "sort", "slice", "filter", "distinct", "group") \
+                and op_.input is not None:     # carried unchanged: no tool rewrites it
+            found = self._packed_by(str(op_.input), column, depth + 1)
+        return found if found is not None and found in self._predicted_of(step_id) else None
+
+    def _restore_column(self, step_id: str) -> str | None:
+        """For an expand: the `#` list whose ids its items get back, if all it
+        unpacks is one pack core made (R-D3)."""
+        step = self.steps.get(step_id)
+        if step is None or self._kind(step_id) != "expand" or step.operation.input is None:
+            return None
+        op_ = step.operation
+        source = str(op_.input)
+        unpacked = op_.shape_verb.settings.get("columns")
+        if not unpacked:
+            if not is_identity(op_.fn or BUILTIN_TOOLS.get(op_.tool)):
+                return None                      # a tool made the list: its items are new
+            have = variables(self._predicted_of(source))
+            unpacked = [VALUE_COLUMN] if VALUE_COLUMN in have else have
+            if len(unpacked) != 1:
+                return None
+        found = {self._packed_by(source, c) for c in unpacked}
+        return found.pop() if len(found) == 1 and None not in found else None
 
     def _dropped_at(self, step_id: str, column: str) -> str | None:
         """The step at or before *step_id* that dropped or renamed `#` *column*,
@@ -1511,6 +1570,9 @@ class Workflow:
             # Every row is blocked: hand the verb an input that says so.
             source = Output(source.data, source.states,
                             {**source.meta, "blocked_all": bad_argument})
+        restore = self._restore_column(step_id)
+        if restore is not None and source is not None:
+            source = Output(source.data, source.states, {**source.meta, "restore": restore})
         try:
             step.output = resolved.run(source, tools)
             step.output.data = _str_columns(step.output.data, step_id)
@@ -1774,6 +1836,7 @@ def _carry_id_columns(operation: Operation, source: Any, output: Output) -> None
 from .system_tools import (  # noqa: E402
     BUILTIN_TOOLS,
     DEFAULT_TOOL,
+    _base,
     identity,
     is_identity,
 )
@@ -1822,6 +1885,8 @@ from .output import (  # noqa: E402
     _str_columns,
     _uncaught_failure,
     is_id_column,
+    VALUE_COLUMN,
+    variables,
 )
 from .references import (  # noqa: E402
     ResRef,

@@ -95,16 +95,17 @@ def same_rows(a: pd.DataFrame, b: pd.DataFrame) -> None:
 
 # ── pack and unpack: lossless ────────────────────────────────────────────────
 
-@pytest.mark.xfail(strict=True, reason="R-D3: unpacking a gathered list gives new ids (R1, M9)")
 def test_L1_unpacking_a_packed_column_gives_back_its_rows(k):
     k["packed"] = gather[mod.collapse()](wf["t"])
-    k["unpacked"] = identity[mod.expand()](wf["packed"])
+    k["unpacked"] = mod.expand(columns=["temp"])(wf["packed"])
+    k["by_tool"] = identity[mod.expand()](wf["packed"])               # the tool form: same ids
     k["names"] = mod.select(columns=["name"])(wf["v"])
     k["side"] = zip_(wf["names"], wf["unpacked"])
     k.run_all()
-    assert data(k, "packed").iloc[0, 0] == [37.0, 38.5, 36.9, 39.1]
+    assert data(k, "packed")["temp"].iloc[0] == [37.0, 38.5, 36.9, 39.1]
     same_rows(data(k, "unpacked"), data(k, "t"))
-    assert tuple(data(k, "side").loc[2]) == ("Ben", 36.9)           # each beside its own name
+    assert list(data(k, "by_tool").index) == [0, 1, 2, 3]
+    assert (data(k, "side").loc[2, "name"], data(k, "side").loc[2, "temp"]) == ("Ben", 36.9)
 
 
 def test_L2_packing_an_unpacked_list_gives_back_the_list(k):
@@ -124,7 +125,7 @@ def test_L3_widening_a_packed_row_gives_back_the_row(k):
     pd.testing.assert_frame_equal(data(k, "back"), data(k, "v"), check_dtype=False)
 
 
-@pytest.mark.xfail(strict=True, reason="R-D2, R-D3: block via a list of dicts loses ids")
+@pytest.mark.xfail(strict=True, reason="R-D2 (step 7): no mod.pack yet")
 def test_L4_a_block_through_a_list_of_dicts_comes_back(k):
     k["rec"] = mod.pack(columns=["name", "ward", "temp"])(wf["v"])
     k["packed"] = gather[mod.collapse()](wf["rec"])
@@ -134,7 +135,7 @@ def test_L4_a_block_through_a_list_of_dicts_comes_back(k):
     same_rows(data(k, "back"), data(k, "v"))
 
 
-@pytest.mark.xfail(strict=True, reason="R-D1, R-D2, R-D4: no dict of lists, no lockstep expand")
+@pytest.mark.xfail(strict=True, reason="R-D2 (step 7): no mod.pack yet")
 def test_L5_a_block_through_a_dict_of_lists_comes_back(k):
     k["lists"] = gather[mod.collapse()](wf["v"])                  # one row: name, ward, temp lists
     k["packed"] = mod.pack(columns=["name", "ward", "temp"])(wf["lists"])
@@ -145,7 +146,6 @@ def test_L5_a_block_through_a_dict_of_lists_comes_back(k):
     same_rows(data(k, "back"), data(k, "v"))
 
 
-@pytest.mark.xfail(strict=True, reason="R-D1, R-D3, R-D4: groups unpack to new ids ('A.0')")
 def test_L6_unpacking_groups_gives_back_the_rows(k):
     k["vt"] = mod.select(columns=["ward", "temp"])(wf["v"])
     k["groups"] = gather[mod.collapse(by="ward")](wf["vt"])       # ward, temp (a list)
@@ -448,7 +448,6 @@ def test_L32_a_reduction_lists_the_rows_it_reduced(k):
     assert data(k, "tot").loc["A", "#vt"] == [0, 1, 3]
 
 
-@pytest.mark.xfail(strict=True, reason="R-D10, R-D12, R9: the key is in the payload; no #vt to unpack")
 def test_L33_a_statistic_goes_back_beside_its_rows(k):
     k["vt"] = mod.select(columns=["ward", "temp"])(wf["v"])
     k["tot"] = op("total")[mod.collapse(by="ward")](wf["vt"])

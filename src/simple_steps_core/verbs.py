@@ -368,12 +368,23 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
 
 
 def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
-            retries: int = 0, axis: str = "rows", replace: bool = False) -> Output:
+            retries: int = 0, axis: str = "rows", replace: bool = False,
+            columns: Sequence[str] | None = None) -> Output:
     """``unnest`` — each unit yields an iterable; results are concatenated.
 
     Output rows outnumber units, so they cannot share the input's index: each
     row records which unit produced it in the ledger's ``source`` column.
+
+    With ``columns=``, a reshape (no tool): those list columns unpack together,
+    item *j* of each in one row, and the grid's other columns are kept
+    (reshaping.md §3, R-D4). When the lists are ones core packed, the items
+    get back the row ids they were packed from (§6.2, R-D3): the workflow
+    names the ``#`` list that lines up with them, as ``meta["restore"]``.
     """
+    restore = source.meta.get("restore") if isinstance(source, Output) else None
+    if columns is not None:
+        _no_tool("expand", fn)
+        return _unpack(source, list(columns), restore)
     frame = rows(source, axis=axis)
     blocked = _upstream_failures(source)
     out_rows, records, ids = [], [], []
@@ -409,17 +420,20 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
                  if isinstance(produced, Iterable)
                  and not isinstance(produced, (str, bytes, dict))
                  else [produced])
+        packed_ids = frame.at[index, restore] if restore in frame.columns else None
         for k, item in enumerate(items):
             # Only the item (owner decision, 2026-10-20), on an id derived from
-            # its parent's; the ledger's `unit` names the parent too.
+            # its parent's; the ledger's `unit` names the parent too. Items of
+            # a list core packed get back the ids they were packed from.
             out_rows.append({name: item})
             records.append({**record, "unit": index})
-            ids.append(_child_id(index, k))
+            ids.append(packed_ids[k] if isinstance(packed_ids, list) and k < len(packed_ids)
+                       else _child_id(index, k))
 
     # Column by column, so a carried int column and the payload both keep their
     # type when a failed unit leaves a gap (008 R8) — `DataFrame(rows)` would
     # turn every int column with a None into float64.
-    data = pd.DataFrame(index=pd.Index(ids, dtype=object))
+    data = pd.DataFrame(index=_id_index(ids))
     for column in (list(out_rows[0]) if out_rows else []):
         data[column] = _typed([r.get(column) for r in out_rows], data.index)
     if not len(data.columns):
@@ -440,6 +454,58 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
         [r.get("unit") for r in records], index=data.index, dtype=object))
     return Output(data=data, records=records, index=data.index,
                   meta={"verb": "expand", "form": "column", "value_column": name,
+                        "n_in": len(frame)})
+
+
+def _id_index(ids: list) -> pd.Index:
+    """Row ids as an index that keeps their type: ints stay ints."""
+    return pd.Index(ids, dtype=object if any(isinstance(i, str) for i in ids) or not ids else None)
+
+
+def _unpack(source: Any, columns: list[str], restore: str | None) -> Output:
+    """``expand(columns=[…])``: unpack list columns together, keep the rest."""
+    frame = rows(source)
+    _require_columns("expand", frame, columns)
+    blocked = _upstream_failures(source)
+    keep = [c for c in variables(frame.columns) if c not in columns]
+    out_rows, records, ids = [], [], []
+    for index, row in _units(frame):
+        if index in blocked:
+            records.append({**_blocked(*blocked[index]), "unit": index})
+            out_rows.append({c: None for c in variables(frame.columns)})
+            ids.append(_child_id(index, 0))
+            continue
+        lists = {c: (frame.at[index, c] if is_id_column(c) else row.get(c)) for c in columns}
+        if all(v is None for v in lists.values()):
+            continue                         # no list: no rows (J-D3)
+        bad = [c for c, v in lists.items() if not isinstance(v, list)]
+        lengths = {c: len(v) for c, v in lists.items() if isinstance(v, list)}
+        error = (f"not a list: {type(lists[bad[0]]).__name__} in {bad[0]!r}" if bad else
+                 None if len(set(lengths.values())) <= 1 else
+                 "the lists don't line up: " + ", ".join(f"{c} has {n} items"
+                                                          for c, n in lengths.items()))
+        if error:
+            records.append({"status": "failed", "error": error, "attempts": 1,
+                            "seconds": 0.0, "unit": index})
+            out_rows.append({c: None for c in variables(frame.columns)})
+            ids.append(_child_id(index, 0))
+            continue
+        packed_ids = frame.at[index, restore] if restore in frame.columns else None
+        n = next(iter(lengths.values()), 0)
+        for k in range(n):
+            out_rows.append({**{c: row.get(c) for c in keep}, **{c: lists[c][k] for c in columns}})
+            records.append({"status": "completed", "error": None, "attempts": 0,
+                            "seconds": 0.0, "unit": index})
+            ids.append(packed_ids[k] if isinstance(packed_ids, list) and k < len(packed_ids)
+                       else _child_id(index, k))
+    order = [c for c in variables(frame.columns)]
+    data = pd.DataFrame(index=_id_index(ids))
+    for c in order:
+        data[c] = _typed([r.get(c) for r in out_rows], data.index)
+    data.insert(0, _id_column_for(source), pd.Series(
+        [r.get("unit") for r in records], index=data.index, dtype=object))
+    return Output(data=data, records=records, index=data.index,
+                  meta={"verb": "expand", "form": "column", "value_column": None,
                         "n_in": len(frame)})
 
 
