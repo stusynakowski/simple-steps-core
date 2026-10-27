@@ -47,8 +47,9 @@ can drop a trace, by dropping its `#` column.
 position, and never reads meaning into an id. Uneven data stays visible: a
 `null` (a value: nothing), `absent` (no value here at all: a key a record
 lacks, a column one input of a `stack` doesn't have, the unmatched side of a
-`join`) and an empty list `[]` are three different things. A step you've
-declared but not written yet is **empty**: one cell, `"empty"`.
+`join`) and an empty list `[]` are three different things. A step with no
+expression yet (`k["x"] = None`) is **empty**: one cell, `"empty"`, which
+nothing can read until it has one.
 
 **10. Grouping is a new index; a reduction is a map over lists.**
 `gather[collapse(by="ward")]` re-indexes by the key and packs: one row per

@@ -87,7 +87,7 @@ The kinds of step ([step-expressions.md](step-expressions.md) has the grammar):
 | execution modifiers | `to_f[mod.map(), mod.retry(times=2), mod.try_except(default=None)]` | built (`timeout` isn't enforced yet, K18) |
 | naming outputs | `mod.name("temp_f")`, `mod.name(pattern="{step}_{field}")` | planned ([outputs-and-reshaping.md §4](outputs-and-reshaping.md#4-naming-outputs-modname)) |
 | a record return, spread into columns | `-> LoHi` gives `lo`, `hi` | planned (G8) |
-| an empty step, a placeholder line | `k["x"] = None` gives a 1×1 `"empty"` | planned (G17: today it is the value `None`) |
+| an empty step, a placeholder line | `k["x"] = None` gives a 1×1 `"empty"`, staged; a step reading it is refused until it has an expression | built (G17, phase 4) |
 | a stage: steps run and shown as one | `k.stage("triage", ["p", "sick", "f"])` | planned (R9) |
 
 Editing the order: `k.insert(1, "c", op)`, `k.move("c", -1)`, `k.rename("f", "temp_f")`,

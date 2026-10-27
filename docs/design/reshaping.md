@@ -368,10 +368,10 @@ choice that loses something is a step you can see.
 A tool given an `absent` cell gets the parameter's default if it has one,
 else `None`, as a Python call does for a missing argument.
 
-**`absent` is not empty.** An *empty step* is a step you've declared with no
-formula yet (`k.declare("x")`): a 1×1 grid holding `"empty"`, which other
-steps can be wired to before it's written. `absent` is a cell whose source
-had no value.
+**`absent` is not empty.** An *empty step* is a step with no expression yet
+(`k["x"] = None`, G17): a 1×1 grid holding `"empty"`, staged; a step that
+reads it is refused until it has an expression. `absent` is a cell whose
+source had no value.
 
 | Uneven | Rule |
 |---|---|

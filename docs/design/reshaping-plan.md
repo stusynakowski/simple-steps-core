@@ -28,11 +28,11 @@ comes off.
 | 4 ✓ | rows meet only through a recorded match, checked when declared (R-D7): `zip_` and column arguments; `zip_(…, match_ids=True)`; ids match exactly; a parent's value reaches each child; A5 is enforced in every test | `daca7e2` |
 | 5 ✓ | every verb records where its rows came from: `collapse` and `distinct` write `#v` lists, `join` and `stack` write `#a`, `#b`; a click on their cells shows the exact input rows; a dropped trace is named | `cc5a801` |
 | 6 ✓ | reducers take lists, and grouping is a pack then a map (R-D1, R-D13); `expand(columns=…)` in lockstep (R-D4); unpacking what core packed gives back its rows (R-D3); `by="#s"` back to any earlier step, every row of it (R-D5, J-D5) | `42e49a4`, `51a9580`, `444f797` |
-| 7 ✓ | `mod.pack`: a row's variables into one dict (R-D2); `widen` drops the column it spreads (G10) and, without `columns=`, takes the union of the keys (J-D2's union) | this commit |
+| 7 ✓ | `mod.pack`: a row's variables into one dict (R-D2); `widen` drops the column it spreads (G10) and, without `columns=`, takes the union of the keys (J-D2's union) | `672232f` |
+| 8 ✓ | `absent` for every cell with no source value (J-D1, J-D2, G2); `expand` never tidies, with `as_list`; a dict expands to key/value rows, `gather_dict` packs them back (J-D3, J-D4); the empty step (J-D6, G17); verbs can warn while running | `217e7cd`, `41d4db0`, this commit |
 
-**43 of the 49 law tests hold:** L1–L20, L22, L28–L39, L41–L49. The other 6
-are marked with the step that fixes them: L23–L27 (step 8), L21 (step 9).
-L40 (the property test) is built in step 10.
+**51 of the 52 law tests hold:** every law but L21 (step 9). L40, the
+property test, is built in step 10.
 
 ## 3. The path
 
@@ -158,14 +158,24 @@ several lists together and carries the other columns (R-D4).
 - **Fixes:** R2, R3, R5, G10.
 - **Laws:** L3, L5.
 
-### Step 8. Uneven data
+### Step 8. Uneven data ✓
+
+*Done 2026-10-27*, in four pieces: the `absent` state and `widen` (8a);
+`stack` and `join` gaps (8b); `expand` and mappings (8c); the empty step
+(8d). An `expand`'s plan has a `key` column when its tool declares it
+returns a dict, and says its columns are unknown when nothing says which.
+Two older tests changed with the decisions: a missing key is `absent`, not
+a failed row, and `k["x"] = None` is the empty step, not a literal `None`.
+
+What was planned:
 
 The `absent` cell state (J-D1); `widen` takes every key seen (J-D2);
 `expand` never tidies (J-D3), with the built-in `as_list`; `expand` of a dict
 gives `key`, `value` rows (J-D4).
 
 - **Decided** (2026-10-27): J-D1 (widened to `stack` and `join` gaps), J-D2,
-  J-D3 (with `as_list`), J-D4 (named `gather_dict`), J-D6 (`k.declare`).
+  J-D3 (with `as_list`), J-D4 (named `gather_dict`), J-D6 (the empty step,
+  `k["x"] = None` as G17 already designed it).
   Nothing left to confirm.
 - **Fixes:** J1, J2, J4, J5.
 - **Laws:** L23, L24, L25, L26, L27.
@@ -231,7 +241,7 @@ alternatives and a recommendation, is in
 | R-D11 | `#` is the row id; the row number has no name | **decided and built** (step 2) | 2 |
 | R-D12 | reductions: `#v` lists the group; empty values over no rows; a failed row blocks its group | **decided** 2026-10-27 (empty values built in step 1) | 5 |
 | J-D1 | a cell state `absent`, for every cell whose source had no value: a key a record lacks, a column one input of a `stack` doesn't have, the unmatched side of an outer or left `join` (widened by the owner, 2026-10-27); the column keeps its type | **decided** 2026-10-27 | 8 |
-| J-D6 | the empty step: `k.declare("x")` gives a step with no formula, a 1×1 grid holding `"empty"` (the project rule), never confused with `None` or `absent` | **decided** 2026-10-27 | 8 |
+| J-D6 | the empty step: `k["x"] = None` (as G17 designed it; first written here as `k.declare`, corrected) gives a step with no expression, a 1×1 grid holding `"empty"`, staged, that nothing can read until it has one; never confused with `None` or `absent` | **decided and built** 2026-10-27 | 8 |
 | J-D2 | `widen` takes every key seen; missing is `absent`; types kept | **decided** 2026-10-27 | 8 |
 | J-D3 | `expand` never tidies; `as_list` does it as a step | **decided** 2026-10-27, with `as_list` | 8 |
 | J-D4 | `expand` of a dict gives `key`, `value` rows; `gather_dict` (name open) packs them back | **decided** 2026-10-27, named `gather_dict` | 8 |
@@ -277,13 +287,13 @@ Found by running core, 2026-10-27. Wrong answers given silently are in bold.
 | R7 | `collapse(by=…)` with a missing column | not a bug: refused when the columns are known |
 | R8 | `cols["#"]` stored row numbers as data | fixed (step 2) |
 | R9 | under `collapse(by=…)`, built-in reducers get the key in each row: `total` by ward fails | fixed (step 6) |
-| J1 | `expand` wraps a bare string | step 8 |
-| J2 | `expand` of `None` gives one `None` row | step 8 |
+| J1 | `expand` wraps a bare string | fixed (step 8) |
+| J2 | `expand` of `None` gives one `None` row | fixed (step 8) |
 | J3 | `expand` of `[]` loses its parent for the way back | fixed (step 6) |
-| J4 | `widen(columns=…)` fails rows missing a key; ints become floats; `null` and missing look alike | step 8 |
-| J5 | `expand` of a dict gives one row holding the dict | step 8 |
-| J6 | a `stack` of grids with different columns, and the unmatched side of an outer or left `join`, give `NaN`, turn ints into floats, and say `known` (G2) | step 8: `absent`, types kept |
-| J7 | the empty step of the project rules isn't built: core can't declare a step with no formula (`k["x"] = None` makes a value step holding `None`) | step 8: `k.declare` |
+| J4 | `widen(columns=…)` fails rows missing a key; ints become floats; `null` and missing look alike | fixed (step 8) |
+| J5 | `expand` of a dict gives one row holding the dict | fixed (step 8) |
+| J6 | a `stack` of grids with different columns, and the unmatched side of an outer or left `join`, give `NaN`, turn ints into floats, and say `known` (G2) | fixed (step 8) |
+| J7 | the empty step of the project rules isn't built: core can't declare a step with no formula (`k["x"] = None` makes a value step holding `None`) | fixed (step 8): `k["x"] = None` |
 
 ## 7. For the app
 

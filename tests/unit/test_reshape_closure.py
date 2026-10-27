@@ -726,3 +726,26 @@ def test_L50_stack_and_join_gaps_are_absent_and_keep_their_type():
     assert str(s.states.at[1, "n"]) == "absent"
     j = k.workflow.steps["j"].output
     assert str(j.states.at[1, "head"]) == "absent" and str(j.states.at[0, "head"]) == "known"
+
+
+@tool
+def dbl_rc(value: float) -> float:
+    return value * 2
+
+
+def test_L51_an_empty_step_holds_a_place():
+    """k["x"] = None is a step with no expression yet (G17): a 1x1 "empty",
+    staged, never a None value or an absent cell, and nothing reads it yet."""
+    k = Kernel(Catalog(tools=[dbl_rc]))
+    k["x"] = None
+    assert state(k, "x") == "staged" and data(k, "x").to_dict("list") == {"value": ["empty"]}
+    k["d"] = dbl_rc[mod.map()](wf["x"])
+    assert [p.code for p in k.workflow.steps["d"].problems] == ["empty_input"]
+    k.run_all()                                                       # nothing to run: no failure
+    assert state(k, "x") == "staged"
+    back = Kernel.from_json(k.to_json(), Catalog(tools=[dbl_rc]))   # saved as empty
+    assert data(back, "x").to_dict("list") == {"value": ["empty"]}
+    k["x"] = pd.DataFrame({"value": [1.0, 2.0]})                     # given an expression
+    assert k.workflow.steps["d"].problems == ()
+    k.run_all()
+    assert data(k, "d")["value"].tolist() == [2.0, 4.0]

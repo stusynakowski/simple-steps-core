@@ -110,8 +110,10 @@ def test_extras_must_be_namespaced_literals_to_be_saved(k):
 
 # ── literal steps (G16) ──────────────────────────────────────────────────
 @pytest.mark.parametrize("value", [[3, 1, 2], (1, "a"), {1: "x", "k": [1.5, None]},
-                                   7, "text", {2, 3}, None, True])
+                                   7, "text", {2, 3}, True])
 def test_a_literal_step_is_saved_with_its_value(value):
+    """(None isn't a literal value: k["x"] = None is the empty step, G17, tested
+    in test_reshape_closure.py L51.)"""
     k = Kernel(Catalog())
     k["x"] = value
     loaded = Kernel.from_json(k.to_json(), Catalog())

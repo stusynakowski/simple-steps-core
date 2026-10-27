@@ -14,6 +14,8 @@ import hashlib
 import inspect
 import json
 
+import pandas as pd
+
 
 class Workflow:
     """Ordered Steps. Assign an Operation, get a Step that is already staged.
@@ -123,7 +125,16 @@ class Workflow:
     @staticmethod
     def _literal_step(step_id: str, value: Any, extras: dict) -> Step:
         """A step declared as a value: a source whose data is its output,
-        completed as soon as it exists."""
+        completed as soon as it exists. ``None`` declares an **empty step**
+        (G17, the project rule): a step with no expression yet, a 1×1 grid
+        holding ``"empty"``, staged, that nothing can read until it has one."""
+        if value is None:
+            plan = {"rows": {"certainty": "exact", "count": 1},
+                    "columns": {"certainty": "exact", "names": [VALUE_COLUMN]}, "types": {}}
+            empty = Output(pd.DataFrame({VALUE_COLUMN: ["empty"]}, index=[0]),
+                           meta={"staged": True, "empty": True, "plan": plan})
+            return Step(step_id, Operation(tool="identity", fn=identity)[mod.source()],
+                        empty, extras=extras, literal=None)
         step = Step(step_id, Operation(tool="identity", fn=identity)[mod.source()],
                     source_(value), extras=extras, literal=value)
         step.output.meta["version"] = _data_version(step.output.data)
@@ -189,17 +200,19 @@ class Workflow:
             # to stage and nothing to compute. It is born completed. This is
             # why a Workflow is only a list of Steps: literals have no separate
             # home, because they were never anything but a step's output.
+            was_empty = existed and self.steps[step_id].output.meta.get("empty")
             self.steps[step_id] = self._literal_step(step_id, operation, kept_extras)
             if existed:
                 self._mark_stale_dependents(step_id)
-            else:
-                self._recheck_readers(step_id)
+            if not existed or was_empty or self.steps[step_id].output.meta.get("empty"):
+                self._recheck_readers(step_id)    # an empty step written, or emptied (G17)
             return
         operation = _attach_bound(operation, self.resources)
         if self.catalog is not None:
             operation = self.catalog.admit(operation)
         problems = check(operation, self, step_id)
         previous = self.steps.get(step_id)
+        was_empty = previous is not None and previous.output.meta.get("empty")
         staged = stage(operation, self, problems)
         output = staged
         if previous is not None and not previous.output.meta.get("staged"):
@@ -220,6 +233,8 @@ class Workflow:
             for sid, st in self.steps.items():
                 if step_id in st.operation.reads:
                     st.warnings = warn(st.operation, self, sid)
+            if was_empty:
+                self._recheck_readers(step_id)    # an empty step got its expression (G17)
         else:
             self._recheck_readers(step_id)
 
@@ -1546,6 +1561,8 @@ class Workflow:
                 return step
             # A literal source holds its data, so running one is a no-op — unless
             # it was reloaded without payloads and has nothing to hold.
+            if step.output.meta.get("empty"):
+                return step                       # nothing to run yet (G17)
             if step.output.meta.get("staged"):
                 raise ValueError(
                     f"source step {step_id!r} has no data. Assign it: "

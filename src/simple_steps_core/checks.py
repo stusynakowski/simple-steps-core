@@ -465,6 +465,9 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             problems.append(f"{label} is itself ({name!r})")
         elif name not in workflow.steps:
             problems.append(f"{label} {name!r}, which is not an earlier step")
+        elif workflow.steps[name].output.meta.get("empty"):
+            # An empty step holds a place; nothing can read it yet (G17).
+            problems.append(f"{label} {name!r} is empty: give it an expression first")
         elif not workflow.steps[name].valid:
             root, why = workflow.root_cause(name)
             problems.append(f"{label} {name!r}, which is invalid "
@@ -481,6 +484,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     for i, p in enumerate(problems):
         problems[i] = classified(p, (("is itself", "self_reference"),
                                      ("which is invalid", "invalid_input"),
+                                     ("is empty: give it", "empty_input"),
                                      ("which is not an earlier step", "missing_step"),
                                      ("is circular", "circular"),
                                      ("comes after", "later_step")),
