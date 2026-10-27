@@ -80,7 +80,7 @@ The kinds of step ([step-expressions.md](step-expressions.md) has the grammar):
 | a tool over rows | `to_f[mod.map()](wf["p"])`; `filter`, `expand`, `group`, `collapse`, `widen`, `sweep`, `table` | built |
 | the verb inferred from the tool's types | `to_f(wf["p"])`, saved as `auto` | built |
 | a reshape, no tool | `mod.sort(by="temp_c")(wf["p"])`, `select`, `drop`, `rename`, `slice`, `distinct` | built |
-| part of a step | `wf["p"][0:2]`, `wf["p"][cols["temp_c"]]` | built (rows by position; by row id is planned, K19) |
+| part of a step | `wf["p"][0:2]`, `wf["p"][rows[[0, 2]]]`, `wf["p"][cols["temp_c"]]`, `wf["p"][cols[["name", "ward"]]]`, `wf["p"][1][cols["temp_c"]]`, `wf["p"].header` | built, as steps and as arguments, and they reload the same (checked 2026-10-27). Rows by position; by row id is K19. `header[k]` is C28 |
 | a combine, reading several steps | `zip_`, `join`, `stack` | built |
 | a resource's tool, or a resource as an argument | `res["ward"].bed[...]`, `tool(..., ward=res["ward"])` | built |
 | a value step as an argument: a control | `limit=wf["limit"]` | built |
@@ -107,7 +107,7 @@ step's input, giving the input twice, a value that isn't a step reference.
 | | Shows | |
 |---|---|---|
 | `k` | the table above; in a notebook, an HTML table | built |
-| `k.step("f")`, `k.step(3)` | the live step | built; its `repr` is one line today, and will show its formula, state, reason and first rows (G18, planned) |
+| `k.step("f")`, `k.step(3)` | the live step | built; its `repr` is one line today. Later: the workflow printed as a table of step blocks, and a step's rows labelled with their references (G18, [features.md](features.md#seeing-a-workflow-as-a-table-later)) |
 | `k.step("f").data` | its values, a DataFrame on its row ids | built |
 | `k.step("f").output.view()` | the grid as a user sees it: row number `#`, values, each row's state and note | built |
 | `k.view("p", rows=(0, 50))` | a page of rows, with each cell's state and type, and how many rows there are in all | built |

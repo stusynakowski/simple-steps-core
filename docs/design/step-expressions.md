@@ -42,10 +42,10 @@ Each is a short way to write something the general form also says.
 | Written | Refers to |
 |---|---|
 | `wf["p"]`, `wf[0]` | step `p`; the first step. Saved by name either way |
-| `wf["p"][1:5]`, `wf["p"][rows[1, 3]]` | rows, by row id (K19; *today* by position) |
-| `wf["p"][cols["n"]]`, `wf["p"][cols["a":"c"]]`, `wf["p"][cols["#"]]` | columns; `#` is the row number |
+| `wf["p"][1:5]`, `wf["p"][1]`, `wf["p"][rows[[1, 3]]]` | rows, by row id (K19; *today* by position). A list of rows is a list: `rows[[1, 3]]`, not `rows[1, 3]` |
+| `wf["p"][cols["n"]]`, `wf["p"][cols["a":"c"]]`, `wf["p"][cols[["a", "c"]]]`, `wf["p"][cols["#"]]` | columns; `#` is the row number |
 | `wf["p"][0][cols["w"]]` | one cell |
-| `wf["p"].header` | the column names, as a value |
+| `wf["p"].header` | the column names. As an argument, a list (`['name', 'temp_c']`). As a step, *today* one row per name in a column called `name`; whether it should be one row per name (in a column called `column`) or one cell holding the list is open. `header[k]` should pick one name; *today* the `[k]` is ignored (C28) |
 | `res["db"]` | a resource, passed to a tool's parameter |
 
 Where each may go:

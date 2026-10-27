@@ -50,7 +50,6 @@ Each is confirmed before it lands, and gets a probe.
 |---|---|
 | **A step is re-checked when an upstream's columns change**, so a reader that lost its column is a problem at once, not a `TypeError` on every row. *Highest priority: reactive status depends on it* | G13 |
 | `to_source()` prints every form as written (reshapes, selections), so step ⇄ formula round-trips | G4 |
-| A step's `repr`: formula, state, reason, problems, first rows | G18 |
 | `k["x"] = None` is an empty step (1×1 `"empty"`), a placeholder line | G17 |
 | Row count and estimated size per output, or `unknown` with the reason; pages of 50–100 rows | K26 |
 | Column types: declared, else `unknown`, then observed or the union | K27 |
@@ -72,7 +71,7 @@ Each is confirmed before it lands, and gets a probe.
 | Feature | ID |
 |---|---|
 | A declared record type (`TypedDict`, `NamedTuple`, dataclass) spreads into one column per field | G8 |
-| `mod.name`: a name, a list, a mapping or a pattern; replaces `name=` | G12 |
+| `mod.name`: a name, a list, a mapping or a pattern; replaces `name=`. The last modifier that defines names wins; with none, columns keep their defaults | G12 |
 | Kernel-wide naming conventions (`Kernel(cat, naming=…)`) | outputs-and-reshaping.md §10 |
 | `widen` reads declared fields, replaces the column it spreads, plans exactly | G9, G10 |
 | A `try_except` default that doesn't fit the return type warns; a step that used defaults warns | G6, G7 |
@@ -106,6 +105,39 @@ Each is confirmed before it lands, and gets a probe.
 |---|---|
 | A pluggable output store: outputs saved beside the spec, so a reloaded kernel opens with its data | C32 (replaces C29, C30) |
 | Media handles for images and other objects, saved as content-hashed references | R7 |
+
+### Seeing a workflow as a table (later)
+
+Decided by the owner, 2026-10-27, to add later. **Each step is a column, and a
+workflow is a table.** `repr(k)` shows the steps side by side, each as a block:
+
+1. the step's name;
+2. its operation;
+3. a summary of its data, column by column: type, how many values (missing,
+   failed), and the range, trues or distinct values.
+
+Printing one step (`k.step("sick")`, `k.show("sick", rows=…)`) shows its
+rows, each labelled on the left with how to reference it (`wf["sick"][0]`), so
+what you see is what you'd write. Rows line up across steps by their row
+mapping (the row ids of K19), so one patient sits on one line through `p`,
+`sick` and `f`. `k.table()` keeps today's one line per step. Long formulas and
+values are cut with "…". A draft that does all but the row alignment was
+written on 2026-10-27 and set aside until then.
+
+| Feature | ID |
+|---|---|
+| The workflow as a table of step blocks (name, operation, data summary) | G18 |
+| A step's rows labelled with their reference | G18 |
+| Rows aligned across steps by row mapping | G18, needs K19 |
+
+### Selections (later)
+
+| Feature | ID |
+|---|---|
+| `header[k]` picks one column name, or is refused; today the `[k]` is ignored | C28 |
+| A header as a step: one row per name (in a column called `column`), or one cell holding the list | open |
+| Selection steps print as written (`wf["p"][0:2]`, not `op("identity")[mod.select(…)]`) | G4 |
+| Possibly accept `rows[1, 3]` and `cols["a", "b"]` as lists | open |
 
 ## Phase 5: documentation
 

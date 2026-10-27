@@ -204,7 +204,7 @@ something the app works out.
 | G15 | no `needs_run()`, no change callbacks, no "read a stale input" mark. *Done in phase 3d* |
 | G16 | a literal step's value isn't saved: `k["x"] = [3, 1, 2]` is saved as an `identity` source with no data, and a reloaded kernel can't run it. A literal is a step's recipe, so the spec should hold JSON-safe literals; a DataFrame assigned in Python is data, and needs a source tool or an output snapshot. *Done (owner, 2026-10-26): JSON-safe literals are saved in the step's spec; a DataFrame isn't* |
 | G17 | `k["x"] = None` declares the value `None`, not an empty step: a placeholder line should be a 1×1 `"empty"` that later steps can't read until it has an expression |
-| G18 | a step's `repr` is one line (`<Step 'f' completed · map to_f · 1 cell>`); it should show its formula, state, reason, problems and first rows, as the kernel's table does for all steps |
+| G18 | a step's `repr` is one line (`<Step 'f' completed · map to_f · 1 cell>`). Decided (owner, 2026-10-27), to add later: the workflow prints as a table, each step a column block (name, operation, data summary), and a step prints its rows labelled with their references; see [features.md](features.md#seeing-a-workflow-as-a-table-later) |
 
 ## 10. Open
 

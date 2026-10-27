@@ -140,6 +140,12 @@ fit[mod.sweep(model=["a", "b"]), mod.name("score")]()             # model, score
 - A row whose sequence has the wrong length for its names fails, with the
   note *"returned 3 values for 2 names"*.
 
+**The last naming modifier wins** (owner, 2026-10-27). A step's column names
+come from the last modifier in its list that defines them; with none, each
+column keeps its default: `value` for a single value, the declared field names
+for a record, or the column's own name for verbs that carry columns. So
+`to_f[mod.map(name="a"), mod.name("b")]` writes `b`.
+
 **`mod.name` replaces `name=`** on `map`, `expand`, `collapse`, `group` and
 `sweep`, so there is one way to name outputs (recommended; for the owner to
 confirm). *Today* naming is `name=` on each verb, for a single column only.
