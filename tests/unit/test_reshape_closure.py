@@ -247,7 +247,7 @@ def test_L16_zip_across_origins_is_refused_when_declared(k):
     assert state(k, "z") == "invalid"
 
 
-@pytest.mark.xfail(strict=True, reason="R-D6, R-D7: zip_ reads '0.j' as a child of v's row 0 (M9)")
+@pytest.mark.xfail(strict=True, reason="R-D7: refused when it runs (M9 fixed), not yet when declared")
 def test_L16b_items_a_tool_rewrote_dont_pair_with_the_packed_rows(k):
     k["packed"] = gather[mod.collapse()](wf["t"])
     k["rev"] = backwards_rc[mod.map()](wf["packed"])
@@ -256,7 +256,6 @@ def test_L16b_items_a_tool_rewrote_dont_pair_with_the_packed_rows(k):
     assert state(k, "z") == "invalid"
 
 
-@pytest.mark.xfail(strict=True, reason="R-D6: lineage parses id strings (M8)")
 def test_L17_row_ids_are_never_parsed(k):
     k["n"] = named_rc[mod.source()]()
     k["e"] = two_rc[mod.expand()](wf["n"])

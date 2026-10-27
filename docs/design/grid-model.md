@@ -250,7 +250,7 @@ define it.**
 |---|---|---|
 | keeps rows: `map`, `filter`, `group`, `widen`, reshapes | the input's ids | as the rule |
 | `zip_` | pairs by row id | as the rule (K19, phase 4) |
-| `expand` | `"i.j"` from the parent row `i`: a label; *proposed:* the parent is in `#v`, and an unpack of a list core packed gives back its ids ([reshaping.md](reshaping.md) §5.1, §6) | as the rule |
+| `expand` | `"i.j"` from the parent row `i`: a label: the parent is in `#v` ([reshaping.md](reshaping.md) §5.1, built in phase 4); *proposed:* an unpack of a list core packed gives back its ids (§6) | as the rule |
 | `source` | the tool's own index if it set one, else 0…n-1 | **differs:** a tool's own index becomes a column named `index`, and ids restart at 0 |
 | `collapse` | `0`, or the key with `by=` (D3) | as the rule (phase 4) |
 | `sweep`, `table` | 0…k-1 (`table`: what the tool returns) | 0…k-1 |

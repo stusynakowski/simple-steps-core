@@ -47,8 +47,17 @@ def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
     rows are never paired by position (K19).
     """
     names = [f.attrs.get("name") or f"input {i + 1}" for i, f in enumerate(frames)]
-    depth = [max((len(_ancestors(i)) for i in f.index), default=0) for f in frames]
-    primary = max(range(len(frames)), key=lambda i: (depth[i], -i))
+    traces = [f.attrs.get("traces") or {} for f in frames]
+
+    def finer(i: int, j: int) -> bool:
+        """Do *i*'s rows come from *j*'s, and not the other way round?"""
+        return traces[i].get(j) is not None and traces[j].get(i) is None
+
+    # The finest grid (an expand's items, say) leads: each of its rows is
+    # paired with the row of every other grid it came from, found through its
+    # `#` columns. With none finer, the first leads and rows pair by id.
+    primary = max(range(len(frames)),
+                  key=lambda i: (sum(finer(i, j) for j in range(len(frames))), -i))
     target = frames[primary].index
     keys = [str(t) for t in target]
     aligned, picked_ids = [], []
@@ -58,7 +67,10 @@ def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
             picked_ids.append(list(frame.index))
             continue
         lookup = _row_lookup(frame)
-        related = any(k in lookup or any(a in lookup for a in _ancestors(k)) for k in keys)
+        traced = traces[primary].get(i)
+        wanted = ([None if t is None else str(t) for t in traced] if traced is not None
+                  else keys)
+        related = any(k in lookup for k in wanted if k is not None)
         if not related and len(frame):
             # K19: rows pair by id, never by position (docs/design/row-ids.md §5).
             raise ValueError(
@@ -67,20 +79,18 @@ def _combine_zip(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
                 f"{_rows_text([str(x) for x in list(frame.index)[:3]])} …). "
                 "Use join to match them on a column")
         picked, unmatched, used = [], [], set()
-        for key in keys:
-            match = key if key in lookup else next(
-                (a for a in _ancestors(key) if a in lookup), None)
-            if match is None:
+        for key, want in zip(keys, wanted):
+            if want is None or want not in lookup:
                 unmatched.append(key)
                 continue
-            picked.append(lookup[match])
-            used.add(match)
+            picked.append(lookup[want])
+            used.add(want)
         if unmatched:
             raise ValueError(
                 f"zip_ pairs rows by id: {_rows_text(unmatched)} of {names[primary]!r} "
                 f"{'has' if len(unmatched) == 1 else 'have'} no matching row in "
                 f"{names[i]!r}. For a partial match, use join")
-        if depth[i] == depth[primary]:
+        if not finer(primary, i):         # a coarser grid may have rows nothing points to
             extra = [k for k in lookup if k not in used]
             if extra:
                 raise ValueError(
@@ -249,6 +259,5 @@ from .checks import columns_unknown, predicted_columns  # noqa: E402
 from .operation import Operation  # noqa: E402
 from .output import Output, VALUE_COLUMN  # noqa: E402
 from .references import StepRef  # noqa: E402
-from .verbs import _ancestors  # noqa: E402
 from .output import is_id_column  # noqa: E402
 from .workflow import Workflow  # noqa: E402

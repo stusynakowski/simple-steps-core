@@ -472,7 +472,7 @@ row ids and (once origins exist) pairing.
 | L4 | block → list of dicts → block | values ✓ (with `identity` packing the row), ids ✗ |
 | L5 | block → dict of lists → block | ✗ (R4, R5) |
 | L6 | unpack(pack by group) = the rows, ids kept | values ✓, ids ✗ (`"A.0"`) |
-| L7 | `expand` → `collapse(by="#v", gather)` = one list per `v` row, pairs with `v` | ✗ (M1): there is no `#v` column; the step ends `invalid` |
+| L7 | `expand` → `collapse(by="#v", gather)` = one list per `v` row, pairs with `v` | ✓ for a direct input (`#v` is a column since step 2); `by="#s"` further back is R-D5 |
 | L8 | sort is a permutation: same ids, same rows | ✓ |
 | L9 | rename then rename back = the grid | ✓ |
 | L10 | `zip_` of two `select`s of `v` = `v` | ✓ |
@@ -481,8 +481,8 @@ row ids and (once origins exist) pairing.
 | L13 | `join` → `first[collapse(by="#v")]` = `v`'s rows, pairs with `v` | ✗ (M4) |
 | L14 | a `collapse` cell traces to exactly its group's rows | ✓ (from the row's note), read by id: `k.cell("c", "A")` (M7, fixed) |
 | L15 | a `join` cell traces to its pair of input rows | ✗ (M4) |
-| L16 | `zip_` across origins is refused at declaration | ✗: completes, wrong (M5, M9) |
-| L17 | ids are never parsed: a source with ids `a`, `a.1`, expanded, traces each row to its true parent | ✗ (M8) |
+| L16 | `zip_` across origins is refused at declaration | ✗: M5 completes, wrong; M9 is refused, but only when it runs |
+| L17 | ids are never parsed: a source with ids `a`, `a.1`, expanded, traces each row to its true parent | ✓ (M8, fixed) |
 | L18 | packing zero rows gives `[]`; unpacking `[]` gives a 0×n grid with its columns | ✓ (R6, fixed) |
 | L19 | `distinct` traces each kept row to every row it stands for | ✗ (M3) |
 | L20 | `table` is its own origin: its rows don't pair with its input's | ✗ (M6) |
@@ -493,9 +493,9 @@ row ids and (once origins exist) pairing.
 | L25 | `expand` doesn't normalise: a bare string fails its row, the others run | ✗ (J1) |
 | L26 | `expand` of a mapping gives `key`, `value` rows | ✗ (J5) |
 | L27 | `expand` of `None` gives no rows | ✗ (J2) |
-| L28 | positions count variables only: `cols[0]` is the first variable beside `#v` | ✗ (no `#` columns yet) |
-| L29 | tools get variables only: a `**kwargs` tool sees no `#` column | ✗ (no `#` columns yet) |
-| L30 | `zip_` of two steps of one origin keeps one `#v` | ✗ |
+| L28 | positions count variables only: `cols[0]` is the first variable beside `#v` | ✓ |
+| L29 | tools get variables only: a `**kwargs` tool sees no `#` column | ✓ |
+| L30 | `zip_` of two steps of one origin keeps one `#v` | ✓ |
 | L31 | after `drop(columns=["#v"])`, `by="#v"` is a problem at declaration | ✗ (no `#v` column yet) |
 | L32 | a reduction's `#v` lists its group's rows | ✗ (kept in the row's note, not a column; and R9) |
 | L33 | unpacking a reduction's `#vt` puts each row beside its group's statistic, lined up with `v` | ✗ |
@@ -515,8 +515,8 @@ Run at `8efe6fd`. M1–M7 come from the `row-maps.md` draft; the rest are new.
 | M5 | `zip_(v, select(join(w, v)))` completes with **Ben beside Dr X**: counted ids pair by accident |
 | M6 | `table` keeps the tool's index, so its rows claim to be the input's rows |
 | M7 | *Fixed 2026-10-27:* `k.cell` took a position, so `k.cell("c", "A")` and `k.cell("e", "0.1")` raised `TypeError`. It now takes a row id, as selections do; `Workflow.cell`, which takes a screen position, is unchanged |
-| **M8** | **Lineage parses id strings.** Source ids `a`, `a.1`, then `expand`: output row `a.1` (item 1 of `a`, value `p1`) traces to source row `a.1` (`q`). A wrong answer, given silently |
-| **M9** | **`zip_` parses id strings.** `zip_(v, expand(gather(v)))` completes and puts **all four unpacked rows beside `v`'s row 0** (Ada, 37.0): `"0.j"` is read as "child of `v`'s row 0", though its parent is the `collapse`'s row 0. A wrong answer, given silently |
+| M8 | *Fixed 2026-10-27 (step 2):* lineage parsed id strings. Source ids `a`, `a.1`, then `expand`: output row `a.1` (item 1 of `a`, value `p1`) traced to source row `a.1` (`q`). It now follows `#n` to `a` |
+| M9 | *Fixed 2026-10-27 (step 2):* `zip_` parsed id strings. `zip_(v, expand(gather(v)))` completed and put **all four unpacked rows beside `v`'s row 0**. It now follows `#` columns, finds no link, and refuses: *"'v' and 'u' share none … use join"*. R-D3 will make it pair correctly |
 | R1 | unpacking a gathered list gives new ids (`"0.j"`, `"A.j"`), not the ids it was packed from |
 | R2 | no way to pack a row whatever its width (`pack`) |
 | R3 | `identity` under `map` packs a row into a dict only when it has 2 or more columns; the shape of the result depends on how wide the input is |
@@ -524,7 +524,7 @@ Run at `8efe6fd`. M1–M7 come from the `row-maps.md` draft; the rest are new.
 | R5 | `expand` unpacks one list; several lists can't be unpacked together |
 | R6 | *Fixed 2026-10-27:* every reducer gave `None` over no rows: `gather` (not `[]`), `total` (not 0) and **`count` (not 0)**, a wrong answer given silently. Each built-in reducer now starts from its empty value |
 | R7 | *Corrected:* not a bug. `collapse(by="nosuch")` is refused at declaration once the input's columns are known (*"collapse groups by 'nosuch', which 'v' does not have"*); before then, the step ends `invalid` with that message when it runs |
-| R8 | `cols["#"]` stores row **numbers** as data: after a sort, `[0, 1, 2]` while the ids are `[1, 2, 0]`. A value that changes when an earlier step reorders: the position pairing K19 retired (tested in test_008_asks: `{"#": [0, 1, 2, 3]}`) |
+| R8 | *Fixed 2026-10-27 (step 2):* `cols["#"]` stored row **numbers** as data: after a sort, `[0, 1, 2]` while the ids were `[1, 2, 0]`. It now gives the ids |
 | R9 | under `collapse(by=…)`, the built-in reducers get **the key in each row's payload**: `gather` gives dicts holding `ward`, and `total[collapse(by="ward")]` on `(ward, temp)` fails, *"unsupported operand type(s) for +: 'int' and 'dict'"* |
 | J1 | `expand` wraps a bare string: `"c"` gives one row `c`, so `"c"` and `["c"]` can't be told apart afterwards |
 | J2 | `expand` of `None` gives one row holding `None`, the same as `[None]` |
@@ -564,8 +564,11 @@ Each is one small piece, confirmed before it lands.
 
 1. ~~Fixes: M7 (`k.cell` takes a row id), R6 (empty values over no rows).~~
    Done 2026-10-27. (R7 turned out not to be a bug.)
-2. R-D6, R-D10 and R-D11 for the steps that keep ids and for `expand`: `#`
-   and `#v` columns, and `_ancestors` goes. Fixes M8 and M9.
+2. ~~R-D6, R-D10 and R-D11 for the steps that keep ids and for `expand`:
+   `#` and `#v` columns, and `_ancestors` goes.~~ Done 2026-10-27: M8, M9 and
+   R8 fixed; L7, L17, L28–L30 hold. Rows are followed back through `#`
+   columns (`Workflow.trace`). `zip_` still pairs grids that share ids with
+   no link between them (M5): that is step 3.
 3. R-D7: origins, and pairing checked at declaration. Fixes M5.
 4. R-D10 for `collapse`, `distinct`, `join` and `stack`, with R-D12; then
    D3's per-group staleness.

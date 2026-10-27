@@ -77,12 +77,6 @@ def _child_id(parent: Any, k: int) -> str:
     return f"{parent}.{k}"
 
 
-def _ancestors(row_id: Any) -> list[str]:
-    """``"1.0.2"`` → ``["1.0", "1"]`` — the rows a derived row came from."""
-    parts = str(row_id).split(".")
-    return [".".join(parts[:i]) for i in range(len(parts) - 1, 0, -1)]
-
-
 def _units(frame: pd.DataFrame):
     """``(index, row dict)`` per row, each value as the tool should get it.
 

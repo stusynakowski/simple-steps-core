@@ -895,7 +895,8 @@ class Workflow:
             if op_.tool == "zip":
                 for g in op_.grids:
                     if column in self._predicted_of(str(g)):
-                        entries.append(self._input_entry(str(g), row_id, [column], None))
+                        entries.append(self._input_entry(
+                            str(g), self._trace_one(step_id, row_id, str(g)), [column], None))
                         break
             else:
                 entries += [{"step": str(g), "id": None, "columns": [], "argument": None,
@@ -916,11 +917,12 @@ class Workflow:
                                 "argument": self._first_param(op_), "state":
                                 self._grid_state(source), "values": {}})
             elif _is_tool_verb(kind, op_):
+                traced = self._trace_one(step_id, row_id, source)
                 for param in self._columns_bound(op_, source, kind):
-                    entries.append(self._input_entry(source, row_id, [param], param))
+                    entries.append(self._input_entry(source, traced, [param], param))
             else:
                 # No tool: the cell is a copy of the input's (renamed, perhaps).
-                entries.append(self._input_entry(source, row_id,
+                entries.append(self._input_entry(source, self._trace_one(step_id, row_id, source),
                                                  [_source_column(op_, column)], None))
 
         for name, value in op_.arguments.items():
@@ -934,6 +936,66 @@ class Workflow:
                 if isinstance(value, StepRef):
                     entries.append(self._reference_entry(value, f"{m.kind}.{name}"))
         return entries
+
+    # ── following a row back (reshaping.md §5.1: ids are never parsed) ────
+    def _same_ids(self, step_id: str) -> set[str]:
+        """*step_id* and the steps whose rows it keeps, with the same ids."""
+        names, seen = {step_id}, step_id
+        while seen in self.steps:
+            op_ = self.steps[seen].operation
+            if self._kind(seen) not in _KEEPS_IDS or op_.input is None:
+                break
+            seen = str(op_.input)
+            names.add(seen)
+        return names
+
+    def trace(self, step_id: str, ids: list, target: str) -> list | None:
+        """The ids, in step *target*, of the rows *ids* of *step_id* came from.
+
+        Follows the `#` columns back, step by step, and the steps that keep
+        ids; never reads anything out of an id. ``None`` when *step_id*'s rows
+        don't come from *target*'s; an entry is ``None`` for a row that
+        doesn't."""
+        return self._trace(step_id, list(ids), self._same_ids(target), 0)
+
+    def _trace(self, step_id: str, ids: list, target: set, depth: int) -> list | None:
+        if step_id in target:
+            return ids
+        step = self.steps.get(step_id)
+        if step is None or depth > len(self.steps):
+            return None
+        data = step.output.data
+        for c in data.columns:
+            parent = c[len(ROW_ID):] if is_id_column(c) and c != ROW_ID else None
+            if parent in self.steps:
+                mapped = [data.at[i, c] if i in data.index else None for i in ids]
+                found = self._trace(parent, mapped, target, depth + 1)
+                if found is not None:
+                    return found
+        op_ = step.operation
+        if self._kind(step_id) in _KEEPS_IDS and op_.input is not None:
+            return self._trace(str(op_.input), ids, target, depth + 1)
+        if is_combine(op_) and op_.tool == "zip":
+            for g in op_.grids:           # a zip's rows are its finest input's
+                inner = self.steps.get(str(g))
+                if inner is not None and all(i in inner.output.data.index for i in ids):
+                    found = self._trace(str(g), ids, target, depth + 1)
+                    if found is not None:
+                        return found
+        return None
+
+    def _kind(self, step_id: str) -> str | None:
+        """The verb a step runs as: an `auto` step's, once it has resolved."""
+        step = self.steps[step_id]
+        verb = step.operation.shape_verb
+        kind = verb.kind if verb is not None else None
+        if kind == "auto":
+            kind = (step.output.meta.get("auto") or {}).get("verb", "map")
+        return kind
+
+    def _trace_one(self, step_id: str, row_id: Any, target: str) -> Any:
+        found = self.trace(step_id, [row_id], target)
+        return found[0] if found else None
 
     def _columns_bound(self, op_: Operation, source: str, kind: str) -> list[str]:
         """The input columns a tool reads: its parameters the input supplies by name."""
@@ -985,7 +1047,7 @@ class Workflow:
                     "state": _worst(states, out.meta.get("stale")), "values": {}}
         lookup = _row_lookup(out.data)
         key = str(row_id)
-        match = key if key in lookup else next((a for a in _ancestors(key) if a in lookup), None)
+        match = key if row_id is not None and key in lookup else None
         if match is None:
             return {**entry, "state": "missing", "values": {}}
         input_id = lookup[match]
@@ -1252,6 +1314,13 @@ class Workflow:
                 frame = rows(self.steps[str(g)].output).copy(deep=False)
                 frame.attrs["name"] = str(g)        # so an error can name it
                 frames.append(frame)
+            if step.operation.tool == "zip":
+                # Which rows of each input the others' rows came from, by
+                # following `#` columns: never by reading the ids (§5.1).
+                for frame in frames:
+                    frame.attrs["traces"] = {
+                        j: self.trace(frame.attrs["name"], list(frame.index), other.attrs["name"])
+                        for j, other in enumerate(frames) if other is not frame}
             try:
                 step.output = _run_combine(step.operation, frames)
                 if step.operation.tool == "zip":
@@ -1632,4 +1701,4 @@ from .values import (  # noqa: E402
     _type_name,
     _value_fits,
 )
-from .verbs import _ancestors, source_  # noqa: E402
+from .verbs import source_  # noqa: E402
