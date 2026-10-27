@@ -27,7 +27,7 @@ from .catalog import Catalog
 from .output import PAYLOAD
 from .specs import KernelSpec
 from .references import ResRef, StepRef
-from .step import Step
+from .step import NO_LITERAL, Step
 from .workflow import Workflow
 
 
@@ -98,6 +98,20 @@ def _notifies(action: str):
                 self._tell(action, before)
         return run
     return wrap
+
+
+def _formula(step: Step) -> str:
+    """How a step is written: its formula, or the value a literal step holds."""
+    if step.literal is not NO_LITERAL:
+        value = step.literal
+        if hasattr(value, "shape") and hasattr(value, "columns"):
+            return f"<{type(value).__name__} {value.shape[0]}×{value.shape[1]}>"
+        text = repr(value)
+        return text if len(text) <= 60 else text[:57] + "..."
+    try:
+        return step.operation.to_source()
+    except Exception:                               # a step that can't print
+        return step.operation.tool_id
 
 
 class Kernel:
@@ -318,10 +332,7 @@ class Kernel:
     def _rows(self) -> list[tuple[str, ...]]:
         rows = []
         for index, (name, st) in enumerate(self.workflow.steps.items()):
-            try:
-                formula = st.operation.to_source()
-            except Exception:                       # a step that can't print
-                formula = st.operation.tool_id
+            formula = _formula(st)
             data = st.output.data
             shape = "—" if st.output.staged else f"{data.shape[0]}×{data.shape[1]}"
             problem = st.problems[0] if st.problems else ""

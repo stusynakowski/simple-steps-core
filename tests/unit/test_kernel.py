@@ -193,3 +193,9 @@ def test_a_kernel_shows_itself_as_a_table(k):
 
 def test_an_empty_kernel_shows_its_heading():
     assert repr(Kernel(Catalog())) == "Kernel: 0 steps, 0 tools (+ built-ins), 0 resources"
+
+
+def test_a_shadowed_rows_is_refused_through_a_kernel_too(k):
+    rows = [10, 20, 30]  # noqa: F841 — shadows core's `rows`, which is the point
+    with pytest.raises(TypeError, match="'rows' is reserved for row selection"):
+        k["x"] = [1, 2]

@@ -258,7 +258,7 @@ keeps the spread column and fails only at run (G8–G10); DataFrame returns per
 row aren't flagged (G11); no naming modifier (G12); readers aren't re-checked when an upstream's
 columns change (G13); `run` doesn't run never-run inputs first (G14); no `needs_run`, change
 callbacks or stale-read mark (G15, done in 3d); a literal step's value isn't saved,
-so `k["x"] = [3, 1, 2]` reloads with no data (G16, for the owner to decide).
+so `k["x"] = [3, 1, 2]` reloads with no data (G16, done: literals are saved; a DataFrame assigned in Python isn't).
 
 - `mod.name` replaces `name=`; an undeclared dict stays one cell; kernel-wide
   naming conventions are a kernel option; one grid per step; combines number

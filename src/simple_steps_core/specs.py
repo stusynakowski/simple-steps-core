@@ -48,9 +48,16 @@ class StepSpec:
     name: str
     operation: dict
     extras: dict = field(default_factory=dict)
+    #: For a step declared as a literal (``k["x"] = [3, 1, 2]``), the value, as
+    #: ``{"value": <tagged JSON>}``: a literal is the step's recipe. None for
+    #: every other step, and for values that aren't literals (a DataFrame is
+    #: data, and isn't saved).
+    literal: dict | None = None
 
     def to_dict(self) -> dict:
         out = {"step_id": self.name, "operation": _plain(self.operation)}
+        if self.literal is not None:
+            out["literal"] = _plain(self.literal)
         if self.extras:
             out["extras"] = _plain(self.extras)
         return out

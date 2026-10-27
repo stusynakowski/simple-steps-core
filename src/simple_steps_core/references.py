@@ -131,15 +131,22 @@ def _reserved_problem(name: str, what: str) -> str | None:
     return None
 
 
-def _check_caller_scope(depth: int = 2) -> None:
+def _check_caller_scope() -> None:
     """Refuse a declaration made where ``rows``/``cols`` mean something else.
 
     A script's own ``rows = [10, 20, 30]`` replaces the import, and Python
     evaluates ``rows[1:5]`` on it before core sees anything — a valid-looking,
-    wrong row selection. So the names are checked in the declaring scope.
+    wrong row selection. So the names are checked in the declaring scope: the
+    first frame outside this package, however many of core's own calls (a
+    kernel, its change notices) are in between.
     """
     import sys
-    frame = sys._getframe(depth)
+    frame = sys._getframe(1)
+    while frame is not None and (frame.f_globals.get("__name__") or "").startswith(
+            "simple_steps_core"):
+        frame = frame.f_back
+    if frame is None:
+        return
     for name, core in (("rows", rows), ("cols", cols)):
         if name in frame.f_locals:
             value = frame.f_locals[name]

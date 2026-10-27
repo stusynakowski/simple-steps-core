@@ -106,3 +106,34 @@ def test_extras_must_be_namespaced_literals_to_be_saved(k):
     k.step("f").extras["simple_steps.ui"] = object()
     with pytest.raises(TypeError, match="must hold literals"):
         k.to_json()
+
+
+# ── literal steps (G16) ──────────────────────────────────────────────────
+@pytest.mark.parametrize("value", [[3, 1, 2], (1, "a"), {1: "x", "k": [1.5, None]},
+                                   7, "text", {2, 3}, None, True])
+def test_a_literal_step_is_saved_with_its_value(value):
+    k = Kernel(Catalog())
+    k["x"] = value
+    loaded = Kernel.from_json(k.to_json(), Catalog())
+    step = loaded.step("x")
+    assert step.state == "completed"
+    assert step.literal == value and type(step.literal) is type(value)
+    assert loaded.spec == k.spec
+
+
+def test_a_dataframe_assigned_in_python_is_data_and_isnt_saved():
+    k = Kernel(Catalog())
+    k["t"] = pd.DataFrame({"a": [1, 2]})
+    assert "literal" not in json.loads(k.to_json())["steps"][0]
+    loaded = Kernel.from_json(k.to_json(), Catalog())
+    assert loaded.step("t").state == "staged"       # a source with no data
+    with pytest.raises(ValueError, match="has no data"):
+        loaded.run("t")
+
+
+def test_a_literal_keeps_its_extras_and_shows_its_value(k, cat):
+    k["limit"] = 38
+    k.step("limit").extras["simple_steps.ui"] = {"widget": "number"}
+    loaded = Kernel.from_json(k.to_json(), cat)
+    assert loaded.step("limit").extras == {"simple_steps.ui": {"widget": "number"}}
+    assert "limit  38" in repr(loaded)

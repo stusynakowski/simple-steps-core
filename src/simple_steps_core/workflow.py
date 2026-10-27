@@ -120,6 +120,16 @@ class Workflow:
         return live
 
     # ── declaring ────────────────────────────────────────────────────────
+    @staticmethod
+    def _literal_step(step_id: str, value: Any, extras: dict) -> Step:
+        """A step declared as a value: a source whose data is its output,
+        completed as soon as it exists."""
+        step = Step(step_id, Operation(tool_id="identity", fn=identity)[mod.source()],
+                    source_(value), extras=extras, literal=value)
+        step.output.meta["version"] = _data_version(step.output.data)
+        step.output.meta["read"] = {}
+        return step
+
     def _as_operation(self, operation: Any) -> Any:
         """What declaring *operation* means, before it is checked: a selection
         becomes a select step, a bare shape verb gets its default tool. Anything
@@ -179,14 +189,7 @@ class Workflow:
             # to stage and nothing to compute. It is born completed. This is
             # why a Workflow is only a list of Steps: literals have no separate
             # home, because they were never anything but a step's output.
-            self.steps[step_id] = Step(
-                step_id,
-                Operation(tool_id="identity", fn=identity)[mod.source()],
-                source_(operation),
-                extras=kept_extras,
-            )
-            out = self.steps[step_id].output
-            out.meta["version"], out.meta["read"] = _data_version(out.data), {}
+            self.steps[step_id] = self._literal_step(step_id, operation, kept_extras)
             if existed:
                 self._mark_stale_dependents(step_id)
             else:
@@ -1404,6 +1407,12 @@ class Workflow:
         workflow.extras = dict(blob.get("extras") or {})
         for entry in blob["steps"]:
             sid = entry["step_id"]
+            if "literal" in entry:
+                # A literal is the step's recipe: the step comes back with it.
+                workflow.steps[sid] = cls._literal_step(
+                    sid, _decode_argument(entry["literal"]["value"]),
+                    dict(entry.get("extras") or {}))
+                continue
             operation = _attach_bound(
                 Operation.from_dict(entry["operation"], tools), workflow.resources)
             if catalog is not None:
@@ -1506,6 +1515,7 @@ from .step import (  # noqa: E402
     _row_fps,
 )
 from .values import (  # noqa: E402
+    _decode_argument,
     FORMAT_VERSION,
     _decode_output,
     _dtype_type,

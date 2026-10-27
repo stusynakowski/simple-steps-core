@@ -48,6 +48,17 @@ def _row_fps(frame: pd.DataFrame, columns: list) -> dict:
                 for i, row in zip(frame.index, frame[columns].itertuples(index=False))}
 
 
+
+class _NoLiteral:
+    """The :attr:`Step.literal` of a step that wasn't declared as a literal."""
+
+    def __repr__(self) -> str:
+        return "NO_LITERAL"
+
+
+NO_LITERAL = _NoLiteral()
+
+
 @dataclass
 class Step:
     """One node of a workflow: **an Operation and an Output**, always both.
@@ -67,12 +78,19 @@ class Step:
     #: The app's additions, by namespace (``{"simple_steps.ui": {"color": …}}``).
     #: Saved with the step, never read by core, never a reason to re-run.
     extras: dict = field(default_factory=dict)
+    #: The value a literal step was declared with (``k["x"] = [3, 1, 2]``), or
+    #: :data:`NO_LITERAL`. Kept so the step's spec can save it.
+    literal: Any = field(default=NO_LITERAL, repr=False, compare=False)
 
     @property
     def spec(self) -> "StepSpec":
-        """The step's saved form: its name and operation, never its output."""
+        """The step's saved form: its name and operation, never its output.
+        A literal step's value is its recipe, so a literal is saved."""
+        saved = None
+        if self.literal is not NO_LITERAL and _literal_problem(self.literal) is None:
+            saved = {"value": _encode_argument(self.literal)}
         return StepSpec(self.step_id, self.operation.to_dict(),
-                        _checked_extras(self.extras))
+                        _checked_extras(self.extras), saved)
 
     @property
     def valid(self) -> bool:
@@ -197,4 +215,4 @@ from .combines import is_combine  # noqa: E402
 from .operation import Operation, _src  # noqa: E402
 from .output import Output, _plan_words  # noqa: E402
 from .specs import StepSpec  # noqa: E402
-from .values import _dtype_type, _type_label  # noqa: E402
+from .values import _dtype_type, _encode_argument, _literal_problem, _type_label  # noqa: E402
