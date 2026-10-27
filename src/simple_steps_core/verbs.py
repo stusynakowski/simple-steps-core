@@ -317,6 +317,9 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
         index = list(keys)
     data = pd.DataFrame(index=pd.Index(index, dtype=object if any(
         isinstance(i, str) for i in index) else None))
+    # Each group's rows, in the order they were reduced (reshaping.md §8).
+    data[_id_column_for(source)] = pd.Series([list(chunk.index) for _, chunk in groups],
+                                             index=data.index, dtype=object)
     if by is not None:                       # key first reads better
         data[by] = keys
     data[name] = _typed(results, data.index)
@@ -881,16 +884,33 @@ def distinct_(source: Any, fn: Callable = identity, *,
     frame = rows(source)
     if callable(columns):
         # 008 C2: two rows are duplicates when the tool gives them the same key.
-        keys = pd.Series(_key_column(frame, columns), index=frame.index)
-        data = frame.loc[~keys.duplicated(keep="first")]
-        return _column_output("distinct", frame, data, index=data.index,
-                              source=source)
-    if columns:
-        _require_columns("distinct", frame, list(columns))
-    data = frame.drop_duplicates(subset=list(columns) if columns else None,
-                                 keep="first")
+        keys = list(_key_column(frame, columns))
+    else:
+        if columns:
+            _require_columns("distinct", frame, list(columns))
+        # Rows compare on their variables, never their `#` columns.
+        subset = list(columns) if columns else variables(frame.columns)
+        keys = [tuple(_hashable(v) for v in row)
+                for row in frame[subset].itertuples(index=False, name=None)]
+    members: dict = {}
+    for row_id, key in zip(frame.index, keys):
+        members.setdefault(_hashable(key), []).append(row_id)
+    kept = [group[0] for group in members.values()]
+    data = frame.loc[kept].copy()
+    # The rows each kept row stands for (reshaping.md §5).
+    data.insert(0, _id_column_for(source), pd.Series(list(members.values()),
+                                                     index=data.index, dtype=object))
     return _column_output("distinct", frame, data, index=data.index,
                           source=source)
+
+
+def _hashable(value: Any) -> Any:
+    """*value*, or its repr when it can't be a dict key (a list in a cell)."""
+    try:
+        hash(value)
+        return value
+    except TypeError:
+        return repr(value)
 
 
 def _column_output(verb: str, frame: pd.DataFrame, data: pd.DataFrame,

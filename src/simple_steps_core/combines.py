@@ -22,9 +22,38 @@ def _variables_only(frames: list[pd.DataFrame]) -> list[pd.DataFrame]:
     return [f[[c for c in f.columns if not is_id_column(c)]] for f in frames]
 
 
+def own_id_columns(names: list[str]) -> list[str]:
+    """The `#` column a join or stack writes for each input: `#a`, `#b`; a step
+    read twice gets `#a_1`, `#a_2` (reshaping.md §5)."""
+    base = [f"{ROW_ID}{n}" for n in names]
+    out, seen = [], {}
+    for b in base:
+        if base.count(b) > 1:
+            seen[b] = seen.get(b, 0) + 1
+            out.append(f"{b}_{seen[b]}")
+        else:
+            out.append(b)
+    return out
+
+
+def _input_names(frames: list[pd.DataFrame]) -> list[str]:
+    return [f.attrs.get("name") or f"input{i + 1}" for i, f in enumerate(frames)]
+
+
+def _ids_as_column(frame: pd.DataFrame, values: list) -> pd.Series:
+    return pd.Series(values, index=frame.index, dtype=object)
+
+
 def _combine_stack(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
-    return pd.concat(_variables_only(frames), axis=0, join=config.get("join", "outer"),
-                     ignore_index=True)
+    own = own_id_columns(_input_names(frames))
+    parts = []
+    for n, (frame, plain) in enumerate(zip(frames, _variables_only(frames))):
+        part = plain.copy()
+        for m, column in enumerate(own):     # each row: the row it came from, in its input
+            part.insert(m, column, _ids_as_column(
+                part, list(frame.index) if m == n else [None] * len(part)))
+        parts.append(part)
+    return pd.concat(parts, axis=0, join=config.get("join", "outer"), ignore_index=True)
 
 
 def _row_lookup(frame: pd.DataFrame) -> dict:
@@ -131,11 +160,19 @@ def _rows_text(keys: list) -> str:
 
 
 def _combine_join(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
+    own = own_id_columns(_input_names(frames))
     left, right = _variables_only(frames)
+    left = left.assign(**{own[0]: _ids_as_column(left, list(frames[0].index))})
+    right = right.assign(**{own[1]: _ids_as_column(right, list(frames[1].index))})
     suffixes = tuple(config.get("suffixes") or ("_left", "_right"))
-    return pd.merge(left, right, on=config.get("on"),
-                    how=config.get("how", "inner"),
-                    suffixes=suffixes).reset_index(drop=True)
+    out = pd.merge(left, right, on=config.get("on"),
+                   how=config.get("how", "inner"),
+                   suffixes=suffixes).reset_index(drop=True)
+    for column in own:                       # each row's pair of input rows, in front
+        ids = out.pop(column)
+        out.insert(own.index(column), column,
+                   pd.Series([None if pd.isna(v) else v for v in ids], index=out.index, dtype=object))
+    return out
 
 
 #: Each combine verb: how it folds row counts (for staging), the minimum grids
@@ -188,6 +225,11 @@ def join(left: Any, right: Any, *, on: Any = None, how: str = "inner",
 
 def _combine_columns(operation: Operation, schemas: list[list[str]]) -> list[str]:
     """Predicted output columns of a combine, folded from its inputs' schemas."""
+    if operation.tool in ("join", "stack"):
+        # They make new rows: their inputs' `#` columns don't describe them,
+        # and they write their own, in front (reshaping.md §5).
+        own = own_id_columns([str(g) for g in operation.inputs])
+        schemas = [[c for c in s if not is_id_column(c)] for s in schemas]
     if operation.tool == "join":
         on = operation.arguments.get("on")
         keys = [on] if isinstance(on, str) else list(on or [])
@@ -203,8 +245,8 @@ def _combine_columns(operation: Operation, schemas: list[list[str]]) -> list[str
                 out.append(f"{c}{suffixes[1]}")
             else:
                 out.append(c)
-        return out
-    out: list[str] = []                         # stack / zip: union, first wins
+        return own + out
+    out: list[str] = list(own) if operation.tool == "stack" else []   # stack / zip: union
     for schema in schemas:
         for c in schema:
             if c not in out:
@@ -264,5 +306,5 @@ from .checks import columns_unknown, predicted_columns  # noqa: E402
 from .operation import Operation  # noqa: E402
 from .output import Output, VALUE_COLUMN  # noqa: E402
 from .references import StepRef  # noqa: E402
-from .output import is_id_column  # noqa: E402
+from .output import ROW_ID, is_id_column  # noqa: E402
 from .workflow import Workflow  # noqa: E402

@@ -472,7 +472,7 @@ def test_C2_a_tool_in_a_setting_runs_and_round_trips(wf):
     wf.run_all()
     assert list(wf.step("s").output.data["n"]) == [3, 2, 2, 1]
     assert wf.step("c").output.data.to_dict("list") == {
-        "first_letter_008": ["S", "N", "L"], "value": [4, 2, 2]}
+        "#readings": [[0, 2], [1], [3]], "first_letter_008": ["S", "N", "L"], "value": [4, 2, 2]}
     assert json.loads(wf.to_json())["steps"][1]["operation"]["modifiers"][0]["settings"] == {
         "by": {"$tool": "neg_n_008"}}
     # The tools are defined here, not at the top of the module, so they are

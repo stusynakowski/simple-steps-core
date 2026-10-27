@@ -50,7 +50,7 @@ def k():
 @pytest.mark.parametrize("step, columns", [
     (lambda: to_f_n[mod.map(), mod.name("temp_f")](wf["p"]), ["temp_f"]),
     (lambda: both_n[mod.expand(), mod.name("reading")](wf["p"]), ["#p", "reading"]),
-    (lambda: add_n[mod.collapse(by="ward"), mod.name("total")](wf["p"]), ["ward", "total"]),
+    (lambda: add_n[mod.collapse(by="ward"), mod.name("total")](wf["p"]), ["#p", "ward", "total"]),
     (lambda: to_f_n[mod.group(), mod.name("band")](wf["p"]), ["ward", "temp_c", "band"]),
     (lambda: grid_n[mod.sweep(model=["a", "b"]), mod.name("upper")](), ["model", "upper"]),
     (lambda: to_f_n[mod.name("temp_f")](wf["p"]), ["temp_f"]),                       # auto
@@ -119,4 +119,4 @@ def test_a_named_key_feeds_collapse(k):
     k["g"] = to_f_n[mod.group(), mod.name("band")](wf["p"])
     k["c"] = Operation(tool="count")[mod.collapse(by="band")](wf["g"])
     k.run_all()
-    assert list(k.step("c").data.columns) == ["band", "value"]
+    assert list(k.step("c").data.columns) == ["#g", "band", "value"]

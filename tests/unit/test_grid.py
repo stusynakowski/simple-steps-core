@@ -734,7 +734,8 @@ def test_staged_prediction_matches_what_actually_appears(three):
     predicted = {sid: predicted_columns(st.output) for sid, st in wf.steps.items()}
     wf.run_all()
     for sid, step in wf.steps.items():
-        assert predicted[sid] == list(step.output.data.columns), sid
+        if step.state == "completed":       # an invalid step has no shape to predict
+            assert predicted[sid] == list(step.output.data.columns), sid
 
 
 def test_naming_the_payload_column_is_predicted_too(three):
@@ -2320,7 +2321,7 @@ def test_the_new_verbs_round_trip(table):
     wf.run_all()
     back = Workflow.from_json(wf.to_session_json(), TOOLS)
     assert all(p == () for p in back.validate().values())
-    assert list(back.step("d").output.data.columns) == ["city", "count"]
+    assert list(back.step("d").output.data.columns) == ["#o", "city", "count"]   # #o: the rows each stands for
 
 
 def test_a_bare_sweep_is_refused_for_the_right_reason():

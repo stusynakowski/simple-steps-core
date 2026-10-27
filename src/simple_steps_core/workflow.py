@@ -906,16 +906,33 @@ class Workflow:
                             str(g), self._trace_one(step_id, row_id, str(g)), [column], None))
                         break
             else:
-                entries += [{"step": str(g), "id": None, "columns": [], "argument": None,
-                             "state": "unknown", "values": {},
-                             "because": f"{op_.tool} doesn't keep row links yet"}
-                            for g in op_.grids]
+                data = step.output.data
+                own = own_id_columns([str(g) for g in op_.grids])
+                keys = op_.arguments.get("on")
+                keys = {keys} if isinstance(keys, str) else set(keys or [])
+                for g, idc in zip((str(g) for g in op_.grids), own):
+                    partner = data.at[row_id, idc] if idc in data.columns and row_id in data.index else None
+                    if partner is None:
+                        continue                          # no row on this side
+                    have = self._predicted_of(g)
+                    read = [c for c in (column, *(column[:-len(s)] for s in
+                            (op_.arguments.get("suffixes") or []) if column.endswith(s)))
+                            if c in have]
+                    if read or column in keys or column == idc:
+                        entries.append(self._input_entry(g, partner, read[:1] or [column], None))
             return entries
 
         if op_.input is not None:
             source = str(op_.input)
-            if kind == "collapse":
-                members = (step.output.notes.get(row_id) or {}).get("unit")
+            listed = step.output.data.at[row_id, f"{ROW_ID}{source}"] \
+                if f"{ROW_ID}{source}" in step.output.data.columns and row_id in step.output.data.index \
+                else None
+            if kind == "distinct" and isinstance(listed, list):
+                entries.append(self._input_entry(source, None, [_source_column(op_, column)],
+                                                 None, rows_=listed))
+            elif kind == "collapse":
+                members = listed if isinstance(listed, list) else \
+                    (step.output.notes.get(row_id) or {}).get("unit")
                 rows_ = members if isinstance(members, list) else None
                 for param in self._columns_bound(op_, source, kind):
                     entries.append(self._input_entry(source, None, [param], param, rows_=rows_))
@@ -956,6 +973,16 @@ class Workflow:
             names.add(seen)
         return names
 
+    def _id_source(self, column: Any) -> str | None:
+        """The step a `#` column names: `#v` → `v`; `#v_2` (a step read twice) → `v`."""
+        if not is_id_column(column) or column == ROW_ID:
+            return None
+        name = column[len(ROW_ID):]
+        if name in self.steps:
+            return name
+        base, _, n = name.rpartition("_")
+        return base if n.isdigit() and base in self.steps else None
+
     def trace(self, step_id: str, ids: list, target: str) -> list | None:
         """The ids, in step *target*, of the rows *ids* of *step_id* came from.
 
@@ -973,9 +1000,13 @@ class Workflow:
             return None
         data = step.output.data
         for c in data.columns:
-            parent = c[len(ROW_ID):] if is_id_column(c) and c != ROW_ID else None
-            if parent in self.steps:
+            parent = self._id_source(c)
+            if parent is not None and self._lists_rows(step_id, c):
+                continue                  # each row came from several: no one partner
+            if parent is not None:
                 mapped = [data.at[i, c] if i in data.index else None for i in ids]
+                if any(isinstance(m, list) for m in mapped):
+                    continue              # these rows came from several: no one partner
                 found = self._trace(parent, mapped, target, depth + 1)
                 if found is not None:
                     return found
@@ -1019,11 +1050,15 @@ class Workflow:
             found.append(f"A1 {step_id}: row ids not unique ({', '.join(dup[:3])})")
         if ROW_ID in data.columns and list(data[ROW_ID]) != list(data.index):
             found.append(f"A1 {step_id}: its {ROW_ID!r} column isn't its row ids")
+        op_ = step.operation
+        # None only where a row has no partner on that side (reshaping.md §5).
+        may_be_none = is_combine(op_) and (op_.tool == "stack" or (
+            op_.tool == "join" and op_.arguments.get("how", "inner") != "inner"))
         for c in data.columns:
             if not is_id_column(c) or c == ROW_ID:
                 continue
-            name = c[len(ROW_ID):]
-            source = self.steps.get(name)
+            name = self._id_source(c)
+            source = self.steps.get(name) if name else None
             if source is None:
                 found.append(f"A3 {step_id}: {c!r} names no step")
                 continue
@@ -1031,10 +1066,9 @@ class Workflow:
                 continue
             ids = set(source.output.data.index)
             bad = [v for cell in data[c] for v in (cell if isinstance(cell, list) else [cell])
-                   if v is None or v not in ids]
+                   if (v is None and not may_be_none) or (v is not None and v not in ids)]
             if bad:
                 found.append(f"A3 {step_id}: {c!r} holds {_plain(bad[0])!r}, not a row of {name!r}")
-        op_ = step.operation
         if keeps_ids(self._kind(step_id), op_.shape_verb) and op_.input is not None:
             inp = self.steps.get(str(op_.input))
             if inp is not None and not inp.output.meta.get("staged"):
@@ -1074,6 +1108,38 @@ class Workflow:
         for x, y in ((a, b), (b, a)):
             if x in self.steps and self.trace(x, list(self.steps[x].output.data.index), y) is not None:
                 return True               # a child and the step its rows came from
+        return False
+
+    def _dropped_at(self, step_id: str, column: str) -> str | None:
+        """The step at or before *step_id* that dropped or renamed `#` *column*,
+        if that's why it's missing (reshaping.md §5: dropping a trace is a step)."""
+        seen = step_id
+        while seen in self.steps:
+            op_ = self.steps[seen].operation
+            verb = op_.shape_verb
+            if verb is not None and verb.kind in ("drop", "rename") and \
+                    column in (verb.settings.get("columns") or ()):
+                return seen
+            if not keeps_ids(self._kind(seen), verb) or op_.input is None:
+                return None
+            seen = str(op_.input)
+        return None
+
+    def _lists_rows(self, step_id: str, column: str) -> bool:
+        """Does *column* of *step_id* hold a list of rows per row? Known from the
+        verbs, so it holds before anything runs: a collapse's own `#` column, and
+        distinct's, and the same column wherever it is carried (reshaping.md §5)."""
+        seen = 0
+        while step_id in self.steps and seen <= len(self.steps):
+            op_ = self.steps[step_id].operation
+            kind = self._kind(step_id)
+            if op_.input is None:
+                return False
+            if kind in ("collapse", "distinct") and column == f"{ROW_ID}{op_.input}":
+                return True
+            if not keeps_ids(kind, op_.shape_verb):
+                return False
+            step_id, seen = str(op_.input), seen + 1   # carried: as it was where it came from
         return False
 
     def _trace_one(self, step_id: str, row_id: Any, target: str) -> Any:
@@ -1738,7 +1804,7 @@ from .checks import (  # noqa: E402
     warn,
     keeps_ids,
 )
-from .combines import _row_lookup, _run_combine, is_combine  # noqa: E402
+from .combines import _row_lookup, _run_combine, is_combine, own_id_columns  # noqa: E402
 from .errors import ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402
 from .modifiers import (  # noqa: E402
     MODIFIERS,

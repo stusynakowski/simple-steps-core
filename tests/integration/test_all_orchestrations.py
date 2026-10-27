@@ -175,7 +175,7 @@ def test_chained_map_over_a_map(wf):
 def test_combine_verbs_read_more_than_one_grid(wf):
     # join: a lookup on a shared key, left-preserving
     enriched = wf.step("enriched").output.data
-    assert list(enriched.columns) == ["city", "n", "region"]
+    assert list(enriched.columns) == ["#readings", "#city_info", "city", "n", "region"]   # each row's pair
     assert list(enriched["region"]) == ["west", "east", "west", "west"]
     # stack: rows appended — the sum of both inputs
     assert list(wf.step("all_readings").output.data["n"]) == [1, 2, 3, 2, 5, 6]

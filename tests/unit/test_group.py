@@ -58,7 +58,8 @@ def test_collapse_follows_group_directly(k):
     k["g"] = band_g[mod.group(), mod.name("band")](wf["p"])
     k["per_band"] = Operation(tool="count")[mod.collapse(by="band")](wf["g"])
     k.run_all()
-    assert k.step("per_band").data.to_dict("list") == {"band": ["normal", "fever"],
+    assert k.step("per_band").data.to_dict("list") == {"#g": [[0, 2], [1, 3]],
+                                                        "band": ["normal", "fever"],
                                                         "value": [2, 2]}
 
 

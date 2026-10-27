@@ -112,7 +112,7 @@ def test_L2_packing_an_unpacked_list_gives_back_the_list(k):
     k["unpacked"] = identity[mod.expand()](wf["packed"])
     k["again"] = gather[mod.collapse()](wf["unpacked"])
     k.run_all()
-    assert data(k, "again").iloc[0, 0] == data(k, "packed").iloc[0, 0]
+    assert data(k, "again").iloc[0, -1] == data(k, "packed").iloc[0, -1]
 
 
 @pytest.mark.xfail(strict=True, reason="R-D2: no mod.pack; widen keeps the dict column (G10)")
@@ -229,7 +229,6 @@ def test_L14_a_collapsed_cell_traces_to_its_group(k):
     assert all(i["rows"] == [0, 1, 3] for i in inputs)
 
 
-@pytest.mark.xfail(strict=True, reason="R-D6: join keeps no row map (M4)")
 def test_L15_a_joined_cell_traces_to_its_pair(k):
     k["j"] = join(wf["v"], wf["w"], on="ward")
     k.run_all()
@@ -240,10 +239,15 @@ def test_L15_a_joined_cell_traces_to_its_pair(k):
 
 
 def test_L16_zip_across_origins_is_refused_when_declared(k):
-    k["jw"] = join(wf["w"], wf["v"], on="ward")
-    k["jn"] = mod.select(columns=["head"])(wf["jw"])
-    k["z"] = zip_(wf["v"], wf["jn"])
+    k["z"] = zip_(wf["v"], wf["w"])                                   # unrelated: refused
     assert state(k, "z") == "invalid"
+    k["jw"] = join(wf["w"], wf["v"], on="ward")                       # records #v: a match
+    k["jn"] = mod.select(columns=["head"])(wf["jw"])
+    k["zj"] = zip_(wf["v"], wf["jn"])
+    assert state(k, "zj") != "invalid"
+    k.run_all()
+    heads = dict(zip(data(k, "zj")["name"], data(k, "zj")["head"]))
+    assert heads["Ben"] == "Dr Y"                                      # M5: Ben beside his own ward's head
 
 
 def test_L16b_items_a_tool_rewrote_dont_pair_with_the_packed_rows(k):
@@ -268,11 +272,10 @@ def test_L18_empty_packs_to_an_empty_list_and_back(k):
     k["packed"] = gather[mod.collapse()](wf["none"])
     k["back"] = identity[mod.expand()](wf["packed"])
     k.run_all()
-    assert data(k, "packed").iloc[0, 0] == []
+    assert data(k, "packed").iloc[0, -1] == []
     assert len(data(k, "back")) == 0
 
 
-@pytest.mark.xfail(strict=True, reason="R-D9: distinct traces only to the row it kept (M3)")
 def test_L19_distinct_traces_to_every_row_it_stands_for(k):
     k["d"] = mod.distinct(columns=["ward"])(wf["v"])
     k.run_all()
@@ -431,7 +434,6 @@ def test_L30_zip_of_one_origin_keeps_one_hash_column(e):
     assert list(data(e, "z").columns).count("#v") == 1
 
 
-@pytest.mark.xfail(strict=True, reason="R-D5 (step 5): the refusal doesn't say the trace was dropped")
 def test_L31_dropping_the_trace_is_a_loss_you_choose(e):
     e["d"] = mod.drop(columns=["#v"])(wf["e"])
     assert state(e, "d") != "invalid"                               # dropping is allowed
@@ -465,9 +467,9 @@ def test_L34_reducers_over_no_rows_give_their_empty_value(k):
     for reducer in ["count", "total", "gather"]:
         k[reducer] = op(reducer)[mod.collapse()](wf["none"])
     k.run_all()
-    assert data(k, "count").iloc[0, 0] == 0
-    assert data(k, "total").iloc[0, 0] == 0
-    assert data(k, "gather").iloc[0, 0] == []
+    assert data(k, "count").iloc[0, -1] == 0
+    assert data(k, "total").iloc[0, -1] == 0
+    assert data(k, "gather").iloc[0, -1] == []
 
 
 @tool

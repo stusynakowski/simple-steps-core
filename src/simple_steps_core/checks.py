@@ -553,9 +553,16 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         by = verb.settings["by"]
         if available and by not in available:
             upstream_name = str(operation.input) if operation.input is not None else "the input"
-            problems.append(
-                f"collapse groups by {by!r}, which {upstream_name!r} does not have "
-                f"(it has {', '.join(map(str, available))})")
+            dropped = workflow._dropped_at(upstream_name, by) if is_id_column(by) else None
+            if dropped is not None:
+                problems.append(
+                    f"collapse groups by {by!r}, but the trace to {by[len(ROW_ID):]!r} was "
+                    f"dropped at {dropped!r}: that step drops or renames {by!r}, so where "
+                    f"these rows came from is no longer known")
+            else:
+                problems.append(
+                    f"collapse groups by {by!r}, which {upstream_name!r} does not have "
+                    f"(it has {', '.join(map(str, available))})")
 
     coded(problems, "missing_column")
 
@@ -1206,11 +1213,13 @@ def _with_id_columns(kind: str | None, verb: Any, operation: "Operation",
     `expand` writes `#<input>`; a step that keeps ids carries its input's,
     except one it drops or renames itself.
     """
-    if kind == "expand" and operation.input is not None:
+    if kind in ("expand", "collapse") and operation.input is not None:
         own = [f"{ROW_ID}{operation.input}"]
     elif keeps_ids(kind, verb):
         named = set(verb.settings.get("columns") or ()) if kind in ("drop", "rename") else set()
         own = [c for c in upstream_columns if is_id_column(c) and c != ROW_ID and c not in named]
+        if kind == "distinct" and operation.input is not None:
+            own = [f"{ROW_ID}{operation.input}", *own]   # the rows each kept row stands for
     else:
         return ordered
     return [*own, *[c for c in ordered if c not in own]]

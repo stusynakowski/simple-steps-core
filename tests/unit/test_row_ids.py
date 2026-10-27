@@ -255,7 +255,7 @@ def test_a_groups_row_id_is_its_key(kc):
     assert list(kc.step("per_ward").data.index) == ["A", "B"]
     kc["b"] = wf["per_ward"][rows["B"]]
     kc.run("b")
-    assert kc.step("b").data.to_dict("list") == {"ward": ["B"], "value": [77.2]}
+    assert kc.step("b").data.to_dict("list") == {"#p": [[1, 3]], "ward": ["B"], "value": [77.2]}
 
 
 def test_a_change_to_one_row_makes_only_its_group_stale(kc):
