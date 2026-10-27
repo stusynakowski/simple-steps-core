@@ -116,6 +116,20 @@ Each phase ends with every test passing. Phases 1 and 2 change no behaviour.
 | **4. Behaviour** | the K-asks, one at a time, each confirmed before it lands: K19 (row ids, column arguments), K20 (hashes, ids), K22 (outputs by version), K23 (progress, cancel), K25–K29, R7, R8, R9 (stages), C28–C32, K18, G1–G15 found while writing these docs, and the autorun modifier once its design is settled ([interactive-sessions.md §6.2](interactive-sessions.md#62-an-autorun-modifier-planned-to-be-designed)) | each ask's probe passes |
 | **5. Docs** | the final docs set (§6) | each doc's examples run as tests |
 
+### Phase 3, piece by piece
+
+Each piece keeps every test passing. The process-wide registry stays as the
+fallback for a workflow made without a catalog until the last piece, when the
+tests and examples have moved onto the kernel.
+
+| Piece | What | Status |
+|---|---|---|
+| 3a | `Catalog`: tools, resource types, built-ins, modifiers, combines; `without`, `from_modules`, `describe`. A workflow with a catalog checks every step against it (declared, re-checked or loaded) and runs the catalog's functions. Tools carry their `tags` and `extras` | done |
+| 3b | `Kernel`: a catalog, a workflow, loaded resources; editing, running, reading, saving | |
+| 3c | `Problem` with codes; `step.state`; named `Output` fields | |
+| 3d | specs on every object; `k.check`, `needs_run`, `on_change`, `insert`, `move`; `repr` and notebook display | |
+| 3e | the tests and examples on the kernel; remove the registry, `freeze`, `grid` and the old names | |
+
 ## 5. What the app changes
 
 Its pin is a fixed commit, so nothing breaks until it moves. At the move to

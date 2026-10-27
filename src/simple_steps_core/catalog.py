@@ -7,8 +7,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import replace
+from collections.abc import Mapping
 from typing import Any
 from typing import Callable
+from typing import Iterable
 from typing import Sequence
 import inspect
 import types
@@ -484,6 +486,11 @@ class ToolHandle:
         self.id = tool_id or fn.__name__
         self.__doc__ = fn.__doc__
         self.__name__ = self.id
+        #: Free labels, from ``@tool(tags=…)``.
+        self.tags: tuple[str, ...] = ()
+        #: The app's additions, by namespace, from ``@tool(extras=…)``. Core
+        #: keeps them and never reads them (docs/design/extensions.md).
+        self.extras: dict = {}
 
     def __call__(self, *args, **kwargs) -> Any:
         """Apply the tool to its input — running it, or wiring it into a step.
@@ -606,7 +613,8 @@ def check_modifier(kind: str, params: dict | None = None) -> tuple[str, ...]:
 
 
 def tool(fn: Callable | None = None, *, id: str | None = None,
-         strict: bool | None = None, tags: Sequence[str] = ()):
+         strict: bool | None = None, tags: Sequence[str] = (),
+         extras: Mapping[str, Any] | None = None):
     """Mark a plain function as a tool. Usable bare or with an id.
 
     Registers it in :data:`TOOLS` so a workflow loaded from JSON can find it
@@ -621,6 +629,7 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
     """
     if isinstance(tags, str) or not all(isinstance(t, str) for t in tags):
         raise TypeError("tags= takes a list of strings, e.g. tags=['rowmap']")
+    extras = _checked_extras(extras)
 
     def make(f: Callable, tool_id: str | None) -> ToolHandle:
         if _FROZEN:
@@ -685,6 +694,7 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
             )
         TOOLS[handle.id] = f
         TOOL_TAGS[handle.id] = tuple(tags)
+        handle.tags, handle.extras = tuple(tags), dict(extras)
         return handle
 
     if fn is not None:
@@ -708,18 +718,253 @@ def formula_names(tools: dict[str, Callable] | None = None) -> dict[str, Any]:
     return names
 
 
+def _checked_extras(extras: Mapping[str, Any] | None) -> dict:
+    """*extras* as a plain dict, refused unless every key is a namespace.
+
+    A namespace is a dotted name owned by whoever writes it
+    (``"simple_steps.ui"``), so two front ends can't overwrite each other's
+    additions. Values must be literals: extras hold values, never code
+    (docs/design/extensions.md §3).
+    """
+    if extras is None:
+        return {}
+    if not isinstance(extras, Mapping):
+        raise TypeError("extras= takes a mapping of namespace → value, "
+                        "e.g. extras={'simple_steps.ui': {'when': 'date-picker'}}")
+    for key, value in extras.items():
+        if not isinstance(key, str) or "." not in key.strip("."):
+            raise ValueError(f"extras key {key!r} must be a dotted namespace, "
+                             "such as 'simple_steps.ui'")
+        if not _json_safe(value):
+            raise TypeError(f"extras[{key!r}] must hold literals (str, number, "
+                            f"bool, None, list, dict), got {type(value).__name__}")
+    return dict(extras)
+
+
+class Catalog:
+    """What a workflow may use: tools, resource types, modifiers and combines.
+
+    Fixed once made. A workflow given a catalog checks every step against it,
+    when the step is declared and when it is loaded, and runs each step with the
+    catalog's own function: a step whose tool, modifier, combine or resource type
+    isn't in the catalog is a problem on the step and never runs
+    (docs/design/object-model.md §4.3)::
+
+        cat = Catalog(tools=[patients, to_f], resources=[ClinicalDB])
+        cat = Catalog.from_modules(my_tools)
+        cat = cat.without("count", "retry")
+
+    The built-in tools, every modifier and every combine are in a catalog by
+    default; :meth:`without` removes any of them.
+    """
+
+    def __init__(self, tools: Iterable[Any] = (), resources: Iterable[type] = ()):
+        found: dict[str, ToolHandle] = {}
+        for item in tools:
+            if not isinstance(item, ToolHandle):
+                name = getattr(item, "__name__", repr(item))
+                raise TypeError(
+                    f"{name} is not a tool. Decorate it with @tool, then pass it "
+                    "to the catalog.")
+            if item.id in found and found[item.id].fn is not item.fn:
+                raise ValueError(
+                    f"two different tools are named {item.id!r}; rename one with "
+                    "@tool(id=…)")
+            found[item.id] = item
+        kinds: dict[str, type] = {}
+        for cls in resources:
+            if not isinstance(cls, type):
+                raise TypeError(f"{cls!r} is not a resource type: pass the class")
+            problems = resource_problems(cls)
+            if problems:
+                raise TypeError(f"{cls.__name__} can't be a resource type: "
+                                + "; ".join(problems) + ".")
+            if cls.__name__ in kinds and kinds[cls.__name__] is not cls:
+                raise ValueError(f"two different resource types are named "
+                                 f"{cls.__name__!r}")
+            kinds[cls.__name__] = cls
+        self._tools = found
+        self._resource_types = kinds
+        self._builtins = frozenset(BUILTIN_TOOLS)
+        self._modifiers = frozenset(MODIFIERS)
+        self._combines = frozenset(COMBINE)
+
+    @classmethod
+    def from_modules(cls, *modules: types.ModuleType) -> "Catalog":
+        """Every ``@tool`` and every resource type defined in *modules*."""
+        tools_, kinds = [], []
+        for module in modules:
+            for value in vars(module).values():
+                if isinstance(value, ToolHandle):
+                    tools_.append(value)
+                elif (isinstance(value, type) and value.__module__ == module.__name__
+                      and RESOURCE_TYPES.get(value.__name__) is value):
+                    kinds.append(value)
+        return cls(tools_, kinds)
+
+    def without(self, *names: str) -> "Catalog":
+        """A copy without the named tools, resource types, built-ins, modifiers
+        or combines. A name the catalog doesn't have is refused, so a typo
+        doesn't silently leave something in."""
+        unknown = [n for n in names if n not in self]
+        if unknown:
+            raise KeyError(f"not in this catalog: {', '.join(map(repr, unknown))}")
+        out = object.__new__(Catalog)
+        out._tools = {k: v for k, v in self._tools.items() if k not in names}
+        out._resource_types = {k: v for k, v in self._resource_types.items()
+                               if k not in names}
+        out._builtins = self._builtins - set(names)
+        out._modifiers = self._modifiers - set(names)
+        out._combines = self._combines - set(names)
+        return out
+
+    # ── what it holds ────────────────────────────────────────────────────
+    @property
+    def tools(self) -> dict[str, ToolHandle]:
+        """The developer's tools, by name."""
+        return dict(self._tools)
+
+    @property
+    def resource_types(self) -> dict[str, type]:
+        """The resource types, by name."""
+        return dict(self._resource_types)
+
+    @property
+    def builtins(self) -> frozenset[str]:
+        """The built-in tools this catalog keeps."""
+        return self._builtins
+
+    @property
+    def modifiers(self) -> frozenset[str]:
+        """The modifier kinds this catalog keeps."""
+        return self._modifiers
+
+    @property
+    def combines(self) -> frozenset[str]:
+        """The combines this catalog keeps (``join``, ``stack``, ``zip``)."""
+        return self._combines
+
+    @property
+    def functions(self) -> dict[str, Callable]:
+        """Tool name → the plain function: developer tools and built-ins. What
+        a workflow with this catalog runs steps with."""
+        out = {name: BUILTIN_TOOLS[name] for name in self._builtins}
+        out.update({name: t.fn for name, t in self._tools.items()})
+        return out
+
+    def __contains__(self, name: object) -> bool:
+        return (name in self._tools or name in self._resource_types
+                or name in self._builtins or name in self._modifiers
+                or name in self._combines)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Catalog):
+            return NotImplemented
+        return ({k: t.fn for k, t in self._tools.items()}
+                == {k: t.fn for k, t in other._tools.items()}
+                and self._resource_types == other._resource_types
+                and self._builtins == other._builtins
+                and self._modifiers == other._modifiers
+                and self._combines == other._combines)
+
+    __hash__ = None
+
+    def __repr__(self) -> str:
+        def names(items) -> str:
+            return ", ".join(sorted(items)) or "(none)"
+        removed = (len(BUILTIN_TOOLS) - len(self._builtins)
+                   + len(MODIFIERS) - len(self._modifiers)
+                   + len(COMBINE) - len(self._combines))
+        lines = [f"Catalog: {len(self._tools)} tools, {len(self._resource_types)} "
+                 f"resource types" + (f", {removed} built-ins removed" if removed else ""),
+                 f"  tools           {names(self._tools)}",
+                 f"  resource types  {names(self._resource_types)}",
+                 f"  built-in tools  {names(self._builtins)}",
+                 f"  modifiers       {names(self._modifiers)}",
+                 f"  combines        {names(self._combines)}"]
+        return "\n".join(lines)
+
+    def describe(self) -> dict:
+        """Every entry as plain data, for a palette, a form or an agent.
+
+        ``tools`` (built-ins first, marked by ``origin``), ``modifiers``,
+        ``combines`` and ``resource_types``, each restricted to this catalog.
+        """
+        entries = {}
+        for name in sorted(self._builtins):
+            entries[name] = tool_entry(name, BUILTIN_TOOLS[name], "builtin")
+            entries[name]["tags"], entries[name]["extras"] = [], {}
+        for name, handle in sorted(self._tools.items()):
+            entries[name] = tool_entry(name, handle.fn, "declared")
+            entries[name]["tags"] = list(handle.tags)
+            entries[name]["extras"] = dict(handle.extras)
+        kinds = modifier_catalog()
+        return {
+            "tools": entries,
+            "modifiers": {k: kinds[k] for k in sorted(self._modifiers)},
+            "combines": sorted(self._combines),
+            "resource_types": {name: resource_entry(cls)
+                               for name, cls in sorted(self._resource_types.items())},
+        }
+
+    # ── checking a step against it ───────────────────────────────────────
+    def problems(self, operation: Operation, workflow: Any = None) -> list[str]:
+        """What *operation* uses that this catalog doesn't have."""
+        found: list[str] = []
+        if operation.bound_to is not None:
+            decl = (workflow.resources.get(operation.bound_to.name)
+                    if workflow is not None else None)
+            if decl is not None and decl.type_name not in self._resource_types:
+                found.append(f"resource type {decl.type_name!r} is not in this "
+                             "workflow's catalog")
+        elif is_combine(operation):
+            if operation.tool_id not in self._combines:
+                found.append(f"{operation.tool_id!r} is not in this workflow's catalog")
+        else:
+            name = operation.tool_id
+            if name in self._tools:
+                if operation.fn is not None and operation.fn is not self._tools[name].fn:
+                    found.append(
+                        f"{name!r} is a different function from the tool of that name "
+                        "in this workflow's catalog")
+            elif name not in self._builtins:
+                found.append(f"{name!r} is not in this workflow's catalog")
+        for m in operation.modifiers:
+            if m.kind not in self._modifiers:
+                found.append(f"modifier {m.kind!r} is not in this workflow's catalog")
+        values = [*operation.arguments.values(),
+                  *(v for m in operation.modifiers for v in m.params.values())]
+        for value in values:
+            name = (value.id if isinstance(value, (ToolHandle, ToolRef)) else None)
+            if name is not None and name not in self._tools and name not in self._builtins:
+                found.append(f"tool {name!r} is not in this workflow's catalog")
+        return found
+
+    def admit(self, operation: Operation) -> Operation:
+        """*operation* carrying this catalog's function for its tool, so it runs
+        the catalog's code and nothing else. Unchanged when the tool isn't here
+        (that is a problem :meth:`problems` reports)."""
+        if operation.bound_to is not None or is_combine(operation):
+            return operation
+        fn = self.functions.get(operation.tool_id)
+        if fn is None or (operation.fn is not None and operation.fn is not fn):
+            return operation
+        return replace(operation, fn=fn)
+
+
 # Names used only inside functions, imported last so the modules can refer
 # to each other (see grid.py).
 from .system_tools import BUILTIN_TOOLS, identity  # noqa: E402
 from .checks import check  # noqa: E402
-from .combines import join, stack, zip_  # noqa: E402
-from .modifiers import Modifier, SHAPE_VERBS, mod  # noqa: E402
+from .combines import COMBINE, is_combine, join, stack, zip_  # noqa: E402
+from .modifiers import MODIFIERS, Modifier, SHAPE_VERBS, mod, modifier_catalog  # noqa: E402
 from .operation import Operation, _NESTED_OPERATION, op  # noqa: E402
 from .options import settings  # noqa: E402
 from .output import Output  # noqa: E402
 from .references import (  # noqa: E402
     ResRef,
     StepRef,
+    ToolRef,
     _reserved_problem,
     cols,
     res,
@@ -729,6 +974,7 @@ from .references import (  # noqa: E402
 from .run import _runs_over_rows  # noqa: E402
 from .step import Step  # noqa: E402
 from .values import (  # noqa: E402
+    _json_safe,
     _literal_annotation,
     _open_keywords,
     _type_name,

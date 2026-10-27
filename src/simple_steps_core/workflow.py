@@ -22,10 +22,14 @@ class Workflow:
     ``wf.run("scored")`` is what actually computes.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, catalog: "Catalog | None" = None) -> None:
         self.steps: dict[str, Step] = {}
         #: Declared resources, by name — the declarations, never the objects.
         self.resources: dict[str, ResourceDecl] = {}
+        #: What this workflow may use. With a catalog, every step is checked
+        #: against it and runs the catalog's functions; without one, the
+        #: process-wide registry is used (until phase 3 removes it).
+        self.catalog = catalog
 
     # ── resources ────────────────────────────────────────────────────────
     def define(self, name: str, type_: type, /, **settings: Any) -> ResRef:
@@ -42,6 +46,11 @@ class Workflow:
             raise ValueError(f"a resource name must be an identifier, got {name!r}")
         if not isinstance(type_, type):
             raise TypeError(f"define({name!r}, …) needs a class, got {type_!r}")
+        if self.catalog is not None \
+                and self.catalog.resource_types.get(type_.__name__) is not type_:
+            raise ValueError(
+                f"cannot define resource {name!r}: {type_.__name__} is not in this "
+                "workflow's catalog. Add it: Catalog(resources=[...])")
         problems = resource_problems(type_)
         accepted = {p.name: p for p in _settings(type_)}
         for key, value in settings.items():
@@ -172,6 +181,8 @@ class Workflow:
                 self._recheck_readers(step_id)
             return
         operation = _attach_bound(operation, self.resources)
+        if self.catalog is not None:
+            operation = self.catalog.admit(operation)
         problems = check(operation, self, step_id)
         previous = self.steps.get(step_id)
         staged = stage(operation, self, problems)
@@ -1022,6 +1033,8 @@ class Workflow:
         every step it read, ``{"res:name": …}`` for resources), and every step
         is re-checked for staleness from those stamps.
         """
+        if tools is None and self.catalog is not None:
+            tools = self.catalog.functions
         step = self.steps[step_id]
         read = self._read_stamps(step.operation) if step_id in self.steps else {}
         result = self._run_step(step_id, tools, resources)
@@ -1268,7 +1281,8 @@ class Workflow:
 
     @classmethod
     def from_dict(cls, blob: dict, tools: dict[str, Callable] | None = None,
-                  resource_types: dict[str, type] | None = None) -> "Workflow":
+                  resource_types: dict[str, type] | None = None, *,
+                  catalog: "Catalog | None" = None) -> "Workflow":
         """Rebuild a Workflow from either export — all at once.
 
         Every step goes through the same :func:`check` and :func:`stage` the
@@ -1276,6 +1290,9 @@ class Workflow:
         declaring would have rejected. *resource_types* maps a saved resource
         type name to its class, as *tools* does for tools; types registered with
         :func:`resource` (or used by ``define``) are found without it.
+
+        With *catalog*, tools and resource types come from it alone, and every
+        step is checked against it.
         """
         version = blob.get("version", 1)
         if not isinstance(version, int) or version > FORMAT_VERSION:
@@ -1284,8 +1301,11 @@ class Workflow:
                 f"this workflow was saved in format version {version!r}; this "
                 f"core reads versions 1 to {FORMAT_VERSION}. Upgrade "
                 "simple-steps-core to load it.")
-        workflow = cls()
-        known = {**RESOURCE_TYPES, **(resource_types or {})}
+        workflow = cls(catalog=catalog)
+        if catalog is not None:
+            tools, known = catalog.functions, catalog.resource_types
+        else:
+            known = {**RESOURCE_TYPES, **(resource_types or {})}
         for name, entry in (blob.get("resources") or {}).items():
             workflow.resources[name] = ResourceDecl(
                 name, known.get(entry["type"]), dict(entry.get("settings") or {}),
@@ -1294,6 +1314,8 @@ class Workflow:
             sid = entry["step_id"]
             operation = _attach_bound(
                 Operation.from_dict(entry["operation"], tools), workflow.resources)
+            if catalog is not None:
+                operation = catalog.admit(operation)
             problems = check(operation, workflow, sid)
             workflow.steps[sid] = Step(sid, operation,
                                        stage(operation, workflow, problems),
@@ -1310,9 +1332,10 @@ class Workflow:
 
     @classmethod
     def from_json(cls, data: str, tools: dict[str, Callable] | None = None,
-                  resource_types: dict[str, type] | None = None) -> "Workflow":
+                  resource_types: dict[str, type] | None = None, *,
+                  catalog: "Catalog | None" = None) -> "Workflow":
         import json
-        return cls.from_dict(json.loads(data), tools, resource_types)
+        return cls.from_dict(json.loads(data), tools, resource_types, catalog=catalog)
 
     def validate(self) -> dict[str, tuple[str, ...]]:
         """Every step's problems, keyed by step id — empty tuples for the good ones."""
@@ -1331,6 +1354,7 @@ from .system_tools import (  # noqa: E402
     is_identity,
 )
 from .catalog import (  # noqa: E402
+    Catalog,
     RESOURCE_TYPES,
     ResourceDecl,
     TOOLS,

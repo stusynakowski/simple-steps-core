@@ -219,6 +219,12 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         operation, _, _ = _provisional(operation, workflow)
     problems: list[str] = []
 
+    # 0. a workflow with a catalog may only use what the catalog has: its tool,
+    #    modifiers, combines, tools given as settings, and resource types.
+    catalog_ = getattr(workflow, "catalog", None)
+    if catalog_ is not None:
+        problems.extend(catalog_.problems(operation, workflow))
+
     # 1. the tool has to exist — unless this is a combine verb, which names no
     #    tool (join/stack/zip apply none; their id is the verb itself). A bound
     #    tool comes from its resource's declared type, never from TOOLS.
