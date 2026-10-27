@@ -35,7 +35,7 @@ green, and it is committed. *Today* lines were run at `39835bc`.
 
 | Feature | Designed in | Today |
 |---|---|---|
-| **G5** a fold with no `initial=` | grid-model.md §8 | fails on every group: `acc` starts as `None` |
+| **G5** a fold with no `initial=` ✓ | grid-model.md §8 | built: starts from its accumulator type's empty value |
 | **G8** a declared record type (`-> LoHi`) spreads into one column per field | outputs-and-reshaping.md §3 (decided 2026-10-26) | stays one cell |
 | **G9** `widen` reads declared record types, so its plan is exact | outputs-and-reshaping.md §6 | needs `columns=`, or takes the union when it runs |
 | **G12** `mod.name` as a list, a mapping or a pattern; kernel-wide naming conventions | outputs-and-reshaping.md §4, §10 (decided 2026-10-26) | a single name only |
@@ -123,7 +123,7 @@ Then phase 5 (the final docs set) starts.
 
 | | Decision | Recommended | Step |
 |---|---|---|---|
-| A-D1 | **G5:** a fold with no `initial=` | start from the reducer's empty value when it has one (as R6 did for built-ins); otherwise refuse when declared: *"add(acc, n) has no starting value: give initial="*. Only when none is given: `initial=0`, or a reference (`initial=wf["s"][0][cols["value"]]`, even before `s` has run; it is read when the step runs) counts as given | A |
+| A-D1 | **G5:** a fold with no `initial=` — **decided and built** 2026-10-27: it starts from `initial=` if given (a value or a reference), else a built-in's empty value, else its accumulator's type's (`acc: float` → `0.0`, `list` → `[]`); untyped or `X \| None` starts at `None`, and a failure there says to give `initial=`; a type with no empty value is refused when declared. Was: | start from the reducer's empty value when it has one (as R6 did for built-ins); otherwise refuse when declared: *"add(acc, n) has no starting value: give initial="*. Only when none is given: `initial=0`, or a reference (`initial=wf["s"][0][cols["value"]]`, even before `s` has run; it is read when the step runs) counts as given | A |
 | A-D2 | **K18:** how `timeout` is enforced | each call in a worker thread with a deadline; a call past it fails, `where: timeout`. A thread can't be stopped, so the call may finish in the background, and its result is dropped | A |
 | B-D1 | K26's page size | 50 rows, as interactive-sessions.md suggests; the host can ask for another | B |
 | C-D1 | **K25:** a resource reports its data version by | a method, `data_version()`, called before a run; a setting can't change while the resource lives | C |

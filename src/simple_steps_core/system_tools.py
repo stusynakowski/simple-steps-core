@@ -177,15 +177,47 @@ def rows_parameters(fn: Any) -> list[str]:
     return found
 
 
+#: A fold's starting value, read from its accumulator's type (G5).
+_EMPTY_OF = {int: 0, float: 0.0, list: [], dict: {}, str: "", tuple: (), set: set()}
+
+
 def empty_value(fn: Callable) -> Any:
-    """What reducer *fn* gives over no rows, through any adapter wrapping it."""
-    seen = 0
-    while fn is not None and seen < 10:
-        if hasattr(fn, "empty"):
-            value = fn.empty
-            return list(value) if isinstance(value, list) else value
-        fn, seen = getattr(fn, "__wrapped__", None), seen + 1
-    return None
+    """What reducer *fn* starts from, and gives over no rows: a built-in's own
+    empty value, else the empty value of its accumulator's declared type
+    (``acc: float`` → ``0.0``), else None (G5)."""
+    seen, probe = 0, fn
+    while probe is not None and seen < 10:
+        if hasattr(probe, "empty"):
+            value = probe.empty
+            return type(value)(value) if isinstance(value, (list, dict, set)) else value
+        probe, seen = getattr(probe, "__wrapped__", None), seen + 1
+    kind = _accumulator_type(fn)
+    value = _EMPTY_OF.get(kind)
+    return type(value)(value) if isinstance(value, (list, dict, set)) else value
+
+
+def _accumulator_type(fn: Callable) -> Any:
+    """A fold's accumulator's declared type, or None (untyped, Any, or optional)."""
+    try:
+        first_param = next(iter(inspect.signature(_base(fn)).parameters.values()), None)
+        hints = typing.get_type_hints(_base(fn))
+    except (TypeError, ValueError, NameError):
+        return None
+    if first_param is None or first_param.name not in ACCUMULATOR_NAMES:
+        return None
+    hint = hints.get(first_param.name)
+    if hint is None or hint is typing.Any or type(None) in typing.get_args(hint):
+        return None
+    return typing.get_origin(hint) or hint
+
+
+def has_starting_value(fn: Callable) -> bool:
+    """Can a fold start without ``initial=``? Yes when it's a built-in, its
+    accumulator's type has an empty value, or the type allows None."""
+    if reducer_form(fn) != "fold":
+        return True
+    kind = _accumulator_type(fn)
+    return kind is None or kind in _EMPTY_OF
 
 
 #: Tools every Operation can name without being handed a registry, and the

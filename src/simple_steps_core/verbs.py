@@ -335,7 +335,15 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
                         caught, error = True, f"caught {caught_now}; used the default"
                 else:
                     for _index, row in units:
-                        accumulator, caught_now = _unwrap(fn(accumulator, row))
+                        acc_before = accumulator
+                        try:
+                            accumulator, caught_now = _unwrap(fn(accumulator, row))
+                        except Exception as exc:
+                            if acc_before is None and _index == units[0][0]:
+                                # G5: say why, where it can only be the start
+                                exc.args = (f"{exc.args[0] if exc.args else exc} "
+                                            f"(acc starts as None: give initial=…)",)
+                            raise
                         if caught_now is not None:
                             caught = True
                             error = f"caught {caught_now}; used the default"

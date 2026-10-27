@@ -84,7 +84,7 @@ The rules, with four decisions for the owner, are in [row-ids.md](row-ids.md).
 | Failure notes say where a row failed: tool, timeout, retry, breaker, expect, upstream | G7 |
 | `timeout` enforced | K18 |
 | `group` labels rows: the input's columns plus its key, so `collapse(by="key")` follows directly; `group(by=…)` is dropped and a column name refused when declared (owner, 2026-10-27). *Done (phase 4)* | G1 |
-| `collapse` with an accumulator and no `initial=` | G5 |
+| `collapse` with an accumulator and no `initial=` *Done (phase 4): it starts from its accumulator type's empty value, or is refused when declared* | G5 |
 
 ### Sessions
 

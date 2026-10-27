@@ -2342,3 +2342,4 @@ def test_a_bare_execution_modifier_still_says_so():
     wf = Workflow()
     with pytest.raises(TypeError, match="an execution modifier"):
         wf["s"] = mod.retry(times=2)
+

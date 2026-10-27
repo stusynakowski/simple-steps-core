@@ -566,6 +566,15 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                     f"the input does not have (it has {', '.join(map(str, available))})"
                 )
 
+    # 6a'. a fold needs a starting value (G5): from initial=, a built-in, or its
+    #      accumulator's type; one typed as something with no empty value can't start.
+    if (verb is not None and verb.kind == "collapse" and fn is not None
+            and verb.settings.get("initial") is None and not has_starting_value(fn)):
+        acc_type = _type_name(_accumulator_type(fn))
+        problems.append(f"{operation.tool}(acc: {acc_type}, …) has no starting value: "
+                        f"give initial=, as a value or a reference")
+    coded(problems, "missing_setting")
+
     # 6b''. collapse(by="#s") groups by an earlier step's rows (R-D5): each row
     #       must trace to one row of s, through `#` columns.
     grouped = workflow._groups_by_step_of(operation) if workflow is not None else None
@@ -1707,7 +1716,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
 
 # Names used only inside functions, imported last so the modules can refer
 # to each other (see grid.py).
-from .system_tools import reducer_form, rows_parameters
+from .system_tools import reducer_form, rows_parameters, has_starting_value, _accumulator_type
 from .system_tools import BUILTIN_TOOLS, is_identity  # noqa: E402
 from .catalog import (  # noqa: E402
     Tool,
