@@ -61,25 +61,37 @@ Local clutter, not tracked: `build/`, `.coverage`, the root `__pycache__/`.
 ## 3. The new package layout
 
 `grid.py` (7,444 lines) is split along the object model. Each module holds one
-object or one job; dependencies only point down the table.
+object or one job. **Phase 2 built the first fifteen rows**, moving code
+unchanged; the last three arrive in phase 3, and the phase-3 contents of each
+module are in *italics*.
 
-| Module | Holds |
-|---|---|
-| `kernel.py` | `Kernel`: editing, running, resources, store, display |
-| `workflow.py` | `Workflow`, `WorkflowSpec` |
-| `step.py` | `Step`, `StepSpec`, `StepStatus`, staleness |
-| `checks.py` | declaration checks and staging (`check`, `warn`, `stage`, `infer_verb`) |
-| `run.py` | compiling an operation into a callable, and running it |
-| `verbs.py` | the shape verbs and reshapes, on DataFrames |
-| `combines.py` | `join`, `stack`, `zip_` |
-| `operation.py` | `Operation`, `to_source()`, `from_spec()` |
-| `references.py` | `StepRef`, `ResRef`, selections, the proxies `wf`, `res`, `rows`, `cols` |
-| `modifiers.py` | `Modifier`, the modifier kinds, `mod` |
-| `catalog.py` | `Catalog`, `Tool`, `@tool`, `@resource`, built-in tools |
-| `output.py` | `Output`, cell states, notes, versions |
-| `values.py` | literal types, type checks, coercion, saving values to JSON |
-| `problems.py` | `Problem` and its codes |
-| `display.py` | `repr` and `_repr_html_` for kernel, step, catalog |
+| Module | Holds (phase 2) | Lines |
+|---|---|---|
+| `workflow.py` | `Workflow` (*`WorkflowSpec`*) | 1,400 |
+| `step.py` | `Step`, staleness helpers (`_ran_with`, `_changes_text`, `_row_fps`) (*`StepSpec`, `StepStatus`*) | 172 |
+| `checks.py` | declaration checks and staging: `check`, `warn`, `stage`, `infer_verb`, plan helpers | 1,316 |
+| `run.py` | compiling an operation into a callable (`compile_operation`), and `auto` | 163 |
+| `verbs.py` | the shape verbs and reshapes on DataFrames, and calling a tool per row | 941 |
+| `combines.py` | `join`, `stack`, `zip_` | 245 |
+| `operation.py` | `Operation`, `op`, formula printing (*`from_spec()`*) | 461 |
+| `references.py` | `StepRef`, `ResRef`, `ToolRef`, selections, the proxies `wf`, `res`, `rows`, `cols` | 492 |
+| `modifiers.py` | `Modifier`, the modifier kinds and their run-time decorators, `mod` | 596 |
+| `catalog.py` | `@tool`, `ToolHandle`, `@resource`, `ResourceDecl`, bound tools, tool and resource descriptions, the registries (*`Catalog`, `Tool`; no registries*) | 738 |
+| `system_tools.py` | `identity`, `gather`, `count`, `total`, `first`, `last` | 127 |
+| `output.py` | `Output`, cell states, notes, versions, `PAYLOAD`, `ROW_ID` | 416 |
+| `values.py` | literal types, type checks, saving arguments and outputs to JSON | 704 |
+| `errors.py` | `SelectionError`, `StepFailed`, `PayloadError`, `ResourceNotLoaded` | 73 |
+| `options.py` | `Settings` (*becomes kernel options*) | 34 |
+| *`kernel.py`* | *`Kernel`: editing, running, resources, store* | — |
+| *`problems.py`* | *`Problem` and its codes* | — |
+| *`display.py`* | *`repr` and `_repr_html_` for kernel, step, catalog* | — |
+
+`grid.py` is now a 94-line compatibility layer: it loads the modules in
+dependency order and re-exports every name, so the tests didn't change.
+**How the modules refer to each other** (phase 2 only): each imports at the top
+what it needs while loading, and at the bottom the names it uses only inside
+functions. Phase 3 replaces this with plain imports as the objects are
+rebuilt, and removes `grid.py`.
 
 The public names, all from `simple_steps_core`:
 

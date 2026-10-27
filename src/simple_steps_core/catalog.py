@@ -1,0 +1,738 @@
+"""Tools and resource types: @tool, @resource, bound tools, and their descriptions.
+
+Moved from grid.py unchanged (phase 2 of docs/design/cleanup-plan.md).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from dataclasses import replace
+from typing import Any
+from typing import Callable
+from typing import Sequence
+import inspect
+import types
+import typing
+import warnings
+
+
+#: Whether ``@tool`` requires a type annotation on every parameter and on the
+#: return. Off by default so tools written before the rule existed keep working;
+#: a project that wants the guarantee everywhere sets this once, at import time,
+#: before declaring anything. ``@tool(strict=True)`` opts in one tool at a time.
+#:
+#: What the annotations buy, and why it is worth the keystrokes: they are the
+#: only description of a step's boundary that both a human and the machine read.
+#: ``check`` compares them against the upstream's real dtypes
+#: (:func:`_dtype_problems`), and ``catalog`` publishes them, so a palette can
+#: say what a tool takes and returns instead of only naming its parameters.
+STRICT_TYPES: bool = False
+
+
+def _arg_docs(fn: Callable) -> dict[str, str]:
+    """Per-parameter text from a Google-style ``Args:`` docstring section.
+
+    A form shows this as the field's help; the summary line stays the tool's
+    own description. Continuation lines are folded into the parameter above them.
+    """
+    doc = inspect.getdoc(fn) or ""
+    sections = {"args", "arguments", "parameters", "returns", "return", "raises",
+                "yields", "examples", "example", "note", "notes", "attributes"}
+    out: dict[str, str] = {}
+    current, in_args = None, False
+    for raw in doc.splitlines():
+        stripped = raw.strip()
+        if stripped.rstrip(":").lower() in sections:
+            in_args = stripped.rstrip(":").lower() in ("args", "arguments", "parameters")
+            current = None
+            continue
+        if not in_args or not stripped:
+            continue
+        name_part, sep, desc = stripped.partition(":")
+        name = name_part.split("(")[0].strip().lstrip("*")
+        if sep and name.isidentifier():
+            out[name] = desc.strip()
+            current = name
+        elif current:                                # a wrapped continuation line
+            out[current] = f"{out[current]} {stripped}".strip()
+    return out
+
+
+def _param_type_info(annotation: Any) -> tuple[str | None, list | None, bool]:
+    """``(type_name, choices, nullable)`` for a parameter annotation.
+
+    Keeps the inner type of ``Optional[X]`` (and sets ``nullable``) and the
+    options of ``Literal[...]`` (with their own type as ``type_name``), so a form
+    renders a dropdown or a typed field instead of a bare "Optional"/"Literal".
+    """
+    if annotation is inspect.Parameter.empty:
+        return None, None, False
+    origin = typing.get_origin(annotation)
+    if origin is typing.Union:
+        args = typing.get_args(annotation)
+        nullable = type(None) in args
+        inner = [a for a in args if a is not type(None)]
+        if len(inner) == 1:
+            name, choices, _ = _param_type_info(inner[0])
+            return name, choices, nullable
+        names = [n for n in (_type_name(a) for a in inner) if n]
+        return (" | ".join(names) or None), None, nullable
+    if origin is typing.Literal:
+        choices = list(typing.get_args(annotation))
+        element = _type_name(type(choices[0])) if choices else None
+        return element, choices, False
+    return _type_name(annotation), None, False
+
+
+def tool_entry(tool_id: str, fn: Callable, origin: str) -> dict:
+    """One tool as a palette entry: what it is, where it came from, what it takes.
+
+    ``description`` is the docstring's first line, which is why those first
+    lines are written as user-facing sentences rather than developer notes.
+    ``origin`` lets a client separate the system's tools from the user's — the
+    builtins are always available and rarely what someone is looking for, so a
+    palette usually groups or hides them.
+
+    Each parameter carries enough to render a form field: ``type`` (the inner
+    type of an ``Optional``, not the word "Optional"), ``choices`` (a
+    ``Literal``'s options), ``nullable``, and ``description`` (its ``Args:`` text).
+    """
+    doc = (inspect.getdoc(fn) or "").strip()
+    try:
+        signature = inspect.signature(fn)
+        parameters = list(signature.parameters.values())
+    except (TypeError, ValueError):
+        signature, parameters = None, []
+    # Resolve string annotations (PEP 563) to real types so Literal/Optional stay
+    # inspectable; fall back to the raw annotation when a forward ref won't resolve.
+    try:
+        hints = typing.get_type_hints(fn, include_extras=True)
+    except Exception:
+        hints = {}
+    arg_docs = _arg_docs(fn)
+    return_ann = hints.get("return")
+    if return_ann is None and signature is not None:
+        return_ann = signature.return_annotation
+    returns = _type_name(return_ann if return_ann is not None
+                         else inspect.Parameter.empty)
+
+    params, takes_row = [], False
+    for parameter in parameters:
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            takes_row = True
+            continue
+        if parameter.kind is inspect.Parameter.VAR_POSITIONAL:
+            continue
+        required = parameter.default is inspect.Parameter.empty
+        annotation = hints.get(parameter.name, parameter.annotation)
+        type_name, choices, nullable = _param_type_info(annotation)
+        params.append({
+            "name": parameter.name,
+            "required": required,
+            "default": None if required else parameter.default,
+            "type": type_name,
+            "choices": choices,
+            "nullable": nullable,
+            "description": arg_docs.get(parameter.name),
+        })
+
+    return {
+        "tool_id": tool_id,
+        "description": doc.split("\n", 1)[0] if doc else "",
+        "origin": origin,
+        "params": params,
+        #: The declared return type, or None. With `params` above, this is the
+        #: tool's whole boundary: what goes in, what comes out.
+        "returns": returns,
+        #: True when every parameter and the return are annotated (a
+        #: **kwargs tool never is — 008 C12).
+        "typed": not annotation_problems(fn),
+        #: True when the tool takes **kwargs: keywords nobody can check.
+        "open": _open_keywords(fn) is not None,
+        # True when the tool declares **kwargs, so it receives every column and
+        # `check` cannot verify its inputs against the upstream (§4).
+        "takes_whole_row": takes_row,
+    }
+
+
+def catalog(tools: dict[str, Callable] | None = None) -> dict[str, dict]:
+    """Every callable tool, id → :func:`tool_entry`, for a palette.
+
+    Feeds the ``GET /tools`` response (docs/react-api.md §2). A user tool cannot
+    shadow a builtin, so an id appears exactly once and ``origin`` is
+    unambiguous.
+    """
+    entries = {}
+    for name, fn in sorted(BUILTIN_TOOLS.items()):
+        entries[name] = tool_entry(name, fn, "builtin")
+        entries[name]["tags"] = []
+    for name, fn in sorted({**TOOLS, **(tools or {})}.items()):
+        entries[name] = tool_entry(name, fn, "declared")
+        entries[name]["tags"] = list(TOOL_TAGS.get(name, ()))
+    return entries
+
+
+class BoundToolHandle:
+    """``res["db"].lookup`` — a bound tool waiting for its brackets.
+
+    The method is found on the resource's **declared type** once the step is in
+    a workflow; until then its tool id is ``"?.lookup"``. Brackets and parens
+    work exactly as on a :class:`ToolHandle`.
+    """
+
+    def __init__(self, ref: ResRef, method: str):
+        self.ref, self.method = ref, method
+        self.id = f"?.{method}"
+
+    def _start(self) -> "Operation":
+        return Operation(tool_id=self.id, bound_to=self.ref)
+
+    def bind(self, **literals) -> "Operation":
+        return self._start().bind(**literals)
+
+    def __getitem__(self, modifiers: Any) -> "Operation":
+        return self._start()[modifiers]
+
+    def __call__(self, *args, **kwargs) -> Any:
+        if args and isinstance(args[0], StepRef):
+            return self._start()(*args, **kwargs)
+        raise TypeError(
+            f"res[{self.ref.name!r}].{self.method} has no instance until the "
+            "workflow runs. Wire it into a step: "
+            f"wf[...] = res[{self.ref.name!r}].{self.method}[mod.map()](wf[...])."
+        )
+
+    def __repr__(self) -> str:
+        return f"<bound tool {self.ref!r}.{self.method}>"
+
+
+#: The attribute ``@bound_tool`` sets on a method. The method is otherwise untouched.
+_BOUND_MARK = "__simple_steps_bound_tool__"
+
+
+def bound_tool(fn: Callable) -> Callable:
+    """Mark a **method** of a resource class as a tool that runs on one instance.
+
+    The method stays an ordinary method — ``FakeDB().lookup("SF")`` still works —
+    and nothing is registered in :data:`TOOLS`. The mark only records that the
+    type offers it, so ``res["db"].lookup[mod.map()](…)`` can use it and the
+    catalog can list it. Unmarked methods are never tools, though tool code may
+    still call them::
+
+        class FakeDB:
+            @bound_tool
+            def lookup(self, key: str) -> str | None: ...
+
+            def reset(self) -> None: ...      # not a tool
+    """
+    try:
+        first = next(iter(inspect.signature(fn).parameters), None)
+    except (TypeError, ValueError):
+        first = None
+    if first != "self":
+        raise TypeError(
+            f"@bound_tool marks a method (first parameter `self`); "
+            f"{getattr(fn, '__qualname__', fn)!r} is not one. "
+            "Use @tool for a free function."
+        )
+    reserved = _reserved_problem(getattr(fn, "__name__", ""), "bound tool")
+    if reserved:
+        raise ValueError(reserved)
+    setattr(fn, _BOUND_MARK, True)
+    return fn
+
+
+def _looks_like_method(fn: Callable) -> bool:
+    """A function defined in a class body whose first parameter is ``self``."""
+    parts = getattr(fn, "__qualname__", "").split(".")
+    if len(parts) < 2 or parts[-2] == "<locals>":
+        return False
+    try:
+        return next(iter(inspect.signature(fn).parameters), None) == "self"
+    except (TypeError, ValueError):
+        return False
+
+
+def _signature(fn: Callable) -> inspect.Signature:
+    """The signature with string annotations (PEP 563) resolved where possible."""
+    try:
+        return inspect.signature(fn, eval_str=True)
+    except Exception:
+        return inspect.signature(fn)
+
+
+#: Every resource type a workflow has declared or ``@resource`` registered, by name.
+#: ``Workflow.from_dict`` resolves a saved ``"type"`` through it.
+RESOURCE_TYPES: dict[str, type] = {}
+
+
+def _settings(cls: type) -> list[inspect.Parameter]:
+    """A resource type's settings: its constructor's named parameters."""
+    try:
+        parameters = list(_signature(cls.__init__).parameters.values())[1:]
+    except (TypeError, ValueError):
+        return []
+    return [p for p in parameters
+            if p.kind not in (inspect.Parameter.VAR_POSITIONAL,
+                              inspect.Parameter.VAR_KEYWORD)]
+
+
+def _bound_tools(cls: type) -> dict[str, Callable]:
+    """The ``@bound_tool`` methods of *cls*, by name, base classes included.
+
+    An unmarked override of a marked method is not a tool: the subclass chose
+    to withdraw it.
+    """
+    found: dict[str, Callable] = {}
+    for klass in reversed(cls.__mro__):
+        for name, value in vars(klass).items():
+            if callable(value) and getattr(value, _BOUND_MARK, False):
+                found[name] = value
+            elif name in found:
+                del found[name]
+    return found
+
+
+_VIEWS: dict[tuple[type, str], Callable] = {}
+
+
+def _method_view(cls: type, name: str) -> Callable:
+    """The bound tool *name* of *cls*, as a function **without** ``self``.
+
+    It carries the signature and docstring, which is everything ``check``,
+    staging, verb inference and the catalog read. It cannot run — the real
+    instance's method replaces it at run time.
+    """
+    key = (cls, name)
+    if key not in _VIEWS:
+        method = _bound_tools(cls)[name]
+        signature = _signature(method)
+
+        def view(*args, **kwargs):
+            raise TypeError(f"{cls.__name__}.{name} is a bound tool; it runs on "
+                            "a resource instance supplied to Workflow.run")
+        view.__signature__ = signature.replace(
+            parameters=list(signature.parameters.values())[1:])
+        view.__name__ = name
+        view.__qualname__ = f"{cls.__name__}.{name}"
+        view.__doc__ = method.__doc__
+        view.__module__ = getattr(method, "__module__", None)
+        _VIEWS[key] = view
+    return _VIEWS[key]
+
+
+def resource_problems(cls: type) -> list[str]:
+    """Why *cls* cannot be a resource type — empty when it can."""
+    problems = []
+    for parameter in _settings(cls):
+        if not _literal_annotation(parameter.annotation):
+            problems.append(
+                f"setting {parameter.name!r} is {_type_name(parameter.annotation)}; "
+                "a resource is built from literal settings only (str, number, "
+                "bool, list, dict), so it can always be rebuilt from its declaration"
+            )
+    return problems
+
+
+def resource(cls: type) -> type:
+    """Register a class as a resource type, checking its settings are literals.
+
+    Optional — ``wf.define`` registers a type the first time it is used — but
+    declaring it puts the type and its bound tools in :func:`resource_catalog`
+    at import, before any workflow exists.
+    """
+    if _FROZEN and RESOURCE_TYPES.get(cls.__name__) is not cls:
+        raise RuntimeError(
+            f"cannot declare resource type {cls.__name__!r}: the registry is "
+            "frozen. Declare resource types before grid.freeze().")
+    problems = resource_problems(cls)
+    reserved = _reserved_problem(cls.__name__, "resource type")
+    if reserved:
+        problems.append(reserved)
+    if problems:
+        raise TypeError(f"cannot declare resource type {cls.__name__!r}: "
+                        + "; ".join(problems) + ".")
+    existing = RESOURCE_TYPES.get(cls.__name__)
+    if existing is not None and existing is not cls \
+            and existing.__qualname__ != cls.__qualname__:
+        warnings.warn(
+            f"resource type {cls.__name__!r} is already declared and is being "
+            "replaced — a workflow loaded from JSON resolves the name to "
+            "whichever was declared last.", stacklevel=2)
+    RESOURCE_TYPES[cls.__name__] = cls
+    return cls
+
+
+def resource_entry(cls: type) -> dict:
+    """One resource type for a palette: its settings, bound tools and bases."""
+    doc = (inspect.getdoc(cls) or "").strip()
+    settings = []
+    for parameter in _settings(cls):
+        required = parameter.default is inspect.Parameter.empty
+        settings.append({
+            "name": parameter.name,
+            "type": _type_name(parameter.annotation),
+            "required": required,
+            "default": None if required else parameter.default,
+        })
+    return {
+        "type": cls.__name__,
+        "description": doc.split("\n", 1)[0] if doc else "",
+        "settings": settings,
+        "tools": {f"{cls.__name__}.{name}":
+                  tool_entry(f"{cls.__name__}.{name}", _method_view(cls, name), "bound")
+                  for name in sorted(_bound_tools(cls))},
+        #: Every type this one is, so a client can show which resources fit a
+        #: parameter declared as a base (`llm: LLM`).
+        "bases": [k.__name__ for k in cls.__mro__ if k is not object],
+    }
+
+
+def resource_catalog(types_: dict[str, type] | None = None) -> dict[str, dict]:
+    """Every registered resource type, name → :func:`resource_entry`."""
+    return {name: resource_entry(cls)
+            for name, cls in sorted({**RESOURCE_TYPES, **(types_ or {})}.items())}
+
+
+@dataclass
+class ResourceDecl:
+    """How a workflow declared a resource — what is saved, never the object."""
+
+    name: str
+    #: The class, or ``None`` when a loaded workflow names a type this process
+    #: does not have. Declaring still works; type checks are skipped.
+    type: type | None
+    settings: dict
+    type_name: str
+    source: str = "defined"
+
+    def to_dict(self) -> dict:
+        return {"source": self.source, "type": self.type_name,
+                "settings": dict(self.settings)}
+
+
+def _type_fits(cls: type, annotation: Any) -> bool | None:
+    """Does an instance of *cls* fit *annotation*? ``None`` when undecidable."""
+    if annotation is inspect.Parameter.empty or isinstance(annotation, str):
+        return None
+    origin = typing.get_origin(annotation)
+    if origin in (typing.Union, types.UnionType):
+        answers = [_type_fits(cls, a) for a in typing.get_args(annotation)]
+        if any(a is True for a in answers):
+            return True
+        return False if all(a is False for a in answers) else None
+    base = origin or annotation
+    if not isinstance(base, type) or base is object:
+        return None
+    return issubclass(cls, base)
+
+
+def _attach_bound(operation: "Operation", resources: dict) -> "Operation":
+    """Give a bound-tool Operation its type-qualified id and its method view.
+
+    Left as is when the resource or the method cannot be found — :func:`check`
+    then says which.
+    """
+    if operation.bound_to is None:
+        return operation
+    decl = resources.get(operation.bound_to.name)
+    method = operation.tool_id.rsplit(".", 1)[-1]
+    if decl is None or decl.type is None or method not in _bound_tools(decl.type):
+        return replace(operation, fn=None)
+    return replace(operation, tool_id=f"{decl.type.__name__}.{method}",
+                   fn=_method_view(decl.type, method))
+
+
+def _no_resource(name: str, workflow: "Workflow") -> str:
+    declared = ", ".join(map(repr, workflow.resources)) or "none"
+    return (f"no resource named {name!r} (declared: {declared}). "
+            f"Declare it first: wf.define({name!r}, <Type>, ...)")
+
+
+def _bound_problem(operation: "Operation", workflow: "Workflow | None") -> str:
+    """Why a bound tool's method could not be found."""
+    name = operation.bound_to.name
+    method = operation.tool_id.rsplit(".", 1)[-1]
+    if workflow is None:
+        return (f"{method} is bound to resource {name!r}, which only a workflow "
+                "can declare")
+    decl = workflow.resources.get(name)
+    if decl is None:
+        return _no_resource(name, workflow)
+    if decl.type is None:
+        return (f"resource {name!r} has type {decl.type_name!r}, which is not "
+                "available here — pass resource_types= when loading")
+    tools = ", ".join(sorted(_bound_tools(decl.type))) or "(none)"
+    return f"{method} is not a tool of {decl.type.__name__}; its tools are: {tools}"
+
+
+class ToolHandle:
+    """What ``@tool`` returns: the plain function, plus a name and brackets.
+
+    **Parens run, brackets decorate** — the same contract a bracket-decorator
+    has outside this system, and the only calling rule in it::
+
+        transcribe({"path": "a.mp4"})              # a plain call, undecorated
+        transcribe[mod.map(over=videos)](videos)   # decorated, then run
+
+    Decorating a tool never touches the function, so the same tool is bare in
+    one step and mapped in another.
+    """
+
+    def __init__(self, fn: Callable, tool_id: str | None = None):
+        self.fn = fn
+        self.id = tool_id or fn.__name__
+        self.__doc__ = fn.__doc__
+        self.__name__ = self.id
+
+    def __call__(self, *args, **kwargs) -> Any:
+        """Apply the tool to its input — running it, or wiring it into a step.
+
+        ``score(3)`` runs the plain function. ``score(wf["raw"])`` has no data
+        to run on, so it builds the step instead, inferring how to iterate::
+
+            wf["scored"] = score(wf["raw"])      # -> map(over='raw') ∘ score
+
+        The two cannot be confused: a :class:`StepRef` is never data.
+        """
+        if args and isinstance(args[0], StepRef):
+            # Anything after the input binds by position (008 C1).
+            return self._start()(*args, **kwargs)
+        if any(isinstance(a, Operation) for a in (*args, *kwargs.values())):
+            raise TypeError(_NESTED_OPERATION)
+        if len(args) == 1 and settings.implicit_auto and _runs_over_rows(self.fn, args[0], kwargs):
+            # 009 decision 7: a frame whose rows are the arguments runs over them.
+            return self._start().bind(**kwargs)[mod.auto()](args[0])
+        return self.fn(*args, **kwargs)
+
+    def bind(self, **literals) -> Operation:
+        """Fix some arguments now, leaving the rest to arrive with each row.
+
+        ``score.bind(threshold=5)[mod.map(over=rows)]`` — the literals become
+        the Operation's ``arguments`` and are applied innermost, inside every
+        modifier, so a retry re-runs the same call and a map passes them to
+        every item. A value may be a :class:`StepRef`: a *value reference*
+        (K10), kept as the ref and resolved to that step's value at run.
+        """
+        return Operation(tool_id=self.id, arguments=dict(literals), fn=self.fn)
+
+    def _start(self) -> Operation:
+        return Operation(tool_id=self.id, fn=self.fn)
+
+    def __getitem__(self, modifiers: Any) -> Operation:
+        """``transcribe[mod.map(over=videos), mod.retry(times=2)]`` — decorate.
+
+        Returns an :class:`Operation` (data), never a wrapped function. Bound
+        literals survive it: ``transcribe.bind(model="large")[mod.map(...)]``.
+        """
+        return self._start()[modifiers]
+
+    def __repr__(self) -> str:
+        return f"<tool {self.id!r}>"
+
+
+#: Every tool declared with ``@tool``, by id. A server needs this: a workflow
+#: arrives as ids and modifiers, so something has to turn ``"to_fahrenheit"``
+#: back into a function. Import the module that declares your tools and they
+#: are here.
+TOOLS: dict[str, Callable] = {}
+
+
+#: Free-form labels per tool id (008 C3): the app's own tool "types" (`step`,
+#: `rowmap`, …) without core owning an enum. Published in the catalog.
+TOOL_TAGS: dict[str, tuple[str, ...]] = {}
+
+
+#: Set by :func:`freeze`: no more tools or resource types may be declared.
+_FROZEN = False
+
+
+def freeze() -> None:
+    """Close the tool and resource-type registries (008 C3).
+
+    After this, ``@tool`` and ``@resource`` raise, so a server can't have its
+    palette change under it mid-session.
+    """
+    global _FROZEN
+    _FROZEN = True
+
+
+def is_frozen() -> bool:
+    """Has :func:`freeze` been called?"""
+    return _FROZEN
+
+
+def builtin_tools() -> dict[str, Callable]:
+    """The tools core always has (identity, gather, count, total, first, last)."""
+    return dict(BUILTIN_TOOLS)
+
+
+def declared_tools() -> dict[str, Callable]:
+    """Every tool declared with ``@tool``, by id — a copy, safe to keep."""
+    return dict(TOOLS)
+
+
+def shape_verbs() -> tuple[str, ...]:
+    """The modifier kinds that change a grid's shape."""
+    return tuple(SHAPE_VERBS)
+
+
+def resource_types() -> dict[str, type]:
+    """Every registered resource type, by name — a copy."""
+    return dict(RESOURCE_TYPES)
+
+
+def payload_column(output: Any) -> str | None:
+    """The column a step (or Output) writes its tool's results to, or None.
+
+    008 C3: read this instead of assuming ``PAYLOAD`` — a step may name its
+    payload (``name=``), and some verbs write none.
+    """
+    if isinstance(output, Step):
+        output = output.output
+    return output.meta.get("payload") if isinstance(output, Output) else None
+
+
+def check_modifier(kind: str, params: dict | None = None) -> tuple[str, ...]:
+    """Problems with one modifier on its own — no tool, no workflow (008 C3/O).
+
+    A misspelt setting, a wrong type, a missing required setting: what a formula
+    bar can say while the modifier is still being typed.
+    """
+    params = dict(params or {})
+    params.pop("over", None)
+    return check(Operation(tool_id="identity", fn=identity,
+                           modifiers=(Modifier(kind, params),)))
+
+
+def tool(fn: Callable | None = None, *, id: str | None = None,
+         strict: bool | None = None, tags: Sequence[str] = ()):
+    """Mark a plain function as a tool. Usable bare or with an id.
+
+    Registers it in :data:`TOOLS` so a workflow loaded from JSON can find it
+    without the caller assembling a name→function map by hand.
+
+    *strict* requires a type annotation on every parameter and on the return,
+    refusing the declaration at import when one is missing. It defaults to
+    :data:`STRICT_TYPES`, so a project turns the rule on once rather than
+    repeating it per tool. The annotations are not decoration: ``check``
+    compares them against the upstream's real dtypes, and ``catalog`` publishes
+    them as the tool's boundary.
+    """
+    if isinstance(tags, str) or not all(isinstance(t, str) for t in tags):
+        raise TypeError("tags= takes a list of strings, e.g. tags=['rowmap']")
+
+    def make(f: Callable, tool_id: str | None) -> ToolHandle:
+        if _FROZEN:
+            raise RuntimeError(
+                f"cannot declare tool {tool_id or f.__name__!r}: the tool "
+                "registry is frozen. Declare tools before grid.freeze().")
+        if _looks_like_method(f):
+            # @tool on a method used to replace it with a handle that never
+            # receives `self`, breaking the method and registering a global
+            # tool `lookup(self, key)`. A method belongs to a resource.
+            raise TypeError(
+                f"{f.__qualname__} is a method. Mark it @bound_tool so it runs "
+                "on a resource instance (res[\"name\"]." + f.__name__ + "); "
+                "@tool is for free functions."
+            )
+        handle = ToolHandle(f, tool_id)
+        reserved = _reserved_problem(handle.id, "tool")
+        if reserved:
+            raise ValueError(f"cannot declare tool {handle.id!r}: {reserved}")
+        found = declaration_problems(f, handle.id)
+        if found:
+            raise TypeError(
+                f"cannot declare tool {handle.id!r}: " + "; ".join(found) + "."
+            )
+        if handle.id in TOOLS and TOOLS[handle.id] is not f:
+            # A warning, not an error: re-running a notebook cell and declaring
+            # a throwaway tool per test are both legitimate. Silently replacing
+            # a *different* function is the case worth surfacing — two modules
+            # claiming one id in a server is a real hazard.
+            warnings.warn(
+                f"tool {handle.id!r} is already declared and is being replaced. "
+                f"If these are two different tools, give one another name or "
+                f"pass id= — a workflow loaded from JSON resolves the id to "
+                f"whichever was declared last.",
+                stacklevel=3,
+            )
+        open_ = _open_keywords(f)
+        if open_ and not (STRICT_TYPES if strict is None else strict):
+            # 008 C12: allowed, but said out loud — strict mode refuses it.
+            warnings.warn(
+                f"{handle.id} accepts **{open_}: its extra keywords can't be "
+                "checked, typed or shown in a form. Name the parameters you "
+                "expect.", stacklevel=3)
+        if STRICT_TYPES if strict is None else strict:
+            found = annotation_problems(f)
+            if found:
+                raise TypeError(
+                    f"tool {handle.id!r} is not fully typed: {'; '.join(found)}. "
+                    "A step's boundary is its annotations — they are what "
+                    "`check` compares against the upstream's dtypes and what a "
+                    "palette shows a user. Annotate it, or declare it with "
+                    "strict=False."
+                )
+        if handle.id in BUILTIN_TOOLS:
+            # Shadowing a builtin is never intended and never harmless: the
+            # shape verbs resolve `identity` and `gather` by name, so a
+            # same-named user tool would quietly change what `select` or a bare
+            # `collapse` does. Refused at import, where it is cheap to rename.
+            raise ValueError(
+                f"{handle.id!r} is a builtin tool ({BUILTIN_TOOLS[handle.id].__doc__ or ''}"
+                f"). Give yours another name, or pass id= to rename it."
+            )
+        TOOLS[handle.id] = f
+        TOOL_TAGS[handle.id] = tuple(tags)
+        return handle
+
+    if fn is not None:
+        return make(fn, None)
+    return lambda f: make(f, id)
+
+
+def formula_names(tools: dict[str, Callable] | None = None) -> dict[str, Any]:
+    """The names a formula may use: ``wf res mod rows cols op join stack zip_``
+    and every declared tool. What :meth:`Operation.to_source` is written against.
+
+    For checking a formula round-trips in Python. A formula bar should parse
+    with its own grammar, never ``eval`` text a user typed.
+    """
+    names: dict[str, Any] = {"wf": wf, "res": res, "mod": mod, "rows": rows,
+                             "cols": cols, "op": op, "join": join,
+                             "stack": stack, "zip_": zip_}
+    for tool_id, fn in {**TOOLS, **(tools or {})}.items():
+        if tool_id.isidentifier():
+            names[tool_id] = fn if isinstance(fn, ToolHandle) else ToolHandle(fn, tool_id)
+    return names
+
+
+# Names used only inside functions, imported last so the modules can refer
+# to each other (see grid.py).
+from .system_tools import BUILTIN_TOOLS, identity  # noqa: E402
+from .checks import check  # noqa: E402
+from .combines import join, stack, zip_  # noqa: E402
+from .modifiers import Modifier, SHAPE_VERBS, mod  # noqa: E402
+from .operation import Operation, _NESTED_OPERATION, op  # noqa: E402
+from .options import settings  # noqa: E402
+from .output import Output  # noqa: E402
+from .references import (  # noqa: E402
+    ResRef,
+    StepRef,
+    _reserved_problem,
+    cols,
+    res,
+    rows,
+    wf,
+)
+from .run import _runs_over_rows  # noqa: E402
+from .step import Step  # noqa: E402
+from .values import (  # noqa: E402
+    _literal_annotation,
+    _open_keywords,
+    _type_name,
+    annotation_problems,
+    declaration_problems,
+)
+from .workflow import Workflow  # noqa: E402
