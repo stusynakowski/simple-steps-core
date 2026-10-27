@@ -172,7 +172,7 @@ What has to be designed before it is built:
 | `k.step("f")`, `k.step(2)` | one step: formula, state, reason, problems, the first rows |
 | `k.step("f").data` | its values, a DataFrame |
 | `k.view("f", rows=(0, 50))` | a page of rows, as the UI shows them: the row id `#` (*today* `#` is the row number and the id is separate, [reshaping.md](reshaping.md) R-D11), a state and type per cell, and how many rows there are in all (*today* `wf.preview`) |
-| `k.cell("f", 1, "value")` | one cell: value, type, state, and the input cells it came from, with their values (*today*) |
+| `k.cell("f", 1, "value")` | one cell, by row id: value, type, state, and the input cells it came from, with their values (*today*) |
 
 Rows in `view` and `cell` are addressed by row number, as displayed; the
 answer also gives the row id, which is what references and lineage use.

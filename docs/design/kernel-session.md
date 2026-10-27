@@ -111,7 +111,7 @@ step's input, giving the input twice, a value that isn't a step reference.
 | `k.step("f").data` | its values, a DataFrame on its row ids | built |
 | `k.step("f").output.view()` | the grid as a user sees it: `#` (the row id; *today* the row number, [reshaping.md](reshaping.md) R-D11), values, each row's state and note | built |
 | `k.view("p", rows=(0, 50))` | a page of rows, with each cell's state and type, and how many rows there are in all | built |
-| `k.cell("f", 0)` | one cell: value, type, state, and the input cells it came from, with their values | built |
+| `k.cell("f", 1)` | one cell, by row id (as selections are): value, type, state, and the input cells it came from, with their values | built |
 | `k.step("f").output.plan` | before running: rows, columns, types, each `exact`, `bounded` or `unknown` and why | built |
 | `k.step("f").problems`, `.warnings` | `Problem`s: message, code, step | built |
 | sizes per output, unknown with the reason | row count and estimated bytes | planned (K26) |
@@ -122,11 +122,12 @@ After `k.run_all()`:
 >>> k.step("side").data
   name  temp_c   value
 1  Ben    38.2  100.76
->>> k.cell("f", 0)["inputs"][0]["values"]
+>>> k.cell("f", 1)["inputs"][0]["values"]
 {'temp_c': 38.2}
 ```
 
-Row `1` is Ben's row id: it follows him through the filter and the zip.
+Row `1` is Ben's row id: it follows him through the filter and the zip, and
+`k.cell` reads a cell by it.
 
 ## 4. Change it, and see what changed
 

@@ -95,6 +95,25 @@ def last(acc: Any = None, **row: Any) -> Any:
     return identity(**row)
 
 
+# What each reducer gives over no rows (docs/design/reshaping.md R6): the
+# value it would start from. ``first`` and ``last`` have none, so they give
+# ``None``; the ``absent`` cell state (J-D1) will say so better.
+gather.empty = []
+count.empty = 0
+total.empty = 0
+
+
+def empty_value(fn: Callable) -> Any:
+    """What reducer *fn* gives over no rows, through any adapter wrapping it."""
+    seen = 0
+    while fn is not None and seen < 10:
+        if hasattr(fn, "empty"):
+            value = fn.empty
+            return list(value) if isinstance(value, list) else value
+        fn, seen = getattr(fn, "__wrapped__", None), seen + 1
+    return None
+
+
 #: Tools every Operation can name without being handed a registry, and the
 #: defaults a bare modifier resolves to. A user may name any of these by id in
 #: place of their own function — they are the reductions and pass-throughs that

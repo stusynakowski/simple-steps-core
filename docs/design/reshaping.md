@@ -228,7 +228,7 @@ written as a tool, `(acc, temp) -> float`, gives one result: `value`, or what
 | a statistic's lineage | the rows in `#v`, restricted to the columns the reducer read |
 | an input row changes | only the groups whose `#v` holds it go stale; a row that changes group marks both; a new group marks the whole step (D3) |
 | a group holds a failed row | the group's cells are `blocked`, naming the row. Core never skips it: to leave failed rows out, `filter` them first, as a step you can see. *Today:* ✓ |
-| a group with no rows (`collapse()` over no rows, or an empty group from `by="#s"`) | the reducer's empty value: `count` 0, `total` 0, `gather` `[]`. A reducer with no empty value (`first`, a mean) gives `absent` (§9.1). *Today:* every reducer gives `None` over no rows, `count` included (R6) |
+| a group with no rows (`collapse()` over no rows, or an empty group from `by="#s"`) | the reducer's empty value: `count` 0, `total` 0, `gather` `[]`. A reducer with no empty value (`first`, a mean) gives `absent` (§9.1). *Fixed* 2026-10-27 for `count`, `total` and `gather` (R6); `first` and `last` give `None` until `absent` exists |
 | several statistics at once | a reducer returning a record (`n`, `mean`, `sd`): a column per field, one shared `#v` |
 | going back | `trace`, never `rebuild` (§7) |
 
@@ -472,18 +472,18 @@ row ids and (once origins exist) pairing.
 | L4 | block → list of dicts → block | values ✓ (with `identity` packing the row), ids ✗ |
 | L5 | block → dict of lists → block | ✗ (R4, R5) |
 | L6 | unpack(pack by group) = the rows, ids kept | values ✓, ids ✗ (`"A.0"`) |
-| L7 | `expand` → `collapse(by="#v", gather)` = one list per `v` row, pairs with `v` | ✗ (M1); `by="#v"` is accepted and gives one group (R7) |
+| L7 | `expand` → `collapse(by="#v", gather)` = one list per `v` row, pairs with `v` | ✗ (M1): there is no `#v` column; the step ends `invalid` |
 | L8 | sort is a permutation: same ids, same rows | ✓ |
 | L9 | rename then rename back = the grid | ✓ |
 | L10 | `zip_` of two `select`s of `v` = `v` | ✓ |
 | L11 | `filter` and `sort` commute | ✓ |
 | L12 | `stack(a, b)` → `first[collapse(by="#a")]` = `a` | ✗ |
 | L13 | `join` → `first[collapse(by="#v")]` = `v`'s rows, pairs with `v` | ✗ (M4) |
-| L14 | a `collapse` cell traces to exactly its group's rows | ✓ (from the row's note), but `k.cell` takes a position (M7) |
+| L14 | a `collapse` cell traces to exactly its group's rows | ✓ (from the row's note), read by id: `k.cell("c", "A")` (M7, fixed) |
 | L15 | a `join` cell traces to its pair of input rows | ✗ (M4) |
 | L16 | `zip_` across origins is refused at declaration | ✗: completes, wrong (M5, M9) |
 | L17 | ids are never parsed: a source with ids `a`, `a.1`, expanded, traces each row to its true parent | ✗ (M8) |
-| L18 | packing zero rows gives `[]`; unpacking `[]` gives a 0×n grid with its columns | ✗: `gather` over no rows gives `None`, which unpacks to one row (R6) |
+| L18 | packing zero rows gives `[]`; unpacking `[]` gives a 0×n grid with its columns | ✓ (R6, fixed) |
 | L19 | `distinct` traces each kept row to every row it stands for | ✗ (M3) |
 | L20 | `table` is its own origin: its rows don't pair with its input's | ✗ (M6) |
 | L21 | the plan says `inverse: rebuild`, `trace` or `opaque` | ✗ (R-D8) |
@@ -496,10 +496,10 @@ row ids and (once origins exist) pairing.
 | L28 | positions count variables only: `cols[0]` is the first variable beside `#v` | ✗ (no `#` columns yet) |
 | L29 | tools get variables only: a `**kwargs` tool sees no `#` column | ✗ (no `#` columns yet) |
 | L30 | `zip_` of two steps of one origin keeps one `#v` | ✗ |
-| L31 | after `drop(columns=["#v"])`, `by="#v"` is a problem at declaration | ✗ (R7: accepted) |
+| L31 | after `drop(columns=["#v"])`, `by="#v"` is a problem at declaration | ✗ (no `#v` column yet) |
 | L32 | a reduction's `#v` lists its group's rows | ✗ (kept in the row's note, not a column; and R9) |
 | L33 | unpacking a reduction's `#vt` puts each row beside its group's statistic, lined up with `v` | ✗ |
-| L34 | reducers over no rows give their empty value: `count` 0, `total` 0, `gather` `[]` | ✗ (R6: `None`) |
+| L34 | reducers over no rows give their empty value: `count` 0, `total` 0, `gather` `[]` | ✓ (R6, fixed) |
 | L35 | a group holding a failed row is `blocked` | ✓ |
 
 ## 11. Found while checking
@@ -514,7 +514,7 @@ Run at `8efe6fd`. M1–M7 come from the `row-maps.md` draft; the rest are new.
 | M4 | `join` and `stack` trace to whole steps: *"join doesn't keep row links yet"* |
 | M5 | `zip_(v, select(join(w, v)))` completes with **Ben beside Dr X**: counted ids pair by accident |
 | M6 | `table` keeps the tool's index, so its rows claim to be the input's rows |
-| M7 | `k.cell` takes a position: `k.cell("c", "A")` and `k.cell("e", "0.1")` raise `TypeError` |
+| M7 | *Fixed 2026-10-27:* `k.cell` took a position, so `k.cell("c", "A")` and `k.cell("e", "0.1")` raised `TypeError`. It now takes a row id, as selections do; `Workflow.cell`, which takes a screen position, is unchanged |
 | **M8** | **Lineage parses id strings.** Source ids `a`, `a.1`, then `expand`: output row `a.1` (item 1 of `a`, value `p1`) traces to source row `a.1` (`q`). A wrong answer, given silently |
 | **M9** | **`zip_` parses id strings.** `zip_(v, expand(gather(v)))` completes and puts **all four unpacked rows beside `v`'s row 0** (Ada, 37.0): `"0.j"` is read as "child of `v`'s row 0", though its parent is the `collapse`'s row 0. A wrong answer, given silently |
 | R1 | unpacking a gathered list gives new ids (`"0.j"`, `"A.j"`), not the ids it was packed from |
@@ -522,8 +522,8 @@ Run at `8efe6fd`. M1–M7 come from the `row-maps.md` draft; the rest are new.
 | R3 | `identity` under `map` packs a row into a dict only when it has 2 or more columns; the shape of the result depends on how wide the input is |
 | R4 | `gather` on 2 or more columns packs both axes in one step (a list of dicts), against "one change per step"; there's no way to get a dict of lists |
 | R5 | `expand` unpacks one list; several lists can't be unpacked together |
-| R6 | **Every reducer gives `None` over no rows**: `gather` (not `[]`), `total` (not 0) and **`count` (not 0)**: a wrong answer, given silently. Unpacking that `None` gives a 1×1 grid, not 0 rows |
-| **R7** | **`collapse(by=…)` with a name that isn't a column is accepted.** `count[collapse(by="nosuch")]` declares with no problem and runs to one row holding `None`. A wrong answer, given silently |
+| R6 | *Fixed 2026-10-27:* every reducer gave `None` over no rows: `gather` (not `[]`), `total` (not 0) and **`count` (not 0)**, a wrong answer given silently. Each built-in reducer now starts from its empty value |
+| R7 | *Corrected:* not a bug. `collapse(by="nosuch")` is refused at declaration once the input's columns are known (*"collapse groups by 'nosuch', which 'v' does not have"*); before then, the step ends `invalid` with that message when it runs |
 | R8 | `cols["#"]` stores row **numbers** as data: after a sort, `[0, 1, 2]` while the ids are `[1, 2, 0]`. A value that changes when an earlier step reorders: the position pairing K19 retired (tested in test_008_asks: `{"#": [0, 1, 2, 3]}`) |
 | R9 | under `collapse(by=…)`, the built-in reducers get **the key in each row's payload**: `gather` gives dicts holding `ward`, and `total[collapse(by="ward")]` on `(ward, temp)` fails, *"unsupported operand type(s) for +: 'int' and 'dict'"* |
 | J1 | `expand` wraps a bare string: `"c"` gives one row `c`, so `"c"` and `["c"]` can't be told apart afterwards |
@@ -562,9 +562,8 @@ Each is one small piece, confirmed before it lands.
 
 ### Order, once decided
 
-1. Fixes with no new behaviour: M7 (`k.cell` takes a row id), R6 (empty
-   values over no rows, `count` first), R7 (an unknown `by=` is a problem
-   when declared).
+1. ~~Fixes: M7 (`k.cell` takes a row id), R6 (empty values over no rows).~~
+   Done 2026-10-27. (R7 turned out not to be a bug.)
 2. R-D6, R-D10 and R-D11 for the steps that keep ids and for `expand`: `#`
    and `#v` columns, and `_ancestors` goes. Fixes M8 and M9.
 3. R-D7: origins, and pairing checked at declaration. Fixes M5.

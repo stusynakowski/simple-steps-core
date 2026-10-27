@@ -293,7 +293,8 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
             records.append({**_blocked(*blocked[failed_in[0]]),
                             "unit": list(chunk.index)})
         else:
-            accumulator, error, caught = initial, None, None
+            accumulator, error, caught = (
+                initial if initial is not None else empty_value(fn)), None, None
             try:
                 for _index, row in _units(chunk):
                     accumulator, caught_now = _unwrap(fn(accumulator, row))
@@ -943,7 +944,7 @@ def _source_failure(error: str, caught: Any) -> Output:
 
 # Names used only inside functions, imported last so the modules can refer
 # to each other (see grid.py).
-from .system_tools import is_identity  # noqa: E402
+from .system_tools import empty_value, is_identity  # noqa: E402
 from .errors import SelectionError  # noqa: E402
 from .modifiers import _d_apply  # noqa: E402
 from .output import (  # noqa: E402

@@ -71,7 +71,7 @@ def main() -> None:
     k.run_all()
     print(k)
     print(k.step("side").data)
-    print("cell f[0] came from:", k.cell("f", 0)["inputs"][0]["values"])
+    print("cell f[1] came from:", k.cell("f", 1)["inputs"][0]["values"])   # row id 1: Ben
 
     print("\n── 4. change it ──")
     k["limit"] = 37.0                                         # move the control

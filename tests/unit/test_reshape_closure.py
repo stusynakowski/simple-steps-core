@@ -222,7 +222,6 @@ def test_L13_a_join_collapses_back_to_one_side(k):
 
 # ── trace: every cell knows its input rows ───────────────────────────────────
 
-@pytest.mark.xfail(strict=True, reason="M7: k.cell takes a position, not a row id")
 def test_L14_a_collapsed_cell_traces_to_its_group(k):
     k["c"] = op("count")[mod.collapse(by="ward")](wf["v"])
     k.run_all()
@@ -268,7 +267,6 @@ def test_L17_row_ids_are_never_parsed(k):
     assert parent["id"] == "a"
 
 
-@pytest.mark.xfail(strict=True, reason="R6: gather over no rows gives None, not []")
 def test_L18_empty_packs_to_an_empty_list_and_back(k):
     k["none"] = cold_rc[mod.filter()](wf["t"])
     k["packed"] = gather[mod.collapse()](wf["none"])
@@ -441,7 +439,7 @@ def test_L30_zip_of_one_origin_keeps_one_hash_column(e):
     assert list(data(e, "z").columns).count("#v") == 1
 
 
-@pytest.mark.xfail(strict=True, reason="R-D10, R7: by='#v' after dropping it is accepted")
+@pytest.mark.xfail(strict=True, reason="R-D10: no #v column yet")
 def test_L31_dropping_the_trace_is_a_loss_you_choose(e):
     e["d"] = mod.drop(columns=["#v"])(wf["e"])
     assert state(e, "d") != "invalid"                               # dropping is allowed
@@ -470,7 +468,6 @@ def test_L33_a_statistic_goes_back_beside_its_rows(k):
     assert data(k, "side").loc[0, "temp"] == pytest.approx(114.6)   # Ada, ward A's total
 
 
-@pytest.mark.xfail(strict=True, reason="R6, R-D12: every reducer gives None over no rows")
 def test_L34_reducers_over_no_rows_give_their_empty_value(k):
     k["none"] = cold_rc[mod.filter()](wf["t"])
     for reducer in ["count", "total", "gather"]:
