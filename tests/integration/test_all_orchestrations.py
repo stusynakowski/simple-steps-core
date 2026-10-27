@@ -105,7 +105,7 @@ def test_expand_then_widen_spreads_records_into_columns(wf):
 
 # ── widen (unnest wider) straight off a column of records ───────────────
 def test_widen_lifts_fields_into_columns(wf):
-    assert list(wf.step("wide").output.data.columns) == ["value", "city", "temp"]
+    assert list(wf.step("wide").output.data.columns) == ["city", "temp"]
 
 
 # ── sweep: the cross product of parameters ──────────────────────────────

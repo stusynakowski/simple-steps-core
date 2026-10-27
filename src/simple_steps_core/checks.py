@@ -167,7 +167,7 @@ def _plan_markers(plan: dict, step_id: str) -> list[dict]:
 #: Verbs whose output rows are their input's rows, one to one (or a subset):
 #: they can tell which output rows a changed input row affects (010 C25).
 ROW_ALIGNED = frozenset({"map", "group", "filter", "select", "drop", "rename",
-                         "sort", "slice", "distinct", "widen"})
+                         "sort", "slice", "distinct", "widen", "pack"})
 
 
 def _worst(states: set, stale: Any = False) -> str:
@@ -501,7 +501,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     coded(problems, "two_shape_verbs")
 
     # 6. the column verbs apply no tool (source may: it can compute its grid)
-    for kind in ("select", "drop", "widen", "slice", "rename",
+    for kind in ("select", "drop", "widen", "pack", "slice", "rename",
                  "sort", "distinct"):
         if any(m.kind == kind for m in operation.modifiers) and not is_identity(fn):
             problems.append(f"{kind} applies no tool; use map to compute")
@@ -1175,6 +1175,7 @@ DEFAULT_PAYLOAD: dict[str, str | None] = {
     "source": None, "filter": None, "select": None, "drop": None,
     # widen writes several *named* columns, so it has no single payload.
     "widen": None,
+    "pack": VALUE_COLUMN,
     # the rearranging verbs write nothing new at all.
     "slice": None, "rename": None, "sort": None, "distinct": None,
     "group": "group",
@@ -1197,7 +1198,7 @@ CARRIES_COLUMNS: frozenset[str] = frozenset({"filter", "group"})
 #: ``filter`` can promise "at most n", never "n".
 ROWS_RULE: dict[str, str] = {
     "source": "same", "map": "same", "group": "same",
-    "filter": "at_most", "select": "same", "drop": "same", "widen": "same",
+    "filter": "at_most", "select": "same", "drop": "same", "widen": "same", "pack": "same",
     "rename": "same", "sort": "same",
     "slice": "at_most", "distinct": "at_most",
     "collapse": "one",
@@ -1218,7 +1219,7 @@ def columns_unknown(output: Output) -> bool:
     return bool(output.meta.get("staged") and output.meta.get("columns_open"))
 
 
-_KEEPS_IDS = frozenset({"map", "filter", "group", "widen", "sort", "rename", "select",
+_KEEPS_IDS = frozenset({"map", "filter", "group", "widen", "pack", "sort", "rename", "select",
                         "drop", "slice", "distinct"})
 
 
@@ -1538,10 +1539,16 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         ordered = [mapping.get(c, c) for c in upstream_columns]
     elif kind in ("slice", "sort", "distinct"):
         ordered = list(upstream_columns)
+    elif kind == "pack":
+        chosen = verb.settings.get("columns") or variables(upstream_columns)
+        ordered = [c for c in upstream_columns if c not in chosen]
     elif kind == "widen":
-        ordered = list(upstream_columns)
-        ordered += [c for c in (verb.settings.get("columns") or [])
-                    if c not in ordered]
+        names_ = variables(upstream_columns)
+        spread = VALUE_COLUMN if VALUE_COLUMN in names_ else (names_[0] if len(names_) == 1 else None)
+        fields = list(verb.settings.get("columns") or [])
+        # the column it spreads goes: its fields are the columns now (G10)
+        ordered = [c for c in upstream_columns if c != spread or c in fields]
+        ordered += [c for c in fields if c not in ordered]
     elif kind in CARRIES_COLUMNS:
         ordered = list(upstream_columns)
     elif kind == "sweep":

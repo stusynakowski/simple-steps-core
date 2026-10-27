@@ -191,7 +191,7 @@ BUILTIN_TOOLS: dict[str, Callable] = {
 #: cannot stand in for the other.
 DEFAULT_TOOL: dict[str, str] = {
     "source": "identity", "select": "identity", "drop": "identity",
-    "widen": "identity", "slice": "identity", "rename": "identity",
+    "widen": "identity", "pack": "identity", "slice": "identity", "rename": "identity",
     "sort": "identity", "distinct": "identity",
     "map": "identity", "filter": "identity", "group": "identity",
     "expand": "identity", "collapse": "gather",

@@ -29,6 +29,7 @@ from .verbs import (
     sweep_,
     table_,
     widen_,
+    pack_,
 )
 
 
@@ -316,6 +317,7 @@ MODIFIERS: dict[str, ModifierKind] = {k.name: k for k in (
     _kind("select",   "shape", _lift(select_), select_),
     _kind("drop",     "shape", _lift(drop_), drop_),
     _kind("widen",    "shape", _lift(widen_), widen_),
+    _kind("pack",     "shape", _lift(pack_), pack_),
     _kind("slice",    "shape", _lift(slice_), slice_),
     _kind("rename",   "shape", _lift(rename_), rename_),
     _kind("sort",     "shape", _lift(sort_), sort_),
@@ -362,7 +364,7 @@ PARAM_TYPES: dict[str, tuple[type, ...]] = {
 
 
 #: The verbs that write a value column, which a naming modifier names (G12).
-NAMED_VERBS = frozenset({"map", "expand", "collapse", "group", "sweep"})
+NAMED_VERBS = frozenset({"map", "expand", "collapse", "group", "sweep", "pack"})
 
 
 #: Where one verb means something different by the same parameter name.
@@ -471,7 +473,7 @@ def _modifier_settings(name: str, kind: ModifierKind) -> list[dict]:
 _TAKES_TOOL: dict[str, Any] = {
     "map": True, "filter": True, "group": True, "sweep": True, "table": True,
     "auto": True,
-    "select": False, "drop": False, "widen": False, "slice": False,
+    "select": False, "drop": False, "widen": False, "pack": False, "slice": False,
     "rename": False, "sort": False, "distinct": False,
     "source": "optional", "expand": "optional", "collapse": "optional",
     "retry": None, "timeout": None, "expect": None, "try_except": None,

@@ -1739,7 +1739,7 @@ def test_widen_lifts_fields_into_columns(records):
     wf.run_all()
 
     out = wf.step("wide").output.data
-    assert list(out.columns) == ["value", "city", "temp"], "carried, then fields"
+    assert list(out.columns) == ["city", "temp"], "carried, then fields"
     assert list(out["city"]) == ["SF", "NYC"]
     assert list(out["temp"]) == [18.0, 31.0]
     assert list(out.index) == list(records.index), "1:1, index preserved"
@@ -1821,7 +1821,7 @@ def test_widen_round_trips(records):
     wf.run_all()
     back = Workflow.from_json(wf.to_session_json(), TOOLS)
     assert all(p == () for p in back.validate().values())
-    assert list(back.step("wide").output.data.columns) == ["value", "city", "temp"]
+    assert list(back.step("wide").output.data.columns) == ["city", "temp"]
     assert back.to_dict()["steps"][1]["operation"]["input"] == {"$ref": "raw"}
     assert back.to_dict()["steps"][1]["operation"]["modifiers"] == [
         {"kind": "widen", "settings": {"columns": ["city", "temp"]}}
@@ -1843,7 +1843,7 @@ def test_widen_a_tuple_cell_auto_names_c0_c1():
     wf["wide"] = mod.widen(over=wf["raw"])          # no columns=
     wf.run_all()
     out = wf.step("wide").output
-    assert list(out.data.columns) == ["value", "c0", "c1"]
+    assert list(out.data.columns) == ["c0", "c1"]
     assert list(out.data["c0"]) == [10, 20] and list(out.data["c1"]) == [1, 4]
     assert set(_row_states(out)) == {"known"}
 
@@ -1863,7 +1863,7 @@ def test_widen_ragged_tuples_auto_pad_with_none():
     wf["wide"] = mod.widen(over=wf["raw"])          # width = 3
     wf.run_all()
     out = wf.step("wide").output
-    assert list(out.data.columns) == ["value", "c0", "c1", "c2"]
+    assert list(out.data.columns) == ["c0", "c1", "c2"]
     assert out.data["c0"].tolist() == [1, 9]
     assert out.data["c2"].iloc[0] == 3 and pd.isna(out.data["c2"].iloc[1])
     assert set(_row_states(out)) == {"known"}, "ragged is not a failure"

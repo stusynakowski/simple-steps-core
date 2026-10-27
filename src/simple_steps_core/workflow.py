@@ -1157,7 +1157,15 @@ class Workflow:
             old = next((o for o, n in mapping.items() if n == column), column) \
                 if isinstance(mapping, dict) else None
             found = self._packed_by(str(op_.input), old, depth + 1) if old else None
-        elif kind in ("select", "drop", "sort", "slice", "filter", "distinct", "group") \
+        elif kind == "widen" and op_.input is not None:
+            # a field of a dict `pack` made is that column again, unchanged
+            inner = self.steps.get(str(op_.input))
+            if inner is not None and self._kind(str(op_.input)) == "pack" and \
+                    column not in variables(self._predicted_of(str(op_.input))):
+                found = self._packed_by(str(inner.operation.input), column, depth + 2)
+            else:
+                found = self._packed_by(str(op_.input), column, depth + 1)
+        elif kind in ("select", "drop", "sort", "slice", "filter", "distinct", "group", "pack") \
                 and op_.input is not None:     # carried unchanged: no tool rewrites it
             found = self._packed_by(str(op_.input), column, depth + 1)
         return found if found is not None and found in self._predicted_of(step_id) else None

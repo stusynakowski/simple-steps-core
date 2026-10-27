@@ -768,6 +768,8 @@ def _widen_columns(cells: list[Any], records: list[dict]) -> list[str] | None:
     if completed and all(isinstance(c, (list, tuple)) for c in completed):
         width = max(len(c) for c in completed)
         return [f"c{i}" for i in range(width)]
+    if completed and all(isinstance(c, dict) or c is None for c in completed):
+        return list(dict.fromkeys(k for c in completed if isinstance(c, dict) for k in c))
     return None
 
 
@@ -869,11 +871,43 @@ def widen_(source: Any, fn: Callable = identity, *,
     # order a reader sees. A field that shadows a carried column wins, because
     # naming it is what the step was asked to do.
     data = frame.copy()
+    spread = _spread_column(frame)
+    if spread is not None and spread not in wanted:
+        data = data.drop(columns=[spread])   # its fields are the columns now (G10)
     for column in wanted:
         data[column] = [row[column] for row in lifted]
     return Output(data=data, records=records, index=frame.index,
                   meta={"verb": "widen", "form": "column", "value_column": None,
                         "n_in": len(frame), "columns": list(data.columns)})
+
+
+def _spread_column(frame: pd.DataFrame) -> str | None:
+    """The column ``widen`` spreads, as ``identity`` resolves it: ``value``, or
+    the only variable. None for a row whose whole self is the record."""
+    names = variables(frame.columns)
+    if VALUE_COLUMN in names:
+        return VALUE_COLUMN
+    return names[0] if len(names) == 1 else None
+
+
+def pack_(source: Any, fn: Callable = identity, *, columns: Sequence[str] | None = None,
+          name: str = VALUE_COLUMN) -> Output:
+    """``pack`` — a row's variables into one dict, whatever its width (R-D2).
+
+    With ``columns=``, those; without, every variable. Never a ``#`` column:
+    those are ids, not data. The other columns are kept. ``widen`` is its
+    inverse.
+    """
+    _no_tool("pack", fn)
+    frame = rows(source)
+    chosen = list(columns) if columns else variables(frame.columns)
+    forged = [c for c in chosen if is_id_column(c)]
+    if forged:
+        raise ValueError(f"pack can't pack {forged[0]!r}: `#` columns are ids, not variables")
+    _require_columns("pack", frame, chosen)
+    data = frame[[c for c in frame.columns if c not in chosen]].copy()
+    data[name] = [{c: row.get(c) for c in chosen} for _index, row in _units(frame)]
+    return _column_output("pack", frame, data, source=source)
 
 
 def slice_(source: Any, fn: Callable = identity, *, start: int = 0,

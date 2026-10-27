@@ -116,7 +116,6 @@ def test_L2_packing_an_unpacked_list_gives_back_the_list(k):
     assert data(k, "again").iloc[0, -1] == data(k, "packed").iloc[0, -1]
 
 
-@pytest.mark.xfail(strict=True, reason="R-D2: no mod.pack; widen keeps the dict column (G10)")
 def test_L3_widening_a_packed_row_gives_back_the_row(k):
     k["rec"] = mod.pack(columns=["name", "ward", "temp"])(wf["v"])
     k["back"] = mod.widen()(wf["rec"])
@@ -125,7 +124,6 @@ def test_L3_widening_a_packed_row_gives_back_the_row(k):
     pd.testing.assert_frame_equal(data(k, "back"), data(k, "v"), check_dtype=False)
 
 
-@pytest.mark.xfail(strict=True, reason="R-D2 (step 7): no mod.pack yet")
 def test_L4_a_block_through_a_list_of_dicts_comes_back(k):
     k["rec"] = mod.pack(columns=["name", "ward", "temp"])(wf["v"])
     k["packed"] = gather[mod.collapse()](wf["rec"])
@@ -135,14 +133,13 @@ def test_L4_a_block_through_a_list_of_dicts_comes_back(k):
     same_rows(data(k, "back"), data(k, "v"))
 
 
-@pytest.mark.xfail(strict=True, reason="R-D2 (step 7): no mod.pack yet")
 def test_L5_a_block_through_a_dict_of_lists_comes_back(k):
     k["lists"] = gather[mod.collapse()](wf["v"])                  # one row: name, ward, temp lists
     k["packed"] = mod.pack(columns=["name", "ward", "temp"])(wf["lists"])
     k["lists2"] = mod.widen()(wf["packed"])
     k["back"] = mod.expand(columns=["name", "ward", "temp"])(wf["lists2"])
     k.run_all()
-    assert list(data(k, "lists").columns) == ["name", "ward", "temp"]
+    assert list(data(k, "lists").columns) == ["#v", "name", "ward", "temp"]    # a list per column
     same_rows(data(k, "back"), data(k, "v"))
 
 

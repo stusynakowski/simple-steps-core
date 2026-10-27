@@ -27,11 +27,12 @@ comes off.
 | 3 ✓ | the invariant check runs on every step of every test (`tests/conftest.py`, `Workflow.check_invariants`); it found and fixed P1–P3 and S1–S6 (§6) | `e2761d9` |
 | 4 ✓ | rows meet only through a recorded match, checked when declared (R-D7): `zip_` and column arguments; `zip_(…, match_ids=True)`; ids match exactly; a parent's value reaches each child; A5 is enforced in every test | `daca7e2` |
 | 5 ✓ | every verb records where its rows came from: `collapse` and `distinct` write `#v` lists, `join` and `stack` write `#a`, `#b`; a click on their cells shows the exact input rows; a dropped trace is named | `cc5a801` |
-| 6 ✓ | reducers take lists, and grouping is a pack then a map (R-D1, R-D13); `expand(columns=…)` in lockstep (R-D4); unpacking what core packed gives back its rows (R-D3); `by="#s"` back to any earlier step, every row of it (R-D5, J-D5) | `42e49a4`, `51a9580`, this commit |
+| 6 ✓ | reducers take lists, and grouping is a pack then a map (R-D1, R-D13); `expand(columns=…)` in lockstep (R-D4); unpacking what core packed gives back its rows (R-D3); `by="#s"` back to any earlier step, every row of it (R-D5, J-D5) | `42e49a4`, `51a9580`, `444f797` |
+| 7 ✓ | `mod.pack`: a row's variables into one dict (R-D2); `widen` drops the column it spreads (G10) and, without `columns=`, takes the union of the keys (J-D2's union) | this commit |
 
-**40 of the 49 law tests hold:** L1, L2, L6–L20, L22, L28–L39, L41–L49.
-The other 9 are marked with the step that fixes them: L3–L5 (step 7), L21
-(step 9), L23–L27 (step 8). L40 (the property test) is built in step 10.
+**43 of the 49 law tests hold:** L1–L20, L22, L28–L39, L41–L49. The other 6
+are marked with the step that fixes them: L23–L27 (step 8), L21 (step 9).
+L40 (the property test) is built in step 10.
 
 ## 3. The path
 
@@ -138,7 +139,16 @@ row of `s` (J-D5).
 - **Changes for users:** `gather[collapse()]` on several columns gives one
   list per column, not a list of dicts.
 
-### Step 7. The missing moves (now only `pack`; R-D4 is built in step 6)
+### Step 7. The missing moves (now only `pack`; R-D4 is built in step 6) ✓
+
+*Done 2026-10-27.* `widen()` with no `columns=` takes the union of the keys
+seen, because `pack` ↔ `widen` needs it: that half of J-D2 is built here;
+`absent` for a missing key is still step 8. A `widen` of a dict `pack` made
+counts as carrying its columns unchanged, so unpacking after a round trip
+still gives back the packed ids (L5). Six tests that expected `widen` to keep
+the column it spread now don't.
+
+What was planned:
 
 `mod.pack(columns=…)` packs a row's variables into a dict (R-D2), and
 `widen` drops the dict it spread (G10). `mod.expand(columns=[…])` unpacks
@@ -257,8 +267,8 @@ Found by running core, 2026-10-27. Wrong answers given silently are in bold.
 | P4 | a built-in reducer's plan claimed exact columns while its input's columns weren't known, so a `select` after it was refused | fixed (step 6) |
 | S8 | a `drop` of `#v` stopped the trace only at that step: tracing back past it reached `#v` again | fixed (step 6): the trace remembers what was dropped on the way back |
 | R1 | unpacking a gathered list gives new ids, not the packed ones | fixed (step 6) |
-| R2 | no way to pack a row whatever its width | step 7 |
-| R3 | `identity` under `map` packs a row into a dict only when it has 2 or more columns | step 7 |
+| R2 | no way to pack a row whatever its width | fixed (step 7) |
+| R3 | `identity` under `map` packs a row into a dict only when it has 2 or more columns | fixed (step 7): `pack` packs a row whatever its width |
 | R4 | `gather` on several columns packs both axes in one step | fixed (step 6) |
 | R5 | `expand` unpacks one list only | fixed (step 6) |
 | **R6** | **every reducer gave `None` over no rows, `count` included** | fixed (step 1) |
