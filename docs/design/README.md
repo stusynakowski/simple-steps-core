@@ -50,6 +50,7 @@ that cannot see each other.
 | [grid-model.md](grid-model.md) | What a grid is, how a tool meets a row, what every verb does to rows, columns and row ids, modifiers as run-time decorators |
 | [outputs-and-reshaping.md](outputs-and-reshaping.md) | The output principles, tools that return several values (records, lists, tables) under each verb, and how the reshapes fit together |
 | [row-ids.md](row-ids.md) | **Proposed:** the rules for row ids (K19): which ids each step gives, selections by id, column arguments paired by row, `zip_` by id, and four decisions |
+| [reshaping.md](reshaping.md) | **Proposed:** the reshaping algebra: packing any selection into a cell (a list, a dict) and back without loss, row maps and origins, `#` columns, rebuild or trace, uneven (jagged JSON) data, the closure laws (tested in `tests/unit/test_reshape_closure.py`), and seventeen decisions |
 | [step-expressions.md](step-expressions.md) | What a step may say: the general form, the other forms, references, literals, what's refused and why, the saved form |
 | [extensions.md](extensions.md) | The app's additions (`extras`), and the guarantee that the app's saved workflow runs the same in plain Python |
 | [kernel-session.md](kernel-session.md) | **The working guide**: constructing a workflow, seeing and changing its data, saving, loading and running kernels, with real output; each part marked built or planned |
