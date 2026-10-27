@@ -2,7 +2,7 @@
 
 > Decided by the owner, 2026-10-27 (D1, D3, D4; D2 taken as recommended).
 > Being built in phase 4, in pieces: **selections — done**; **column arguments — done**; **`zip_` — done**; **the ids new rows get — done** (2026-10-27). K19 is complete.
-> `zip_`; *Today* notes were run at `6435a98`. This is what makes a reference keep pointing
+> *Today* notes were run at `6435a98`, before K19. This is what makes a reference keep pointing
 > at the same row when the data shifts: selections, column arguments, `zip_`,
 > lineage, and later the row-aligned table view all rest on it.
 
