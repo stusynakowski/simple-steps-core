@@ -9,6 +9,7 @@ from typing import Any
 from typing import Callable
 import inspect
 import pandas as pd
+import collections.abc
 import typing
 
 from .output import VALUE_COLUMN
@@ -811,8 +812,7 @@ def warn(operation: Operation, workflow: "Workflow | None" = None,
         return _warnings(notes, step_id)
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
         return _warnings(notes, step_id)                       # takes the whole row; nothing to expect
-    if verb.kind in ("collapse", "table"):
-        parameters = parameters[1:]     # the verb supplies the accumulator / the grid
+    parameters = _tool_parameters(verb.kind, fn, parameters)   # not an accumulator or grid
     predicted = set(rows(upstream.output).columns) | set(operation.arguments)
     required = [p.name for p in parameters
                 if p.default is inspect.Parameter.empty
@@ -839,6 +839,42 @@ def warn(operation: Operation, workflow: "Workflow | None" = None,
 #: The verbs that call their tool once per row, so a column given as an
 #: argument can be paired with the input row by row (K19).
 _ROW_BY_ROW = frozenset({"map", "filter", "expand", "group"})
+
+
+def _tool_parameters(kind: str | None, fn: Any, parameters: list) -> list:
+    """The parameters a step's rows fill: not a fold's accumulator, not a
+    table tool's grid, not a group function's rows (reshaping.md §8)."""
+    if kind == "table":
+        return parameters[1:]
+    if kind == "collapse":
+        if reducer_form(fn) == "group":
+            rows_ = set(rows_parameters(fn))
+            return [p for p in parameters if p.name not in rows_]
+        return parameters[1:]
+    return parameters
+
+
+def _group_function_types(operation: Operation, fn: Any, by: Any) -> list[str]:
+    """A group function gets each column as a list (R-D13 e): a column
+    parameter declared as a scalar can't take one."""
+    try:
+        parameters = list(_signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        return []
+    found = []
+    for p in _tool_parameters("collapse", fn, parameters):
+        if p.name in operation.arguments or p.name == by or p.annotation is inspect.Parameter.empty:
+            continue
+        origin = typing.get_origin(p.annotation) or p.annotation
+        if origin in (list, tuple, typing.Any) or (isinstance(origin, type) and issubclass(
+                origin, collections.abc.Iterable) and origin not in (str, bytes, dict)):
+            continue
+        found.append(
+            f"{operation.tool}() declares {p.name}: {_type_name(p.annotation)}, but under "
+            f"collapse it gets {p.name} as a list of the group's values: declare "
+            f"{p.name}: list[{_type_name(p.annotation)}], or write it as a fold, "
+            f"(acc, {p.name})")
+    return found
 
 
 def _unmatched_rows(operation: Operation, workflow: "Workflow") -> list[str]:
@@ -917,8 +953,7 @@ def _required_columns(operation: Operation, verb: Any) -> list[str]:
         return []
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
         return []
-    if verb.kind in ("collapse", "table"):
-        parameters = parameters[1:]
+    parameters = _tool_parameters(verb.kind, fn, parameters)
     return [p.name for p in parameters
             if p.default is inspect.Parameter.empty
             and p.kind is not inspect.Parameter.VAR_POSITIONAL
@@ -976,8 +1011,7 @@ def _missing_columns(operation: Operation, fn: Callable,
         return []
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
         return []                       # takes the whole row; nothing to miss
-    if verb.kind in ("collapse", "table"):
-        parameters = parameters[1:]     # the verb supplies the accumulator / the grid
+    parameters = _tool_parameters(verb.kind, fn, parameters)   # not an accumulator or grid
 
     available = set(rows(upstream).columns) | set(operation.arguments)
     missing = [p.name for p in parameters
@@ -1056,14 +1090,14 @@ def _type_mismatches(operation: Operation, fn: Callable,
     if workflow is None or verb is None or verb.kind in ("source", "sweep",
                                                          "select", "drop"):
         return problems
+    if verb.kind == "collapse" and reducer_form(fn) == "group":
+        return problems + _group_function_types(operation, fn, verb.settings.get("by"))
     upstream = workflow._input_for(operation)
     if upstream is None:
         # 008 C5: before the input runs, check against the types it declares
         # (a source's schema, mod.expect, or a tool's return annotation).
         declared_types = workflow._column_types(operation)
-        params = list(parameters.values())
-        if verb.kind in ("collapse", "table"):
-            params = params[1:]
+        params = _tool_parameters(verb.kind, fn, list(parameters.values()))
         for parameter in params:
             if parameter.name in operation.arguments:
                 continue
@@ -1082,9 +1116,7 @@ def _type_mismatches(operation: Operation, fn: Callable,
     # Only rows that completed count: a failed cell is a failure, not a
     # missing value, and its row is blocked downstream anyway (008 C10).
     completed = pd.Index(upstream.ids_in("known"))
-    declared = list(parameters.values())
-    if verb.kind in ("collapse", "table"):
-        declared = declared[1:]          # the verb supplies the accumulator / the grid
+    declared = _tool_parameters(verb.kind, fn, list(parameters.values()))
     upstream_name = (str(operation.input) if operation.input is not None
                      else "the input")
     for parameter in declared:
@@ -1492,6 +1524,11 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         ordered = [k for k in verb.settings if k not in ("name", "over", "retries")]
     elif kind == "collapse" and verb.settings.get("by"):
         ordered = [verb.settings["by"]]
+    if kind == "collapse" and reducer_form(operation.fn or BUILTIN_TOOLS.get(operation.tool)) == "per_column":
+        # A built-in reducer: one column per variable, under its own name (R-D1).
+        by_ = verb.settings.get("by")
+        ordered += [c for c in variables(upstream_columns) if c != by_ and c not in ordered]
+        payload = None
     if payload and payload not in ordered:
         ordered.append(payload)
     index_names = ordered
@@ -1573,6 +1610,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
 
 # Names used only inside functions, imported last so the modules can refer
 # to each other (see grid.py).
+from .system_tools import reducer_form, rows_parameters
 from .system_tools import BUILTIN_TOOLS, is_identity  # noqa: E402
 from .catalog import (  # noqa: E402
     Tool,

@@ -278,6 +278,9 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
                 f"(it has {', '.join(map(str, frame.columns)) or 'no columns'})")
         groups = list(frame.groupby(by, sort=False))
 
+    form = reducer_form(fn)
+    reduced = [c for c in variables(frame.columns) if c != by]
+    rows_params = rows_parameters(fn) if form == "group" else []
     results, keys, records, index = [], [], [], []
     for position, (key, chunk) in enumerate(groups):
         started = time.perf_counter()
@@ -292,11 +295,34 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
             accumulator, error, caught = (
                 initial if initial is not None else empty_value(fn)), None, None
             try:
-                for _index, row in _units(chunk):
-                    accumulator, caught_now = _unwrap(fn(accumulator, row))
+                units = list(_units(chunk))
+                if form == "per_column":
+                    # A built-in reducer, once per variable; never the key (R-D1).
+                    accumulator = {}
+                    for c in reduced:
+                        acc_c = initial if initial is not None else empty_value(fn)
+                        for _index, row in units:
+                            acc_c, caught_now = _unwrap(fn(acc_c, {c: row.get(c)}))
+                            if caught_now is not None:
+                                caught, error = True, f"caught {caught_now}; used the default"
+                        accumulator[c] = acc_c
+                elif form == "group":
+                    # Once per group: each column as a list, the key as itself, the
+                    # rows for a list-of-records parameter (R-D13).
+                    whole = {c: [row.get(c) for _i, row in units] for c in reduced}
+                    if by is not None:
+                        whole[by] = key
+                    for p in rows_params:
+                        whole.setdefault(p, [row for _i, row in units])
+                    accumulator, caught_now = _unwrap(fn(whole))
                     if caught_now is not None:
-                        caught = True
-                        error = f"caught {caught_now}; used the default"
+                        caught, error = True, f"caught {caught_now}; used the default"
+                else:
+                    for _index, row in units:
+                        accumulator, caught_now = _unwrap(fn(accumulator, row))
+                        if caught_now is not None:
+                            caught = True
+                            error = f"caught {caught_now}; used the default"
                 status = "completed"
             except _Tolerated as exc:
                 status, accumulator, error, caught = "failed", None, str(exc), True
@@ -322,13 +348,22 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
                                              index=data.index, dtype=object)
     if by is not None:                       # key first reads better
         data[by] = keys
-    data[name] = _typed(results, data.index)
+    if form == "per_column":
+        # One column per variable, under its own name (R-D1).
+        for c in reduced:
+            data[c] = _typed([r.get(c) if isinstance(r, dict) else None for r in results],
+                             data.index)
+    else:
+        data[name] = _typed(results, data.index)
     # Which input rows each output row was made from, so a change to one of
     # them marks only its group's row stale (owner, 2026-10-27).
     members = [[out_id, list(chunk.index)] for out_id, (_, chunk) in zip(index, groups)]
     return Output(data=data, records=records, index=index,
                   meta={"verb": "collapse", "form": "scalar" if by is None
-                        else "column", "value_column": name, "by": by,
+                        else "column",
+                        # one variable reduced per column: that column is the payload
+                        "value_column": (reduced[0] if len(reduced) == 1 else None)
+                        if form == "per_column" else name, "by": by,
                         "n_in": len(frame), "groups": members})
 
 
@@ -976,7 +1011,7 @@ def _source_failure(error: str, caught: Any) -> Output:
 
 # Names used only inside functions, imported last so the modules can refer
 # to each other (see grid.py).
-from .system_tools import empty_value, is_identity  # noqa: E402
+from .system_tools import empty_value, is_identity, reducer_form, rows_parameters  # noqa: E402
 from .errors import SelectionError  # noqa: E402
 from .modifiers import _d_apply  # noqa: E402
 from .output import (  # noqa: E402

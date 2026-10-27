@@ -1154,8 +1154,7 @@ class Workflow:
             parameters = list(_signature(fn).parameters.values()) if fn else []
         except (TypeError, ValueError):
             parameters = []
-        if kind == "collapse":
-            parameters = parameters[1:]              # the accumulator
+        parameters = _tool_parameters(kind, fn, parameters)   # not an accumulator or grid
         if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
             return [c for c in columns if c not in op_.arguments]      # the whole row
         return [p.name for p in parameters
@@ -1803,6 +1802,7 @@ from .checks import (  # noqa: E402
     stage,
     warn,
     keeps_ids,
+    _tool_parameters,
 )
 from .combines import _row_lookup, _run_combine, is_combine, own_id_columns  # noqa: E402
 from .errors import ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402

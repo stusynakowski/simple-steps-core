@@ -198,7 +198,6 @@ def test_L11_filter_and_sort_commute(k):
     pd.testing.assert_frame_equal(data(k, "fs"), data(k, "sf"))
 
 
-@pytest.mark.xfail(strict=True, reason="R-D5, R-D6: stack keeps no row map; no by='#a'")
 def test_L12_a_stack_splits_back_into_its_inputs(k):
     k["a"] = mod.select(columns=["temp"])(wf["v"])
     k["b"] = mod.select(columns=["temp"])(wf["v"])
@@ -442,7 +441,6 @@ def test_L31_dropping_the_trace_is_a_loss_you_choose(e):
     assert any("dropped" in str(p) for p in e.workflow.steps["back"].problems)
 
 
-@pytest.mark.xfail(strict=True, reason="R-D12, R9: the key is in the payload; rows are in a note, not #vt")
 def test_L32_a_reduction_lists_the_rows_it_reduced(k):
     k["vt"] = mod.select(columns=["ward", "temp"])(wf["v"])
     k["tot"] = op("total")[mod.collapse(by="ward")](wf["vt"])
@@ -683,8 +681,9 @@ def mean_temp_rc(temp: list) -> float:
     return sum(temp) / len(temp)
 
 
-@pytest.mark.xfail(strict=True, reason="R-D1, R-D13 (step 6): collapse has no group-function form yet")
-def test_L49_a_reduction_is_a_map_over_packed_lists(k):
+def test_L49_a_reduction_is_a_map_over_packed_lists():
+    k = Kernel(Catalog(tools=[visits_rc, mean_temp_rc]))
+    k["v"] = visits_rc[mod.source()]()
     k["vt"] = mod.select(columns=["ward", "temp"])(wf["v"])
     k["direct"] = mean_temp_rc[mod.collapse(by="ward")](wf["vt"])
     k["packed"] = gather[mod.collapse(by="ward")](wf["vt"])          # a new index: one row per ward
