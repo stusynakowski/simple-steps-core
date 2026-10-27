@@ -24,6 +24,7 @@ from typing import Any
 
 from .catalog import Catalog
 from .output import PAYLOAD
+from .specs import KernelSpec
 from .references import ResRef, StepRef
 from .step import Step
 from .workflow import Workflow
@@ -180,15 +181,37 @@ class Kernel:
         return self.workflow.cell(self._name(step), row, column)
 
     # ── saving ───────────────────────────────────────────────────────────
+    @property
+    def extras(self) -> dict:
+        """The app's additions to this kernel's workflow, by namespace."""
+        return self.workflow.extras
+
+    @property
+    def spec(self) -> KernelSpec:
+        """Everything needed to reproduce this workflow with this set of tools:
+        the workflow spec and the catalog spec. Never output data."""
+        return KernelSpec(self.workflow.spec, self.catalog.spec)
+
     def to_json(self) -> str:
-        """The workflow as JSON: its steps and resources, never output data."""
-        return self.workflow.to_json()
+        """The spec as JSON: steps, resources, extras and the catalog's names."""
+        return json.dumps(self.spec.to_dict())
+
+    @classmethod
+    def from_spec(cls, spec: KernelSpec, catalog: Catalog) -> "Kernel":
+        """A kernel built from *spec*, checked against *catalog*. The spec's
+        catalog names say what it was saved with; *catalog* is what it runs with."""
+        return cls._load(spec.workflow.to_dict(), catalog)
 
     @classmethod
     def from_json(cls, text: str, catalog: Catalog) -> "Kernel":
         """A kernel from :meth:`to_json`, checked against *catalog*."""
+        return cls._load(json.loads(text), catalog)
+
+    @classmethod
+    def _load(cls, blob: dict, catalog: Catalog) -> "Kernel":
         kernel = cls(catalog)
-        kernel.workflow = Workflow.from_dict(json.loads(text), catalog=catalog)
+        blob = {k: v for k, v in blob.items() if k != "catalog"}
+        kernel.workflow = Workflow.from_dict(blob, catalog=catalog)
         return kernel
 
     # ── display ──────────────────────────────────────────────────────────

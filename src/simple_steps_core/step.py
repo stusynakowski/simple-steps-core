@@ -5,7 +5,7 @@ Moved from grid.py unchanged (phase 2 of docs/design/cleanup-plan.md).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 import hashlib
 import pandas as pd
@@ -64,6 +64,15 @@ class Step:
     #: Non-blocking column expectations (005 C) — what this step predicts it
     #: will need from an upstream that has not run yet. Never stops a run.
     warnings: tuple[str, ...] = ()
+    #: The app's additions, by namespace (``{"simple_steps.ui": {"color": …}}``).
+    #: Saved with the step, never read by core, never a reason to re-run.
+    extras: dict = field(default_factory=dict)
+
+    @property
+    def spec(self) -> "StepSpec":
+        """The step's saved form: its name and operation, never its output."""
+        return StepSpec(self.step_id, self.operation.to_dict(),
+                        _checked_extras(self.extras))
 
     @property
     def valid(self) -> bool:
@@ -183,7 +192,9 @@ class Step:
 
 # Names used only inside functions, imported last so the modules can refer
 # to each other (see grid.py).
+from .catalog import _checked_extras  # noqa: E402
 from .combines import is_combine  # noqa: E402
 from .operation import Operation, _src  # noqa: E402
 from .output import Output, _plan_words  # noqa: E402
+from .specs import StepSpec  # noqa: E402
 from .values import _dtype_type, _type_label  # noqa: E402

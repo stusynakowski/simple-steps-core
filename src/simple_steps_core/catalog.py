@@ -5,7 +5,7 @@ Moved from grid.py unchanged (phase 2 of docs/design/cleanup-plan.md).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from dataclasses import replace
 from collections.abc import Mapping
 from typing import Any
@@ -407,10 +407,17 @@ class ResourceDecl:
     settings: dict
     type_name: str
     source: str = "defined"
+    #: The app's additions, by namespace. Saved, never read by core.
+    extras: dict = field(default_factory=dict)
+
+    @property
+    def spec(self) -> "ResourceSpec":
+        """What is needed to build this resource: its type's name and settings."""
+        return ResourceSpec(self.name, self.type_name, dict(self.settings),
+                            _checked_extras(self.extras), self.source)
 
     def to_dict(self) -> dict:
-        return {"source": self.source, "type": self.type_name,
-                "settings": dict(self.settings)}
+        return self.spec.to_dict()
 
 
 def _type_fits(cls: type, annotation: Any) -> bool | None:
@@ -888,6 +895,16 @@ class Catalog:
                  f"  combines        {names(self._combines)}"]
         return "\n".join(lines)
 
+    @property
+    def spec(self) -> "CatalogSpec":
+        """The names this catalog allows, and each tool's extras. Never code."""
+        return CatalogSpec(
+            tools={name: {"extras": dict(t.extras)} for name, t in sorted(self._tools.items())},
+            resource_types=tuple(sorted(self._resource_types)),
+            builtins=tuple(sorted(self._builtins)),
+            modifiers=tuple(sorted(self._modifiers)),
+            combines=tuple(sorted(self._combines)))
+
     def describe(self) -> dict:
         """Every entry as plain data, for a palette, a form or an agent.
 
@@ -961,6 +978,7 @@ class Catalog:
 from .system_tools import BUILTIN_TOOLS, identity  # noqa: E402
 from .checks import check  # noqa: E402
 from .problems import Problem  # noqa: E402
+from .specs import CatalogSpec, ResourceSpec  # noqa: E402
 from .combines import COMBINE, is_combine, join, stack, zip_  # noqa: E402
 from .modifiers import MODIFIERS, Modifier, SHAPE_VERBS, mod, modifier_catalog  # noqa: E402
 from .operation import Operation, _NESTED_OPERATION, op  # noqa: E402

@@ -654,7 +654,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     return tuple(p.at(step_id) for p in problems)
 
 
-def warn(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str, ...]:
+def warn(operation: Operation, workflow: "Workflow | None" = None,
+         step_id: str | None = None) -> tuple[str, ...]:
     """Non-blocking column expectations, before the upstream has run (005 C).
 
     The hard column check (:func:`_missing_columns`) only fires once the upstream
@@ -665,12 +666,12 @@ def warn(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str,
     into a problem) when the upstream runs. Warnings never stop a run.
     """
     if workflow is None or operation.input is None:
-        return _warnings([])
+        return _warnings([], step_id)
     if _is_auto(operation) and len(operation.shape_verbs) == 1:
         operation, _, _ = _provisional(operation, workflow)
     verb = operation.shape_verb
     if verb is None or verb.kind in ("source", "sweep"):
-        return _warnings([])
+        return _warnings([], step_id)
     notes: list[str] = []
     # 008 C12: a keyword that matches no named parameter lands in **kwargs,
     # unchecked — a typo there would otherwise pass silently.
@@ -719,19 +720,19 @@ def warn(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str,
     upstream = workflow.steps.get(str(operation.input))
     # Only predict while the upstream is staged; once it runs, `check` is exact.
     if upstream is None or not upstream.output.meta.get("staged"):
-        return _warnings(notes)
+        return _warnings(notes, step_id)
     fn = operation.fn or TOOLS.get(operation.tool_id) \
         or BUILTIN_TOOLS.get(operation.tool_id)
     if isinstance(fn, ToolHandle):
         fn = fn.fn
     if fn is None:
-        return _warnings(notes)
+        return _warnings(notes, step_id)
     try:
         parameters = list(inspect.signature(fn).parameters.values())
     except (TypeError, ValueError):
-        return _warnings(notes)
+        return _warnings(notes, step_id)
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
-        return _warnings(notes)                       # takes the whole row; nothing to expect
+        return _warnings(notes, step_id)                       # takes the whole row; nothing to expect
     if verb.kind in ("collapse", "table"):
         parameters = parameters[1:]     # the verb supplies the accumulator / the grid
     predicted = set(rows(upstream.output).columns) | set(operation.arguments)
@@ -753,7 +754,7 @@ def warn(operation: Operation, workflow: "Workflow | None" = None) -> tuple[str,
             f"expects {', '.join(map(repr, present))} from {up!r}, "
             f"unconfirmed until it runs"
         )
-    return _warnings(notes + warnings)
+    return _warnings(notes + warnings, step_id)
 
 
 
@@ -768,9 +769,9 @@ _WARNING_KINDS = (
 )
 
 
-def _warnings(notes: list[str]) -> tuple[Problem, ...]:
-    """*notes* as warnings, each with its code."""
-    return tuple(classified(n, _WARNING_KINDS, "problem", severity="warning")
+def _warnings(notes: list[str], step_id: str | None = None) -> tuple[Problem, ...]:
+    """*notes* as warnings on *step_id*, each with its code."""
+    return tuple(classified(n, _WARNING_KINDS, "problem", severity="warning").at(step_id)
                  for n in notes)
 
 def _missing_columns(operation: Operation, fn: Callable,

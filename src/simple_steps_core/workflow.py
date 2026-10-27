@@ -30,6 +30,8 @@ class Workflow:
         #: against it and runs the catalog's functions; without one, the
         #: process-wide registry is used (until phase 3 removes it).
         self.catalog = catalog
+        #: The app's additions to the workflow, by namespace. Saved, never read.
+        self.extras: dict = {}
 
     # ── resources ────────────────────────────────────────────────────────
     def define(self, name: str, type_: type, /, **settings: Any) -> ResRef:
@@ -93,7 +95,7 @@ class Workflow:
             if problems != st.problems or not ran:
                 st.problems = problems
                 st.output = stage(operation, self, problems)
-                st.warnings = warn(operation, self)
+                st.warnings = warn(operation, self, sid)
                 self._restage_after(sid)
             elif stale:
                 # Same as a changed `$ref` upstream: the data is now outdated.
@@ -121,6 +123,8 @@ class Workflow:
     def __setitem__(self, step_id: str, operation: Any) -> None:
         _check_caller_scope()
         existed = step_id in self.steps
+        # The app's additions stay with the step when it is re-declared.
+        kept_extras = self.steps[step_id].extras if existed else {}
         if isinstance(operation, StepRef):
             # 008 C7 (K9): `wf["block"] = wf["p"][1:5][cols["a":"c"]]` is a
             # select step — visible, saved and re-runnable. A plain reference
@@ -172,6 +176,7 @@ class Workflow:
                 step_id,
                 Operation(tool_id="identity", fn=identity)[mod.source()],
                 source_(operation),
+                extras=kept_extras,
             )
             out = self.steps[step_id].output
             out.meta["version"], out.meta["read"] = _data_version(out.data), {}
@@ -198,7 +203,7 @@ class Workflow:
                                 {**previous.output.meta, "edited": True,
                                  "next_plan": staged.meta.get("plan")})
         self.steps[step_id] = Step(step_id, operation, output, problems,
-                                   warn(operation, self))
+                                   warn(operation, self, step_id), kept_extras)
         if existed:
             self._mark_stale_dependents(step_id)
         else:
@@ -217,7 +222,7 @@ class Workflow:
             if problems != st.problems:
                 st.problems = problems
                 st.output = stage(st.operation, self, problems)
-                st.warnings = warn(st.operation, self)
+                st.warnings = warn(st.operation, self, sid)
 
     def __getitem__(self, step_id: str | int) -> StepRef:
         """A reference to a step, by **name** or by **position**.
@@ -1217,7 +1222,7 @@ class Workflow:
                           columns_unknown(other.output))
                 other.problems = check(other.operation, self, other.step_id)
                 other.output = stage(other.operation, self, other.problems)
-                other.warnings = warn(other.operation, self)
+                other.warnings = warn(other.operation, self, other.step_id)
                 after = (other.output.meta.get("expected"), other.problems,
                          predicted_columns(other.output),
                          columns_unknown(other.output))
@@ -1247,14 +1252,20 @@ class Workflow:
         cannot reproduce is *cardinality*, which came from the data: a light
         round-trip lands at §7's level 1 (shape known, counts not), by design.
         """
-        blob = {"version": FORMAT_VERSION,
-                "steps": [{"step_id": sid, "operation": st.operation.to_dict()}
-                          for sid, st in self.steps.items()]}
-        if self.resources:
-            # The declarations, never the objects — the caller supplies those.
-            blob["resources"] = {name: decl.to_dict()
-                                 for name, decl in self.resources.items()}
-        return blob
+        return self.spec.to_dict()
+
+    @property
+    def spec(self) -> "WorkflowSpec":
+        """The workflow's saved form: step specs in order, resource specs and
+        extras. The declarations, never the objects or the outputs."""
+        return WorkflowSpec(tuple(st.spec for st in self.steps.values()),
+                            tuple(decl.spec for decl in self.resources.values()),
+                            _checked_extras(self.extras))
+
+    @classmethod
+    def from_spec(cls, spec: "WorkflowSpec", catalog: "Catalog | None" = None) -> "Workflow":
+        """A workflow built from *spec*, checked against *catalog*."""
+        return cls.from_dict(spec.to_dict(), catalog=catalog)
 
     def to_json(self) -> str:
         import json
@@ -1309,7 +1320,9 @@ class Workflow:
         for name, entry in (blob.get("resources") or {}).items():
             workflow.resources[name] = ResourceDecl(
                 name, known.get(entry["type"]), dict(entry.get("settings") or {}),
-                entry["type"], entry.get("source", "defined"))
+                entry["type"], entry.get("source", "defined"),
+                dict(entry.get("extras") or {}))
+        workflow.extras = dict(blob.get("extras") or {})
         for entry in blob["steps"]:
             sid = entry["step_id"]
             operation = _attach_bound(
@@ -1319,7 +1332,8 @@ class Workflow:
             problems = check(operation, workflow, sid)
             workflow.steps[sid] = Step(sid, operation,
                                        stage(operation, workflow, problems),
-                                       problems, warn(operation, workflow))
+                                       problems, warn(operation, workflow, sid),
+                                       dict(entry.get("extras") or {}))
             # Restore this step's payload before checking the steps after it,
             # as declaring does: a later `select` is checked against the real
             # columns, not a staged guess that would refuse a valid step.
@@ -1355,6 +1369,7 @@ from .system_tools import (  # noqa: E402
 )
 from .catalog import (  # noqa: E402
     Catalog,
+    _checked_extras,
     RESOURCE_TYPES,
     ResourceDecl,
     TOOLS,
@@ -1404,6 +1419,7 @@ from .references import (  # noqa: E402
     rows,
 )
 from .run import _is_auto, _resolve_auto  # noqa: E402
+from .specs import WorkflowSpec  # noqa: E402
 from .step import (  # noqa: E402
     Step,
     _changes_text,
