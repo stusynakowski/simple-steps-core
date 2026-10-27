@@ -147,7 +147,7 @@ fit[mod.sweep(model=["a", "b"]), mod.name("score")]()             # model, score
 come from the last modifier in its list that defines them; with none, each
 column keeps its default: `value` for a single value, the declared field names
 for a record, or the column's own name for verbs that carry columns. So
-`to_f[mod.map(name="a"), mod.name("b")]` writes `b`.
+`to_f[mod.name("a"), mod.map(), mod.name("b")]` writes `b`.
 
 **`mod.name` replaces `name=`** on `map`, `expand`, `collapse`, `group` and
 `sweep` (decided 2026-10-27): `name=` on a verb is a problem pointing to

@@ -69,7 +69,7 @@ The **shape verbs** call a tool. At most one per step. When a tool returns sever
 | `map` | `(columns…) -> value` | same | `value` | kept |
 | `filter` | `(columns…) -> bool` | at most n | the input's | kept, for rows that pass |
 | `expand` | `(columns…) -> list` | one per item | `value` | `"i.j"`: item *j* of row *i* |
-| `group` | `(columns…) -> key` | same | the input's columns plus the key (`group`, or named with `name=`); a key named like an input column is refused unless `replace=True` | kept |
+| `group` | `(columns…) -> key` | same | the input's columns plus the key (`group`, or named with `mod.name`); a key named like an input column is refused unless `replace=True` | kept |
 | `collapse` | `(acc, columns…) -> acc`, or a built-in reducer | 1, or one per `by=` group | `by` column and `value` | 0…k-1 |
 | `widen` | a cell holding a record or sequence | same | one per field (`columns=`), or `c0, c1, …` for sequences | kept |
 | `table` | `(df: DataFrame) -> DataFrame` | what it returns | what it returns | what it returns |
