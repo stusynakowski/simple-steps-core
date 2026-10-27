@@ -17,15 +17,27 @@ def _is_int(value: Any) -> bool:
     return isinstance(value, numbers.Integral) and not isinstance(value, bool)
 
 
-def _row_part(key: Any) -> Any:
-    """A row selector in saved form: an int, a list of ints, or {start, stop}."""
+def _row_part(key: Any, strings: bool = False) -> Any:
+    """A row selector in saved form (K19, docs/design/row-ids.md): a row id or a
+    list of row ids, or ``{start, stop}``, a range of positions.
+
+    A plain bracket takes int ids; ``rows[…]`` (*strings*) also takes string
+    ids, such as expand's ``"0.1"``, since a bare string reads like a column.
+    """
     if isinstance(key, Rows):
         return key.sel
     if isinstance(key, str):
+        if strings:
+            return key
         raise SelectionError(
-            f"columns are selected with cols: wf[…][cols[{key!r}]] — a plain "
-            "bracket selects rows, by position")
+            f"a plain bracket selects rows by int id; a string row id goes "
+            f"through rows: wf[…][rows[{key!r}]]. Columns use cols: "
+            f"wf[…][cols[{key!r}]]")
     if _is_int(key):
+        if key < 0:
+            raise SelectionError(
+                f"row ids aren't negative, so [{key}] names no row; to count "
+                f"from the end, use a range of positions: [{key}:]")
         return int(key)
     if isinstance(key, slice):
         if key.step is not None:
@@ -38,12 +50,10 @@ def _row_part(key: Any) -> Any:
     if isinstance(key, list):
         if not key:
             raise SelectionError("an empty row selection selects nothing")
-        if not all(_is_int(k) for k in key):
-            raise SelectionError("a list of rows takes int positions only")
-        return [int(k) for k in key]
+        return [_row_part(k, strings) for k in key]
     raise SelectionError(
-        f"rows are selected by int position, an int range or a list of ints; "
-        f"got {type(key).__name__}")
+        f"rows are selected by row id, a list of row ids or a range of "
+        f"positions; got {type(key).__name__}")
 
 
 def _col_part(key: Any) -> dict:
@@ -93,7 +103,7 @@ class _RowsIndexer:
     """``rows[…]`` selects rows; ``rows(value)`` is the old coercion to a frame."""
 
     def __getitem__(self, key: Any) -> Rows:
-        return Rows(_row_part(key))
+        return Rows(_row_part(key, strings=True))
 
     def __call__(self, value: Any, *, axis: str = "rows") -> pd.DataFrame:
         return _rows_frame(value, axis=axis)
@@ -165,7 +175,7 @@ def _selection_kind(ref: "StepRef") -> str | None:
     """cell / column / row / block for a selection, known without running."""
     if ref.rows is None and ref.columns is None:
         return None
-    one_row = _is_int(ref.rows)
+    one_row = _is_int(ref.rows) or isinstance(ref.rows, str)
     columns = ref.columns or {}
     if columns.get("header"):
         return "column"
@@ -258,13 +268,21 @@ def _apply_selection(frame: pd.DataFrame, row_sel: Any, col_sel: Any,
         out = out[wanted]
     if row_sel is not None:
         n = len(out)
-        if _is_int(row_sel):
-            out = out.iloc[[_position(n, row_sel, "row", step_id)]]
-        elif isinstance(row_sel, dict):
+        if isinstance(row_sel, dict):
+            # A range is positions: the first rows, as shown (owner, 2026-10-27).
             lo, hi = _bound(n, row_sel.get("start"), row_sel.get("stop"), "row", step_id)
             out = out.iloc[lo:hi]
         else:
-            out = out.iloc[[_position(n, i, "row", step_id) for i in row_sel]]
+            # A row id, or a list of them: the same rows wherever they are now.
+            wanted = row_sel if isinstance(row_sel, list) else [row_sel]
+            missing = [i for i in wanted if i not in out.index]
+            if missing:
+                have = list(out.index)
+                shown = ", ".join(map(repr, have[:6])) + (", …" if len(have) > 6 else "")
+                raise SelectionError(
+                    f"{step_id!r} has no row {missing[0]!r}"
+                    + (f" (its row ids are {shown})" if have else " (it has no rows)"))
+            out = out.loc[wanted]
     return out
 
 

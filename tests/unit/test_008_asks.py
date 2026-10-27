@@ -411,19 +411,19 @@ def test_C11_a_non_literal_is_refused_at_declaration(wf):
         "weight: a date isn't a literal; pass a str ('2024-01-01'), or make it a step",)
 
 
-def test_K17_v4_is_written_and_other_versions_are_refused_clearly(wf):
+def test_K17_v5_is_written_and_other_versions_are_refused_clearly(wf):
     """Files from before the redesign aren't loaded (decided 2026-10-26)."""
-    assert json.loads(wf.to_json())["version"] == 4
-    v4 = {"version": 4, "steps": [{"name": "r", "operation": {
+    assert json.loads(wf.to_json())["version"] == 5
+    v4 = {"version": 5, "steps": [{"name": "r", "operation": {
         "tool": "scale_008", "input": None, "arguments": {"weight": 2},
         "modifiers": [{"kind": "map", "settings": {}}]}}]}
     loaded = Workflow.from_dict(v4, TOOLS_008)
     assert loaded.step("r").operation.arguments == {"weight": 2}
-    for older in (1, 2, 3):
-        with pytest.raises(ValueError, match="before the redesign; this core reads version 4"):
+    for older in (1, 2, 3, 4):
+        with pytest.raises(ValueError, match="before the redesign; this core reads version 5"):
             Workflow.from_dict({**v4, "version": older})
-    with pytest.raises(ValueError, match="this core reads version 4. Upgrade"):
-        Workflow.from_dict({**v4, "version": 5})
+    with pytest.raises(ValueError, match="this core reads version 5. Upgrade"):
+        Workflow.from_dict({**v4, "version": 6})
 
 
 def test_C1_a_reference_in_a_setting_resolves_and_goes_stale(wf):
@@ -504,13 +504,15 @@ def prices():
 def test_C7_selections_as_steps(prices):
     prices["block"] = prices["p"][1:3][cols["name":"price"]]
     prices["by_pos"] = prices["p"][1:3][cols[0:2]]
-    prices["cell"] = prices["p"][-1][cols["price"]]
+    prices["cell"] = prices["p"][4][cols["price"]]          # row id 4
+    prices["last"] = prices["p"][-1:][cols["price"]]        # the last row, by position
     prices.run_all()
     assert prices.step("block").output.data.to_dict("list") == {
         "name": ["b", "c"], "qty": [2, 3], "price": [20.0, 30.0]}
     assert list(prices.step("block").output.data.index) == [1, 2]   # ids kept
     assert prices.step("by_pos").output.data.to_dict("list") == {"name": ["b", "c"], "qty": [2, 3]}
     assert prices.step("cell").output.data.to_dict("list") == {"price": [50.0]}
+    assert prices.step("last").output.data.to_dict("list") == {"price": [50.0]}
 
 
 def test_C7_every_spelling_saves_identically(prices):
@@ -550,7 +552,8 @@ def test_C7_refusals(prices):
     with pytest.raises(TypeError, match="can't be a tool's input"):
         scale_008[mod.map()](prices["p"][1:3])
     prices["far"] = prices["p"][9]
-    assert prices.step("far").problems == ("select: row 9 of 'p', which has 5 rows (0–4)",)
+    assert prices.step("far").problems == (
+        "select: 'p' has no row 9 (its row ids are 0, 1, 2, 3, 4)",)
 
 
 def test_C7_column_names_are_strings():

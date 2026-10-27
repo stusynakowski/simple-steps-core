@@ -342,7 +342,9 @@ PARAM_TYPES: dict[str, tuple[type, ...]] = {
     "at": (list, tuple),
     "ascending": (bool,),
     "replace": (bool,),
-    "rows": (int, list, dict),
+    # a row id (an int, or a string such as expand's "0.1"), a list of ids,
+    # or {start, stop}: a range of positions (K19)
+    "rows": (int, str, list, dict),
 }
 
 

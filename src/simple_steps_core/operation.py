@@ -211,7 +211,7 @@ class Operation:
         rows_, columns = m.settings.get("rows"), m.settings.get("columns")
         # Only plain selections print as one; a reference as a setting (C1,
         # mod.select(columns=wf["cols"])) keeps the mod.select form.
-        plain = ((rows_ is None or (isinstance(rows_, (int, list, dict))
+        plain = ((rows_ is None or (isinstance(rows_, (int, str, list, dict))
                                     and not isinstance(rows_, bool)))
                  and (columns is None or isinstance(columns, (list, tuple, dict))))
         if m.kind == "select" and plain and set(m.settings) <= {"rows", "columns"}:
@@ -437,6 +437,9 @@ def _src(value: Any) -> str:
                 lo = "" if rows_.get("start") is None else rows_["start"]
                 hi = "" if rows_.get("stop") is None else rows_["stop"]
                 text += f"[{lo}:{hi}]"
+            elif isinstance(rows_, str) or (isinstance(rows_, list)
+                                            and any(isinstance(r, str) for r in rows_)):
+                text += f"[rows[{_src(rows_)}]]"   # a string id goes through rows[…]
             else:
                 text += f"[{rows_!r}]"
         columns = value.columns

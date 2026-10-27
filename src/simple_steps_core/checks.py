@@ -706,8 +706,8 @@ def warn(operation: Operation, workflow: "Workflow | None" = None,
                 *(StepRef(str(operation.input), rows=verb.settings.get("rows"))
                   if verb.kind == "select" and verb.settings.get("rows") is not None
                   else None,)]:
-        if not isinstance(ref, StepRef) or ref.rows is None:
-            continue
+        if not isinstance(ref, StepRef) or not isinstance(ref.rows, dict):
+            continue                        # ids follow their rows; only ranges are positions
         read = workflow.steps.get(ref.id)
         made_by = read.operation.shape_verb.kind if read and read.operation.shape_verb else None
         if made_by in ("filter", "expand", "group", "distinct", "collapse"):

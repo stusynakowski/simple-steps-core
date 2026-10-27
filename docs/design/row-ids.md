@@ -1,7 +1,8 @@
 # Row ids: the rules (K19)
 
-> Proposed 2026-10-27, for the owner to confirm before it is built. Today's
-> behaviour was run at `6435a98`. This is what makes a reference keep pointing
+> Decided by the owner, 2026-10-27 (D1, D3, D4; D2 taken as recommended).
+> Being built in phase 4, in pieces: **selections — done**; column arguments;
+> `zip_`; the ids new rows get. *Today* notes were run at `6435a98`. This is what makes a reference keep pointing
 > at the same row when the data shifts: selections, column arguments, `zip_`,
 > lineage, and later the row-aligned table view all rest on it.
 
@@ -84,9 +85,9 @@ lengths, so after a `filter` on one side it can pair the wrong rows.
 
 ## Decisions
 
-| | Question | Recommended |
+| | Question | Decided |
 |---|---|---|
-| D1 | A slice `[a:b]`: positions (the first rows), or ids | positions; single rows and lists are ids |
-| D2 | A source tool's own index: its row ids | yes, when it isn't the default and is unique |
-| D3 | `collapse(by=…)`: the key as the row id, or `0…k-1` | the key |
-| D4 | Bump the saved format to v5, refusing v4 files with selections | yes |
+| D1 | A slice `[a:b]`: positions or ids | **Positions**: `wf["srt"][0:2]` is the top two rows (the header isn't a row). Single rows and lists are ids |
+| D2 | A source tool's own index: its row ids | Taken as recommended: yes, when it isn't the default and is unique |
+| D3 | `collapse(by=…)`'s row ids | **The key**, for its output. And a collapsed row keeps which input rows were in its group, so a change to one of them marks only that group's row stale |
+| D4 | Bump the saved format | **Yes**: version 5 (done with the selections piece) |

@@ -294,7 +294,7 @@ def k17_json_version():
     old = {**blob, "version": 1}
     _, old_err = _try(lambda: Workflow.from_dict(old))
     _, new_err = _try(lambda: Workflow.from_dict({**blob, "version": 99}))
-    done = current == 4 and old_err is not None and new_err is not None
+    done = current == 5 and old_err is not None and new_err is not None
     return done, (f"to_json version = {current!r}; v1 refused: {old_err is not None}; "
                   f"newer refused: {new_err is not None}")
 

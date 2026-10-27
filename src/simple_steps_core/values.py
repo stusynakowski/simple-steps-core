@@ -372,7 +372,7 @@ def _column_fits(series: pd.Series, annotation: Any) -> bool | None:
 #: - 3 (009): implicit steps save ``mod.auto()``; the ``breaker`` modifier;
 #:   session outputs save ``data``, ``states`` and ``notes`` (no ledger), with
 #:   data-hash ``version`` and ``read`` stamps in their meta.
-FORMAT_VERSION = 4
+FORMAT_VERSION = 5
 
 
 #: The tags a saved value can carry. A literal dict that happens to use one of

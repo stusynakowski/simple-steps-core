@@ -1297,7 +1297,7 @@ def test_staging_is_a_pure_function_of_the_steps(three):
 
 
 def test_loading_runs_the_same_checks_as_declaring():
-    blob = {"version": 4, "steps": [
+    blob = {"version": 5, "steps": [
         {"name": "bad", "operation": {"tool": "score", "arguments": {},
                                       "input": {"$ref": "nope"},
                                       "modifiers": [{"kind": "map", "settings": {}}]}},
@@ -1320,7 +1320,7 @@ def test_an_unexportable_payload_says_so(three):
 
 
 def test_exports_are_json(ran):
-    assert json.loads(ran.to_json())["version"] == 4
+    assert json.loads(ran.to_json())["version"] == 5
     full = json.loads(ran.to_session_json())
     assert "inputs" not in full, "one payload map, not two"
     assert full["outputs"]["raw"]["data"]["kind"] == "frame"
