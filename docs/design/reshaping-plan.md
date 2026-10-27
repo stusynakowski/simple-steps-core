@@ -75,7 +75,7 @@ inputs' `#` columns out, and `collapse` keeps its groups in a note (per-group
 staleness, D3, already works from it: L41). Lineage says when a trace was
 dropped.
 
-- **Decide:** R-D12 (reductions); R-D9b (`distinct`).
+- **Decided** (2026-10-27): R-D12, R-D9b. Nothing left to confirm.
 - **Fixes:** M2, M3, M4.
 - **Laws:** L15, L19, L31, L32.
 - **Changes for users:** `collapse`, `distinct`, `join` and `stack` outputs
@@ -88,7 +88,7 @@ list `gather` made gives back the packed ids (R-D3). `collapse(by="#s")`
 follows `#` columns back to any earlier step (R-D5), with a row for every
 row of `s` (J-D5).
 
-- **Decide:** R-D1, R-D5, J-D5. R-D3 is decided.
+- **Decided** (2026-10-27): R-D1, R-D3, R-D5, R-D13, J-D5. Nothing left to confirm.
 - **Fixes:** R1, R4, R9, J3.
 - **Laws:** L1, L4, L6, L12, L13, L22, L33.
 - **Changes for users:** `gather[collapse()]` on several columns gives one
@@ -100,7 +100,7 @@ row of `s` (J-D5).
 `widen` drops the dict it spread (G10). `mod.expand(columns=[…])` unpacks
 several lists together and carries the other columns (R-D4).
 
-- **Decide:** R-D2 (and its name), R-D4.
+- **Decided** (2026-10-27): R-D2, named `pack`; R-D4. Nothing left to confirm.
 - **Fixes:** R2, R3, R5, G10.
 - **Laws:** L3, L5.
 
@@ -110,7 +110,8 @@ The `absent` cell state (J-D1); `widen` takes every key seen (J-D2);
 `expand` never tidies (J-D3), with the built-in `as_list`; `expand` of a dict
 gives `key`, `value` rows (J-D4).
 
-- **Decide:** J-D1, J-D2, J-D3, J-D4.
+- **Decided** (2026-10-27): J-D1, J-D2, J-D3 (with `as_list`), J-D4 (named
+  `gather_dict`). Nothing left to confirm.
 - **Fixes:** J1, J2, J4, J5.
 - **Laws:** L23, L24, L25, L26, L27.
 - **Changes for users:** `expand` of a bare string or `None` no longer gives
@@ -121,7 +122,7 @@ gives `key`, `value` rows (J-D4).
 Each plan carries `inverse: rebuild | trace | opaque`, and for `rebuild` the
 inverse step's formula (R-D8).
 
-- **Decide:** R-D8.
+- **Decided** (2026-10-27): R-D8.
 - **Laws:** L21.
 
 ### Step 10. The property test (L40)
@@ -130,8 +131,7 @@ Generated grids that meet V1–V9 (reshaping.md §10), and generated chains of
 verbs over them, each checked with `check_invariants` and the round-trip
 laws. Hand-picked examples can't show closure; this can.
 
-- **Decide:** add `hypothesis` as a dev dependency (recommended), or use a
-  seeded generator with no new dependency.
+- **Decided** (2026-10-27): `hypothesis`, as a dev dependency only.
 - **Laws:** L40.
 
 ## 4. Done means
@@ -154,30 +154,32 @@ those are limits of the design, not missing work.
 
 ## 5. Decisions
 
-Each one, with what core does today, what it does once decided, the
+**Every decision is made** (2026-10-27): nothing in steps 3–10 waits on the
+owner. Each one, with what core does today, what it does once decided, the
 alternatives and a recommendation, is in
 [reshaping-decisions.md](reshaping-decisions.md).
 
 | | Decision | Status | Step |
 |---|---|---|---|
-| R-D1 | built-in reducers reduce each variable separately, under its own name; the `by` key is never in what they reduce | to confirm: changes `gather` on several columns | 6 |
-| R-D2 | `mod.pack(columns=…)`; `widen` is its inverse and drops the dict column | to confirm; the name is open | 7 |
+| R-D1 | a reducer takes each column it names as a list (sometimes the group's rows as a list of dicts; the types say which). Built-in reducers do this per variable; the `by` key is never in what they reduce | **direction decided** 2026-10-27; details in R-D13 | 6 |
+| R-D13 | how a group function gets its arguments: a column parameter → a list; `list[dict]` → the group's rows; the `by` key → its value; the `acc` form kept | **decided** 2026-10-27: a–e as recommended | 6 |
+| R-D2 | `mod.pack(columns=…)`; `widen` is its inverse and drops the dict column | **decided** 2026-10-27: named `pack` | 7 |
 | R-D3 | an `expand` of a list core packed gives back its ids and origin | **decided** 2026-10-27 | 6 |
-| R-D4 | `expand(columns=[…])` unpacks several lists together and, as a reshape, carries the other columns | to confirm: refines the 2026-10-20 decision for the tool-less form | 7 |
-| R-D5 | `collapse(by="#s")` groups by the row of any earlier step | to confirm | 6 |
+| R-D4 | `expand(columns=[…])` unpacks several lists together and, as a reshape, carries the other columns | **decided** 2026-10-27: keeps the other columns of the grid it's given, so the reference decides which | 7 |
+| R-D5 | `collapse(by="#s")` groups by the row of any earlier step | **decided** 2026-10-27 | 6 |
 | R-D6 | core never parses ids | **built** (step 2) | 2 |
 | R-D7 | rows line up only when core recorded how they match, so every row has exactly one partner: one origin, a child and its one parent, or `zip_(…, match_ids=True)`; otherwise `join` first. Checked when declared. A shared index name is not a match; missing rows block a column argument and refuse a `zip_` (as K19) | **decided** 2026-10-27 | 4 |
-| R-D8 | the plan says `inverse: rebuild \| trace \| opaque` | to confirm | 9 |
+| R-D8 | the plan says `inverse: rebuild \| trace \| opaque` | **decided** 2026-10-27 | 9 |
 | R-D9 | `table` is always its own origin | **decided** 2026-10-27: follows from R-D7 (a tool's index is no known match) | 4 |
-| R-D9b | `distinct` records the rows it stands for | to confirm | 5 |
+| R-D9b | `distinct` records the rows it stands for | **decided** 2026-10-27 | 5 |
 | R-D10 | `#` columns are grid columns, under the five guarantees | **decided** 2026-10-27; built for `expand` (step 2) | 2, 5 |
 | R-D11 | `#` is the row id; the row number has no name | **decided and built** (step 2) | 2 |
-| R-D12 | reductions: `#v` lists the group; empty values over no rows; a failed row blocks its group | to confirm (empty values built in step 1) | 5 |
-| J-D1 | a cell state `absent` | to confirm | 8 |
-| J-D2 | `widen` takes every key seen; missing is `absent`; types kept | to confirm | 8 |
-| J-D3 | `expand` never tidies; `as_list` does it as a step | to confirm: changes `expand` of a bare string or `None` | 8 |
-| J-D4 | `expand` of a dict gives `key`, `value` rows; `gather_dict` (name open) packs them back | to confirm | 8 |
-| J-D5 | `collapse(by="#s")` gives a row for every row of `s` | to confirm | 6 |
+| R-D12 | reductions: `#v` lists the group; empty values over no rows; a failed row blocks its group | **decided** 2026-10-27 (empty values built in step 1) | 5 |
+| J-D1 | a cell state `absent` | **decided** 2026-10-27 | 8 |
+| J-D2 | `widen` takes every key seen; missing is `absent`; types kept | **decided** 2026-10-27 | 8 |
+| J-D3 | `expand` never tidies; `as_list` does it as a step | **decided** 2026-10-27, with `as_list` | 8 |
+| J-D4 | `expand` of a dict gives `key`, `value` rows; `gather_dict` (name open) packs them back | **decided** 2026-10-27, named `gather_dict` | 8 |
+| J-D5 | `collapse(by="#s")` gives a row for every row of `s` | **decided** 2026-10-27 | 6 |
 
 ## 6. Findings
 

@@ -1,6 +1,6 @@
 # Reshaping: the decisions, with examples
 
-> For the owner. Each open decision in
+> For the owner. **Every decision here is made (2026-10-27).** Each decision in
 > [reshaping-plan.md §5](reshaping-plan.md#5-decisions), with what core does
 > **today** (run at `464e423`), what it does **with the decision**, the
 > alternatives, and a recommendation. The rules the decisions serve are in
@@ -92,7 +92,7 @@ With `match_ids=True`, the ids must still be the same set, and the same type:
 **Changes for users:** a `zip_` or column argument between unrelated steps
 that works today is refused. One argument puts it back, if it was meant.
 
-### R-D9. A `table` is its own origin (decided); `distinct` records what it stands for (R-D9b, open)
+### R-D9. A `table` is its own origin; `distinct` records what it stands for (R-D9b) — both decided 2026-10-27
 
 The `table` half is decided (2026-10-27): it follows from R-D7, because a
 tool's index is no known match.
@@ -135,7 +135,7 @@ row 2 → `[2]`. A click shows all three. Changing row 3 makes row 0 stale.
 
 ## Step 5: provenance for every verb
 
-### R-D12. A reduction lists the rows it reduced, as `#v`
+### R-D12. A reduction lists the rows it reduced, as `#v` — decided 2026-10-27
 
 **Today:** the group's rows are recorded, but only in a note:
 
@@ -170,7 +170,30 @@ each holding its ward's count. Two parts of R-D12 are already built:
 
 ## Step 6: round trips
 
-### ⚠ R-D1. Built-in reducers work on each variable separately
+### ⚠ R-D1. A reducer takes each column as a list — direction decided
+
+**Owner, 2026-10-27:** *reductions almost always take a list for each
+argument; sometimes a list of dicts, depending on the operation. The types
+say which* (to be written up with the orchestration docs). So `collapse`
+calls a reducer once per group, with each column it names as a list:
+
+```python
+@tool
+def mean_temp(temp: list[float]) -> float: ...              # temp: the group's temps
+@tool
+def spread(temp: list[float], name: list[str]) -> Spread: ...  # two columns, as two lists
+@tool
+def hottest(rows: list[Visit]) -> str: ...                  # the group's rows, as records
+```
+
+**Today this form doesn't exist.** `collapse` only folds one row at a time,
+`(acc, temp) -> acc`:
+- `mean_temp` fails, *"got multiple values for argument 'temp'"*;
+- `spread` is refused when declared, *"declares name: list, but 'v' has name
+  as str"*.
+
+The details are R-D13 below. The rest of this section is the built-in
+reducers' part.
 
 **Today:** a reducer gets each row as a whole when the grid has two or more
 columns:
@@ -203,7 +226,19 @@ To get a list of dicts, say so: `pack` each row first (R-D2), then `gather`.
 **Changes for users:** `gather` on a grid with several columns gives one list
 per column, not a list of dicts.
 
-### R-D5. `collapse(by="#s")` regroups by any earlier step
+### R-D13. How a group function gets its arguments — decided 2026-10-27 (a–e)
+
+Follows from R-D1. The questions, with a recommendation each:
+
+| | Question | Recommended |
+|---|---|---|
+| a | A parameter named after a column: what does it get? | the group's values of that column, as a list in the order of `#v`; untyped parameters too, since reducers almost always take lists |
+| b | A parameter typed `list[dict]`, or a list of a record type, that isn't a column's name | the group's rows, each as a dict of its variables (never its `#` columns) |
+| c | A parameter named after the `by` key, typed as a scalar | the group's key: `def f(ward: str, temp: list[float])` |
+| d | The accumulator form `(acc, …) -> acc` | kept, for folds over very large groups; a first parameter named `acc` still means it |
+| e | The type check | under `collapse`, a column parameter is checked as `list[<the column's type>]`: `spread` above passes |
+
+### R-D5. `collapse(by="#s")` regroups by any earlier step — decided 2026-10-27
 
 **Today:** it works when `#s` is a column of the input. That covers a direct
 `expand`, and steps that carried it, such as a `sort`:
@@ -234,7 +269,7 @@ between).
 
 **Recommended:** yes.
 
-### J-D5. Regrouping gives a row for every row of `s`
+### J-D5. Regrouping gives a row for every row of `s` — decided 2026-10-27
 
 **Today:** a record whose list was empty vanishes on the way back:
 
@@ -268,7 +303,7 @@ refused (M9, fixed in step 2).
 
 ## Step 7: the missing moves
 
-### R-D2. `mod.pack(columns=…)`: a row into a dict, whatever its width
+### R-D2. `mod.pack(columns=…)`: a row into a dict, whatever its width — decided 2026-10-27, named `pack`
 
 **Today:** `identity` under `map` packs a row only when it has two or more
 columns:
@@ -286,7 +321,7 @@ every time. `widen` is its inverse, and drops the dict column it spread
 
 **Recommended:** yes, named `pack`.
 
-### R-D4. `expand(columns=[…])` unpacks several lists together
+### R-D4. `expand(columns=[…])` unpacks several lists together — decided 2026-10-27
 
 **Today:** `expand` without a tool unpacks one value per row. A row with
 several columns arrives as one dict, which isn't a list, so it isn't
@@ -311,6 +346,11 @@ mod.expand(columns=["name", "temp"])(wf["l"])
 A row whose lists differ in length fails (V2). This form calls no tool, so it
 is a reshape, and reshapes carry columns (`ward` here).
 
+**Decided (owner, 2026-10-27): it keeps the other columns of the grid it is
+given, so the reference decides which.** `(wf["l"])` keeps `ward`;
+`(wf["l"][cols[["name", "temp"]]])` keeps nothing else, because nothing else
+was referenced.
+
 **This refines your 2026-10-20 decision**, that `expand` outputs only its
 results. That stays true for `expand` with a tool. The tool-less form is a
 reshape and carries.
@@ -325,7 +365,7 @@ reshape and carries.
 
 ## Step 8: uneven data
 
-### J-D1 and ⚠ J-D2. `absent`, and `widen` takes every key
+### J-D1 and ⚠ J-D2. `absent`, and `widen` takes every key — decided 2026-10-27
 
 **Today:**
 
@@ -363,7 +403,7 @@ mod.widen(columns=["x", "y"])(wf["m"])
 
 **Changes for users:** rows missing a key stop failing.
 
-### ⚠ J-D3. `expand` never tidies data for you
+### ⚠ J-D3. `expand` never tidies data for you — decided 2026-10-27
 
 **Today:**
 
@@ -389,7 +429,7 @@ op("identity")[mod.expand()](wf["tg"])
 **Changes for users:** a bare value or `None` where a list belongs no longer
 expands to a row.
 
-### ⚠ J-D4. `expand` of a dict gives `key`, `value` rows
+### ⚠ J-D4. `expand` of a dict gives `key`, `value` rows — decided 2026-10-27, named `gather_dict`
 
 **Today:**
 
@@ -420,7 +460,7 @@ look like data.
 
 ## Step 9
 
-### R-D8. The plan says how to go back
+### R-D8. The plan says how to go back — decided 2026-10-27
 
 **Today:** a plan has `rows`, `columns` and `types`.
 
@@ -441,7 +481,7 @@ The app can offer "undo this reshape" as a new step wherever it says
 
 ## Step 10
 
-### The property test: `hypothesis`, or a seeded generator
+### The property test: `hypothesis` — decided 2026-10-27, as a dev dependency only
 
 The property test (L40) generates valid grids and chains of verbs, and checks
 the guarantees on every result.

@@ -104,8 +104,11 @@ Every reshape is built from these. Nothing else changes a grid's shape.
 | **opaque** | a tool returns a whole grid | `table` | what the tool decides |
 
 `expand` appears twice. With a tool, it **makes rows**: the tool decides the
-items. Without one (`mod.expand(columns=…)`), it **unpacks** lists already in
-the grid.
+items, and the output is only its results. Without one
+(`mod.expand(columns=…)`), it **unpacks** lists already in the grid, several
+together in lockstep, and keeps the other columns of the grid it is given:
+the reference decides which (`wf["l"]` keeps them all;
+`wf["l"][cols[["name", "temp"]]]` keeps none).
 
 ## 4. Any selection to any cell, and back
 
@@ -317,6 +320,12 @@ else `None`, as a Python call does for a missing argument.
 | keys that are data (`{"2026-01": 3, …}`) | a **mapping**: `expand` it into `key`, `value` rows. `widen` warns when keys look like data |
 | depth | one level per step: a nested dict stays a cell until another `widen` |
 | broken JSON | parsing is a tool under `map`: that row fails, the others run |
+
+**A group function gets each column it names as a list** (a reducer under
+`collapse`): `def mean_temp(temp: list[float])`. A parameter typed as a list
+of dicts or records gets the group's rows; a parameter named after the `by`
+key gets the key. A first parameter named `acc` still means a fold, one row
+at a time.
 
 **The verb says what a dict is:** `widen` treats it as a record (its keys are
 variables), `expand` as a mapping (its keys are data). To make the plan exact
