@@ -1,8 +1,8 @@
 # Row ids: the rules (K19)
 
 > Decided by the owner, 2026-10-27 (D1, D3, D4; D2 taken as recommended).
-> Being built in phase 4, in pieces: **selections — done**; **column arguments — done**; **`zip_` — done**;
-> `zip_`; the ids new rows get. *Today* notes were run at `6435a98`. This is what makes a reference keep pointing
+> Being built in phase 4, in pieces: **selections — done**; **column arguments — done**; **`zip_` — done**; **the ids new rows get — done** (2026-10-27). K19 is complete.
+> `zip_`; *Today* notes were run at `6435a98`. This is what makes a reference keep pointing
 > at the same row when the data shifts: selections, column arguments, `zip_`,
 > lineage, and later the row-aligned table view all rest on it.
 
@@ -23,10 +23,10 @@
 | Step | Row ids | Today |
 |---|---|---|
 | a value (`k["x"] = [3, 1, 2]`), a DataFrame assigned in Python | its own index if it isn't the default `0…n-1`, else `0…n-1` | always `0…n-1` |
-| a source tool | the index the tool returned, if it isn't the default and is unique; else `0…n-1`. **Decision D2** | always `0…n-1`; the tool's index becomes a column called `index` (G3) |
+| a source tool | the index the tool returned, if it isn't the default, is unique and holds ints or strings; a named index is also kept as a column. Else `0…n-1`, with the index as a column. **Decision D2** | always `0…n-1`; the tool's index becomes a column called `index` (G3) |
 | `expand` | `"i.j"`: item `j` of row `i` | as proposed |
 | `collapse` with no `by` | `0` | as proposed |
-| `collapse(by="ward")` | the group's key (`"A"`, `"B"`), so a reference to a group follows it when groups are added or reordered. **Decision D3** | `0…k-1` |
+| `collapse(by="ward")` | the group's key (`"A"`, `"B"`), so a reference to a group follows it when groups are added or reordered. Each group's row records the input rows it was made from: a change to one of them marks only that group stale; a row that changes group marks both; a new group marks the whole step. **Decision D3** | `0…k-1` |
 | `sweep` | `0…n-1`, in the order of the combinations | as proposed |
 | `table` | the index the tool returned, as for a source | `0…n-1` |
 | `join`, `stack` | `0…N-1`; each cell's lineage points at the input rows (decided 2026-10-27) | `0…N-1`, no lineage |

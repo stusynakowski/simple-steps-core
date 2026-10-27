@@ -455,7 +455,8 @@ class Workflow:
         kind = op_.shape_verb.kind
         if kind == "auto":
             kind = (step.output.meta.get("auto") or {}).get("verb")
-        if kind not in ROW_ALIGNED:
+        grouped = kind == "collapse" and step.output.meta.get("groups") is not None
+        if kind not in ROW_ALIGNED and not grouped:
             return None
         source = str(op_.input)
         upstream = self.steps.get(source)
@@ -465,6 +466,12 @@ class Workflow:
             columns = self._columns_bound(op_, source, kind)
         else:
             columns = list(dict.fromkeys(_source_column(op_, c) for c in step.output.data.columns))
+        if grouped:
+            # A group's value reads what the tool takes, and its key: a row may
+            # change group.
+            columns = self._columns_bound(op_, source, kind)
+            if step.output.meta.get("by"):
+                columns = list(dict.fromkeys([*columns, step.output.meta["by"]]))
         columns = [c for c in columns if c in upstream.output.data.columns]
         return {"step": source, "columns": columns,
                 "fp": [[_plain(i), h] for i, h in _row_fps(upstream.output.data, columns).items()]}
@@ -517,6 +524,8 @@ class Workflow:
                 if current != seen:
                     if tracked:
                         changed = self._changed_rows(row_reads)
+                        if changed and output.meta.get("groups") is not None:
+                            changed = self._groups_of(output, changed, name)
                         if changed is None:
                             found, everything = found or f"input {name} changed", True
                         elif changed:
@@ -530,7 +539,14 @@ class Workflow:
                         and name not in (output.meta.get("read_stale") or {}):
                     found = found or f"{name} is stale"
                     upstream_rows = partial.get(name)
-                    if tracked and upstream_rows is not None:
+                    if tracked and upstream_rows is not None \
+                            and output.meta.get("groups") is not None:
+                        grouped = self._groups_of(output, set(upstream_rows), name)
+                        if grouped is None:
+                            everything = True
+                        else:
+                            rows_ |= grouped
+                    elif tracked and upstream_rows is not None:
                         rows_ |= upstream_rows      # row-aligned: the same rows
                     else:
                         everything = True
@@ -558,6 +574,25 @@ class Workflow:
                     meta["stale_rows"] = [_plain(i) for i in st.output.data.index if i in rows_]
                 else:
                     meta.pop("stale_rows", None)
+
+    def _groups_of(self, output: Output, rows_in: set, source: str) -> set | None:
+        """The output rows of a grouped step made from *rows_in* (D3): the
+        groups they were in, and the groups their key puts them in now. None
+        when a key now names a group the output doesn't have."""
+        groups = output.meta.get("groups") or []
+        out = {out_id for out_id, members in groups
+               if any(m in rows_in for m in members)}
+        by = output.meta.get("by")
+        upstream = self.steps.get(source)
+        if by and upstream is not None and by in upstream.output.data.columns:
+            ids = set(output.data.index)
+            for row in rows_in:
+                if row in upstream.output.data.index:
+                    key = upstream.output.data.loc[row, by]
+                    if key not in ids:
+                        return None            # a new group: the whole output changes
+                    out.add(key)
+        return out
 
     def _changed_rows(self, row_reads: dict) -> set | None:
         """Input rows whose read columns changed since the run; None if rows came or went."""

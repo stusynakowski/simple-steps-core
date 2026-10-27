@@ -2148,15 +2148,17 @@ def test_a_range_index_round_trips_as_a_range_index(ran):
         assert before.equals(after), sid
 
 
-def test_a_labelled_index_becomes_its_own_column(three):
-    """A loaded table's own index is kept as a column; its rows get ids 0…n-1."""
+def test_a_labelled_index_is_the_row_ids_and_kept_as_a_column(three):
+    """K19 D2: a loaded table's own index (unique) is its row ids, and a named
+    one is kept as a column too; ids survive a map and a save and load."""
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"n": [1, 2]}, index=pd.Index(["p", "q"], name="code"))
     wf["s"] = score[mod.map(over=wf["raw"])]
     wf.run_all()
     assert wf.step("raw").output.data.to_dict("list") == {"code": ["p", "q"], "n": [1, 2]}
+    assert list(wf.step("s").output.data.index) == ["p", "q"]
     back = Workflow.from_json(wf.to_session_json(), TOOLS)
-    assert list(back.step("s").output.data.index) == [0, 1]
+    assert list(back.step("s").output.data.index) == ["p", "q"]
     assert list(back.step("raw").output.view()["#"]) == [0, 1]
 
 

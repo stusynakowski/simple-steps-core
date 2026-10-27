@@ -1638,15 +1638,27 @@ def test_a_table_with_its_own_hash_column_is_refused():
         Workflow()["bad"] = pd.DataFrame({"#": [1], "n": [2]})
 
 
-def test_a_predefined_index_becomes_a_column():
+def test_a_tables_own_index_is_its_row_ids():
+    """K19 D2: an index that names each row once is the row ids; a named one is
+    kept as a column too. Any other index becomes a column, and rows count 0…n-1."""
     w = Workflow()
     w["p"] = pd.DataFrame({"n": [5, 6]}, index=pd.Index(["a", "b"], name="code"))
     w["q"] = pd.DataFrame({"n": [7]}, index=[10])                    # unnamed
+    assert list(w.step("p").output.data.index) == ["a", "b"]
     assert w.step("p").output.view()[["#", "code", "n"]].to_dict("list") == {
         "#": [0, 1], "code": ["a", "b"], "n": [5, 6]}
-    assert list(w.step("q").output.data.columns) == ["index", "n"]
+    assert list(w.step("q").output.data.index) == [10]
+    assert list(w.step("q").output.data.columns) == ["n"]
+    w["dup"] = pd.DataFrame({"n": [1, 2]}, index=[7, 7])             # not unique
+    assert list(w.step("dup").output.data.index) == [0, 1]
+    assert list(w.step("dup").output.data.columns) == ["index", "n"]
+    # The ids keep the index, so a column already named like it is simply kept;
+    # an index that becomes a column can't take a name a column has.
+    w["kept"] = pd.DataFrame({"code": [1]}, index=pd.Index(["x"], name="code"))
+    assert list(w.step("kept").output.data.index) == ["x"]
+    assert w.step("kept").output.data["code"].tolist() == [1]
     with pytest.raises(SelectionError, match="a column already has that name"):
-        Workflow()["clash"] = pd.DataFrame({"code": [1]}, index=pd.Index(["x"], name="code"))
+        Workflow()["clash"] = pd.DataFrame({"code": [1, 2]}, index=pd.Index(["x", "x"], name="code"))
 
 
 def test_row_ids_and_column_names_can_be_referenced(wf):

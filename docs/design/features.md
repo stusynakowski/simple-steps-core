@@ -63,9 +63,9 @@ The rules, with four decisions for the owner, are in [row-ids.md](row-ids.md).
 
 | Feature | ID |
 |---|---|
-| Selections pick rows by row id, so `wf["srt"][0]` is the same row after a sort | K19 |
-| A column given as an argument pairs row by row, by the parameter's type | K19 |
-| `zip_` pairs by row id; a source keeps the index its tool set | K19, G3 |
+| Selections pick rows by row id, so `wf["srt"][0]` is the same row after a sort *Done (phase 4)* | K19 |
+| A column given as an argument pairs row by row, by the parameter's type *Done (phase 4)* | K19 |
+| `zip_` pairs by row id; a source keeps the index its tool set *Done (phase 4)* | K19, G3 |
 | Each cell's lineage stored with its output, including combines and multi-value cells | K28 |
 | Reading an older version of a step warns, naming the step and version | K29 |
 

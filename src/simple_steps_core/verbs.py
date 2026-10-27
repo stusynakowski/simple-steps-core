@@ -313,14 +313,23 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
         keys.append(key)
         index.append(position)
 
-    data = pd.DataFrame(index=index)
+    # K19 D3: a group's row id is its key, so a reference to a group follows
+    # it when groups are added or reordered (keys that are ints or strings).
+    if by is not None and keys and all(isinstance(k, (int, str)) and not isinstance(k, bool)
+                                       for k in keys):
+        index = list(keys)
+    data = pd.DataFrame(index=pd.Index(index, dtype=object if any(
+        isinstance(i, str) for i in index) else None))
     if by is not None:                       # key first reads better
         data[by] = keys
     data[name] = _typed(results, data.index)
+    # Which input rows each output row was made from, so a change to one of
+    # them marks only its group's row stale (owner, 2026-10-27).
+    members = [[out_id, list(chunk.index)] for out_id, (_, chunk) in zip(index, groups)]
     return Output(data=data, records=records, index=index,
                   meta={"verb": "collapse", "form": "scalar" if by is None
                         else "column", "value_column": name, "by": by,
-                        "n_in": len(frame)})
+                        "n_in": len(frame), "groups": members})
 
 
 def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
@@ -493,11 +502,14 @@ def sweep_(fn: Callable, *, name: str = VALUE_COLUMN, retries: int = 0,
 
 
 def _own_index(frame: pd.DataFrame, where: str = "the table") -> pd.DataFrame:
-    """A loaded table's rows get core's own ids, 0…n-1, in the ``#`` index.
+    """A loaded table's row ids (K19 D2, docs/design/row-ids.md §2).
 
-    A column named ``#`` is refused: ``#`` is the row-id column. A
-    predefined index (anything but the plain 0, 1, 2 …) becomes an ordinary
-    column, keeping its name (``index`` when it has none), so nothing is lost.
+    A table's own index is its row ids when it names each row once with an int
+    or a string (``"Ada"``, ``10``); a named index is kept as a column too, so
+    nothing is lost. Any other index (duplicates, dates, several levels)
+    becomes an ordinary column, named ``index`` when it has no name, and the
+    rows are counted 0…n-1. A column named ``#`` is refused: ``#`` is the row
+    number.
     """
     if ROW_ID in [str(c) for c in frame.columns]:
         raise SelectionError(
@@ -508,6 +520,14 @@ def _own_index(frame: pd.DataFrame, where: str = "the table") -> pd.DataFrame:
              and index.name in (None, ROW_ID))
     if plain:
         return frame
+    if (index.nlevels == 1 and index.is_unique
+            and all(isinstance(v, (int, str)) and not isinstance(v, bool) for v in index)):
+        out = frame.copy()
+        if index.name is not None and str(index.name) not in (ROW_ID, *map(str, frame.columns)):
+            out.insert(0, str(index.name), list(index))     # a named index: kept as a column too
+        strings = any(isinstance(v, str) for v in index)
+        out.index = pd.Index(list(index), dtype=object if strings else None)
+        return out
     names = [str(n) if n is not None else ("index" if index.nlevels == 1 else f"index_{i}")
              for i, n in enumerate(index.names)]
     for name in names:

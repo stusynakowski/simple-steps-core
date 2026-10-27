@@ -184,3 +184,79 @@ def test_zip_refuses_rows_one_side_doesnt_have(k):
     assert k.step("side").state == "failed"
     assert "no matching row in 'renamed'" in str(k.step("side").output.notes)
 
+
+
+# ── the ids new rows get (K19 part 4) ────────────────────────────────────
+@tool
+def by_name_r() -> pd.DataFrame:
+    return pd.DataFrame({"temp_c": [36.6, 38.2]}, index=["Ada", "Ben"])
+
+
+@tool
+def add_temp_r(acc: float, temp_c: float) -> float:
+    return (acc or 0) + temp_c
+
+
+def test_a_source_tools_own_index_is_its_row_ids():
+    k = Kernel(Catalog(tools=[by_name_r]))
+    k["n"] = by_name_r[mod.source()]()
+    k["ben"] = wf["n"][rows["Ben"]]
+    k.run_all()
+    assert list(k.step("n").data.index) == ["Ada", "Ben"]
+    assert list(k.step("n").data.columns) == ["temp_c"]          # no "index" column
+    assert k.step("ben").data["temp_c"].tolist() == [38.2]
+
+
+@tool
+def notes_r() -> pd.DataFrame:
+    return pd.DataFrame({"note": ["x", "y", "z"]}, index=["Ada", "Ben", "Cy"])
+
+
+def test_zip_refuses_grids_that_share_no_row_ids_rather_than_pair_by_position():
+    from simple_steps_core import zip_
+    k = Kernel(Catalog(tools=[patients_r, notes_r]))
+    k["p"] = patients_r[mod.source()]()                          # ids 0, 1, 2
+    k["n"] = notes_r[mod.source()]()                             # ids Ada, Ben, Cy: same length
+    k["side"] = zip_(wf["p"], wf["n"])
+    from simple_steps_core.errors import StepFailed
+    with pytest.raises(StepFailed, match="share none"):            # the run stops on it
+        k.run_all()
+    assert k.step("side").state == "failed"
+    assert "Use join" in str(k.step("side").output.notes)
+
+
+BASE = {"name": ["Ada", "Ben", "Cy", "Di"], "ward": ["A", "B", "A", "B"],
+        "temp_c": [36.6, 38.2, 37.1, 39.0]}
+
+
+@pytest.fixture
+def kc():
+    k = Kernel(Catalog(tools=[add_temp_r]))
+    k["p"] = pd.DataFrame(BASE)
+    k["per_ward"] = add_temp_r[mod.collapse(by="ward")](wf["p"])
+    k.run_all()
+    return k
+
+
+def test_a_groups_row_id_is_its_key(kc):
+    assert list(kc.step("per_ward").data.index) == ["A", "B"]
+    kc["b"] = wf["per_ward"][rows["B"]]
+    kc.run("b")
+    assert kc.step("b").data.to_dict("list") == {"ward": ["B"], "value": [77.2]}
+
+
+def test_a_change_to_one_row_makes_only_its_group_stale(kc):
+    kc["p"] = pd.DataFrame({**BASE, "temp_c": [36.6, 40.0, 37.1, 39.0]})   # Ben, ward B
+    assert kc.needs_run()["per_ward"] == "stale: input p changed"
+    assert kc.workflow.stale_rows("per_ward") == ["B"]
+
+
+def test_a_row_moving_group_makes_both_groups_stale(kc):
+    kc["p"] = pd.DataFrame({**BASE, "ward": ["A", "A", "A", "B"]})          # Ben: B -> A
+    assert kc.workflow.stale_rows("per_ward") == ["A", "B"]
+
+
+def test_a_new_group_makes_the_whole_step_stale(kc):
+    kc["p"] = pd.DataFrame({**BASE, "ward": ["A", "B", "C", "B"]})          # Cy: a new ward
+    assert kc.step("per_ward").state == "stale"
+    assert kc.workflow.stale_rows("per_ward") is None
