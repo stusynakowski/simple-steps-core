@@ -153,6 +153,14 @@ catalog and kernel (`Kernel.from_json(k.to_json(), new_cat)` keeps the steps).
 A way to swap a kernel's catalog, marking steps whose tool changed as stale
 (K20), can be added later if tinkering needs it.
 
+**Any catalog entry can be removed, core ones included** (decided 2026-10-26).
+`identity`, `source` and `select` are what literal and selection steps are built
+on, and they can still be left out. A step that uses an entry its catalog
+doesn't have can't run (a problem on the step); if it already has an output,
+that output is kept and shown as stale, and so are the outputs of the steps
+after it. This matters when a kernel's catalog changes (the swap above) or a
+saved workflow with its outputs is loaded against a smaller catalog.
+
 ## 5. What the app changes
 
 Its pin is a fixed commit, so nothing breaks until it moves. At the move to
