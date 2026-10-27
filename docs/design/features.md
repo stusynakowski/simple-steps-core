@@ -43,8 +43,9 @@ become `.name` later.
 
 ## Phase 4: behaviour, one change at a time
 
-Each is confirmed before it lands, and gets a probe. The reshaping work (row
-ids, `#` columns, lining rows up, round trips, uneven data) has its own plan:
+Each is confirmed before it lands, and gets a probe. The order of what's left
+is [phase4-plan.md](phase4-plan.md). The reshaping work (row ids, `#` columns,
+matching rows, round trips, uneven data) is finished:
 [reshaping-plan.md](reshaping-plan.md).
 
 ### Seeing the data truthfully
@@ -160,7 +161,8 @@ as `examples/kernel_session.py` already is.
 
 ## Decisions still open
 
-1. The finishing-phase-3 items above, and their order.
-2. The autorun modifier's definition.
-3. Whether a resource reports its data version by a method or a setting (K25).
-4. A source tool that sets its own index: is that its row ids (G3)?
+They are in [phase4-plan.md §5](phase4-plan.md#5-decisions), each with a
+recommendation: G5's starting value, how `timeout` is enforced (K18), how a
+resource reports its data version (K25), the autorun modifier's design, the
+progress callback, and the output store's interface. (G3, a source's own
+index as its row ids, was decided as D2 in row-ids.md and is built.)
