@@ -262,7 +262,7 @@ def _apply_selection(frame: pd.DataFrame, row_sel: Any, col_sel: Any,
     out = frame
     if isinstance(col_sel, dict) and col_sel.get("header"):
         # The column names themselves (`wf["p"].header`): one per row.
-        return pd.DataFrame({"name": [str(c) for c in frame.columns]})
+        return pd.DataFrame({"name": [str(c) for c in frame.columns if not is_id_column(c)]})
     if col_sel is not None:
         wanted = _resolve_columns(list(out.columns), col_sel, step_id)
         if ROW_ID in wanted:

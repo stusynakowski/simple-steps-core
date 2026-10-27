@@ -1,6 +1,7 @@
 # Reshaping: the rules and the laws
 
-> What a user of core needs to know to reshape data and trust the result. This
+> The ten rules on one page are [rules.md](rules.md); this is the detail behind
+> them. What a user of core needs to know to reshape data and trust the result. This
 > describes the system as designed, closed and airtight; how far today's core
 > is from it is in reshaping-plan.md. The rules are the owner's (2026-10-27);
 > the laws are tests, in
@@ -360,6 +361,9 @@ Each law is one test, `test_L<n>_…`. Grouped by the guarantee it checks:
 | L29 | a `**kwargs` tool never sees a `#` column |
 | L30 | `zip_` of two steps of one origin keeps one `#v` |
 | L31 | after `drop(columns=["#v"])`, grouping by `#v` is refused, saying the trace was dropped |
+| L46 | a tool can't write an id column: a source or `table` returning `#v` fails its step |
+| L47 | `mod.name("#v")` and `rename(columns={"x": "#v"})` are refused; renaming `#v` into a variable is allowed |
+| L48 | `.header` and a name-choosing tool (`select(columns=a_tool)`) see variables only |
 
 **2. Every row knows where it came from**
 

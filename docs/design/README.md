@@ -50,6 +50,7 @@ that cannot see each other.
 | [grid-model.md](grid-model.md) | What a grid is, how a tool meets a row, what every verb does to rows, columns and row ids, modifiers as run-time decorators |
 | [outputs-and-reshaping.md](outputs-and-reshaping.md) | The output principles, tools that return several values (records, lists, tables) under each verb, and how the reshapes fit together |
 | [row-ids.md](row-ids.md) | **Proposed:** the rules for row ids (K19): which ids each step gives, selections by id, column arguments paired by row, `zip_` by id, and four decisions |
+| [rules.md](rules.md) | **Start here: the rules of the game.** Ten one-line rules for how data moves through a workflow, and what core can't do |
 | [reshaping.md](reshaping.md) | **The reshaping rules and laws**, for anyone using core: the grid and its `#` columns, the five guarantees, the moves, any selection to any cell and back, lining rows up, going back, reductions, uneven data, the laws (each a test), what airtight means precisely, what can't be done, and how it compares with pandas |
 | [reshaping-plan.md](reshaping-plan.md) | **The path to a closed reshaping system:** what's done, the remaining steps in order with the decision each needs, what "done" means, every decision and finding with its status, and what changes for the app |
 | [reshaping-decisions.md](reshaping-decisions.md) | **The open reshaping decisions, with examples:** for each, what core does today (run), what it does once decided, the alternatives, and a recommendation |

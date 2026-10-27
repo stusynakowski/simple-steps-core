@@ -515,13 +515,14 @@ def _own_index(frame: pd.DataFrame, where: str = "the table") -> pd.DataFrame:
     or a string (``"Ada"``, ``10``); a named index is kept as a column too, so
     nothing is lost. Any other index (duplicates, dates, several levels)
     becomes an ordinary column, named ``index`` when it has no name, and the
-    rows are counted 0…n-1. A column named ``#`` is refused: ``#`` is the row
-    number.
+    rows are counted 0…n-1. A column whose name starts with ``#`` is refused:
+    those are core's id columns (``#``, ``#v``), and a tool can't write them.
     """
-    if ROW_ID in [str(c) for c in frame.columns]:
+    forged = [str(c) for c in frame.columns if is_id_column(str(c))]
+    if forged:
         raise SelectionError(
-            f"{where} has a column named {ROW_ID!r}, which is reserved for row "
-            f"ids; rename or remove that column")
+            f"{where} has a column named {forged[0]!r}, which is reserved for row "
+            f"ids: names starting with {ROW_ID!r} are core's. Rename or remove that column")
     index = frame.index
     plain = (isinstance(index, pd.RangeIndex) and index.start == 0 and index.step == 1
              and index.name in (None, ROW_ID))
@@ -611,7 +612,7 @@ def select_(source: Any, fn: Callable = identity, *,
     frame = _rows_frame(source)
     if callable(columns):
         # 008 C2: a tool is a predicate on column names.
-        columns = [c for c in frame.columns if columns(c)]
+        columns = [c for c in variables(frame.columns) if columns(c)]     # never a `#` column
     if isinstance(columns, (list, tuple)) and ROW_ID in columns:
         columns = {"names": list(columns)}
     if isinstance(columns, dict) or row_sel is not None:
@@ -824,10 +825,15 @@ def rename_(source: Any, fn: Callable = identity, *,
     frame = rows(source)
     if callable(columns):
         # 008 C2: a tool maps each column name to its new one.
-        columns = {c: columns(c) for c in frame.columns if columns(c) != c}
+        columns = {c: columns(c) for c in variables(frame.columns) if columns(c) != c}
         if not columns:
             return _column_output("rename", frame, frame, source=source)
     _require_columns("rename", frame, list(columns))
+    forged = [new for new in columns.values() if is_id_column(new)]
+    if forged:
+        # `#v` → a variable is allowed (it ends the trace); a variable → `#v` isn't.
+        raise ValueError(f"rename can't name a column {forged[0]!r}: names starting "
+                         f"with {ROW_ID!r} are core's id columns")
     clashes = [new for new in columns.values()
                if new in frame.columns and new not in columns]
     if clashes:

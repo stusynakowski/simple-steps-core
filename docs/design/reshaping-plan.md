@@ -24,14 +24,25 @@ comes off.
 |---|---|---|
 | 1 ✓ | reducers give their empty value over no rows (R6); `k.cell` takes a row id (M7) | `8d622ed` |
 | 2 ✓ | `#` is the row id (R-D11, R8); `expand` writes `#v` and steps that keep ids carry it (R-D10); rows are followed back through `#` columns, never by parsing ids (R-D6, M8, M9) | `b2ac908`, `45b547a`, `464e423` |
+| 3 ✓ | the invariant check runs on every step of every test (`tests/conftest.py`, `Workflow.check_invariants`); it found and fixed P1–P3 and S1–S6 (§6); A5 is reported, enforced from step 4 | this commit |
 
-**15 of the 40 law tests hold:** L2, L7–L11, L14, L17, L18, L28–L30, L34,
-L35, L41. The other 25 are marked with the step that fixes them. L39 and L40
-are not tests yet: steps 3 and 10 build them.
+**19 of the 48 law tests hold:** L2, L7–L11, L14, L17, L18, L28–L30, L34,
+L35, L39, L41, L46–L48. The other 29 are marked with the step that fixes
+them. L40 (the property test) is built in step 10.
 
 ## 3. The path
 
-### Step 3. The invariant check (L39)
+### Step 3. The invariant check (L39) ✓
+
+*Done 2026-10-27.* `Workflow.check_invariants(step, plan)` checks A1, A3–A6;
+`tests/conftest.py` runs it after every step of every test, against the plan
+the step had before it ran. A5 is reported but not yet enforced: four tests
+zip or pair unrelated steps today (`test_009_zip_of_loaded_tables_pairs_by_id…`,
+`test_C7_a_selection_as_an_argument_converts_by_type`, and
+`test_a_column_pairs_with_the_rows_that_share_its_ids` twice). Step 4 refuses
+those pairings, and they get `match_ids=True` or a `join`.
+
+What was planned:
 
 A function, `check_invariants(kernel)`, run after every test that runs a
 kernel (through the test fixtures), asserting A1–A7 of
@@ -200,6 +211,15 @@ Found by running core, 2026-10-27. Wrong answers given silently are in bold.
 | **M11** | **ids are matched as text: an int id `1` and a string id `"1"` pair as one row** | step 4 |
 | M12 | a column argument from a parent into its child fails (*"'v' has no row '0.0'"*), though `zip_` makes the same match | step 4 |
 | M13 | two `expand`s of one step are refused only for a column-name clash; renamed, they would pair item *j* with item *j* | step 4 |
+| P1 | a row selection's plan claimed its input's row count, exactly (`wf["srt"][0:2]` planned 3 rows, got 2) | fixed (step 3) |
+| P2 | `widen()` with no `columns=` planned exactly `['value']` | fixed (step 3): its columns are planned as unknown until it runs |
+| P3 | `collapse(by=a_tool)` planned exactly 1 row and `['value']` | fixed (step 3): one row per group, columns unknown until it runs |
+| S1 | `wf["p"].header` listed `#` columns as if they were variables, and carried `#v` onto rows that are column names | fixed (step 3) |
+| S2 | `select(columns=a_tool)` and `rename(columns=a_tool)` called the tool on `#` column names, so it could rename `#v` | fixed (step 3) |
+| **S3** | **a source or `table` tool could return a `#v` column and forge provenance; only an exact `#` was refused** | fixed (step 3): any `#` name is refused |
+| **S4** | **`mod.name("#v")` and `rename(columns={"x": "#v"})` could forge an id column** | fixed (step 3): refused when declared |
+| S5 | a source tool returning a `#` column raised out of `run_all` instead of failing its step | fixed (step 3) |
+| S6 | which steps keep ids was listed twice (checks and workflow) | fixed (step 3): one `keeps_ids` rule |
 | R1 | unpacking a gathered list gives new ids, not the packed ones | step 6 |
 | R2 | no way to pack a row whatever its width | step 7 |
 | R3 | `identity` under `map` packs a row into a dict only when it has 2 or more columns | step 7 |

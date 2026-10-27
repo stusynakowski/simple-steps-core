@@ -305,8 +305,9 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         verb_ = operation.shape_verbs[-1] if operation.shape_verbs else None
         if not isinstance(to, str) or not to.strip():
             problems.append(f"mod.name needs a column name, got {to!r}")
-        elif to == ROW_ID:
-            problems.append(f"{ROW_ID!r} is the row id; name the column something else")
+        elif is_id_column(to):
+            problems.append(f"{to!r}: names starting with {ROW_ID!r} are core's id columns "
+                            f"({ROW_ID!r} is the row id); name the column something else")
         elif verb_ is not None and verb_.kind not in NAMED_VERBS and verb_.kind != "auto":
             problems.append(
                 f"{verb_.kind} writes no new values, so there is nothing to name; "
@@ -508,6 +509,13 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
 
     # 6b. select and drop must name columns the input will actually have
     verb = operation.shape_verb
+    # A rename can turn `#v` into a variable (it ends the trace), but never a
+    # variable into an id column: those are core's (reshaping.md §5.1).
+    if verb is not None and verb.kind == "rename" and isinstance(verb.settings.get("columns"), dict):
+        forged = [new for new in verb.settings["columns"].values() if is_id_column(new)]
+        if forged:
+            problems.append(f"rename can't name a column {forged[0]!r}: names starting "
+                            f"with {ROW_ID!r} are core's id columns")
     # Deliberately not `widen`: its columns are the record's fields, which do
     # not exist upstream — that is the whole point of the verb.
     if (verb is not None and verb.kind in ("select", "drop", "rename", "sort",
@@ -1116,6 +1124,37 @@ _KEEPS_IDS = frozenset({"map", "filter", "group", "widen", "sort", "rename", "se
                         "drop", "slice", "distinct"})
 
 
+def _selected_index(verb: Any, operation: "Operation", workflow: "Workflow | None",
+                    known: Any) -> tuple[list, int | None]:
+    """The rows a row selection will have, when its input's rows are known."""
+    if known is None:
+        return [], None
+    if (verb.settings.get("columns") or {}) == {"header": True}:
+        columns = workflow._known_columns(operation) if workflow is not None else None
+        if not columns or workflow._columns_open(operation):
+            return [], None
+        names = variables(columns)                  # a header lists variables only
+        return list(range(len(names))), len(names)
+    try:
+        frame = pd.DataFrame(index=pd.Index(list(known), dtype=object))
+        chosen = list(_apply_selection(frame, verb.settings["rows"], None, "the input").index)
+    except SelectionError:
+        return [], None                 # a selection that can't be made is a problem elsewhere
+    return chosen, len(chosen)
+
+
+def keeps_ids(kind: str | None, verb: Any) -> bool:
+    """Are a step's rows its input's rows, with the same ids (reshaping.md §5)?
+
+    The one place this is decided. A header selection's rows are its input's
+    column names, not its rows, so it doesn't.
+    """
+    if kind not in _KEEPS_IDS:
+        return False
+    return not (kind == "select" and verb is not None
+                and (verb.settings.get("columns") or {}) == {"header": True})
+
+
 def _with_id_columns(kind: str | None, verb: Any, operation: "Operation",
                      ordered: list, upstream_columns: Any) -> list:
     """The `#` columns a step will have, in front (reshaping.md §5.1).
@@ -1125,7 +1164,7 @@ def _with_id_columns(kind: str | None, verb: Any, operation: "Operation",
     """
     if kind == "expand" and operation.input is not None:
         own = [f"{ROW_ID}{operation.input}"]
-    elif kind in _KEEPS_IDS:
+    elif keeps_ids(kind, verb):
         named = set(verb.settings.get("columns") or ()) if kind in ("drop", "rename") else set()
         own = [c for c in upstream_columns if is_id_column(c) and c != ROW_ID and c not in named]
     else:
@@ -1318,6 +1357,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     # run. Stage as though it were absent, and say the columns are not known.
     unsettled = verb is not None and any(
         isinstance(v, StepRef) or _is_tool_value(v) for v in verb.settings.values())
+    grouped = kind == "collapse" and bool(verb.settings.get("by"))   # before it's set aside
     if unsettled:
         verb = Modifier(verb.kind, {k: v for k, v in verb.settings.items()
                                     if not isinstance(v, StepRef) and not _is_tool_value(v)})
@@ -1331,7 +1371,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     #     opposite case: its count is fully determined by its own parameter
     #     lists, with no upstream involved at all.
     swept = 0
-    if kind == "collapse" and verb.settings.get("by"):
+    if grouped:
         rule = "per_group"
     elif kind == "sweep":
         lists = [v for k, v in verb.settings.items()
@@ -1342,8 +1382,13 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
                 swept *= len(values)
             rule = "generated"
 
+    if kind == "select" and (verb.settings.get("rows") is not None
+                             or (verb.settings.get("columns") or {}) == {"header": True}):
+        rule = "selected"
     if kind is None:                       # no orchestration → a single value
         index, expected = [0], 1
+    elif rule == "selected":
+        index, expected = _selected_index(verb, operation, workflow, known)
     elif rule == "same" and known is not None:
         index, expected = list(known), n_in
     elif rule == "one":
@@ -1412,6 +1457,10 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         columns_open = not is_identity(fn)
     elif kind == "table":
         columns_open = True             # what the tool returns — unless declared
+    elif kind == "widen" and not verb.settings.get("columns"):
+        columns_open = True             # the fields are only known by running (G9)
+    elif kind == "collapse" and unsettled:
+        columns_open = True             # the key's column is named by a tool
     elif kind in ("sweep", "select", "collapse", "map", "expand"):
         columns_open = False            # these build their columns themselves
     else:

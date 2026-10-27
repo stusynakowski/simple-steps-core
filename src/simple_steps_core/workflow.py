@@ -943,7 +943,7 @@ class Workflow:
         names, seen = {step_id}, step_id
         while seen in self.steps:
             op_ = self.steps[seen].operation
-            if self._kind(seen) not in _KEEPS_IDS or op_.input is None:
+            if not keeps_ids(self._kind(seen), op_.shape_verb) or op_.input is None:
                 break
             seen = str(op_.input)
             names.add(seen)
@@ -973,7 +973,7 @@ class Workflow:
                 if found is not None:
                     return found
         op_ = step.operation
-        if self._kind(step_id) in _KEEPS_IDS and op_.input is not None:
+        if keeps_ids(self._kind(step_id), op_.shape_verb) and op_.input is not None:
             return self._trace(str(op_.input), ids, target, depth + 1)
         if is_combine(op_) and op_.tool == "zip":
             for g in op_.grids:           # a zip's rows are its finest input's
@@ -992,6 +992,74 @@ class Workflow:
         if kind == "auto":
             kind = (step.output.meta.get("auto") or {}).get("verb", "map")
         return kind
+
+    # ── the invariants (reshaping.md §2.1) ─────────────────────────────────
+    def check_invariants(self, step_id: str, plan: dict | None = None) -> list[str]:
+        """What breaks the airtight checks in a step that has run, or ``[]``.
+
+        A1 row ids are unique; A3 every ``#v`` value is a row of step ``v``;
+        A4 a step that keeps ids keeps its input's; A5 rows of two grids met
+        only through a match core recorded; A6 an exact *plan* (the step's,
+        taken before it ran) was kept. A2 (no tool sees a ``#`` column) and A7
+        (every loss is a step) can't be seen after a run: laws test them.
+        """
+        step = self.steps.get(step_id)
+        if step is None or step.output.meta.get("staged") or step.state != "completed":
+            return []
+        data, found = step.output.data, []
+        if not data.index.is_unique:
+            dup = sorted({str(i) for i in data.index[data.index.duplicated()]})
+            found.append(f"A1 {step_id}: row ids not unique ({', '.join(dup[:3])})")
+        if ROW_ID in data.columns and list(data[ROW_ID]) != list(data.index):
+            found.append(f"A1 {step_id}: its {ROW_ID!r} column isn't its row ids")
+        for c in data.columns:
+            if not is_id_column(c) or c == ROW_ID:
+                continue
+            name = c[len(ROW_ID):]
+            source = self.steps.get(name)
+            if source is None:
+                found.append(f"A3 {step_id}: {c!r} names no step")
+                continue
+            if source.output.meta.get("staged"):
+                continue
+            ids = set(source.output.data.index)
+            bad = [v for cell in data[c] for v in (cell if isinstance(cell, list) else [cell])
+                   if v is None or v not in ids]
+            if bad:
+                found.append(f"A3 {step_id}: {c!r} holds {_plain(bad[0])!r}, not a row of {name!r}")
+        op_ = step.operation
+        if keeps_ids(self._kind(step_id), op_.shape_verb) and op_.input is not None:
+            inp = self.steps.get(str(op_.input))
+            if inp is not None and not inp.output.meta.get("staged"):
+                kept = set(inp.output.data.index)
+                extra = [i for i in data.index if i not in kept]
+                if extra:
+                    found.append(f"A4 {step_id}: row {_plain(extra[0])!r} isn't a row of {str(op_.input)!r}")
+        meeting = []
+        if is_combine(op_) and op_.tool == "zip":
+            grids = [str(g) for g in op_.grids]
+            meeting = [(a, b) for n, a in enumerate(grids) for b in grids[n + 1:]]
+        elif op_.input is not None:
+            meeting = [(str(op_.input), ref.id) for ref in _paired_arguments(op_, self).values()]
+        for a, b in meeting:
+            if not self._matched(a, b):
+                found.append(f"A5 {step_id}: rows of {a!r} and {b!r} met with no recorded match")
+        columns, rows_ = (plan or {}).get("columns") or {}, (plan or {}).get("rows") or {}
+        if columns.get("certainty") == "exact" and list(columns.get("names") or []) != list(data.columns):
+            found.append(f"A6 {step_id}: planned columns {columns.get('names')}, got {list(data.columns)}")
+        if rows_.get("certainty") == "exact" and rows_.get("count") is not None \
+                and rows_["count"] != len(data):
+            found.append(f"A6 {step_id}: planned {rows_['count']} rows, got {len(data)}")
+        return found
+
+    def _matched(self, a: str, b: str) -> bool:
+        """Did core record how rows of steps *a* and *b* match (reshaping.md §6)?"""
+        if self._same_ids(a) & self._same_ids(b):
+            return True                   # one origin: the same rows
+        for x, y in ((a, b), (b, a)):
+            if x in self.steps and self.trace(x, list(self.steps[x].output.data.index), y) is not None:
+                return True               # a child and the step its rows came from
+        return False
 
     def _trace_one(self, step_id: str, row_id: Any, target: str) -> Any:
         found = self.trace(step_id, [row_id], target)
@@ -1284,8 +1352,15 @@ class Workflow:
                     or BUILTIN_TOOLS.get(step.operation.tool))
             if not is_identity(tool):
                 # A tool source computes its grid from a no-input tool.
-                step.output = self._resolve_arguments(
-                    step.operation, resources).run(None, tools)
+                try:
+                    step.output = self._resolve_arguments(
+                        step.operation, resources).run(None, tools)
+                except SelectionError as exc:
+                    # A table it can't take (a `#` column): the step fails with
+                    # the reason, like every other failure; it never raises.
+                    step.output = _failed_output(step.operation, str(exc))
+                    self._restage_after(step_id)
+                    return step
                 mismatch = _output_mismatch(step.operation, step.output.data)
                 if mismatch:
                     step.output = _failed_output(step.operation, mismatch)
@@ -1596,12 +1671,6 @@ class Workflow:
         return f"<Workflow {len(self.steps)} step(s): {list(self.steps)}>"
 
 
-#: The verbs whose rows are their input's rows, with the same ids
-#: (reshaping.md §5): their output carries the input's `#` columns.
-_KEEPS_IDS = {"map", "filter", "group", "widen", "sort", "rename", "select",
-              "drop", "slice", "distinct"}
-
-
 def _carry_id_columns(operation: Operation, source: Any, output: Output) -> None:
     """Give a step that keeps ids its input's `#` columns (reshaping.md §5.1).
 
@@ -1610,7 +1679,7 @@ def _carry_id_columns(operation: Operation, source: Any, output: Output) -> None
     isn't put back.
     """
     verb = operation.shape_verb
-    if verb is None or verb.kind not in _KEEPS_IDS or not isinstance(source, Output):
+    if verb is None or not keeps_ids(verb.kind, verb) or not isinstance(source, Output):
         return
     named = set(verb.settings.get("columns") or ()) if verb.kind in ("drop", "rename") else set()
     frame = source.data
@@ -1653,6 +1722,7 @@ from .checks import (  # noqa: E402
     predicted_columns,
     stage,
     warn,
+    keeps_ids,
 )
 from .combines import _row_lookup, _run_combine, is_combine  # noqa: E402
 from .errors import ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402

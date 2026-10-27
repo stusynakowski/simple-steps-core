@@ -620,3 +620,65 @@ def test_L45_a_shared_index_name_is_not_a_match(m):
     m["z"] = zip_(wf["a"], wf["b2"])
     assert state(m, "z") == "invalid"
     assert not any("is in both" in str(p) for p in m.workflow.steps["z"].problems)
+
+
+# ── the invariant check itself (L39; tests/conftest.py runs it on every test) ─
+
+@pytest.mark.no_invariants
+def test_L39_the_invariant_check_catches_each_break(k):
+    from simple_steps_core.output import Output
+    k["e"] = readings_rc[mod.expand()](wf["v"])
+    k["srt"] = mod.sort(by="temp")(wf["v"])
+    k.run_all()
+    wf_ = k.workflow
+    assert wf_.check_invariants("e") == [] and wf_.check_invariants("srt") == []
+
+    def broken(step, data):
+        wf_.steps[step].output = Output(data)
+        return " ".join(wf_.check_invariants(step))
+
+    assert broken("srt", pd.DataFrame({"temp": [1.0, 2.0]}, index=[0, 0])).startswith("A1")
+    assert broken("e", pd.DataFrame({"#v": [0, 9], "value": [1, 2]}, index=["0.0", "0.1"])).startswith("A3")
+    assert broken("e", pd.DataFrame({"#nosuch": [0], "value": [1]}, index=["0.0"])).startswith("A3")
+    assert broken("srt", pd.DataFrame({"temp": [1.0]}, index=[7])).startswith("A4")
+    k.run_all()
+    plan = {"columns": {"certainty": "exact", "names": ["temp"]}}
+    assert wf_.check_invariants("srt", plan)[0].startswith("A6")
+
+
+# ── ids are core's: nothing else can write them (guarantee 1, found in step 3) ─
+
+@tool
+def forger_rc() -> pd.DataFrame:
+    return pd.DataFrame({"#v": [0, 1], "x": [1, 2]})
+
+
+@tool
+def seen_rc(names: list) -> str:
+    return ",".join(names)
+
+
+def test_L46_a_tool_cant_write_an_id_column():
+    k = Kernel(Catalog(tools=[forger_rc]))
+    k["f"] = forger_rc[mod.source()]()
+    run(k)
+    assert state(k, "f") == "failed"
+    assert "reserved for row ids" in str(k.workflow.steps["f"].output.notes)
+
+
+def test_L47_naming_cant_forge_an_id_column(e):
+    e["n"] = readings_rc[mod.map(), mod.name("#v")](wf["v"])
+    assert state(e, "n") == "invalid"
+    e["r"] = mod.rename(columns={"value": "#x"})(wf["e"])
+    assert state(e, "r") == "invalid"                                  # refused when declared
+    e["out"] = mod.rename(columns={"#v": "visit"})(wf["e"])               # copying out is allowed
+    e.run_all()
+    assert list(data(e, "out").columns) == ["visit", "value"]
+
+
+def test_L48_header_and_name_tools_see_variables_only(e):
+    e["h"] = wf["e"].header
+    e["sel"] = mod.select(columns=lambda c: True)(wf["e"])
+    e.run_all()
+    assert data(e, "h")["name"].tolist() == ["value"]
+    assert list(data(e, "sel").columns) == ["#v", "value"]                # #v carried, not chosen
