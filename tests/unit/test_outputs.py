@@ -321,3 +321,79 @@ def test_G7_a_modifier_before_the_verb_says_it_covers_the_whole_step(k18):
     k18["o"] = risky[mod.retry(times=2), mod.map()](wf["x"])
     assert [w.code for w in k18.step("o").warnings] == ["modifier_order"]
     assert "retries the whole step" in str(k18.step("o").warnings[0])
+
+
+# ── T7, T8 (app-migration.md §7) ─────────────────────────────────────────
+from typing import NamedTuple as _NT, TypedDict as _TD
+
+
+class _Bounds(_NT):
+    lo: int
+    hi: int
+
+
+class _Person(_TD):
+    name: str
+    age: int
+
+
+@tool
+def bounds_src() -> list[_Bounds]:
+    return [_Bounds(1, 2), _Bounds(3, 4)]
+
+
+@tool
+def one_bound_src() -> _Bounds:
+    return _Bounds(5, 6)
+
+
+@tool
+def people_src() -> list[_Person]:
+    return [{"name": "x", "age": 1}, {"name": "y", "age": 2}]
+
+
+@tool
+def broken_people_src() -> list[_Person]:
+    return [{"name": "x", "age": 1}, {"name": "y"}]
+
+
+@tool
+def plain_dicts_src() -> list[dict]:
+    return [{"name": "x"}, {"name": "y", "age": 2}]
+
+
+@tool
+def pairs_t7(value: int) -> list[int]:
+    return [value] * value
+
+
+def test_a_source_of_records_gives_a_row_per_record():
+    k = Kernel(Catalog(tools=[bounds_src, one_bound_src, people_src, plain_dicts_src]))
+    k["b"] = bounds_src[mod.source()]()
+    k["o"] = one_bound_src[mod.source()]()
+    k["p"] = people_src[mod.source()]()
+    k["d"] = plain_dicts_src[mod.source()]()
+    assert k.step("b").plan["columns"] == {"certainty": "exact", "names": ["lo", "hi"]}
+    k.run_all()
+    assert k.step("b").data[["lo", "hi"]].values.tolist() == [[1, 2], [3, 4]]
+    assert k.step("o").data[["lo", "hi"]].values.tolist() == [[5, 6]]
+    assert k.step("p").data[["name", "age"]].values.tolist() == [["x", 1], ["y", 2]]
+    assert len(k.step("d").data) == 1                # undeclared: one cell, never guessed
+
+
+def test_a_source_record_that_doesnt_fit_fails_where_declared():
+    k = Kernel(Catalog(tools=[broken_people_src]))
+    k["p"] = broken_people_src[mod.source()]()
+    with pytest.raises(StepFailed, match="item 1 has no 'age'"):
+        k.run_all()
+    assert k.step("p").output.notes[0]["where"] == "declared"
+
+
+def test_a_broken_expect_fails_where_expect():
+    k = Kernel(Catalog(tools=[pairs_t7]))
+    k["p"] = [1, 2]
+    k["e"] = mod.expand()(wf["p"])
+    k["g"] = pairs_t7[mod.expand()][mod.expect(rows=5)](wf["e"])
+    with pytest.raises(StepFailed, match="expected 5 rows, got 3"):
+        k.run_all()
+    assert k.step("g").output.notes[0] == {"error": "expected 5 rows, got 3", "where": "expect"}

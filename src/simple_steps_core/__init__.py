@@ -36,8 +36,9 @@ del _module
 from .catalog import Catalog, Tool, bound_tool, resource, tool  # noqa: E402
 from .combines import join, stack, zip_  # noqa: E402
 from .kernel import Kernel  # noqa: E402
+from .errors import PayloadError, ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402
 from .modifiers import mod  # noqa: E402
-from .operation import Operation  # noqa: E402
+from .operation import Operation, op  # noqa: E402
 from .output import Output  # noqa: E402
 from .problems import Problem  # noqa: E402
 from .references import cols, res, rows, wf  # noqa: E402
@@ -48,7 +49,8 @@ from .values import Secret  # noqa: E402
 __all__ = [
     "Catalog", "Kernel", "Tool", "tool", "resource", "bound_tool", "Secret",
     "mod", "wf", "res", "rows", "cols", "join", "stack", "zip_",
-    "Operation", "Step", "StepStatus", "Output", "Problem",
+    "Operation", "op", "Step", "StepStatus", "Output", "Problem",
+    "StepFailed", "SelectionError", "ResourceNotLoaded", "PayloadError",
     "ResourceSpec", "StepSpec", "WorkflowSpec", "CatalogSpec", "KernelSpec", "Naming",
     "__version__",
 ]

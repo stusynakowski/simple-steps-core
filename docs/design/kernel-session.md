@@ -168,6 +168,23 @@ text = k.to_json()                      # the spec: steps, values, resources, ex
 k2 = Kernel.from_json(text, CATALOG)    # checked against the catalog you pass
 k2.spec == k.spec                       # True
 k2.run_all()                            # the same data again
+
+k2.id == k.id                           # True: the same recipe (extras and secrets aren't in it)
+k2.run_id == k.run_id                   # True once both hold the same data
+k2["limit"] = 36.0
+k.diff(k2)                              # {"steps": {"limit": "recipe", "sick": "input limit", …}, …}
+```
+
+A resource with a secret setting declares it `Secret[str]`; a resource whose
+data changes outside core says so with a `data_version()` method:
+
+```python
+from simple_steps_core import Secret
+
+@resource
+class ClinicalDB:
+    def __init__(self, url: str, password: Secret[str]): ...
+    def data_version(self) -> str: ...        # asked before each run; a new one makes its users stale
 ```
 
 | | | |

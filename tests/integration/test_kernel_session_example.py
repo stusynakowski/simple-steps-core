@@ -17,6 +17,7 @@ def test_the_walkthrough_runs(capsys):
     ex.main()
     out = capsys.readouterr().out
     assert "same spec: True" in out and "missing_step" in out
+    assert "same id: True | same run: True" in out
 
 
 def test_declaring_runs_nothing_and_a_value_is_born_completed():
@@ -44,3 +45,12 @@ def test_a_saved_session_reloads_and_reruns_to_the_same_data():
     loaded.run_all()
     for step in ("sick", "f", "side", "beds"):
         assert loaded.step(step).data.equals(k.step(step).data)
+
+
+def test_a_changed_control_shows_in_the_diff():
+    k = ex.build()
+    other = ex.build()
+    other["limit"] = 36.0
+    steps = k.diff(other)["steps"]
+    assert steps["limit"] == "recipe"
+    assert steps["sick"] == "input limit"

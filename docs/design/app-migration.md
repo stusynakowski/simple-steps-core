@@ -66,15 +66,17 @@ Anything else comes from its module and may still change:
 | The app uses | Now |
 |---|---|
 | `grid.Workflow` (61 uses) | `Kernel` for everything the app hosts; `simple_steps_core.workflow.Workflow` only inside core |
-| `grid.Operation`, `grid.op`, `grid.Output` | `Operation`, `simple_steps_core.operation.op`, `Output` |
+| `grid.Operation`, `grid.op`, `grid.Output` | `Operation`, `op`, `Output` |
 | `grid.mod`, `wf`, `res`, `cols`, `zip_`, `join`, `stack`, `tool`, `resource`, `bound_tool` | the same names, from the package |
-| `grid.ResourceNotLoaded` | `simple_steps_core.errors.ResourceNotLoaded` |
+| `grid.ResourceNotLoaded` | `ResourceNotLoaded` (also `StepFailed`, `SelectionError`, `PayloadError`) |
 | `grid.catalog`, `tool_entry`, `resource_entry`, `modifier_catalog`, `builtin_tools`, `shape_verbs`, `MODIFIERS`, `BUILTIN_TOOLS` | `cat.describe()` (`tools`, `modifiers`, `combines`, `resource_types`) |
 | `grid.TOOLS`, `grid.RESOURCE_TYPES`, `REGISTRY`, `register_tool` | gone: a `Catalog` |
 | `grid.ToolHandle` | `Tool` |
 | `grid.payload_column(output)` | `output.value_column` |
 | `grid.grid(value)` (`example_check.as_table`) | `k["x"] = value` then `k.step("x").data`; or `simple_steps_core.verbs.grid` |
-| `grid.infer_verb`, `check_modifier`, `predicted_columns`, `formula_names`, `check` | `simple_steps_core.checks` / `.catalog` (internal); prefer `k.check(name, op)` and `step.plan` |
+| `grid.infer_verb` (the editor's `/api/infer_verb`) | `k.infer_verb(tool, input, arguments, bound_to=…)` → `(verb, why)`, declaring nothing |
+| `grid.formula_names` | `cat.formula_names()` |
+| `grid.check_modifier`, `predicted_columns`, `check` | `k.check(name, op)` and `step.plan` |
 
 The pin-drift symptom in the app's `CLAUDE.md` and `docs/context.md`
 becomes *`cannot import name 'grid' from 'simple_steps_core'`*.
@@ -211,11 +213,11 @@ one piece, confirmed before it lands; ✓ when done.
 
 | | To do | Why |
 |---|---|---|
-| T1 | **Tag a release** (`0.2.0`, from `0.1.0`) at the commit the app pins, and bump `__version__` | the app pins a commit today; a tag says which core the migration was checked against |
-| T2 | **Export what the app needs publicly**: `ResourceNotLoaded` (and the other errors), `op`; or say which module each comes from in `docs/integrating.md` | §3.1 sends the app to internal modules for these; an internal name may change |
-| T3 | **A public way to infer a verb and list formula names**: the UI calls `/api/infer_verb` and the parser needs `formula_names` (today `checks.infer_verb`, `catalog.formula_names`, both internal) | the app shouldn't reach into `checks` |
-| T4 | `cat.describe()` gives each tool's **`hash`** beside its tags and extras | the palette and the workflow file show `k.id`; a changed tool should be visible there too |
-| T5 | **Update kernel-session.md and its example** (`examples/kernel_session.py`) with step C: ids, `diff`, `Secret`, `data_version()` | the working guide is what the app's developer reads first (phase-4 *done means*, 4) |
+| T1 ✓ | **Tag a release** (`0.2.0`, from `0.1.0`) at the commit the app pins, and bump `__version__` | the app pins a commit today; a tag says which core the migration was checked against |
+| T2 ✓ | **Export what the app needs publicly**: `ResourceNotLoaded` (and the other errors), `op`; or say which module each comes from in `docs/integrating.md` | §3.1 sends the app to internal modules for these; an internal name may change |
+| T3 ✓ | **A public way to infer a verb and list formula names** (`k.infer_verb`, `cat.formula_names()`): the UI calls `/api/infer_verb` and the parser needs `formula_names` (today `checks.infer_verb`, `catalog.formula_names`, both internal) | the app shouldn't reach into `checks` |
+| T4 ✓ | `cat.describe()` gives each tool's **`hash`** beside its tags and extras | the palette and the workflow file show `k.id`; a changed tool should be visible there too |
+| T5 ✓ | **Update kernel-session.md and its example** (`examples/kernel_session.py`) with step C: ids, `diff`, `Secret`, `data_version()` | the working guide is what the app's developer reads first (phase-4 *done means*, 4) |
 | T6 | **Run the app's acceptance session against core alone** (its doc 12, and the regenerated probes), and fix what fails here, not in the app | "if the app works out a fact about a workflow, that fact belongs in core" |
 
 ### Decisions waiting on the owner
@@ -230,8 +232,8 @@ one piece, confirmed before it lands; ✓ when done.
 
 | | To do |
 |---|---|
-| T7 | `where: expect` on a failure note from an `expect` modifier, like `where: timeout` |
-| T8 | a source tool returning a list of records gives one row per record (`-> list[LoHi]` does under `expand`; a source doesn't yet) |
+| T7 ✓ | `where: expect` on a failure note from an `expect` modifier, like `where: timeout` |
+| T8 ✓ | a source tool returning a record gives one row, a list of records a row per record, a column per field; an item that doesn't fit fails the step, `where: declared`. An undeclared `list[dict]` stays one cell |
 
 ### After the move: the rest of phase 4
 

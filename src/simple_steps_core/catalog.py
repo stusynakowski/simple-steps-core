@@ -883,6 +883,13 @@ class Catalog:
         out.update({name: t.fn for name, t in self._tools.items()})
         return out
 
+    def formula_names(self) -> dict[str, Any]:
+        """The names a formula written against this catalog may use: ``wf res
+        mod rows cols op join stack zip_`` and each tool, by name. What a
+        parser resolves names against; never ``eval`` a user's text with it."""
+        return formula_names({**{n: BUILTIN_TOOLS[n] for n in self._builtins},
+                              **self._tools})
+
     def __contains__(self, name: object) -> bool:
         return (name in self._tools or name in self._resource_types
                 or name in self._builtins or name in self._modifiers
@@ -936,10 +943,12 @@ class Catalog:
         for name in sorted(self._builtins):
             entries[name] = tool_entry(name, BUILTIN_TOOLS[name], "builtin")
             entries[name]["tags"], entries[name]["extras"] = [], {}
+            entries[name]["hash"] = self.hash_of(name)
         for name, handle in sorted(self._tools.items()):
             entries[name] = tool_entry(name, handle.fn, "declared")
             entries[name]["tags"] = list(handle.tags)
             entries[name]["extras"] = dict(handle.extras)
+            entries[name]["hash"] = handle.hash
         kinds = modifier_catalog()
         return {
             "tools": entries,

@@ -185,6 +185,35 @@ class Kernel:
         st.id = self.workflow.identity()[name]["id"]
         return st
 
+    def infer_verb(self, tool: str, input: str | None = None,
+                   arguments: Mapping[str, Any] | None = None,
+                   bound_to: str | None = None) -> tuple[str, str]:
+        """The shape verb a step calling *tool* on step *input* would get, and
+        why: what ``tool(wf[input])`` writes, without declaring anything. For
+        an editor that shows the verb as the user picks a tool or an input.
+
+        ``bound_to`` names a resource, for its bound tool *tool*. *arguments*
+        are the literals given so far (references are left out). Advice only:
+        a tool it can't find gives ``("map", <why>)``.
+        """
+        from .checks import infer_verb
+        from .references import ResRef, StepRef
+        if input is None:
+            return "source", "it reads no step"
+        if bound_to is not None:
+            decl = self.workflow.resources.get(bound_to)
+            if decl is None or decl.type is None:
+                return "map", f'res["{bound_to}"] isn\'t declared yet, so applying it per row'
+            fn = getattr(decl.type, tool, None)
+        else:
+            fn = self.catalog.functions.get(tool)
+        if fn is None:
+            return "map", f"no tool named {tool!r}"
+        literals = {k: v for k, v in (arguments or {}).items()
+                    if not isinstance(v, (StepRef, ResRef))}
+        step = self.workflow.steps.get(input)
+        return infer_verb(fn, step.output if step is not None else None, literals)
+
     # ── identity (K20) ───────────────────────────────────────────────────
     @property
     def id(self) -> str:

@@ -245,3 +245,40 @@ def test_a_resource_passed_by_position_is_the_tools_argument():
 def test_a_plain_call_with_a_resource_says_to_make_a_step():
     with pytest.raises(TypeError, match=r"has no object until the workflow runs"):
         beds(res["ward"])
+
+
+# ── T2–T4 (app-migration.md §7): what the app reads from core ────────────
+def test_the_app_imports_everything_from_the_package():
+    import simple_steps_core as core
+    for name in ("op", "StepFailed", "SelectionError", "ResourceNotLoaded",
+                 "PayloadError", "Secret"):
+        assert name in core.__all__ and hasattr(core, name)
+
+
+def test_describe_gives_each_tools_hash():
+    tools = Catalog(tools=[to_f_i]).describe()["tools"]
+    assert tools["to_f_i"]["hash"] == to_f_i.hash
+    assert len(tools["identity"]["hash"]) == 16      # built-ins: core's version
+
+
+@tool
+def hot_i(value: float) -> bool:
+    return value > 37
+
+
+def test_infer_verb_without_declaring_anything():
+    k = Kernel(Catalog(tools=[hot_i, to_f_i]))
+    k["p"] = [36.6, 38.2]
+    k["e"] = mod.expand()(wf["p"])
+    before = list(k.workflow.steps)
+    assert k.infer_verb("hot_i", "e")[0] == "filter"
+    assert k.infer_verb("hot_i") == ("source", "it reads no step")
+    assert k.infer_verb("nope", "e") == ("map", "no tool named 'nope'")
+    assert list(k.workflow.steps) == before
+
+
+def test_formula_names_are_the_catalogs():
+    names = Catalog(tools=[hot_i]).formula_names()
+    assert {"wf", "res", "mod", "cols", "rows", "op", "join", "stack", "zip_",
+            "hot_i", "identity"} <= set(names)
+    assert "to_f_i" not in names

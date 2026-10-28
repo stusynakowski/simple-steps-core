@@ -91,6 +91,9 @@ def main() -> None:
     k2.run_all()
     print("reloaded f:", k2.step("f").data["value"].tolist(),
           "| extras kept:", k2.step("f").extras)
+    print("same id:", k2.id == k.id, "| same run:", k2.run_id == k.run_id)
+    k2["limit"] = 36.0
+    print("diff:", k.diff(k2)["steps"])
 
 
 if __name__ == "__main__":

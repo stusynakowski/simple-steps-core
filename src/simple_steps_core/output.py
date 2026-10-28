@@ -438,13 +438,16 @@ def _data_version(data: pd.DataFrame) -> str:
     return hashlib.sha1(columns + values).hexdigest()[:12]
 
 
-def _failed_output(operation: Any, error: str) -> "Output":
-    """A step that could not produce a grid: one failed cell saying why."""
+def _failed_output(operation: Any, error: str, where: str | None = None) -> "Output":
+    """A step that could not produce a grid: one failed cell saying why, and
+    *where* it failed when that isn't the tool (``expect``, ``declared``)."""
     kind = operation.shape_verb.kind if operation.shape_verb else None
+    record = {"status": "failed", "error": error, "attempts": 0, "seconds": 0.0}
+    if where:
+        record["where"] = where
     return Output(
         data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
-        records=[{"status": "failed", "error": error, "attempts": 0,
-                         "seconds": 0.0}], index=[0],
+        records=[record], index=[0],
         meta={"verb": kind, "form": "scalar", "value_column": VALUE_COLUMN})
 
 

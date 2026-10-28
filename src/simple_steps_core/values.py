@@ -382,6 +382,66 @@ def _declared_schema(fn: Any) -> dict | None:
     return None
 
 
+def source_record(fn: Any) -> tuple[Any, bool] | None:
+    """The record type a source tool declares, and whether it returns a list
+    of them: ``-> LoHi`` is one row, ``-> list[LoHi]`` a row per item
+    (outputs-and-reshaping.md §3). None for anything else: an undeclared
+    ``list[dict]`` stays one cell, since core never guesses."""
+    hint = _return_hint(fn)
+    if hint is None:
+        return None
+    if typing.get_origin(hint) is typing.Annotated:
+        hint = typing.get_args(hint)[0]
+    many = typing.get_origin(hint) in (list, tuple) and len(typing.get_args(hint)) == 1
+    if many:
+        hint = typing.get_args(hint)[0]
+    return (hint, many) if _record_fields(hint) else None
+
+
+def source_schema(fn: Any) -> dict | None:
+    """The columns a source tool declares: a DataFrame's (008 C5) or a
+    record's fields."""
+    schema = _declared_schema(fn)
+    if schema is None:
+        declared = source_record(fn)
+        schema = dict(_record_fields(declared[0])) if declared else None
+    return schema
+
+
+def source_rows(fn: Any, value: Any) -> pd.DataFrame | None:
+    """What a source that declares records returned, as rows: one per record,
+    a column per field in declared order. None when it declares no record.
+    Raises ``ValueError`` naming the item that doesn't fit."""
+    declared = source_record(fn)
+    if declared is None:
+        return None
+    cls, many = declared
+    fields = _record_fields(cls)
+    items = value if many else [value]
+    if many and not isinstance(items, (list, tuple)):
+        raise ValueError(f"returned {type(value).__name__}; declared a list of {cls.__name__}")
+    rows_: list[dict] = []
+    for n, item in enumerate(items):
+        where = f"item {n}" if many else "it"
+        if item is None:
+            raise ValueError(f"{where} is None; declared {cls.__name__}")
+        row = {}
+        for f, t in fields.items():
+            if isinstance(item, dict):
+                if f not in item:
+                    raise ValueError(f"{where} has no {f!r}; declared {cls.__name__}")
+                row[f] = item[f]
+            elif hasattr(item, f):
+                row[f] = getattr(item, f)
+            else:
+                raise ValueError(f"{where} has no {f!r}; declared {cls.__name__}")
+            if t is not None and row[f] is not None and _value_fits(row[f], t) is False:
+                raise ValueError(f"{where}: {f} is {type(row[f]).__name__}; "
+                                 f"declared {_type_name(t)}")
+        rows_.append(row)
+    return pd.DataFrame(rows_, columns=list(fields))
+
+
 def _payload_type(kind: str | None, fn: Any) -> Any:
     """The type a verb's payload column will hold, from the tool's return."""
     hint = _return_hint(fn)

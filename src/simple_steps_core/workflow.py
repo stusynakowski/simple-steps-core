@@ -530,6 +530,28 @@ class Workflow:
             "resources": {r: self._resource_version(r, data=False) for r in sorted(self.resources)},
             "naming": self.naming.to_dict() if self.naming is not None else None})
 
+    @staticmethod
+    def _source_records(step: Step) -> str | None:
+        """A source tool that declares records (``-> LoHi``, ``-> list[LoHi]``)
+        gives a row per record, a column per field (outputs-and-reshaping.md
+        §3). Returns why when what it returned doesn't fit; None otherwise.
+        ``mod.name`` keeps the value in one cell, and a failed or caught call
+        is left as it is."""
+        output = step.output
+        if step.operation.naming is not None or source_record(step.operation.fn) is None:
+            return None
+        column = output.meta.get("value_column") or VALUE_COLUMN
+        if len(output.failed) or output.meta.get("notes") or column not in output.data.columns \
+                or len(output.data) != 1:
+            return None
+        try:
+            frame = source_rows(step.operation.fn, output.data[column].iloc[0])
+        except ValueError as exc:
+            return f"{step.operation.tool} {exc}"
+        step.output = grid(frame)
+        step.output.meta["verb"] = "source"
+        return None
+
     def _ask_data_versions(self, operation: Operation,
                            resources: Mapping[str, Any] | None) -> None:
         """K25: ask the resources *operation* uses for their data version, just
@@ -1769,9 +1791,15 @@ class Workflow:
                     step.output = _failed_output(step.operation, str(exc))
                     self._restage_after(step_id)
                     return step
+                failure = self._source_records(step)
+                if failure:
+                    step.output = _failed_output(step.operation, failure, "declared")
+                    self._restage_after(step_id)
+                    return step
                 mismatch = _output_mismatch(step.operation, step.output.data)
                 if mismatch:
-                    step.output = _failed_output(step.operation, mismatch)
+                    step.output = _failed_output(step.operation, mismatch,
+                                                 mismatch_where(mismatch))
                 self._restage_after(step_id)
                 return step
             # A literal source holds its data, so running one is a no-op — unless
@@ -1887,8 +1915,9 @@ class Workflow:
                                         for w in found)]))
             mismatch = _output_mismatch(step.operation, step.output.data)
             if mismatch:
-                raise SelectionError(mismatch)
+                raise _PlanBroken(mismatch)
         except (SelectionError, KeyError, TypeError, ValueError) as exc:
+            where = mismatch_where(str(exc)) if isinstance(exc, _PlanBroken) else None
             # 008 C7: a position out of range, a column that is gone — the step
             # fails with the reason, never None, NaN or an empty grid. A TypeError
             # here is core's own reshaping (a tool's is caught per row): a sort,
@@ -1898,7 +1927,7 @@ class Workflow:
                 why = (f"{step.operation.shape_verb.kind if step.operation.shape_verb else 'step'}: "
                        f"{why}. A column used to sort, group or match must hold single "
                        f"values, not lists or dicts (V6)")
-            step.output = _failed_output(step.operation, why)
+            step.output = _failed_output(step.operation, why, where)
         if chosen is not None:
             step.output.meta["auto"] = chosen
         self._restage_after(step_id)
@@ -2187,6 +2216,7 @@ from .checks import (  # noqa: E402
     ROW_ALIGNED,
     _is_tool_verb,
     _output_mismatch,
+    mismatch_where,
     _plan_markers,
     _source_column,
     _worst,
@@ -2199,9 +2229,9 @@ from .checks import (  # noqa: E402
     _tool_parameters,
 )
 from .combines import _row_lookup, _run_combine, is_combine, own_id_columns  # noqa: E402
-from .errors import PayloadError, ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402
+from .errors import PayloadError, PlanBroken as _PlanBroken, ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402
 from .problems import Problem  # noqa: E402
-from .values import _record_fields, named_columns, record_return  # noqa: E402
+from .values import _record_fields, named_columns, record_return, source_record, source_rows  # noqa: E402
 from .modifiers import (  # noqa: E402
     MODIFIERS,
     NAMED_VERBS,
@@ -2254,7 +2284,7 @@ from .values import (  # noqa: E402
     _type_name,
     _value_fits,
 )
-from .verbs import source_  # noqa: E402
+from .verbs import grid, source_  # noqa: E402
 
 
 def _spread_record(operation: Operation, output: Output) -> None:

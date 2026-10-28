@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "simple-steps-core"
-version = "0.1.0"
+version = "0.2.0"
 description = "The grid model behind Simple Steps: tools, steps and workflows you can run from a Python session"
 readme = "README.md"
 requires-python = ">=3.10"

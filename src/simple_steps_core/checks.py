@@ -96,6 +96,12 @@ def _declared_fits(column_type: Any, annotation: Any) -> bool | None:
     return issubclass(col_origin, origin)
 
 
+def mismatch_where(text: str) -> str:
+    """Where a :func:`_output_mismatch` came from: ``declared`` (a source's
+    declared columns) or ``expect`` (``mod.expect``)."""
+    return "declared" if " declares columns " in text else "expect"
+
+
 def _output_mismatch(operation: "Operation", data: pd.DataFrame) -> str | None:
     """How a real output breaks what its step declared or stated, or None.
 
@@ -107,7 +113,8 @@ def _output_mismatch(operation: "Operation", data: pd.DataFrame) -> str | None:
     verb = operation.shape_verb
     if verb is not None and verb.kind in ("source", "table"):
         fn = operation.fn
-        schema = _declared_schema(fn) if fn is not None else None
+        schema = (source_schema(fn) if verb.kind == "source" else _declared_schema(fn)) \
+            if fn is not None else None
         if schema is not None and list(schema) != variables(data.columns):
             return (f"{operation.tool} declares columns {', '.join(schema)}; "
                     f"it returned {', '.join(map(str, data.columns)) or 'none'}")
@@ -1785,7 +1792,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         for f, t in _record_fields(declared_record[0]).items():
             types[rename_written.get(f, f)] = t | None if declared_record[1] and t is not None else t
     if kind in ("source", "table") and not is_identity(fn):
-        schema = _declared_schema(fn)
+        schema = source_schema(fn) if kind == "source" else _declared_schema(fn)
         if schema is not None:
             ordered, types, columns_open = list(schema), dict(schema), False
     expect = _expectation(operation)
@@ -1872,6 +1879,7 @@ from .values import (  # noqa: E402
     _TYPE_NAMES,
     _column_fits,
     _declared_schema,
+    source_schema,
     _literal_problem,
     _open_keywords,
     _optional_parts,

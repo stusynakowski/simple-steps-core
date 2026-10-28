@@ -57,6 +57,12 @@ class SelectionError(ValueError):
 #     ``db=res["db"]``;
 #   * a **bound** tool is a method of the resource class marked
 #     ``@bound_tool``, used on one named instance: ``res["db"].lookup``.
+class PlanBroken(SelectionError):
+    """A real output that breaks what its step declared (a source's columns)
+    or stated (``mod.expect``). The step fails, ``where: expect`` or
+    ``where: declared``."""
+
+
 class ResourceNotLoaded(LookupError):
     """A step needs a resource the caller did not pass to ``run``."""
 
