@@ -256,7 +256,7 @@ define it.**
 | `collapse` | `0`, or the key with `by=` (D3) | as the rule (phase 4) |
 | `sweep`, `table` | 0…k-1 (`table`: what the tool returns) | 0…k-1 |
 | `join`, `stack` | 0…N-1, new rows; each cell's lineage points at the input cells it came from (decided 2026-10-26), through `#` columns ([reshaping.md](reshaping.md) §5) | 0…n-1; lineage not stored |
-| selection `wf["srt"][0]` | by row id | **differs:** by position (picked row id 1 after a sort) |
+| selection `wf["srt"][0]` | by row id; a range `[0:2]` by position | as the rule (K19, phase 4) |
 
 ## 8. Found while checking (to fix, in phase 4)
 

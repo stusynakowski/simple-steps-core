@@ -11,6 +11,12 @@ value is a 1×1 grid; a list or dict in a cell is still a grid.
 Core makes the ids: your tools never see them, and nothing but core can write
 a column whose name starts with `#`.
 
+*Picking rows and columns:* one row or a list of rows is **by id**
+(`wf["s"][3]`, `rows[[1, 3]]`, `rows["0.1"]`), so a pick survives a sort; a
+range is **by position** as shown now (`wf["s"][0:2]`, `[-2:]`, or the step
+`mod.slice`). Columns are **by name** (`cols["temp"]`), or by position over
+variables only (`cols[0]`). To choose rows by what they hold, `filter`.
+
 **3. Every row remembers where it came from.** `#v` holds the row of step `v`
 it came from:
 
