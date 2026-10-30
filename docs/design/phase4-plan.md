@@ -157,3 +157,7 @@ Then phase 5 (the final docs set) starts.
 
 Already decided and only to build: G8, G9, G12, G6, G7, K20, K22, K23, R9,
 G18 (see the step tables).
+
+Choices the owner wants to reconsider later (`auto`, modifiers that take data,
+how references are passed, expand's ids, `#` in modifiers) are listed, with
+what core does today, in [to-revisit.md](to-revisit.md).
