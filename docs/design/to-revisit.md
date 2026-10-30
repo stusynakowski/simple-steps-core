@@ -85,6 +85,43 @@ id, K20).
   the call), tools in `by=` / `columns=` become steps.
 - (c) Keep all, documented as the exceptions.
 
+**The owner's rule (2026-10-30), to formalise:** *a modifier changes how the
+tool is executed on the grid (which rows, which variables, how they are
+grouped, ordered and iterated, and how failures and time are handled); it
+never supplies values that the tool consumes.* Values for the tool's
+parameters come in the call, as the tool's arguments. A modifier **may** take
+a reference or a tool when that reference acts as a tool on the structure
+itself: it computes a key, an order or a choice of variables, not an input to
+the step's tool.
+
+Every setting today, sorted by that rule:
+
+| Setting | What it does | Under the rule |
+|---|---|---|
+| `select(rows=, columns=)`, `drop`, `rename`, `slice`, `distinct(columns=)` | which rows / variables | **structure**: keep |
+| `sort(by=)`, `collapse(by=)` | order and grouping by a variable | **structure**: keep |
+| `sort(by=tool)`, `collapse(by=tool)`, `columns=tool` | a key, order or choice *computed* | **a tool on the structure**: keep, as a catalog tool or a reference to a step, never a lambda (it must save, K20) |
+| `expand(columns=)`, `widen(columns=)`, `pack(columns=)` | which variables unpack or pack | **structure**: keep |
+| `map(axis=)`, `replace=`, `mod.name` | how calls meet rows; what the output is named | **structure**: keep |
+| `retry`, `timeout`, `breaker`, `expect` | how the tool is run and checked | **execution**: keep |
+| `try_except(default=)` | a value written *instead of* the tool's result | **execution, with a value**: the tool never sees it. Keep (Q below) |
+| `collapse(initial=)` | a fold's starting accumulator, **passed to the tool** as `acc` | **data to the tool**: move to the call, `add[mod.collapse(by="ward")](wf["p"], acc=0)` |
+| `sweep(x=[…], y=[…])` | the values **passed to the tool's parameters** | **data to the tool**: the values move to the call; the modifier names only which parameters are swept, `tool[mod.sweep("x", "y")](x=[1, 2], y=[3, 4])` |
+| `over=` | the step's input | **data to the tool**: remove; the input is the call's first argument (principle 5) |
+
+**Questions.**
+- Is `try_except(default=)` acceptable? It is a value, but the tool never
+  receives it: it is what the *modifier* writes when the tool fails.
+  *Recommended:* yes, as an execution setting; it stays a literal.
+- Under [referencing-proposal.md](referencing-proposal.md) N6, a vector
+  given to a scalar parameter already maps. Is `sweep` then just "map over
+  every combination of these vector arguments"? *Recommended:* yes: the
+  values are arguments, `mod.sweep("x", "y")` says only to take their
+  product rather than pair them.
+- Does "a reference used as a tool" also cover a step's output used as a key
+  table (`collapse(by=wf["wards"]["name"])`, groups in that order)?
+  *Recommended:* only by variable name for now; a key table is a `join`.
+
 ## V3. How arguments are passed: a column as a list, a row as a dict
 
 **Owner:** unclear how arguments are passed and treated. Can a column
