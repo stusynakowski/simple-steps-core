@@ -6,6 +6,9 @@
 > options. When one is taken up, it becomes a decision in
 > [phase4-plan.md](phase4-plan.md) §5 and is confirmed before it lands.
 
+**A proposal answering V1, V3 and V4 is in
+[referencing-proposal.md](referencing-proposal.md)** (2026-10-30).
+
 The principles these are judged by (from the review of "several ways to do
 the same thing"):
 
