@@ -1,5 +1,7 @@
 # To revisit
 
+> **Consolidated into [syntax-review.md](syntax-review.md)** (2026-10-30): read that first; this page is background.
+
 > The owner's list of design choices to reconsider in a later update
 > (2026-10-29). Nothing here is decided or built: each entry says what core
 > does today (each line was run at `adeda02`), why it's a concern, and the

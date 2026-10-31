@@ -1,5 +1,7 @@
 # Referencing and assignment: a proposal
 
+> **Consolidated into [syntax-review.md](syntax-review.md)** (2026-10-30): read that first; this page is background.
+
 > **The work is ordered in [expressions-plan.md](expressions-plan.md)** (X1–X10).
 >
 > **Status: a proposal, nothing built** (owner, 2026-10-30). It formalises

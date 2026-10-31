@@ -1,5 +1,7 @@
 # Cleaning up expressions: the plan
 
+> **Consolidated into [syntax-review.md](syntax-review.md)** (2026-10-30): read that first; this page is background.
+
 > The dev plan for the basic syntax of expressions: how a step is referenced,
 > and what a tool receives. Started 2026-10-30. It turns
 > [referencing-proposal.md](referencing-proposal.md) and V1–V5 of
