@@ -15,6 +15,70 @@ recommended in a group, except …" is a fine answer.
 
 **Already answered in your own words, to confirm:** D1, D2, D3, D4, D6, D9, D11, D13, D14, D15, D16, D22, D23.
 
+## 1b. By importance
+
+Ranked (2026-10-31) by four things: **how much depends on it** (work and
+other decisions that wait for it), **how hard it is to change later** (saved
+formulas and the app bake it in), **whether something is silently wrong**
+until it's made, and **how much of what a user sees** it changes. Importance
+isn't urgency: the "when" column says when it's needed.
+
+### Tier 1: the model itself. Decide these first; almost everything follows
+
+| # | | Decision | Why it ranks here | When |
+|---|---|---|---|---|
+| 1 | **D13** | What a tool receives, by type (a list to a value parameter iterates) | It *is* the model: every formula's meaning, the binding code at the centre of running a step, about 200 test call sites and every app formula. D14–D19, D20b and D9 are details of it | S3 |
+| 2 | **D2** | An integer is a row, a string a key | The grammar every reference is written in. Once formulas are saved and the app writes them, changing it means rewriting them all | S3 |
+| 3 | **D15** | Binding by key name: opt-in only | Decides whether today's formulas keep working or are rewritten, and closes the silent wrong result B7 (a column replacing a default). The biggest single cost of the migration | S3 |
+| 4 | **D14** | Never choose a key when there is more than one | Your core wish ("no implicit behaviour"). Without it D13 still guesses | S3 |
+| 5 | **D51** | This cleanup before the app moves | Decides whether the app migrates once or twice. Nothing technical, all cost | before G |
+| 6 | **D4** | Row numbers `0…n-1`, or stable ids | The largest piece of work, and it changes what identity means underneath lineage and staleness. Ranked below 1–5 only because it can be deferred without blocking them | S5 |
+
+### Tier 2: settles what users write every day, or fixes silent errors
+
+| # | | Decision | Why | When |
+|---|---|---|---|---|
+| 7 | **D57** | Objects' data versions | Silently wrong today: readers of any object column look stale after every run | S1 |
+| 8 | **D31** | `widen` names its column | Silently wrong today: `None`s, no warning | S1 |
+| 9 | **D16** | Keys, row numbers, `#` never reach a tool unless asked | The guarantee that keeps tools independent of the data's names; closes B3 | S3 |
+| 10 | **D20b** | `auto` doesn't choose `filter` | Settles what `auto` is (how many calls, not which rows), and whether a bare call can drop rows | S4 |
+| 11 | **D9** | A single key named after its step | Renames every unnamed output (`value` → the step's name): touches 126 test references and every downstream formula that says `"value"` | S4 |
+| 12 | **D3** | Keys are identifiers | Cheap now, expensive once data with other names is saved | S1–S2 |
+| 13 | **D17** | Tools get plain Python values | Tool authors will write against it; changing it later breaks their tools | S2 |
+| 14 | **D21** | Nothing added unseen (`breaker`) | "The formula shows what runs" is false without it | S4 |
+| 15 | **D6** | A selection can be a step's input | Without it the model's main form, `to_f(wf["p"]["temp"])`, is refused | S3 |
+
+### Tier 3: grammar details; each follows from tier 1
+
+| # | | Decision | Why | When |
+|---|---|---|---|---|
+| 16 | D5 | `wf[…]` by name only | Needed for D2 to be unambiguous (`wf[0]` is otherwise both) | S3 |
+| 17 | D18 | References to steps whose shape isn't known yet | The one place D13 can't decide before running | S3 |
+| 18 | D12 | A source's return: rows or one value | A consistency fix between sources and literals | S4 |
+| 19 | D10 | Brackets never reach inside a cell | Keeps D2 airtight | S3 |
+| 20 | D7, D8 | `cols[…]`/`rows[…]`; `.header` → `.keys` | Spelling; easy to revisit | S3 |
+| 21 | D19 | `collapse(by=)` on one key of a step | An edge case of D13 | S3 |
+| 22 | D1, D11 | The model; a literal is one value | Already your words; confirming | S3–S4 |
+
+### Tier 4: features and fixes that add, without changing the model
+
+| # | | Decisions | Why here | When |
+|---|---|---|---|---|
+| 23 | D-D1, D-D2, D42 | Autorun, the progress callback, re-running stale rows | Large features, but additive. Autorun has no design yet, which makes D-D1 the most important of these | D |
+| 24 | E-D1 | The output store's interface | Additive; the interface is what the app will build on | E |
+| 25 | D27, D28, D29, D30, D32 | `#` handling; `expand` of dicts | Small bug-level choices with an obvious answer | S1, S5 |
+| 26 | D35, D47 | Collapse's group order; row classes | Follow from D4 | S5 |
+| 27 | D22–D25, D56 | Modifiers take no data | Your rule; mostly moving three settings into the call | S6 |
+| 28 | D41, D43–D46 | Cell-level staleness; volatility; the seed | Make staleness and reproducibility honest; none changes a formula | S9 |
+| 29 | D33, D34, D36 | `melt`, `pivot`, `keep=`, the cheat sheet | Quick reshaping (goal 3); purely additive | S7 |
+| 30 | D37–D40 | States | Naming and display | S8 |
+| 31 | D48, D49 | `k.data`; the output UI | Convenience and app design | S10 |
+| 32 | D50, D52, D53 | Bound tools as arguments; old workspaces; the app's cleanups | Carried over, each with a clear default | G |
+
+**In short:** tier 1 (six decisions) settles the model and the cost of the
+migration. Tier 2's first two fix things that are silently wrong today, so
+they're worth making first even though they're small.
+
 ## 2. Open, by the step that needs them
 
 ### S1–S2. Bugs, values and keys
