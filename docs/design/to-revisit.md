@@ -6,7 +6,7 @@
 > (2026-10-29). Nothing here is decided or built: each entry says what core
 > does today (each line was run at `adeda02`), why it's a concern, and the
 > options. When one is taken up, it becomes a decision in
-> [phase4-plan.md](phase4-plan.md) §5 and is confirmed before it lands.
+> [decisions.md](decisions.md) and is confirmed before it lands.
 
 **The dev plan for V1–V5 is [expressions-plan.md](expressions-plan.md).**
 **A proposal answering V1, V3 and V4 is in

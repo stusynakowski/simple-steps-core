@@ -161,8 +161,7 @@ as `examples/kernel_session.py` already is.
 
 ## Decisions still open
 
-They are in [phase4-plan.md §5](phase4-plan.md#5-decisions), each with a
-recommendation: G5's starting value, how `timeout` is enforced (K18), how a
-resource reports its data version (K25), the autorun modifier's design, the
-progress callback, and the output store's interface. (G3, a source's own
-index as its row ids, was decided as D2 in row-ids.md and is built.)
+They are all in [decisions.md](decisions.md), grouped by the step of
+[phase4-plan.md](phase4-plan.md) that needs them, each with a recommendation.
+(G3, a source's own index as its row ids, was decided as D2 in row-ids.md and
+is built.)

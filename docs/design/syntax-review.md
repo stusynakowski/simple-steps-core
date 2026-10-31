@@ -8,9 +8,10 @@
 > and [expressions-plan.md](expressions-plan.md), which stay as background.
 > Every *today* line was run on core at `20a7980`.
 
-**How to use it.** Read §1–§3 (the model and its rules). Go through §5, the
-decisions: most say what you have already said, so they only need a yes. Then
-§7 (the plan) and §8 (the tests) follow from your answers.
+**How to use it.** This page is the design: §1–§3 (the model and its
+rules), §4 (today and the bugs), §6 (concerns) and §8 (the tests). The
+decisions are in [decisions.md](decisions.md); the order of work is in
+[phase4-plan.md](phase4-plan.md).
 
 ## 1. What you want
 
@@ -160,125 +161,13 @@ What core does today against §3, run at `20a7980`:
 
 ## 5. The decisions
 
-*You said* is what you said in the sessions; where it's there, the decision
-only needs confirming. Old ids are kept so the background docs still line up.
+All of them, D1–D56, are in [decisions.md](decisions.md), grouped by the
+step that needs them, with what you said and what is recommended.
 
-### A. References
-
-| | Decision | You said | Recommended | Was |
-|---|---|---|---|---|
-| D1 | The user's model is §2: a list of rows, each a dict | yes | yes | — |
-| D2 | An integer is a row, a string a key; nothing else in brackets | yes | yes | N2, N3 |
-| D3 | Keys: strings only; identifiers only? | strings only | identifiers too (`temp_f`, not `temp f`), so every key can be typed | X-D3, Q3 |
-| D4 | Rows: numbers `0…n-1` in each step's order, or stable ids? | integers | numbers; core keeps a hidden key per row for staleness and lineage; anything that must last is written by value | X-D1, Q1 |
-| D5 | `wf[…]` takes step names only (`wf[0]` goes) | — | yes | Q10 |
-| D6 | A key or row selection can be a step's input | (implied) | yes | X4 |
-| D7 | `cols[…]` / `rows[…]` stay? | — | only for ranges of keys (`cols["a":"c"]`); otherwise plain brackets | X-D6, Q9 |
-| D8 | `.header` → `.keys` | — | yes | X-D7 |
-| D9 | One key is named after its step, not `value` | (your "stepname is a variable") | yes; `mod.name` still wins | X-D5, N4 |
-| D10 | `[i]` / `["k"]` never reach inside a cell | — | yes: `expand` / `widen` do | Q8 |
-| D11 | A literal is one value | yes | yes | N5 |
-| D12 | A source's return: rows or one value? | — | its declared type decides: `list[T]` is rows; `list` or no annotation is one value | X-D10 |
-
-### B. What tools receive
-
-| | Decision | You said | Recommended | Was |
-|---|---|---|---|---|
-| D13 | §3's table: by type, a list to a value parameter iterates | yes ("a mapping is implied") | yes | N6 |
-| D14 | Never choose a key when there is more than one | yes | yes | N7 |
-| D15 | Binding by key name | only when explicitly defined | opt-in: `tool[mod.map(by_name=True)](wf["p"])`, refused when a name is missing | X-D2, Q2 |
-| D16 | Keys, row numbers and `#` never reach a tool unless asked | yes | yes | N8 |
-| D17 | Tools get plain Python values | — | yes | X3, N12 |
-| D18 | A reference to a step whose shape is unknown until it runs | — | a warning when declared; decided when it runs; re-checked after | Q6 |
-| D19 | `collapse(by="ward")` on a list of values: where is `ward`? | — | from that list's own step, for `by=` only | Q7 |
-
-### C. Verbs
-
-| | Decision | You said | Recommended | Was |
-|---|---|---|---|---|
-| D20 | `auto` | **keep it, as broadcasting with clearly defined rules** (owner, 2026-10-31) | `auto` decides only how calls are broadcast over the arguments (§3.1), never which key a parameter gets; it resolves when written and prints what it chose. Whether it may still choose a row-changing verb (`filter` from `-> bool`) is D20b | X-D4, V1 |
-| D20b | May `auto` pick `filter` (a tool returning `bool`)? | — | no: broadcasting decides how many calls, not which rows stay; `filter` is written | — |
-| D21 | Nothing added unseen (`breaker`) | — | shown in the formula, or not added | N11 |
-
-### D. Modifiers
-
-| | Decision | You said | Recommended | Was |
-|---|---|---|---|---|
-| D22 | Modifiers: structure and execution only; tools in them are catalog tools or references, never lambdas | yes | yes | V2 |
-| D23 | Move `initial=` (→ `acc=` in the call), `sweep`'s values (→ the call, `mod.sweep("x", "y")`), `over=` (goes) | yes | yes | X-D8 |
-| D24 | `try_except(default=)` stays: the tool never sees it | — | yes | V2 |
-| D25 | A key table in `collapse(by=)` | — | no: that's a `join` | V2 |
-
-### E. Ids and `#`
-
-| | Decision | You said | Recommended | Was |
-|---|---|---|---|---|
-| D26 | `#` columns accepted by reshaping modifiers (`collapse(by="#s")`) | you like it | keep | V5 |
-| D27 | Refuse a `#` column as a tool argument (B3) | — | yes, pointing to D28 | — |
-| D28 | `mod.rename(columns={"#": "row"})` makes the row id data | — | yes: one explicit way | — |
-| D29 | Refuse `stack` of an ids-only step (B4) | — | yes | — |
-| D30 | `sort` / `join` / `collapse` by `#` | — | no: under D4 `#` is a position; use the `#<step>` links | V5 |
-
-### F. Reshaping
-
-| | Decision | You said | Recommended | Was |
-|---|---|---|---|---|
-| D31 | Fix `widen` (B1): name the column, `mod.widen("info")`; refused when it can't tell which | — | yes | — |
-| D32 | `expand(columns=[…])` takes dicts as key/value rows (B2) | — | yes, so a melt keeps its keys | — |
-| D33 | `mod.melt(columns=[…], into=("key", "value"))`, `mod.pivot(by=, key=, value=)`, built from existing moves | — | yes; a pivot's columns are unknown until it runs, and must be identifiers (D3) | — |
-| D34 | `collapse(by="ward", keep=[…])`: columns constant in a group stay one value, checked | — | yes | — |
-| D35 | Collapse's group order | — | first appearance (today); sorting is a `sort` | — |
-| D36 | A reshaping cheat sheet in rules.md: "I have X, I want Y, write Z" | — | yes | — |
-
-### F2. Conditions (built 2026-10-31)
-
-| | Decision | You said | Built | Was |
-|---|---|---|---|---|
-| D54 ✓ | Apply a tool on a condition: `to_f[mod.map(where=is_hot)](wf["p"])` | add it | the tool runs where the test is true; every row is kept and aligned; the others are `absent`. The test is a catalog tool returning `bool` (refused otherwise); one that raises fails its row, `where: where`; a change to a column the test reads makes the step stale | — |
-| D55 ✓ | "Else" is a separate step: `op("first_present")[mod.map()](wf["f"], default=wf["p"][cols["temp"]])` | yes | fills only the `absent` cells; a `None` the tool returned is kept | — |
-| D56 | A `where=` test that needs a setting (`above(temp, limit)`) | — | not possible yet: a tool in a setting gets the row only. Options: a test step written before (`k["hot"] = above(…, limit=…)`, then `where=` names it), or a bound test | — |
-
-A **single cell broadcasts like a literal** (§3.1 rule 4; checked by
+A **single cell broadcasts like a literal** (§3.1 rule 4, checked by
 `tests/unit/test_where.py`): `limit=38.0`, `limit=wf["lim"]` (a 1×1 step) and
 `limit=wf["c"][0]["limit"]` give the same result. A column of a one-row step
 is a list, not a cell: it pairs by row, so take its cell, `[0]`.
-
-### G. States
-
-| | Decision | You said | Recommended | Was |
-|---|---|---|---|---|
-| D37 | The empty step gets its own state, `empty` (today `staged`) | — | yes, to match rule 9 | — |
-| D38 | The `"empty"` cell: only the state says a step is empty, never the string | — | yes | — |
-| D39 | `maybe` and `pending`: keep both (shown differently) or merge | — | keep, and document the difference | — |
-| D40 | New conditions are marks on `completed`, not states (*as of 10:42*, *read stale*) | — | yes | T-D3 |
-
-### H. Staleness and time
-
-| | Decision | You said | Recommended | Was |
-|---|---|---|---|---|
-| D41 | Track the exact cells an argument reads, so a cell argument is stale only when that cell changes | — | yes | — |
-| D42 | Re-run only the stale rows | — | yes, with K15 (phase 4 step D) | — |
-| D43 | Volatility classes: pure, seeded, versioned, volatile; a tool is pure unless it says `@tool(volatile=True)` | — | yes | T-D1 |
-| D44 | A resource with no `data_version()` counts as volatile, with a note | — | yes | T-D2 |
-| D45 | `run_id` includes *as of* for volatile steps | — | yes | T-D4 |
-| D46 | A tool with `seed` that isn't given warns, and counts as volatile | — | yes | C-D2 |
-| D47 | The plan carries the row class (aligned, subset, one→many, …) and a position into a step whose rows can shift warns | — | yes | — |
-
-### I. Terminal and UI
-
-| | Decision | You said | Recommended | Was |
-|---|---|---|---|---|
-| D48 | `k["p"]` stays a reference; `k.data("p")` gives the list of dicts, plain values | — | yes | — |
-| D49 | The output UI (a value card, a list, a table, a lineage strip; headers select values, never names; `#` outside the selection) | — | yes, written in the app's dev plan | — |
-
-### J. Carried over
-
-| | Decision | Recommended | Was |
-|---|---|---|---|
-| D50 | A resource with bound tools may also be passed to a free tool | yes, both | R-D1 |
-| D51 | **Order against the app's migration:** this cleanup's §7 phases 1–4 before the app moves, so its formulas change once | yes | X-D9, G-D1 |
-| D52 | Older saved workspaces | refused with core's message | G-D2 |
-| D53 | The app's own cleanups before it moves | yes | G-D3 |
 
 ## 6. Concerns
 
@@ -302,23 +191,8 @@ is a list, not a cell: it pairs by row, so take its cell, `[0]`.
 
 ## 7. The dev plan
 
-Each phase keeps the suite green, ends with its laws passing, and each
-behaviour change is confirmed before it lands.
-
-| Phase | Work | Decisions |
-|---|---|---|
-| **0. Tests first** | §8's laws, each expected-to-fail until its phase; regression tests for B1–B6 | — |
-| **1. Bugs** | B1 (`widen`), B2 (`expand` dicts), B3 (`#` argument), B4 (`stack`), B6 (string keys) | D27, D29, D31, D32, D3 |
-| **2. Values and keys** | plain Python values to tools; identifiers | D17, D3 |
-| **3. The heart** | brackets (string = key, int = row); selections as inputs; `wf[…]` by name; `.keys`; what tools receive by type; no binding by name (opt-in) | D2, D5–D8, D13–D16, D18, D19 |
-| **4. Verbs and naming** | no `auto` (B5); nothing unseen; a single key named after its step; literals and sources | D20, D21, D9, D11, D12 |
-| *the app moves here* | app-migration.md, with the new syntax | D51–D53 |
-| **5. Row numbers** | `0…n-1` per step; links in `#`; core's hidden key; the reshaping laws re-run | D4, D10, D30, D47 |
-| **6. Modifiers** | `initial=`, `sweep`, `over=` | D22–D25 |
-| **7. Reshaping** | `melt`, `pivot`, `keep=`, the cheat sheet | D33–D36 |
-| **8. States** | `empty`; marks | D37–D40 |
-| **9. Staleness and time** | cell reads; volatility; *as of*; seed | D41–D46 (D42 with phase 4 step D) |
-| **10. Docs** | rules.md opens with §2; step-expressions, kernel-session; the UI design to the app | D48, D49 |
+In [phase4-plan.md](phase4-plan.md) §2: steps S0–S10 in order among the rest
+of phase 4 (the app's move, sessions, storage, the table view).
 
 ## 8. The tests
 
