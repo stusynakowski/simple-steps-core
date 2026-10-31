@@ -49,7 +49,7 @@ change is confirmed before it lands.
 | C | Identity | tool hashes, ids, `diff`, `data_version()`, `Secret` | — | ✓ (seed: S9) |
 | — | Conditions | `mod.map(where=…)`, `first_present` | — | ✓ |
 | **S0** | **The tests** | the laws E1–E27 (syntax-review.md §8), each expected-to-fail until its step | small | **next** |
-| **S1** | **Bugs** | B1–B8 (syntax-review.md §4): `widen`, `expand` of dicts, the `#` leak, `stack`, string keys, a column replacing a default | small | needs D3, D27–D29, D31, D32 |
+| **S1** | **Bugs** | B1–B10 (syntax-review.md §4): `widen`, `expand` of dicts, the `#` leak, `stack`, string keys, a column replacing a default, `#` counted in a shape, objects' versions | small | needs D3, D27–D29, D31, D32, D57 |
 | **S2** | **Values and keys** | tools get plain Python values; keys are identifiers | small | needs D3, D17 |
 | **S3** | **The core change** | string = key, integer = row; a selection can be an input; tools receive by type (§3 of syntax-review); binding by name only on request | **large** | needs D1, D2, D5–D8, D10, D13–D16, D18, D19 |
 | **S4** | **Broadcasting and naming** | `auto` as broadcasting, resolved when written; nothing unseen; one key named after its step; sources and literals | medium | needs D9, D11, D12, D20b, D21 |

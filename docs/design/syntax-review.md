@@ -158,6 +158,8 @@ What core does today against §3, run at `20a7980`:
 | B6 | non-string column names are coerced silently | as above |
 | B7 | **a column in the data silently replaces a parameter's default** | `to_f(temp, scale=1.8)` on a step that happens to have a `scale` column (100.0) → 3692 °F, no warning |
 | B8 | a one-key step can't feed a tool whose parameter has another name | `to_f_v(t)` on `expand`'s `value` → *"needs 't'"*; the message also lists `#xs` as a column |
+| B9 | a one-key list given as an argument is called a "block": its `#` column is counted as a second column | `to_f_v(t=wf["list"])` → *"'list' is a block"*; rule 2 says `#` is never counted |
+| B10 | **an object without a stable `repr` gets a new data version on every run** | a tool returning `Scan(...)`: re-running the same step makes every reader *"stale: input s changed"*; the version hashes the object's address |
 
 ## 5. The decisions
 

@@ -30,6 +30,7 @@ Needed first: phase S1 fixes what is wrong today.
 | D31 | Fix `widen` (B1): name the column, `mod.widen("info")`; refused when it can't tell which | — | yes | — |
 | D32 | `expand(columns=[…])` takes dicts as key/value rows (B2) | — | yes, so a melt keeps its keys | — |
 | D17 | Tools get plain Python values | — | yes | X3, N12 |
+| D57 | How an object's data version is computed (B10) | — | in order: the object's own `data_version()` (as resources have, K25); a dataclass, NamedTuple or plain object by its fields; a value pickle can hash; otherwise the step's plan says *"Scan has no stable version: readers look stale after each run; give it data_version()"*. Images and files get content hashes with media handles (R7, step E) | — |
 
 ### S3. The core change: brackets and what tools receive
 
