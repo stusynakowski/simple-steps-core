@@ -12,6 +12,7 @@ from typing import Callable
 from typing import Iterable
 from typing import Sequence
 import itertools
+import numpy as np
 import pandas as pd
 import time
 import traceback
@@ -172,20 +173,30 @@ def _call(fn: Callable, arg: dict, retries: int) -> tuple[Any, dict]:
 # The verbs
 # ─────────────────────────────────────────────────────────────────────────
 def map_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
-         retries: int = 0, axis: str = "rows", replace: bool = False) -> Output:
+         retries: int = 0, axis: str = "rows", replace: bool = False,
+         where: Callable | None = None) -> Output:
     """``map`` — n rows in, n rows out: **only** *fn*'s result, one column.
 
     The input columns are **not** carried (owner decision, 2026-10-20): a map
     step is its results. Each row keeps its input row's id, so the results stay
     aligned with the input — put them side by side with ``zip_(wf["in"],
     wf["out"])`` or ``join``.
+
+    ``where=`` (a tool returning ``bool``, given the row like the step's tool)
+    says which rows the tool runs on. Every row is still there: the others are
+    ``absent``, since the tool didn't run on them. A test that raises fails
+    its row (``where: where``); one that doesn't return a ``bool`` too, since
+    core doesn't read truthiness into it.
     """
     frame = rows(source, axis=axis)
     blocked = _upstream_failures(source)
-    values, records = [], []
+    test = _row_key(where) if where is not None else None
+    values, records, skipped = [], [], []
     for index, row in _units(frame, _absent_of(source)):
         if index in blocked:
             value, record = None, _blocked(*blocked[index])
+        elif test is not None and not _passes(test, row, index, skipped, records, values):
+            continue
         else:
             value, record = _call(fn, row, retries)
         values.append(value)
@@ -193,9 +204,43 @@ def map_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
 
     data = pd.DataFrame(index=frame.index)
     data[name] = _typed(values, frame.index)
-    return Output(data=data, records=records, index=frame.index,
-                  meta={"verb": "map", "form": "column", "value_column": name,
-                        "n_in": len(frame)})
+    out = Output(data=data, records=records, index=frame.index,
+                 meta={"verb": "map", "form": "column", "value_column": name,
+                       "n_in": len(frame)})
+    if skipped:
+        out.mark_absent({name: skipped})
+        out.meta["skipped"] = [_plain_id(i) for i in skipped]
+    return out
+
+
+def _passes(test: Callable, row: dict, index: Any, skipped: list,
+            records: list, values: list) -> bool:
+    """Run ``where=``'s test on one row. False when the row is not to run:
+    then its value and record are appended here (absent, or failed)."""
+    try:
+        keep = test(row)
+    except Exception as exc:
+        values.append(None)
+        records.append({"status": "failed", "error": f"where: {type(exc).__name__}: {exc}",
+                        "attempts": 1, "where": "where", "seconds": 0.0})
+        return False
+    if not isinstance(keep, (bool, np.bool_)):
+        values.append(None)
+        records.append({"status": "failed",
+                        "error": f"where: returned {type(keep).__name__}, not bool",
+                        "attempts": 1, "where": "where", "seconds": 0.0})
+        return False
+    if not keep:
+        skipped.append(index)
+        values.append(None)
+        records.append({"status": "completed", "error": None, "attempts": 0,
+                        "seconds": 0.0})
+        return False
+    return True
+
+
+def _plain_id(i: Any) -> Any:
+    return i.item() if hasattr(i, "item") else i
 
 
 def filter_(source: Any, fn: Callable, *, retries: int = 0,

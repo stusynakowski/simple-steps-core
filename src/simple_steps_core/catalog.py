@@ -116,10 +116,13 @@ def tool_entry(tool_id: str, fn: Callable, origin: str) -> dict:
         required = parameter.default is inspect.Parameter.empty
         annotation = hints.get(parameter.name, parameter.annotation)
         type_name, choices, nullable = _param_type_info(annotation)
+        default = None if required else parameter.default
+        if not _json_safe(default):                 # a sentinel: said, not sent
+            default = repr(default)
         params.append({
             "name": parameter.name,
             "required": required,
-            "default": None if required else parameter.default,
+            "default": default,
             "type": type_name,
             "choices": choices,
             "nullable": nullable,

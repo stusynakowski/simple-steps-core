@@ -108,6 +108,21 @@ def as_list(**row: Any) -> list:
     return list(value) if isinstance(value, (list, tuple)) else [value]
 
 
+class _NotPresent:
+    def __repr__(self) -> str:
+        return "<not present>"
+
+
+_NOT_PRESENT = _NotPresent()
+
+
+def first_present(value=_NOT_PRESENT, default=None):
+    """*value*, or *default* where it is ``absent`` (a row ``map(where=…)``
+    skipped, a gap from ``stack`` or ``join``): the "else" of a condition.
+    A ``None`` value is present: it is kept."""
+    return default if value is _NOT_PRESENT else value
+
+
 def gather_dict(key: list, value: list) -> dict:
     """The rows of a group as one dict, ``{key: value}``: the inverse of
     ``expand`` over a dict (J-D4)."""
@@ -233,6 +248,7 @@ BUILTIN_TOOLS: dict[str, Callable] = {
     "last": last,
     "as_list": as_list,
     "gather_dict": gather_dict,
+    "first_present": first_present,
 }
 
 

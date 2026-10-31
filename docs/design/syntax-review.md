@@ -230,6 +230,19 @@ only needs confirming. Old ids are kept so the background docs still line up.
 | D35 | Collapse's group order | — | first appearance (today); sorting is a `sort` | — |
 | D36 | A reshaping cheat sheet in rules.md: "I have X, I want Y, write Z" | — | yes | — |
 
+### F2. Conditions (built 2026-10-31)
+
+| | Decision | You said | Built | Was |
+|---|---|---|---|---|
+| D54 ✓ | Apply a tool on a condition: `to_f[mod.map(where=is_hot)](wf["p"])` | add it | the tool runs where the test is true; every row is kept and aligned; the others are `absent`. The test is a catalog tool returning `bool` (refused otherwise); one that raises fails its row, `where: where`; a change to a column the test reads makes the step stale | — |
+| D55 ✓ | "Else" is a separate step: `op("first_present")[mod.map()](wf["f"], default=wf["p"][cols["temp"]])` | yes | fills only the `absent` cells; a `None` the tool returned is kept | — |
+| D56 | A `where=` test that needs a setting (`above(temp, limit)`) | — | not possible yet: a tool in a setting gets the row only. Options: a test step written before (`k["hot"] = above(…, limit=…)`, then `where=` names it), or a bound test | — |
+
+A **single cell broadcasts like a literal** (§3.1 rule 4; checked by
+`tests/unit/test_where.py`): `limit=38.0`, `limit=wf["lim"]` (a 1×1 step) and
+`limit=wf["c"][0]["limit"]` give the same result. A column of a one-row step
+is a list, not a cell: it pairs by row, so take its cell, `[0]`.
+
 ### G. States
 
 | | Decision | You said | Recommended | Was |

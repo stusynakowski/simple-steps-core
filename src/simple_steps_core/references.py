@@ -454,7 +454,7 @@ def _is_tool_value(value: Any) -> bool:
 
 #: Settings that may hold a tool instead of column names (008 C2).
 TOOL_SETTINGS: dict[str, tuple[str, ...]] = {
-    "sort": ("by",), "collapse": ("by",),
+    "sort": ("by",), "collapse": ("by",), "map": ("where",),
     "distinct": ("columns",), "select": ("columns",), "rename": ("columns",),
 }
 

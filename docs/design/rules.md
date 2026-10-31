@@ -67,6 +67,13 @@ and it keeps the key as a column too (`ward`), since tools never see `#`. A
 parameter named after the key gets the key. A key is one value: to group by
 two columns, make one key from them first.
 
+*Applying on a condition:* `to_f[mod.map(where=is_hot)](wf["p"])` runs
+`to_f` only where `is_hot` is true. Every row stays, so the result lines up
+with `p`; the rows it skipped are `absent`. Fill them in a next step with
+`first_present` (`default=` the value to use instead). One value, whether
+written (`38`) or referenced (`wf["limit"]`, `wf["c"][0]["limit"]`), is the
+same in every call.
+
 ## What core can't do, by design
 
 - See inside a tool, or inside a `table` tool's result.

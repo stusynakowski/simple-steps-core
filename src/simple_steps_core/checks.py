@@ -656,6 +656,25 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 problems.append(f"{modifier.kind}'s {name}= names tool "
                                 f"{value.id!r}, which is not registered")
 
+    # 6f. `map(where=…)` takes a test: a tool, returning bool when it says.
+    for modifier in operation.modifiers:
+        if modifier.kind != "map" or modifier.settings.get("where") is None:
+            continue
+        test = modifier.settings["where"]
+        if not _is_tool_value(test) or isinstance(test, StepRef):
+            problems.append(f"map's where= takes a tool that returns bool for each row "
+                            f"(a test, such as is_hot), got {type(test).__name__}")
+            continue
+        fn = getattr(test, "fn", test)
+        if isinstance(test, ToolRef):
+            fn = (workflow.catalog.functions.get(test.id)
+                  if getattr(workflow, "catalog", None) is not None else BUILTIN_TOOLS.get(test.id))
+        returns = _return_hint(fn) if fn is not None else None
+        if returns is not None and returns is not bool:
+            problems.append(f"map's where= needs a test returning bool; "
+                            f"{getattr(test, 'id', getattr(fn, '__name__', 'it'))} "
+                            f"returns {_type_name(returns)}")
+
     coded(problems, "bad_tool_setting")
 
     # 6c'. a reference argument arrives whole, shaped by the parameter's type

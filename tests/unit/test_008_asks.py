@@ -824,7 +824,7 @@ def test_C3_functions_instead_of_globals():
 
 def test_C3_a_modifier_is_checked_on_its_own():
     assert check_modifier("map", {"nme": "s"}) == (
-        "map takes no parameter 'nme'; it accepts axis, name, replace, retries",)
+        "map takes no parameter 'nme'; it accepts axis, name, replace, retries, where",)
     assert check_modifier("retry") == (
         "retry needs times= — it has no default, so a step without it cannot run",)
     assert check_modifier("retry", {"times": 2}) == ()
