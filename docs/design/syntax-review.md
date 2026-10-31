@@ -101,6 +101,28 @@ list is written: `filter`, `expand`, `collapse(by=…)`, `sort`, `slice`,
 **Modifiers** say which rows, which keys, order, grouping, failures and
 time. Values for the tool come in the call.
 
+### 3.1 Broadcasting (`auto`)
+
+`auto` is broadcasting, as numpy defines it, applied to the arguments of one
+call (owner, 2026-10-31):
+
+1. Each argument is a **value**, a **list** (n items) or a **list of rows**.
+2. A list given to a parameter that takes one item is **iterated**; a list
+   given to a `list[T]` parameter is **consumed whole** (numpy's "core
+   dimension": `mean(temp: list[float])` is `(n) → ()`).
+3. Every iterated list must have **the same rows** (rule 6). Equal length is
+   not enough; otherwise refused, pointing to `join`.
+4. Values are **the same in every call** (broadcast).
+5. A list of rows given to a one-item parameter is **refused** unless it has
+   exactly one key: `auto` never chooses a key.
+6. Nothing iterated → **one call**, one value. Something iterated → **a call
+   per row**, a list aligned with those rows.
+7. Each argument reaches its parameter **by position or by keyword in the
+   call**, never because a column happens to share the parameter's name.
+
+It resolves when the step is written and prints as `map` (or one call), so
+the saved form says what runs.
+
 **Principles** for every choice: many spellings, one saved form; the explicit
 form prints back; a shortcut resolves when written; look-alikes that differ
 save differently; a second way only for a different intent; a refusal names
@@ -133,6 +155,8 @@ What core does today against §3, run at `20a7980`:
 | B4 | `stack` of an ids-only step gives rows with nothing in them | `stack(wf["p"][cols["#"]], …)` |
 | B5 | `auto` is stored, against `infer_verb`'s own docstring (*"never into a stored auto"*) | two spellings of one step have different specs and ids |
 | B6 | non-string column names are coerced silently | as above |
+| B7 | **a column in the data silently replaces a parameter's default** | `to_f(temp, scale=1.8)` on a step that happens to have a `scale` column (100.0) → 3692 °F, no warning |
+| B8 | a one-key step can't feed a tool whose parameter has another name | `to_f_v(t)` on `expand`'s `value` → *"needs 't'"*; the message also lists `#xs` as a column |
 
 ## 5. The decisions
 
@@ -172,7 +196,8 @@ only needs confirming. Old ids are kept so the background docs still line up.
 
 | | Decision | You said | Recommended | Was |
 |---|---|---|---|---|
-| D20 | Remove `auto` | don't infer variables | remove; the editor may *suggest* a verb (`k.infer_verb`); what's saved is what was chosen | X-D4, V1 |
+| D20 | `auto` | **keep it, as broadcasting with clearly defined rules** (owner, 2026-10-31) | `auto` decides only how calls are broadcast over the arguments (§3.1), never which key a parameter gets; it resolves when written and prints what it chose. Whether it may still choose a row-changing verb (`filter` from `-> bool`) is D20b | X-D4, V1 |
+| D20b | May `auto` pick `filter` (a tool returning `bool`)? | — | no: broadcasting decides how many calls, not which rows stay; `filter` is written | — |
 | D21 | Nothing added unseen (`breaker`) | — | shown in the formula, or not added | N11 |
 
 ### D. Modifiers
