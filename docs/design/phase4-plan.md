@@ -6,7 +6,7 @@
 >
 > | Page | Holds |
 > |---|---|
-> | **this one** | the goals and the order of work |
+> | **this one** | the goals, the order of work, and the changes in detail |
 > | [decisions.md](decisions.md) | every decision, grouped by the step that needs it |
 > | [syntax-review.md](syntax-review.md) | the design of the expression cleanup: the model, the rules, the bugs, the tests |
 >
@@ -77,7 +77,80 @@ change is confirmed before it lands.
 **The cheaper path.** S0–S4, then G, and S5 deferred: most of goal 1 and
 all of goal 2, for well under half the remaining effort.
 
-## 3. Done means
+## 3. The changes, in detail (S0–S4)
+
+What I propose to change, step by step: what you'd see before and after,
+where in the code, and the test that shows it. Later steps (S5–S10, D, E, F)
+are written at this level when they come up. Nothing below lands without
+your yes on its decisions ([decisions.md](decisions.md)).
+
+### S0. The tests (no behaviour changes)
+
+| Change | Where |
+|---|---|
+| The laws E1–E27 of syntax-review.md §8, one test each, marked expected-to-fail with the step that will make it pass | new `tests/unit/test_expressions.py` |
+| A regression test per bug B1–B10, expected-to-fail until S1 | the same file |
+| The property test learns the new references (`wf["p"]["temp"]`, `wf["p"][1]`), switched on step by step | `tests/unit/test_reshape_properties.py` |
+
+Running it shows exactly what fails today: the starting line.
+
+### S1. Bugs
+
+| | Today | After | Where | Needs |
+|---|---|---|---|---|
+| B1 | `widen(columns=["age", "bed"])` on `name, info` gives `None`s, silently | `mod.widen("info")` spreads that column; with other columns and none named: refused, *"widen which column? p has name, info"* | `verbs.widen_`, `checks` (widen's column) | D31 |
+| B2 | `expand(columns=["info"])` refuses a dict | key/value rows, the other columns kept (so a melt keeps `ward`) | `verbs.expand_` / `_unpack` | D32 |
+| B3 | `value=wf["p"][cols["#"]]` hands ids to a tool | refused: *"row ids aren't data; rename them into a variable first"* | `checks` (arguments), `workflow._resolve_arguments` | D27 |
+| — | `rename(columns={"#": "row"})` refused | copies the row id into a variable `row`; the row keeps its `#` | `verbs` (rename), `checks` | D28 |
+| B4 | `stack` of an ids-only step gives empty rows | refused: nothing to stack | `combines.stack` | D29 |
+| B6 | `DataFrame([[1, 2]])` gets keys `"0"`, `"1"` | refused: *"columns must be named: mod.name(["a", "b"])"* | `verbs.grid` and the source path | D3 |
+| B7 | a `scale` column silently replaces `scale=1.8` | a warning: *"scale comes from p's column, not its default 1.8"* (S3 then removes binding by name) | `modifiers._d_apply`, `checks` | — |
+| B9 | a one-key list counts as a "block" (its `#` counted) | `#` columns never count towards a shape | `values._shape_kind` | — |
+| B10 | an object without a `repr` gets a new data version every run | its own `data_version()`, else its fields, else pickle; else the plan says it has no stable version | `output._data_version` | D57 |
+
+(B5, `auto` stored, is S4. B8 is S3.)
+
+### S2. Values and keys
+
+| Today | After | Where | Needs |
+|---|---|---|---|
+| a row dict holds `np.float64(38.2)`, missing floats as `NaN` | `38.2`, `None`: plain Python, unless the parameter asks for `pd.Series` / `DataFrame` | `verbs._units` (the one place rows are made for tools) | D17 |
+| any string is a column name | an identifier (`temp_f`); others refused with a suggested name, when a step writes them | `checks` (names written: sources, `mod.name`, `rename`, records) | D3 |
+
+### S3. The core change
+
+| Today | After | Where | Needs |
+|---|---|---|---|
+| `wf["p"]["temp"]` refused (*"Columns use cols"*) | a string in brackets is a key; an integer a row; `wf["p"][1]["temp"]` = `wf["p"]["temp"][1]` | `references.StepRef.__getitem__` | D2, D10 |
+| a selection can't be an input (*"make it its own step"*) | `to_f(wf["p"]["temp"])` is the normal form | `operation._wire`, `run`, staging | D6 |
+| `wf[0]` is the first step | step names only | `references` (`wf[…]`) | D5 |
+| `cols[…]` / `rows[…]` needed | kept for ranges of keys; printed in the plain form | `references`, `operation.to_source` | D7 |
+| `.header` | `.keys` | `references` | D8 |
+| parameters bind to columns **by name** | by **position or keyword in the call**, and by type (§3.1 broadcasting); a list of rows to a value parameter refused, naming the keys; to `dict`, a call per row | `modifiers._d_apply`, `checks` (binding, `_paired_arguments`), `workflow._columns_bound` | D13, D14, D16 |
+| — | by name only on request: `mod.map(by_name=True)` | `modifiers`, `checks` | D15 |
+| a reference to a step whose shape isn't known yet | a warning when declared, decided at run, re-checked after | `checks`, staging | D18 |
+| `collapse(by="ward")` reads `ward` from the input | the same, also when the input is one key of a step | `verbs.collapse_` | D19 |
+
+Every existing formula that relies on binding by name is rewritten in the
+tests and examples (about 200 call sites); the app's formulas change in G.
+
+### S4. Broadcasting and naming
+
+| Today | After | Where | Needs |
+|---|---|---|---|
+| `is_hot(wf["p"])` saves `mod.auto()`, decides at run (B5) | `auto` resolves when written, by §3.1's rules, and saves and prints what it chose (`map`, or one call) | `run._resolve_auto`, `operation._wire` | D20 |
+| `auto` turns a `bool` tool into a `filter` | it doesn't: `filter` is written | `checks.infer_verb` | D20b |
+| `auto` adds `breaker(after=5)` unseen | shown in the formula, or not added | `run` (defaults), `operation.to_source` | D21 |
+| an unnamed single key is `value` | the step's name (`k["temp_f"] = …` → `temp_f`); `mod.name` still wins | `workflow.default_name_rule` | D9 |
+| a source's `list[int]` is one value | its declared type decides: `list[T]` is rows; `list` or none is one value | the source path in `workflow` | D12 |
+| a literal is one value | the same (confirmed) | — | D11 |
+
+### After S4
+
+G (the app moves) uses app-migration.md, updated with S1–S4's changes. S5
+onwards is written at this level when its turn comes.
+
+## 4. Done means
 
 Phase 4 is done when:
 
@@ -93,7 +166,7 @@ Phase 4 is done when:
 
 Then phase 5, the final docs, starts.
 
-## 4. Done so far in phase 4
+## 5. Done so far in phase 4
 
 | | |
 |---|---|
