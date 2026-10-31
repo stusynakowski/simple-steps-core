@@ -1,5 +1,7 @@
 # Referencing and assignment: a proposal
 
+> **The work is ordered in [expressions-plan.md](expressions-plan.md)** (X1–X10).
+>
 > **Status: a proposal, nothing built** (owner, 2026-10-30). It formalises
 > the owner's thoughts on how steps, variables, rows and cells are referenced
 > and handed to tools, so the rules can be decided one by one. "Today" lines

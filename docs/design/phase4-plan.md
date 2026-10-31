@@ -160,4 +160,5 @@ G18 (see the step tables).
 
 Choices the owner wants to reconsider later (`auto`, modifiers that take data,
 how references are passed, expand's ids, `#` in modifiers) are listed, with
-what core does today, in [to-revisit.md](to-revisit.md).
+what core does today, in [to-revisit.md](to-revisit.md). The cleanup of expression syntax that comes from them is planned in
+[expressions-plan.md](expressions-plan.md).

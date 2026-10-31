@@ -6,6 +6,7 @@
 > options. When one is taken up, it becomes a decision in
 > [phase4-plan.md](phase4-plan.md) §5 and is confirmed before it lands.
 
+**The dev plan for V1–V5 is [expressions-plan.md](expressions-plan.md).**
 **A proposal answering V1, V3 and V4 is in
 [referencing-proposal.md](referencing-proposal.md)** (2026-10-30).
 
