@@ -730,7 +730,9 @@ class Workflow:
             for row in rows_in:
                 if row in upstream.output.data.index:
                     key = upstream.output.data.loc[row, by]
-                    if key not in ids:
+                    # a group's id is its key only for an int or str key (K19 D3);
+                    # any other key (a list) can't be looked up: all of it changes
+                    if not isinstance(key, (int, str)) or key not in ids:
                         return None            # a new group: the whole output changes
                     out.add(key)
         return out
