@@ -424,27 +424,14 @@ class Kernel:
         the first 50 when not given. ``window`` says which, and how many in all."""
         return self.workflow.preview(self._name(step), rows if rows is not None else (0, self.PAGE))
 
-    def cell(self, step: str | int, row: Any, column: str = VALUE_COLUMN) -> dict:
-        """One cell: its value, type and state, and the input cells it came from.
+    def cell(self, step: str | int, row: int, column: str = VALUE_COLUMN) -> dict:
+        """One cell: its value, type and state, its lineage, and the input
+        cells it came from.
 
-        *row* is a row id, as in selections (K19): ``k.cell("srt", 0)`` is the
-        row whose id is 0, wherever a sort put it; ``k.cell("e", "0.1")`` and
-        ``k.cell("c", "A")`` work too.
+        *row* is a row number, as shown (``#``): ``k.cell("srt", 0)`` is the
+        first row on screen, ``-1`` the last (S5a, CA-B1).
         """
-        name = self._name(step)
-        index = self.workflow.steps[name].output.data.index
-        position = next((p for p, i in enumerate(index) if i == row), None)
-        if position is None:      # an id typed as text, or text typed as an id
-            position = next((p for p, i in enumerate(index) if str(i) == str(row)), None)
-        if position is not None:
-            return self.workflow.cell(name, position, column)
-        base = {"step": name, "row": row, "column": column}
-        if self.workflow.steps[name].output.meta.get("staged"):
-            return {**base, "state": "unknown",
-                    "because": f"{name!r} hasn't run, so whether it has row {row!r} isn't known yet",
-                    "resolve": [f"run {name}"]}
-        return {**base, "state": "missing",
-                "because": f"{name!r} has no row {row!r}"}
+        return self.workflow.cell(self._name(step), row, column)
 
     # ── saving ───────────────────────────────────────────────────────────
     @property

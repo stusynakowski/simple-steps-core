@@ -864,12 +864,13 @@ class Workflow:
                    "formula": step.operation.to_source()}
         if not step.valid:
             root, why = self.root_cause(step_id) or (step_id, step.problems[0])
-            return {**summary, "columns": [], "rows": [], "row_count": None,
+            return {**summary, "columns": [], "lineage": [], "rows": [], "row_count": None,
                     "problems": list(step.problems),
                     "markers": [{"kind": "invalid", "text": f"‹can't run — {step.problems[0]}›",
                                  "root": root, "because": why}]}
         types = plan.get("types", {})
-        names = list(plan.get("columns", {}).get("names", []))
+        # data columns only: lineage is listed apart (S5a, rule 28)
+        names = [c for c in plan.get("columns", {}).get("names", []) if not is_id_column(c)]
         # Each column's number, 0…m-1 left to right: the counterpart of a row's
         # "#", for showing and clicking by position (cols[0], cols[0:3]).
         columns = [{"name": c, "type": types.get(c, "any"), ROW_ID: i}
@@ -886,7 +887,10 @@ class Workflow:
                                "because": label, "resolve": [f"run {step_id!r}"]})
         all_rows = self._preview_rows(step, staged, names, types)
         lo, hi = (rows if rows is not None else (0, len(all_rows)))
-        return {**summary, "columns": columns, "rows": all_rows[lo:hi],
+        lineage = {} if staged else self.lineage(step_id)
+        for n, row in enumerate(all_rows):
+            row["lineage"] = {name: cells[n] for name, cells in lineage.items()}
+        return {**summary, "columns": columns, "lineage": list(lineage), "rows": all_rows[lo:hi],
                 "row_count": plan.get("rows"), "markers": markers,
                 "window": {"start": lo, "stop": min(hi, len(all_rows)),
                            "of": len(all_rows)}}
@@ -904,6 +908,8 @@ class Workflow:
                 note = out.notes.get(row_id, {})
                 cells = {}
                 for c in out.data.columns:
+                    if is_id_column(c):
+                        continue                    # lineage: listed apart
                     state = str(out.states.at[row_id, c])
                     if state == "known" and stale:
                         state = "stale"
@@ -916,7 +922,7 @@ class Workflow:
                             cell["error"] = note["cells"][str(c)]
                     cells[str(c)] = cell
                 row_state = str(row_states[row_id])
-                result.append({ROW_ID: _plain(row_id), "position": position, "id": _plain(row_id),
+                result.append({ROW_ID: position, "position": position,
                                "state": "stale" if stale and row_state == "known" else row_state,
                                "cells": cells})
             return result
@@ -927,9 +933,9 @@ class Workflow:
         if not index and ROWS_RULE.get(verb) == "at_most":
             known = self._known_index(step.operation)
             index, state = (list(known) if known is not None else []), "maybe"
-        return [{ROW_ID: _plain(row_id), "position": i, "id": _plain(row_id), "state": state,
+        return [{ROW_ID: i, "position": i, "state": state,
                  "cells": {c: {"state": state, "type": types.get(c, "any")} for c in names}}
-                for i, row_id in enumerate(index)]
+                for i, _row_id in enumerate(index)]
 
     def cell(self, step_id: str, row: int, column: str) -> dict:
         """One cell, for a click: its value or what is expected there (009 §4).
@@ -944,6 +950,9 @@ class Workflow:
         """
         view = self.preview(step_id)
         base = {"step": step_id, "row": row, "column": column}
+        if not isinstance(row, int) or isinstance(row, bool):
+            return {**base, "state": "missing",
+                    "because": f"a row is a row number, as shown in #: {row!r} isn't one"}
         if view["state"] == "invalid":
             return {**base, "state": "missing", "because": view["problems"][0]}
         names = [c["name"] for c in view["columns"]]
@@ -963,9 +972,11 @@ class Workflow:
         n = len(rows_)
         if -n <= row < n:
             entry = rows_[row]
-            cell = {**base, "id": entry["id"], **entry["cells"].get(column, {"state": entry["state"]}),
-                    "type": type_}
-            cell["inputs"] = self._cell_inputs(step_id, entry["id"], column)
+            row_id = self.steps[step_id].output.data.index[row] \
+                if row < len(self.steps[step_id].output.data.index) else None
+            cell = {**base, **entry["cells"].get(column, {"state": entry["state"]}),
+                    "type": type_, "lineage": entry.get("lineage", {})}
+            cell["inputs"] = [self._shown_input(e) for e in self._cell_inputs(step_id, row_id, column)]
             if cell["state"] == "stale":
                 out_meta = self.steps[step_id].output.meta
                 changes = self.arg_changes(step_id)
@@ -1026,6 +1037,21 @@ class Workflow:
 
     #: How many of an input row's values a cell click shows; the rest are counted.
     INPUT_VALUES_SHOWN = 6
+
+    def _shown_input(self, entry: dict) -> dict:
+        """An input entry as shown: its rows as row numbers, never ids (S5-D5)."""
+        entry = dict(entry)
+        source = self.steps.get(entry.get("step"))
+        index = [str(i) for i in source.output.data.index] if source is not None else []
+
+        def number(v: Any) -> Any:
+            return index.index(str(v)) if str(v) in index else None
+        if "id" in entry:
+            row_id = entry.pop("id")
+            entry["row"] = None if row_id is None else number(row_id)
+        if isinstance(entry.get("rows"), list):
+            entry["rows"] = [number(v) for v in entry["rows"]]
+        return entry
 
     def _cell_inputs(self, step_id: str, row_id: Any, column: str | None = None) -> list[dict]:
         """Every input cell a result cell came from, one entry per binding (010 C27).
@@ -1187,6 +1213,120 @@ class Workflow:
                     if found is not None:
                         return found
         return None
+
+    # ── lineage, as a user sees it (S5a, S5b; core-asks §M3) ───────────────
+    def lineage(self, step_id: str) -> dict:
+        """A step's lineage columns, as shown: ``{"#r": [cell per row], …}``.
+
+        Every step carries its input's lineage; one that isn't one-to-one adds
+        ``#<parent>`` (``.idx`` after an expand, ``.2`` for a parent read
+        twice). A cell is the ancestor row's **current** row number, a list of
+        them after a collapse, or None where there is none (S5-D4). Computed
+        from core's row ids, which already are lineage: nothing is stored.
+        """
+        step = self.steps.get(step_id)
+        if step is None or step.output.meta.get("staged"):
+            return {}
+        positions: dict = {}
+
+        def number(ancestor: str, value: Any) -> Any:
+            if ancestor not in positions:
+                index = self.steps[ancestor].output.data.index if ancestor in self.steps else []
+                positions[ancestor] = {**{str(i): n for n, i in enumerate(index)},
+                                       **{i: n for n, i in enumerate(index) if _hashable(i)}}
+            found = positions[ancestor]
+            if isinstance(value, list):
+                return [found.get(v, found.get(str(v))) for v in value]
+            return None if value is None else found.get(value, found.get(str(value)))
+
+        shown = {}
+        for name, (ancestor, kind, cells) in self._lineage_ids(step_id, {}).items():
+            shown[name] = list(cells) if kind == "idx" else [number(ancestor, v) for v in cells]
+        return shown
+
+    def _lineage_ids(self, step_id: str, memo: dict) -> dict:
+        """``{name: (ancestor, "rows" | "idx", [cell per row])}``, cells in the
+        ancestor's row ids (an id, a list of ids, or None)."""
+        if step_id in memo:
+            return memo[step_id]
+        memo[step_id] = {}                          # a cycle can't feed itself
+        step = self.steps.get(step_id)
+        if step is None or step.output.meta.get("staged"):
+            return {}
+        data, op_ = step.output.data, step.operation
+        index = list(data.index)
+        kind = self._kind(step_id)
+        out: dict = {}
+
+        def add(name: str, entry: tuple) -> None:
+            base, n = name, 2
+            while name in out:                      # the same ancestor twice: #r, #r.2
+                name, n = f"{base}.{n}", n + 1
+            out[name] = entry
+
+        # Its own parents, and for each, the parent's id of every row.
+        parents: list = []                          # [(parent, [id per row], writes idx)]
+        writes = is_combine(op_) and op_.tool in ("join", "stack") \
+            or kind in ("expand", "collapse", "distinct")
+        if writes:
+            # only the column it writes for each input: a `#` column it carries,
+            # or groups by, isn't a new parent
+            if is_combine(op_):
+                written = own_id_columns([str(g) for g in op_.grids])
+            else:
+                written = [f"{ROW_ID}{op_.input}"] if op_.input is not None else []
+            for c in written:
+                parent = self._id_source(c)
+                if c in data.columns and parent in self.steps:
+                    parents.append((parent, [_plain(data.at[i, c]) for i in index], kind == "expand"))
+        elif is_combine(op_) and op_.tool == "zip":
+            for g in op_.grids:
+                found = self.trace(step_id, index, str(g)) if str(g) in self.steps else None
+                if found is not None:
+                    parents.append((str(g), list(found), False))
+        elif op_.input is not None and keeps_ids(kind, op_.shape_verb):
+            source = str(op_.input)
+            columns_only = kind == "select" and op_.shape_verb.settings.get("rows") is None
+            if kind in _ONE_TO_ONE or columns_only or kind is None:
+                # one-to-one: its rows are its input's; it carries, adds nothing
+                for name, (ancestor, k_, cells) in self._lineage_ids(source, memo).items():
+                    by_id = dict(zip(map(str, self.steps[source].output.data.index), cells))
+                    add(name, (ancestor, k_, [by_id.get(str(i)) for i in index]))
+                memo[step_id] = out
+                return out
+            parents.append((source, [_plain(i) for i in index], False))
+
+        counts: dict = {}
+        for parent, ids, idx in parents:
+            name = f"{ROW_ID}{parent}"
+            add(name, (parent, "rows", ids))
+            if idx:                                 # an item's place in its parent's cell
+                seen: dict = {}
+                places = []
+                for v in ids:
+                    places.append(seen.get(str(v), 0))
+                    seen[str(v)] = places[-1] + 1
+                add(f"{name}.idx", (parent, "idx", places))
+            counts[parent] = counts.get(parent, 0) + 1
+        # ... then everything its parents carry, looked up through those ids
+        for parent, ids, _idx in parents:
+            carried = self._lineage_ids(parent, memo)
+            if not carried:
+                continue
+            parent_ids = list(map(str, self.steps[parent].output.data.index))
+            for name, (ancestor, k_, cells) in carried.items():
+                by_id = dict(zip(parent_ids, cells))
+
+                def through(v: Any) -> Any:
+                    if isinstance(v, list):
+                        hits = [through(x) for x in v]
+                        flat = [y for h in hits for y in (h if isinstance(h, list) else [h])
+                                if y is not None]
+                        return list(dict.fromkeys(flat)) if k_ == "rows" else flat
+                    return None if v is None else by_id.get(str(v))
+                add(name, (ancestor, k_, [through(v) for v in ids]))
+        memo[step_id] = out
+        return out
 
     def aligned(self, a: str, b: str) -> bool:
         """Are steps *a* and *b* the same rows in the same order: one step, or
@@ -2443,6 +2583,15 @@ def _spread_record(operation: Operation, output: Output) -> None:
 
 
 _MISSING = object()
+
+
+def _hashable(value: Any) -> bool:
+    try:
+        hash(value)
+    except TypeError:
+        return False
+    return True
+
 #: Verbs whose output rows are their input's rows, in order (core-asks §M3, aligned).
 _ONE_TO_ONE = frozenset({"map", "group", "rename", "drop", "widen", "pack"})
 _SNAKE = re.compile(r'^[a-z0-9]+(_[a-z0-9]+)*$')

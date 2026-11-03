@@ -274,11 +274,11 @@ def test_L40_reshaping_is_closed(frame, chain):
         if step.state != "completed":
             continue
         # 3. lineage names rows that exist
-        for row in list(step.output.data.index)[:3]:
+        for row in range(min(3, len(step.output.data))):
             for column in variables(step.output.data.columns)[:2]:
                 for entry in k.cell(s, row, column).get("inputs", []):
-                    if entry.get("id") is not None and entry.get("step") in wf_.steps:
-                        assert entry["id"] in wf_.steps[entry["step"]].output.data.index, \
+                    if entry.get("row") is not None and entry.get("step") in wf_.steps:
+                        assert 0 <= entry["row"] < len(wf_.steps[entry["step"]].output.data), \
                             (s, row, column, entry)
         # 4. a rebuild gives the input back
         inverse = step.plan.get("inverse") or {}

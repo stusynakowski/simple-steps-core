@@ -281,3 +281,12 @@ here (core-asks D1 is CA-D1, and so on).
 | D27 (B3) | yes: a `#` column never reaches a tool; it may still be used to pick | refused as an argument; settings and conditions may name it |
 | D29 (B4) | yes, refused with its reason | refused |
 | B9, D57 (B10), B11 | yes | — |
+
+### S5, answered (2026-11-02)
+
+S5-D1 to S5-D6 (phase4-plan §3, S5): **all as recommended** (owner). Conditions
+move into S5; a range stays a range, a row or list of rows is saved as
+lineage; a pick into a step that hasn't run is resolved when it has; a lineage
+cell shows the parent row's current row number, empty when it's gone;
+`step.output.data` keeps core's ids for code, everything shown uses row
+numbers; a join row's empty side is `row["other"] == None`.

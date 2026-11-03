@@ -210,13 +210,13 @@ is copied from it, not the other way round.
 | S1 | an object's data version is its own `data_version()`, else its fields, else its pickle: readers of an object column no longer look stale after every run | — |
 | S1 | a step is stale when a column its output carries changes, not only a bound one | more steps show `stale`, correctly |
 | S1 | an int column stays int across a `join` gap | — |
+| S5a, S5b | the view's `#` is the row number `0…n-1`; the `id` field goes; `k.cell(step, row)` takes a row number (and refuses anything else, saying so); a cell's `inputs` give each input row as `row` (its number), not `id`; lineage is listed apart: `view["lineage"]` names the columns, each row's `lineage` holds them (the ancestor's current row number, a list after a collapse, `None` for a gap), and every step carries its ancestors' (`#r`, `#r.idx`, `#r.2`). `step.output.data` keeps core's ids, for code | show `#` as is; collapse lineage under "from r"; read `row`, not `id`, in a cell's inputs |
 | S2 | a numeric or empty column name becomes `var<n>` (`0`, `"0"` → `var0`, `2023` → `var2023`); a clash is refused naming both | expressions that named `"0"` name `var0` |
 
 **Coming** (planned; this list becomes "landed" row by row)
 
 | Step | Change | What the app will do |
 |---|---|---|
-| S5 | the view's `#` is the row number `0…n-1`; the `id` field goes; `k.cell(step, row)` takes a row number; lineage columns are listed apart (`view["lineage"]`), each cell the parent's current row number | show `#` as is; collapse lineage under "from r" |
 | S5 | a typed row number (`wf["s"][3]`) is resolved at staging and **saved as the row's lineage** (`wf["s"][row["r"] == 2]`, `cols["ward"] == "A"` after a collapse); a range stays a range; `rows["A"]` is refused | the parser parses conditions; the grid shows the saved form; a click writes a row number |
 | S5 | conditions in a pick: `cols["x"]`, `row["s"]`, `row["s"].idx`, comparisons, `.isin`, `&`, `\|`, `~`; `row`, `rows`, `cols` reserved | the parser accepts them (never evaluated as Python) |
 | S5 | `join(…, on="#r")`; `mod.copy`; column arguments and `zip_` only between aligned steps | offer "join back to parent" |

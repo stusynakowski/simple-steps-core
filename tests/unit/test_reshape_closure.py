@@ -219,7 +219,7 @@ def test_L13_a_join_collapses_back_to_one_side(k):
 def test_L14_a_collapsed_cell_traces_to_its_group(k):
     k["c"] = op("count")[mod.collapse(by="ward")](wf["v"])
     k.run_all()
-    inputs = k.cell("c", "A", "value")["inputs"]
+    inputs = k.cell("c", 0, "value")["inputs"]                    # group A, row 0
     assert {i["step"] for i in inputs} == {"v"}
     assert all(i["rows"] == [0, 1, 3] for i in inputs)
 
@@ -227,9 +227,9 @@ def test_L14_a_collapsed_cell_traces_to_its_group(k):
 def test_L15_a_joined_cell_traces_to_its_pair(k):
     k["j"] = join(wf["v"], wf["w"], on="ward")
     k.run_all()
-    row = next(i for i, n in data(k, "j")["name"].items() if n == "Ben")
+    row = list(data(k, "j")["name"]).index("Ben")               # a row number (S5a)
     inputs = k.cell("j", row, "head")["inputs"]
-    assert {(i["step"], i["id"]) for i in inputs} >= {("w", 1)}
+    assert {(i["step"], i["row"]) for i in inputs} >= {("w", 1)}
     assert all(i["state"] == "known" for i in inputs)
 
 
@@ -258,8 +258,8 @@ def test_L17_row_ids_are_never_parsed(k):
     k["e"] = two_rc[mod.expand()](wf["n"])
     k.run_all()
     assert data(k, "e").loc["a.1", "value"] == "p1"                 # item 1 of row a
-    (parent,) = k.cell("e", "a.1", "value")["inputs"]
-    assert parent["id"] == "a"
+    (parent,) = k.cell("e", 1, "value")["inputs"]               # item 1 of row a: row 1
+    assert parent["row"] == 0                                     # a is n's row 0
 
 
 def test_L18_empty_packs_to_an_empty_list_and_back(k):
@@ -575,7 +575,7 @@ def test_L41_changing_one_row_makes_only_its_group_stale():
     k["tot"] = op("count")[mod.collapse(by="ward")](wf["v"])
     k.run_all()
     k["v"] = pd.DataFrame({"ward": ["A", "A", "B"], "temp": [1.0, 2.0, 9.0]})   # ward B's row
-    stale = {r["#"]: r["state"] for r in k.view("tot")["rows"]}
+    stale = {r["cells"]["ward"]["value"]: r["state"] for r in k.view("tot")["rows"]}
     assert stale == {"A": "known", "B": "stale"}
 
 

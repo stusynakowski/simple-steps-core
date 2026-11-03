@@ -57,7 +57,7 @@ change is confirmed before it lands.
 | **S0** | **The tests** | the laws E1–E27, expected-to-fail until their step; core-asks `probe.py` (L1–L52) turned into tests the same way | all | small | ✓ 2026-11-02 |
 | **S1** | **Bugs, and no wrong answers** | B1–B11; a column argument from an unaligned step refused, the message writing the join; `zip_` of unaligned steps refused; `total` over mixed columns | M0 (L1–L5) | small | ✓ 2026-11-02 |
 | **S2** | **Values and keys** | tools get plain Python values (already held on every path; now tested); numeric names become `var<n>`; other names kept (CA-E) | L21 | small | ✓ 2026-11-02 |
-| **S5** | **Row numbers and lineage** (moved up, **next**: detail it in §3 first) | **a change of surface** (CA-B1, amended): rows shown and typed as `0…n-1`, picks saved as lineage; core's lineage-based row ids stay its identity. Every step carries its ancestors' lineage; `.idx`; `#r.2`; lineage apart from data; conditions (`cols`, `row`, from S3); joins on lineage; `mod.copy`; strict alignment (CA-11). Five pieces, §3 | M1, M2, conditions (L6–L19, L29–L31, L35, L36, L41, L44, L45, L48) | medium (was the largest) | N1 decided; S5-D1–D6 (recommended, §3) |
+| **S5** | **Row numbers and lineage** (moved up, **next**: detail it in §3 first) | **a change of surface** (CA-B1, amended): rows shown and typed as `0…n-1`, picks saved as lineage; core's lineage-based row ids stay its identity. Every step carries its ancestors' lineage; `.idx`; `#r.2`; lineage apart from data; conditions (`cols`, `row`, from S3); joins on lineage; `mod.copy`; strict alignment (CA-11). Five pieces, §3 | M1, M2, conditions (L6–L19, L29–L31, L35, L36, L41, L44, L45, L48) | medium (was the largest) | N1, S5-D1–D6 decided |
 | **S4** | **Naming** | one output named after its step; a dict's keys as columns; `var<n>`; ints stay ints; step names identifiers; sources and literals (D12) | M3 (L20–L24, L46, L47) | medium | needs D12 (recommended) |
 | **S3** | **Grammar and binding** | strings choose columns; pickers before the verb; a pick as an input; **binding at staging, saved explicitly** (CA-A); `mod.cast`; verbs inferred and written (`auto` resolved, D20); nothing unseen (D21) | M4, M5 (L25–L39, L48–L51) | **large** | N2, N3 decided; D8, D18, D19, D21 (recommended) |
 | **S11** | **Live editing** | readers re-checked at once; "reference moved"; stale reasons; renames rewrite what core wrote; delete anyway | M6 (L40–L43, L52) | small–medium | — |
@@ -193,7 +193,7 @@ row numbers `0, 0, 1, 1`.
 | S5d | **Picks are row numbers, saved as lineage** | `wf["sorted_"][1]` is row id 1 (`n` 20); `[-1]` refused; `rows["A"]` works | `[i]`, `[[i, k]]`, `[-1]` are row numbers as typed; staging writes the rows' lineage: `row["r"] == 2`; `(row["r"] == 1) & (row["r"].idx == 0)` through an expand; `cols["ward"] == "A"` through a collapse; both sides through a join; into a source, sweep or table it stays a row number. A range stays a range (S5-D2). A pick follows its row; one whose row is gone fails, naming it. `rows["A"]` refused with the row number to use | `references`, `checks` (resolve at staging), `operation.to_source` | L7a–L7f, L8, L41a, L41b |
 | S5e | **Joins on lineage, copy, strict alignment** | `join(…, on="#r")` refused; no `mod.copy`; `rename` of `#r` replaces it; pairing by id after a sort or between child and parent | `join(child, parent, on="#r")`, `how="left"` gives every parent row back, `absent` where dropped; a column passed through from the shared ancestor appears once (CA-C). `mod.copy(columns={"#r": "parent"})`, and `rename` of a `#` column saved as it (CA-D). Column arguments and `zip_` only between aligned steps (CA-11); the refusal writes the join | `combines.join`, `verbs` (copy), `checks` (`_covers` → `aligned`) | L17, L18a, L18b, L45a, L45b, L37b |
 
-**Decisions** (each recommended; confirm before its piece lands):
+**Decisions** (all decided as recommended, owner 2026-11-02):
 
 | | Decision | Recommended |
 |---|---|---|
@@ -203,6 +203,10 @@ row numbers `0, 0, 1, 1`.
 | S5-D4 | A lineage cell's number | the parent row's **current** row number (the model said "as when the step ran"); empty where the parent row is gone |
 | S5-D5 | The Python API | `step.output.data` keeps core's ids as its index, for code; the view, `k.cell`, picks and `k.data()` (D48) use row numbers |
 | S5-D6 | A join row's lineage pick, with an empty side | both sides' lineage, an empty side written `row["other"] == None` |
+
+**Progress.** S5a and S5b done 2026-11-02: `Workflow.lineage(step)` works the
+lineage out from core's ids; the view lists it apart and shows row numbers;
+cell inputs give row numbers. 14 core-asks tests now hold (L6, L10–L16a, L52).
 
 **Existing tests that change** (counted at `65865bb`): the view's `#` (12
 uses), `k.cell` by id (31; most read a source, where the id is the row

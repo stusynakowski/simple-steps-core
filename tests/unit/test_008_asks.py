@@ -1332,7 +1332,7 @@ def test_009_clicking_a_cell_says_what_is_there_or_expected(unrun):
     known = unrun.cell("s", 1, "value")
     assert (known["state"], known["value"]) == ("known", 3.0)
     # 010 C27: one entry per binding — the column read and the argument it fed
-    assert known["inputs"] == [{"step": "r", "id": 1, "row": 1, "columns": ["n"], "argument": "n",
+    assert known["inputs"] == [{"step": "r", "row": 1, "row": 1, "columns": ["n"], "argument": "n",
                                 "state": "known", "values": {"n": 2}, "more": 0}]
     assert unrun.cell("s", 9, "value")["because"] == "row 9 of 's', which has 2 rows (0–1)"
     assert unrun.cell("s", 0, "nope")["state"] == "missing"
@@ -1401,23 +1401,23 @@ def test_009_a_cell_shows_the_input_values_that_produced_it(failing):
     up from the row id, never stored per cell."""
     failing.run_all()
     failed = failing.cell("a", 1, "value")
-    assert failed["inputs"] == [{"step": "r", "id": 1, "row": 1, "columns": ["n"], "argument": "n",
+    assert failed["inputs"] == [{"step": "r", "row": 1, "row": 1, "columns": ["n"], "argument": "n",
                                  "state": "known", "values": {"n": 2}, "more": 0}]   # n = 2 raised
     assert "inputs" not in failing.step("a").output.meta                # nothing stored
     failing["view"] = zip_(failing["r"], failing["a"])
     failing.run("view")
     # a zip cell comes from the one input that supplied its column
-    assert [(i["step"], i["id"], i["state"]) for i in failing.cell("view", 1, "value")["inputs"]] == [
+    assert [(i["step"], i["row"], i["state"]) for i in failing.cell("view", 1, "value")["inputs"]] == [
         ("a", 1, "failed")]
-    assert [(i["step"], i["id"]) for i in failing.cell("view", 1, "n")["inputs"]] == [("r", 1)]
+    assert [(i["step"], i["row"]) for i in failing.cell("view", 1, "n")["inputs"]] == [("r", 1)]
 
 
 def test_009_an_expanded_item_points_to_its_parent_row(r3):
     r3["items"] = fan_ids_009[mod.expand()](r3["r"])
     r3.run_all()
-    cell = r3.cell("items", 2, "value")                                   # id "1.1"
-    assert cell["id"] == "1.1"
-    assert cell["inputs"][0]["id"] == 1 and cell["inputs"][0]["values"] == {"n": 2}
+    cell = r3.cell("items", 2, "value")                                   # item 1 of r's row 1
+    assert cell["lineage"] == {"#r": 1, "#r.idx": 1}
+    assert cell["inputs"][0]["row"] == 1 and cell["inputs"][0]["values"] == {"n": 2}
 
 
 def test_009_wide_input_rows_show_a_few_values_and_count_the_rest():
@@ -1433,7 +1433,7 @@ def test_009_wide_input_rows_show_a_few_values_and_count_the_rest():
     inputs = w.cell("s", 0, "value")["inputs"]
     assert len(inputs) == 9                       # one binding per column read
     copied = w.cell("one", 0, "c0")["inputs"]
-    assert copied == [{"step": "r", "id": 0, "row": 0, "columns": ["c0"], "argument": None,
+    assert copied == [{"step": "r", "row": 0, "row": 0, "columns": ["c0"], "argument": None,
                        "state": "known", "values": {"c0": 0}, "more": 0}]
 
 
@@ -1555,9 +1555,9 @@ def test_C27_every_input_cell_is_named_with_its_argument():
     w["s"] = scale_008[mod.map()](w["r"], weight=w["w"][0][cols["w"]])
     w.run("s")
     assert w.cell("s", 1, "value")["inputs"] == [
-        {"step": "r", "id": 1, "row": 1, "columns": ["n"], "argument": "n", "state": "known",
+        {"step": "r", "row": 1, "row": 1, "columns": ["n"], "argument": "n", "state": "known",
          "values": {"n": 2}, "more": 0},
-        {"step": "w", "id": 0, "row": 0, "columns": ["w"], "argument": "weight", "state": "known",
+        {"step": "w", "row": 0, "row": 0, "columns": ["w"], "argument": "weight", "state": "known",
          "values": {"w": 1.5}},
     ]
 
@@ -1643,9 +1643,9 @@ def test_C25_row_staleness_survives_a_saved_session(rows3):
 
 
 # ── "#" is the row-id column (2026-10-23) ───────────────────────────────
-def test_hash_is_the_row_id_on_every_step(wf):
-    """'#' is each row's id (reshaping.md R-D11) — after a filter, the ids of
-    the input rows it kept; the row's position on screen is `position`."""
+def test_hash_is_the_row_number_and_lineage_says_where_from(wf):
+    """'#' is each row's number (S5a, CA-B1); after a filter, the input rows it
+    kept are its lineage. Core's ids stay in `.data` (S5-D5)."""
     @tool
     def big_hash(n: int) -> bool:
         return n > 1
@@ -1653,9 +1653,9 @@ def test_hash_is_the_row_id_on_every_step(wf):
     wf["k"] = big_hash[mod.filter()](wf["readings"])        # keeps input rows 1, 2, 3
     wf["s"] = scale_008[mod.map()](wf["k"])
     wf.run_all()
-    assert list(wf.step("s").output.view()["#"]) == [1, 2, 3]
-    assert [r["#"] for r in wf.preview("s")["rows"]] == [1, 2, 3]
-    assert [r["position"] for r in wf.preview("s")["rows"]] == [0, 1, 2]
+    assert list(wf.step("s").output.data.index) == [1, 2, 3]
+    assert [r["#"] for r in wf.preview("s")["rows"]] == [0, 1, 2]
+    assert [r["lineage"]["#readings"] for r in wf.preview("s")["rows"]] == [1, 2, 3]
     cell = wf.cell("s", 0, "value")                          # '#0' of s
     assert cell["inputs"][0]["step"] == "k" and cell["inputs"][0]["row"] == 0
     assert wf.cell("k", 0, "n")["inputs"][0]["row"] == 1     # k's #0 is readings' #1
