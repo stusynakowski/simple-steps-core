@@ -281,7 +281,6 @@ def test_B10_an_objects_version_is_its_own_then_its_fields():
     assert version(Scan(1)) == version(Scan(1)) != version(Scan(2))
 
 
-@pytest.mark.xfail(strict=True, reason="S1 (B11): a passed-through column makes its step stale")
 def test_B11_a_change_to_a_passed_through_column_makes_the_step_stale():
     k = Kernel(Catalog([key_pp]))
     k["s0"] = pd.DataFrame({"k": ["A"], "n": [1]})

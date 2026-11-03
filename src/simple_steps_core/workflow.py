@@ -596,7 +596,11 @@ class Workflow:
         if upstream is None or upstream.output.meta.get("staged"):
             return None
         if _is_tool_verb(kind, op_):
-            columns = self._columns_bound(op_, source, kind)
+            # what the tool binds, and what the output carries through (B11):
+            # a carried column that changes is out of date in the output too
+            columns = [*self._columns_bound(op_, source, kind),
+                       *(_source_column(op_, c) for c in step.output.data.columns)]
+            columns = list(dict.fromkeys(columns))
         else:
             columns = list(dict.fromkeys(_source_column(op_, c) for c in step.output.data.columns))
         if grouped:
