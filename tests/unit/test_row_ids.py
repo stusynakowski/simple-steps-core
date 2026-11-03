@@ -6,7 +6,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from simple_steps_core import Catalog, Kernel, cols, mod, rows, tool, wf
+from simple_steps_core import Catalog, Kernel, cols, mod, rows, tool, wf, join
 from simple_steps_core.catalog import formula_names
 from simple_steps_core.errors import SelectionError
 from simple_steps_core.operation import op
@@ -133,15 +133,18 @@ def kw():
 
 
 @pytest.mark.parametrize("tool_", [scale_r, scale_untyped_r])
-def test_a_column_pairs_with_the_rows_that_share_its_ids(kw, tool_):
-    """Within one origin a column argument pairs by id, wherever a sort put the
-    rows; from an unrelated step it is refused (R-D7, reshaping.md §6)."""
-    kw["s"] = tool_[mod.map()](wf["warm"], w=wf["wts"][cols["w"]])
-    assert kw.step("s").problems == ()
+def test_rows_of_one_origin_in_another_order_meet_in_a_join(kw, tool_):
+    """CA-11: a column argument pairs only with an aligned step; a sorted copy
+    meets its weights in a join on lineage, the refusal says which. From an
+    unrelated step it is refused (R-D7)."""
     kw.run_all()
-    # Ben (id 1) x 20, Cy (id 2) x 30, Ada (id 0) x 10, in the sorted order.
+    kw["s0"] = tool_[mod.map()](wf["warm"], w=wf["wts"][cols["w"]])
+    assert "join(wf['warm'], wf['wts'], on='#p')" in str(kw.step("s0").problems[0])
+    kw["j"] = join(wf["warm"], wf["wts"], on="#p")
+    kw["s"] = tool_[mod.map()](wf["j"])
+    kw.run_all()
+    # Ben x 20, Cy x 30, Ada x 10, in the sorted order.
     assert kw.step("s").data["value"].tolist() == [764.0, 1113.0, 366.0]
-    assert list(kw.step("s").data.index) == [1, 2, 0]
     kw["u"] = tool_[mod.map()](wf["warm"], w=wf["weights"][cols["w"]])
     assert [p.code for p in kw.step("u").problems] == ["unmatched_rows"]
     assert "match_ids=True" in kw.step("u").problems[0]
@@ -184,15 +187,17 @@ def test_under_a_whole_table_verb_a_column_stays_whole():
 # source counts its rows from 0.
 
 
-def test_zip_pairs_by_id_after_one_side_was_sorted(k):
+def test_after_a_sort_rows_meet_their_own_in_a_join_on_lineage(k):
     from simple_steps_core import zip_
-    k["t"] = mod.select(columns=["temp_c"])(wf["srt"])                  # ids 1, 2, 0
+    k["t"] = mod.select(columns=["temp_c"])(wf["srt"])
     k["renamed"] = mod.rename(columns={"temp_c": "t"})(wf["t"])
-    k["side"] = zip_(wf["p"], wf["renamed"])
+    k.run_all()
+    k["zipped"] = zip_(wf["p"], wf["renamed"])                         # reordered (CA-11)
+    assert k.step("zipped").state == "invalid"
+    k["side"] = join(wf["p"], wf["renamed"], on="#p")
     k.run_all()
     data = k.step("side").data
     assert (data["temp_c"] == data["t"]).all()                          # each row with its own
-    assert list(data.index) == [0, 1, 2]
 
 
 def test_zip_refuses_rows_one_side_doesnt_have(k):
@@ -201,8 +206,8 @@ def test_zip_refuses_rows_one_side_doesnt_have(k):
     k["renamed"] = mod.rename(columns={"name": "who", "temp_c": "t"})(wf["hot"])
     k["side"] = zip_(wf["p"], wf["renamed"])
     k.run_all()
-    assert k.step("side").state == "invalid"          # L2: refused once both have run
-    assert "Use join" in str(k.step("side").problems[0])
+    assert k.step("side").state == "invalid"          # L2, CA-11
+    assert "join(" in str(k.step("side").problems[0])
 
 
 

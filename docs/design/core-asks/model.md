@@ -290,7 +290,7 @@ Column modifiers, `cast` and column picks add none.
 | Row number column `#<step>` | This row's row number, `0..n-1` |
 | Data column | A named column of values, with a type. Names are unique, non-empty text, never starting with `#`, kept as written (`'Patient ID'` too); numeric names become `var<n>`. An int column stays int when a value is missing |
 | Cell | One value at (row number, data column), with a state: `known`, `absent`, `maybe`, `pending`, `blocked`, `failed`, `invalid` (core's states, CA-10) |
-| Aligned | Two steps whose rows are the same rows in the same order: one step, or connected only through one-to-one steps |
+| Aligned | Two steps whose rows are the same rows in the same order: one step, or connected only through one-to-one steps, a `zip_` of aligned steps, `collapse(by="#s")` (one row per row of `s`, in `s`'s order) or an expand that gives packed rows back. Only aligned steps pair row by row (a column argument, `zip_`); others meet in a join on lineage, `on="#s"` for their nearest shared ancestor `s`, which the refusal writes |
 | Row id | Core's internal identity for a row. Never shown or written |
 
 ## M4. The ruleset

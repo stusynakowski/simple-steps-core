@@ -57,8 +57,8 @@ change is confirmed before it lands.
 | **S0** | **The tests** | the laws E1–E27, expected-to-fail until their step; core-asks `probe.py` (L1–L52) turned into tests the same way | all | small | ✓ 2026-11-02 |
 | **S1** | **Bugs, and no wrong answers** | B1–B11; a column argument from an unaligned step refused, the message writing the join; `zip_` of unaligned steps refused; `total` over mixed columns | M0 (L1–L5) | small | ✓ 2026-11-02 |
 | **S2** | **Values and keys** | tools get plain Python values (already held on every path; now tested); numeric names become `var<n>`; other names kept (CA-E) | L21 | small | ✓ 2026-11-02 |
-| **S5** | **Row numbers and lineage** (moved up, **next**: detail it in §3 first) | **a change of surface** (CA-B1, amended): rows shown and typed as `0…n-1`, picks saved as lineage; core's lineage-based row ids stay its identity. Every step carries its ancestors' lineage; `.idx`; `#r.2`; lineage apart from data; conditions (`cols`, `row`, from S3); joins on lineage; `mod.copy`; strict alignment (CA-11). Five pieces, §3 | M1, M2, conditions (L6–L19, L29–L31, L35, L36, L41, L44, L45, L48) | medium (was the largest) | N1, S5-D1–D6 decided |
-| **S4** | **Naming** | one output named after its step; a dict's keys as columns; `var<n>`; ints stay ints; step names identifiers; sources and literals (D12) | M3 (L20–L24, L46, L47) | medium | needs D12 (recommended) |
+| **S5** | **Row numbers and lineage** (moved up) | **a change of surface** (CA-B1, amended): rows shown and typed as `0…n-1`, picks saved as lineage; core's lineage-based row ids stay its identity. Every step carries its ancestors' lineage; `.idx`; `#r.2`; lineage apart from data; conditions (`cols`, `row`, from S3); joins on lineage; `mod.copy`; strict alignment (CA-11). Five pieces, §3 | M1, M2, conditions (L6–L19, L29–L31, L35, L36, L41, L44, L45, L48) | medium (was the largest) | ✓ 2026-11-02 |
+| **S4** | **Naming** (**next**) | one output named after its step; a dict's keys as columns; `var<n>`; ints stay ints; step names identifiers; sources and literals (D12) | M3 (L20–L24, L46, L47) | medium | needs D12 (recommended) |
 | **S3** | **Grammar and binding** | strings choose columns; pickers before the verb; a pick as an input; **binding at staging, saved explicitly** (CA-A); `mod.cast`; verbs inferred and written (`auto` resolved, D20); nothing unseen (D21) | M4, M5 (L25–L39, L48–L51) | **large** | N2, N3 decided; D8, D18, D19, D21 (recommended) |
 | **S11** | **Live editing** | readers re-checked at once; "reference moved"; stale reasons; renames rewrite what core wrote; delete anyway | M6 (L40–L43, L52) | small–medium | — |
 | **G** | **The app moves** | [app-migration.md](app-migration.md), onto the new syntax; core's to-dos T6, T9–T13 | — | medium (in the app) | needs D50, D52, D53 |
@@ -217,6 +217,13 @@ of CA-B1's "fails if gone" beside CA-5's "zero rows"); 10 more hold (L7a–L8,
 L37b, L41a/b). The property test picks rows, and compares an edited run with a
 fresh run of the *saved* workflow. Found on the way: `collapse(by="#s")` could
 run before `s`, and didn't go stale with it.
+S5e done 2026-11-02: `mod.copy`, `rename` of `#` saved as copy, `#` picks
+refused; joins on lineage (a collapse's list meets each of its rows; shared
+columns merge); strict alignment (CA-11), "aligned" widened to a `zip_` of
+aligned steps, `collapse(by="#s")` and a restoring expand, so the reshaping
+laws hold as they were; the tests that paired a child with its parent became
+joins. Found on the way: `run_all` could run a reader before an input that was
+about to change. **S5 is done**: every M1/M2 core-asks test holds.
 
 **Existing tests that change** (counted at `65865bb`): the view's `#` (12
 uses), `k.cell` by id (31; most read a source, where the id is the row

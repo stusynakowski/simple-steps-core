@@ -994,22 +994,32 @@ def test_009_expand_ids_derive_from_the_parent(r3):
     assert list(r3.step("again").output.data.index)[:2] == ["0.0.0", "0.0.1"]
 
 
-def test_009_zip_gives_each_item_its_parent_row(r3):
+def test_009_each_item_meets_its_parent_row_in_a_join_on_lineage(r3):
+    """CA-11: zip_ pairs aligned steps only; a child meets its parent in a join
+    on lineage (S5e), which the refusal writes."""
     r3["items"] = fan_ids_009[mod.expand()](r3["r"])
-    r3["with_parent"] = zip_(r3["items"], r3["r"])         # row 2 expanded to nothing
+    r3.run_all()
+    r3["zipped"] = zip_(r3["items"], r3["r"])
+    assert "join(wf['items'], wf['r'], on='#r')" in str(r3.step("zipped").problems[0])
+    del r3["zipped"]
+    r3["with_parent"] = join(r3["items"], r3["r"], on="#r")    # row 2 expanded to nothing
     r3.run_all()
     out = r3.step("with_parent").output.data
-    assert list(out.index) == ["0.0", "1.0", "1.1"]
-    assert out.to_dict("list") == {"#r": [0, 1, 1], "value": [10, 20, 21],
-                                   "city": ["SF", "NYC", "NYC"], "n": [1, 2, 2]}
+    assert {c: list(out[c]) for c in ("value", "city", "n")} == {
+        "value": [10, 20, 21], "city": ["SF", "NYC", "NYC"], "n": [1, 2, 2]}
 
 
-def test_009_zip_after_a_sort_pairs_by_id_not_position(r3):
+def test_009_after_a_sort_rows_meet_in_a_join_on_lineage_not_by_position(r3):
     r3["sorted"] = mod.sort(by="n", ascending=False)(r3["r"])
     r3["neg"] = neg_009[mod.map()](r3["sorted"])
-    r3["pairs"] = zip_(r3["r"], r3["neg"])
     r3.run_all()
-    assert r3.step("pairs").output.data.to_dict("list") == {
+    r3["zipped"] = zip_(r3["r"], r3["neg"])                  # reordered: not aligned (CA-11)
+    assert r3.step("zipped").state == "invalid"
+    del r3["zipped"]
+    r3["pairs"] = join(r3["r"], r3["neg"], on="#r")
+    r3.run_all()
+    out = r3.step("pairs").output.data
+    assert {c: list(out[c]) for c in ("city", "n", "value")} == {
         "city": ["SF", "NYC", "LA"], "n": [1, 2, 0], "value": [-1, -2, 0]}
 
 
@@ -1024,7 +1034,7 @@ def test_009_zip_never_drops_a_row(r3):
     # declared (re-checked), before anything runs.
     for s in ("short_first", "long_first"):
         said = " ".join(map(str, r3.step(s).problems))
-        assert "aren't the same (2 in only one)" in said and "Use join" in said
+        assert "aren't the same rows in the same order" in said and "join(" in said
 
 
 def test_009_zip_of_loaded_tables_pairs_by_id_and_refuses_extra_rows():

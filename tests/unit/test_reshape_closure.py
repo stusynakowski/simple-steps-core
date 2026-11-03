@@ -238,8 +238,10 @@ def test_L16_zip_across_origins_is_refused_when_declared(k):
     assert state(k, "z") == "invalid"
     k["jw"] = join(wf["w"], wf["v"], on="ward")                       # records #v: a match
     k["jn"] = mod.select(columns=["head"])(wf["jw"])
-    k["zj"] = zip_(wf["v"], wf["jn"])
-    assert state(k, "zj") != "invalid"
+    k.run_all()
+    k["zj0"] = zip_(wf["v"], wf["jn"])                   # not the same rows in order (CA-11)
+    assert state(k, "zj0") == "invalid"
+    k["zj"] = join(wf["v"], wf["jn"], on="#v")             # a join on lineage instead (S5e)
     k.run_all()
     heads = dict(zip(data(k, "zj")["name"], data(k, "zj")["head"]))
     assert heads["Ben"] == "Dr Y"                                      # M5: Ben beside his own ward's head
@@ -615,11 +617,15 @@ def m():
     return k
 
 
-def test_L42_a_column_argument_from_a_parent_reaches_each_child(m):
+def test_L42_a_parents_value_reaches_each_child_through_a_join_on_lineage(m):
     from simple_steps_core import cols
-    m["c"] = scale_rc[mod.map()](wf["e"], temp=wf["v"][cols["temp"]])
     m.run_all()
-    assert data(m, "c").loc["0.1", "value"] == 30 * 37.0                # Ada's item 1 × Ada's temp
+    m["c0"] = scale_rc[mod.map()](wf["e"], temp=wf["v"][cols["temp"]])
+    assert "join(wf['e'], wf['v'], on='#v')" in str(m.step("c0").problems[0])   # CA-11
+    m["j"] = join(wf["e"], wf["v"], on="#v")
+    m["c"] = scale_rc[mod.map()](wf["j"])
+    m.run_all()
+    assert list(data(m, "c")["value"])[1] == 30 * 37.0                  # Ada's item 1 × Ada's temp
 
 
 def test_L43_a_scalar_argument_from_children_into_their_parent_is_refused(m):

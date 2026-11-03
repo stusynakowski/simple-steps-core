@@ -26,6 +26,7 @@ from typing import Annotated, Callable, TypedDict
 import pandas as pd
 from simple_steps_core import (
     cols,
+    join,
     mod,
     Operation,
     Output,
@@ -636,19 +637,22 @@ def c12_kwargs_warn():
 
 
 def c16_row_ids():
+    """An item knows its parent row (lineage, S5b) and meets it in a join on
+    lineage (S5e); zip_ pairs aligned steps only since CA-11."""
     @tool
     def fan(n) -> list:
         return [n] * n
 
     wf = _wf()
     wf["items"] = fan[mod.expand()](wf["readings"])
-    wf["with_parent"] = zip_(wf["items"], wf["readings"])
     wf.run_all()
-    ids = list(wf.step("items").output.data.index)
+    wf["with_parent"] = join(wf["items"], wf["readings"], on="#readings")
+    wf.run_all()
+    parents = [r["lineage"].get("#readings") for r in wf.preview("items")["rows"]]
     cities = list(wf.step("with_parent").output.data["city"])
-    done = ids[:3] == ["0.0", "1.0", "1.1"] and cities[:3] == ["SF", "NYC", "NYC"]
-    return done, (f"expand ids {ids[:4]}…; zip_ to parent -> cities {cities[:3]}… "
-                  "(expand only; collapse/join/stack ids still open)")
+    done = parents[:3] == [0, 1, 1] and cities[:3] == ["SF", "NYC", "NYC"]
+    return done, (f"items' parent rows {parents[:4]}…; join on #readings -> cities "
+                  f"{cities[:3]}…")
 
 
 ASKS = [
@@ -690,7 +694,7 @@ ASKS = [
     ("N", "(core) a written mod.auto(), resolved at run", n_auto_modifier),
     ("P", "(core) Operation.to_source() round-trips", p_to_source),
     ("C12", "(core) **kwargs tools warn and are marked open", c12_kwargs_warn),
-    ("C16", "(core) row ids derive from the parent; zip_ pairs by id", c16_row_ids),
+    ("C16", "(core) an item knows its parent row; it meets it in a join on lineage", c16_row_ids),
 ]
 
 

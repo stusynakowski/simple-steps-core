@@ -182,9 +182,15 @@ def _combine_join(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
     keys = config.get("on")
     on_lineage = all("on_values" in f.attrs for f in frames)
     if on_lineage:
-        # a join on lineage (S5e): matched by row number, through a temporary key
-        left = left.assign(**{_ON: frames[0].attrs["on_values"]})
-        right = right.assign(**{_ON: frames[1].attrs["on_values"]})
+        # a join on lineage (S5e): matched by row number, through a temporary key;
+        # a collapse's cell lists its rows, so it meets each of them (CA-L3)
+        sides = []
+        for side, f in ((left, frames[0]), (right, frames[1])):
+            side = side.assign(**{_ON: f.attrs["on_values"]})
+            if any(isinstance(v, list) for v in side[_ON]):
+                side = side.explode(_ON)
+            sides.append(side)
+        left, right = sides
         keys = _ON
     merge_on = keys
     keys = {keys} if isinstance(keys, str) else set(keys or [])

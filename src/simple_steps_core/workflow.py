@@ -1335,21 +1335,22 @@ class Workflow:
         filter, sort or slice makes other rows; a row pick does too."""
         return self._aligned_root(a) == self._aligned_root(b)
 
-    def _covers(self, a: str, b: str) -> bool:
-        """Does every row of step *a* have one row of step *b* (L1)? True when
-        they're aligned, when *a* is *b*'s rows filtered or reordered, or when
-        each row of *a* traces to a parent row in *b*. A subset *b* of *a*'s
-        rows doesn't cover it."""
-        if self.aligned(a, b) or self._aligned_root(b) in self._same_ids(a):
-            return True
-        if self._same_ids(a) & self._same_ids(b):
-            # one origin: once both have run, their ids say; before, b may lack some
-            ran = [self.steps[s].output for s in (a, b)
-                   if s in self.steps and not self.steps[s].output.meta.get("staged")]
-            if len(ran) == 2:
-                return {str(i) for i in ran[0].data.index} <= {str(i) for i in ran[1].data.index}
-            return False
-        return a in self.steps and self.trace(a, list(self.steps[a].output.data.index), b) is not None
+    def _join_hint(self, a: str, b: str) -> str:
+        """The join that brings steps *a* and *b* together: on the lineage of
+        their nearest shared ancestor (S5e), else on a column."""
+        common = [x for x in self._matchable(a) if x in self._matchable(b)]
+        if common:
+            return f"join(wf[{a!r}], wf[{b!r}], on={ROW_ID + common[0]!r})"
+        return f"join(wf[{a!r}], wf[{b!r}], on=…)"
+
+    def _matchable(self, step_id: str) -> list[str]:
+        """The steps a join on lineage can match *step_id*'s rows to, nearest
+        first: itself, the step it's aligned with, its ancestors."""
+        if step_id not in self.steps:
+            return []
+        found = [step_id, self._aligned_root(step_id)]
+        found += [n[len(ROW_ID):].split(".")[0] for n in self.lineage(step_id)]
+        return list(dict.fromkeys(found))
 
     def _aligned_root(self, step_id: str) -> str:
         """The furthest step back that *step_id* reaches through one-to-one steps."""
@@ -1357,6 +1358,15 @@ class Workflow:
         while seen in self.steps:
             op_ = self.steps[seen].operation
             kind = self._kind(seen)
+            # one row per row of s, in s's order (R-D5), or packed rows given back (R-D3)
+            grouped, restored = self._groups_by_step(seen), self._restore_column(seen)
+            nxt = grouped[1] if grouped else (self._id_source(restored) if restored else None)
+            if is_combine(op_) and op_.tool == "zip" and op_.grids:
+                nxt = str(op_.grids[0])          # a zip_ of aligned steps is their rows, in order
+            if nxt is not None and nxt not in names:
+                names.add(nxt)
+                seen = nxt
+                continue
             columns_only = kind == "select" and op_.shape_verb.settings.get("rows") is None
             if op_.input is None or is_combine(op_) or getattr(op_.input, "rows", None) is not None \
                     or not (kind in _ONE_TO_ONE or columns_only):
@@ -2163,15 +2173,13 @@ class Workflow:
                 target = self._id_source(on) or on[len(ROW_ID):]
                 for frame in frames:
                     name = frame.attrs["name"]
-                    if name == target:
-                        values = list(range(len(frame)))
+                    if name == target or self.aligned(name, target):
+                        values = list(range(len(frame)))     # its rows are target's, in order
                     else:
                         values = self.lineage(name).get(on)
-                    if values is None or any(isinstance(v, list) for v in values):
+                    if values is None:
                         frame.attrs["on_problem"] = (     # the step fails with it, below
-                            f"join on {on!r}: {name!r} has no lineage {on}" if values is None else
-                            f"join on {on!r}: {name!r} holds lists there (a collapse); join on "
-                            f"its key instead")
+                            f"join on {on!r}: {name!r} has no lineage {on}")
                         break
                     frame.attrs["on_values"] = values
             try:
@@ -2292,11 +2300,13 @@ class Workflow:
         done: set[str] = set()
         remaining = [sid for sid, st in self.steps.items() if st.valid]
         while remaining:
+            due = set(remaining) - done
             ready = [sid for sid in remaining
                      if all(w in done for w in self.pending(sid))
-                     # collapse(by="#s") runs after s, while s is still to run
-                     and not ((g := self._groups_by_step(sid)) and g[1] in remaining
-                              and g[1] not in done)]
+                     # after every step it depends on that is still to run this
+                     # time, including collapse(by="#s")'s s: a reader never
+                     # runs on an output about to change
+                     and not any(d in due for d in self._depends_on(sid))]
             if not ready:                    # only reachable if a cycle slipped through
                 raise ValueError(
                     f"cannot order {remaining!r}: something reads a step that never runs"
@@ -2316,6 +2326,14 @@ class Workflow:
                 done.add(step_id)
             remaining = [sid for sid in remaining if sid not in done]
         return self
+
+    def _depends_on(self, step_id: str) -> list[str]:
+        """The steps *step_id* reads, and for ``collapse(by="#s")`` its ``s``."""
+        found = [str(r) for r in self.steps[step_id].operation.reads]
+        grouped = self._groups_by_step(step_id)
+        if grouped is not None:
+            found.append(grouped[1])
+        return [d for d in found if d != step_id]
 
     def _restage_after(self, step_id: str) -> None:
         """Re-stage everything downstream of *step_id* — cardinality sharpened.
