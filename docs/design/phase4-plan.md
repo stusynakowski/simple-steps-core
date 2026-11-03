@@ -57,9 +57,9 @@ change is confirmed before it lands.
 | **S0** | **The tests** | the laws E1–E27, expected-to-fail until their step; core-asks `probe.py` (L1–L52) turned into tests the same way | all | small | ✓ 2026-11-02 |
 | **S1** | **Bugs, and no wrong answers** | B1–B11; a column argument from an unaligned step refused, the message writing the join; `zip_` of unaligned steps refused; `total` over mixed columns | M0 (L1–L5) | small | ✓ 2026-11-02 |
 | **S2** | **Values and keys** | tools get plain Python values (already held on every path; now tested); numeric names become `var<n>`; other names kept (CA-E) | L21 | small | ✓ 2026-11-02 |
-| **S5** | **Row numbers and lineage** (moved up, **next**: detail it in §3 first) | **a change of surface** (CA-B1, amended): rows shown and typed as `0…n-1`, picks saved as lineage; core's lineage-based row ids stay its identity. Every step carries its ancestors' lineage; `.idx`; `#r.2`; lineage apart from data; joins on lineage; `mod.copy`; strict alignment (CA-11) | M1, M2 (L6–L19, L41, L44, L45) | medium (was the largest) | N1 decided |
+| **S5** | **Row numbers and lineage** (moved up, **next**: detail it in §3 first) | **a change of surface** (CA-B1, amended): rows shown and typed as `0…n-1`, picks saved as lineage; core's lineage-based row ids stay its identity. Every step carries its ancestors' lineage; `.idx`; `#r.2`; lineage apart from data; conditions (`cols`, `row`, from S3); joins on lineage; `mod.copy`; strict alignment (CA-11). Five pieces, §3 | M1, M2, conditions (L6–L19, L29–L31, L35, L36, L41, L44, L45, L48) | medium (was the largest) | N1 decided; S5-D1–D6 (recommended, §3) |
 | **S4** | **Naming** | one output named after its step; a dict's keys as columns; `var<n>`; ints stay ints; step names identifiers; sources and literals (D12) | M3 (L20–L24, L46, L47) | medium | needs D12 (recommended) |
-| **S3** | **Grammar and binding** | strings choose columns, integers rows, conditions (`cols`, `row`); pickers before the verb; a pick as an input; **binding at staging, saved explicitly** (CA-A); `mod.cast`; verbs inferred and written (`auto` resolved, D20); nothing unseen (D21) | M4, M5 (L25–L39, L48–L51) | **large** | N2, N3 decided; D8, D18, D19, D21 (recommended) |
+| **S3** | **Grammar and binding** | strings choose columns; pickers before the verb; a pick as an input; **binding at staging, saved explicitly** (CA-A); `mod.cast`; verbs inferred and written (`auto` resolved, D20); nothing unseen (D21) | M4, M5 (L25–L39, L48–L51) | **large** | N2, N3 decided; D8, D18, D19, D21 (recommended) |
 | **S11** | **Live editing** | readers re-checked at once; "reference moved"; stale reasons; renames rewrite what core wrote; delete anyway | M6 (L40–L43, L52) | small–medium | — |
 | **G** | **The app moves** | [app-migration.md](app-migration.md), onto the new syntax; core's to-dos T6, T9–T13 | — | medium (in the app) | needs D50, D52, D53 |
 | **D** | **Sessions** | outputs kept by version (K22), progress and `cancel()` (K23, K14), re-run failed or stale rows (K15, D42), stages (R9), autorun | — | medium–large | needs D-D1, D-D2, D42 |
@@ -89,11 +89,11 @@ the order is the table's.
 **The cheaper path is gone** (N1): deferring S5 past G would mean the app
 migrating twice.
 
-## 3. The changes, in detail (S0–S4)
+## 3. The changes, in detail (S0–S5)
 
 What I propose to change, step by step: what you'd see before and after,
-where in the code, and the test that shows it. Later steps (S5–S10, D, E, F)
-are written at this level when they come up. Nothing below lands without
+where in the code, and the test that shows it. Later steps (S11, S6–S10, D,
+E, F) are written at this level when they come up. Nothing below lands without
 your yes on its decisions ([decisions.md](decisions.md)).
 
 ### S0. The tests (no behaviour changes)
@@ -142,12 +142,75 @@ Suite: 720 passed, 1 skipped, 79 xfailed; `STRESS=1` property tests green.
 
 (B5, `auto` stored, is S4. B8 is S3.)
 
+**Done 2026-11-02**, with the owner's answers (decisions.md §4, "S1,
+answered"). As built, where it differs from the table: `total(…,
+numeric_only=True)` (L5); `mod.widen("info")`, or the one dict column (B1);
+`expand(columns=…, keep=)` (B2); B6 became `var<n>` names (S2, L21); D28 became
+`mod.copy` (S5); B7 became binding at staging (S3). Also built: L1–L3 (a
+column argument pairs by verb, refused where a row would get no value; a
+`zip_` whose ids differ refused once both ran), and A3 allowing a gap carried
+through `zip_`.
+
 ### S2. Values and keys
 
 | Today | After | Where | Needs |
 |---|---|---|---|
 | a row dict holds `np.float64(38.2)`, missing floats as `NaN` | `38.2`, `None`: plain Python, unless the parameter asks for `pd.Series` / `DataFrame` | `verbs._units` (the one place rows are made for tools) | D17 |
 | any string is a column name | an identifier (`temp_f`); others refused with a suggested name, when a step writes them | `checks` (names written: sources, `mod.name`, `rename`, records) | D3 |
+
+**Done 2026-11-02.** D17 already held on every path (parameters, `**row`,
+gathered lists, the view); a test keeps it. D3 became CA-E: names are kept as
+written, and numeric or empty ones become `var<n>` (L21).
+
+### S5. Row numbers and lineage: a change of surface
+
+Written 2026-11-02 at `65865bb`, every *today* run. CA-B1 (amended) is the
+design: core's row ids stay its identity, because they already are lineage;
+what a user sees and writes becomes row numbers and lineage.
+
+**Today** (run on the core-asks fixture):
+
+| | Row id (the view's `#`) | Lineage stored |
+|---|---|---|
+| a source | `0, 1, 2, 3` | none |
+| `filter`, `sort`, `slice` | the parent's ids: `1, 2, 3`; `3, 2, 1, 0` | none: the id *is* the parent's |
+| `expand` | `0.0, 0.1, 1.0, …` | `#r`: the parent's ids |
+| `collapse(by=…)` | the key: `A, B, C` | `#r`: lists of the parent's ids |
+| `join`, `stack` | `0 … n-1` | `#r`, `#other`: each side's ids, `None` for a gap |
+
+The view already returns each row's `position` (0…n-1) beside `#`; lineage
+columns sit among the data columns; an expand of `filtered` writes
+`#filtered` = `1, 1, 2, 2` (filtered's ids, which are r's), not filtered's
+row numbers `0, 0, 1, 1`.
+
+**The changes**, in five pieces, each its own commit:
+
+| | Piece | Today | After | Where | Tests |
+|---|---|---|---|---|---|
+| S5a | **What you see** | `#` is the row id; lineage columns among the data, holding ids | `#` (and `#<step>`) is the row number, `0…n-1`; lineage listed apart (`view["lineage"]`), each cell the parent's **current** row number (a list after a collapse, empty where there is none). `k.cell(step, row)` takes a row number | `workflow` (view, `_preview_rows`, `cell`), a translation through `trace` | L6, L10, L11a, L12b, L14a, L16a |
+| S5b | **Lineage is carried, and named** | only combines and expands write lineage, one hop | every step that isn't one-to-one adds `#<parent>` and carries its input's; one-to-one steps carry. Computed from the ids by `trace` for the steps that keep ids, so nothing new is stored. An expand adds `#<parent>.idx` (from the id's last part); the same parent twice is `#r`, `#r.2` (today `#r_1`, `#r_2`) | `workflow` (lineage of a step), `combines` (names) | L12, L13, L14b, L15, L44 |
+| S5c | **Conditions** (moved from S3, S5-D1) | `cols["n"] > 15` is a `TypeError` | `cols["x"]`, `row["s"]`, `row["s"].idx`, comparisons, `.isin`, `&`, `\|`, `~`, in a pick's row slot and in `mod.select(rows=…)`; list cells by CA-L3; matching nothing is zero rows and a warning; `row`, `rows`, `cols` reserved | `references` (a condition object, parsed, never run), `verbs.select`, `checks` | L29a, L29b, L30a, L30b, L31, L35, L36, L48a, L48b |
+| S5d | **Picks are row numbers, saved as lineage** | `wf["sorted_"][1]` is row id 1 (`n` 20); `[-1]` refused; `rows["A"]` works | `[i]`, `[[i, k]]`, `[-1]` are row numbers as typed; staging writes the rows' lineage: `row["r"] == 2`; `(row["r"] == 1) & (row["r"].idx == 0)` through an expand; `cols["ward"] == "A"` through a collapse; both sides through a join; into a source, sweep or table it stays a row number. A range stays a range (S5-D2). A pick follows its row; one whose row is gone fails, naming it. `rows["A"]` refused with the row number to use | `references`, `checks` (resolve at staging), `operation.to_source` | L7a–L7f, L8, L41a, L41b |
+| S5e | **Joins on lineage, copy, strict alignment** | `join(…, on="#r")` refused; no `mod.copy`; `rename` of `#r` replaces it; pairing by id after a sort or between child and parent | `join(child, parent, on="#r")`, `how="left"` gives every parent row back, `absent` where dropped; a column passed through from the shared ancestor appears once (CA-C). `mod.copy(columns={"#r": "parent"})`, and `rename` of a `#` column saved as it (CA-D). Column arguments and `zip_` only between aligned steps (CA-11); the refusal writes the join | `combines.join`, `verbs` (copy), `checks` (`_covers` → `aligned`) | L17, L18a, L18b, L45a, L45b, L37b |
+
+**Decisions** (each recommended; confirm before its piece lands):
+
+| | Decision | Recommended |
+|---|---|---|
+| S5-D1 | Conditions move from S3 into S5 | yes: a pick saved as lineage is written as a condition, so the grammar has to exist first |
+| S5-D2 | What a typed range saves | a range stays a range: `[0:10]` means the first ten rows, whatever they are (like `head`); a single row and a list of rows are saved as lineage |
+| S5-D3 | A pick into a step that hasn't run | resolved when that step has run, and written in then, saying so (as D18) |
+| S5-D4 | A lineage cell's number | the parent row's **current** row number (the model said "as when the step ran"); empty where the parent row is gone |
+| S5-D5 | The Python API | `step.output.data` keeps core's ids as its index, for code; the view, `k.cell`, picks and `k.data()` (D48) use row numbers |
+| S5-D6 | A join row's lineage pick, with an empty side | both sides' lineage, an empty side written `row["other"] == None` |
+
+**Existing tests that change** (counted at `65865bb`): the view's `#` (12
+uses), `k.cell` by id (31; most read a source, where the id is the row
+number), integer picks (8), text row ids (4), and the `zip_` and
+column-argument tests that pair a child with its parent or after a sort (some
+of 34 `zip_` uses), which become joins on lineage in S5e. Tests that read
+`step.output.data.index` (47) keep core's ids (S5-D5) and don't change. The
+property test learns typed row numbers and conditions in S5c and S5d.
 
 ### S3. The core change
 
@@ -182,10 +245,11 @@ D19, D12, D20, D21).
 | a source's `list[int]` is one value | its declared type decides: `list[T]` is rows; `list` or none is one value | the source path in `workflow` | D12 |
 | a literal is one value | the same (confirmed) | — | D11 |
 
-### After S4
+### After S4, and S11
 
-G (the app moves) uses app-migration.md, updated with S1–S4's changes. S5
-onwards is written at this level when its turn comes.
+G (the app moves) uses [app-migration.md](app-migration.md). **Each step, as
+it lands, adds what the app changes to app-migration.md §3.8** (owner,
+2026-11-02), so the migration guide is current when G starts.
 
 ## 4. Done means
 
@@ -200,7 +264,8 @@ Phase 4 is done when:
    every test (today 24 of 85);
 4. every feature in features.md is done, or moved to "Later, by decision";
 5. rules.md opens with the model, kernel-session.md shows what was built,
-   and its example runs as a test;
+   and its example runs as a test; app-migration.md §3.8 lists every change
+   the app makes, step by step;
 6. the app runs on this core (app-migration.md §4).
 
 Then phase 5, the final docs, starts.

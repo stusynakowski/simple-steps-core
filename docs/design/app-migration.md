@@ -7,10 +7,22 @@
 > the same work are its `docs/cleanup-map.md` (round 4, stages A–D) and
 > `docs/system_design/12-core-and-app.md`; this page says which of their
 > rows core now makes possible.
+>
+> **Amended 2026-11-02.** The app now moves **after the expression cleanup**
+> (phase4-plan S0–S11), not before it (decisions.md N1, D51): the syntax the
+> app writes expressions in changes, so it moves once, onto the new syntax.
+> What each cleanup step changes for the app is §3.8, kept current as each
+> step lands. The word is now *expression* (CA-F); core's `step.formula`
+> keeps its name until it is renamed.
 
 ## 1. Can the app move now?
 
-**Yes.** Nothing left in phase 4 blocks it. Steps D, E and F add features
+**Not yet (2026-11-02).** It waits for phase4-plan's S5, S4, S3 and S11:
+they change how rows are picked, how columns bind and are named, and what an
+expression saves, so moving before them would mean migrating twice (N1).
+Steps D, E and F still don't block it, as below.
+
+*As written 2026-10-27:* **Yes.** Nothing left in phase 4 blocks it. Steps D, E and F add features
 the app either does without today or does for itself, and none of them
 renames or removes anything the app will use. So the move is one breaking
 pass now, then small additive passes as each core step lands (§5).
@@ -151,9 +163,9 @@ Behaviour from phase 4, which the UI and its tests will see:
 | Change | Rule ([rules.md](rules.md)) |
 |---|---|
 | a step's `.data` has its row id `#` as the index, and starts with the `#` columns that say where each row came from (`#v`, …); tools never see them | 2, 3 |
-| `k.view` rows carry the row id under `#`, the screen position under `position`; `k.cell` takes a row id | 2 |
-| selections and column arguments go by row id, not position | 2, 6 |
-| `zip_` and column arguments between unrelated steps are refused; `zip_(…, match_ids=True)` | 6 |
+| `k.view` rows carry the row id under `#`, the screen position under `position`; `k.cell` takes a row id. **Superseded by S5 (§3.8)**: `#` becomes the row number | 2 |
+| selections and column arguments go by row id, not position. **Superseded by S1 and S5 (§3.8)** | 2, 6 |
+| `zip_` and column arguments between unrelated steps are refused; `zip_(…, match_ids=True)`. **Tightened by S1 and S5 (§3.8)** | 6 |
 | `collapse`, `distinct`, `join`, `stack` add `#` columns; `gather[collapse()]` gives one list per column; a reducer gets lists | 3, 10 |
 | `expand` of a bare string or `None` fails the row; a dict expands to key/value rows | 9 |
 | a cell state `absent`; ints stay ints when rows fail | 9 |
@@ -173,6 +185,44 @@ recommends.
 Regenerate the app's `scripts/core_probes/` and `scripts/core_asks.py`
 against the package API (they import `grid`), then rebuild
 `core-handover/` with `scripts/core_handover.py`.
+
+### 3.8 What the expression cleanup changes for the app
+
+One row per change, by phase4-plan step, **added as each step lands**
+(phase4-plan §3, "After S4, and S11"). The design is core's
+[core-asks/model.md](core-asks/model.md); its decisions are decisions.md §0
+and §4. Core's copy of `core-asks/` leads (N4): the app's `docs/core-asks/`
+is copied from it, not the other way round.
+
+**Landed**
+
+| Step | Change | What the app does |
+|---|---|---|
+| S1 | `total` over mixed columns fails only the cells it can't add, naming `numeric_only=True`; `op("total")[mod.collapse()](…, numeric_only=True)` leaves those columns out | nothing, or offer `numeric_only` in the palette |
+| S1 | a failed cell can carry its own error: the view's cell `error` comes from the row's note `cells` when present | show a cell's own error |
+| S1 | `mod.widen("info")` names the column it spreads (printed that way); with no name, the one column holding dicts; none or several fail the step | the parser accepts `mod.widen("info")` |
+| S1 | `mod.expand(columns=[…], keep=…)`: a dict column gives a row per key (`key`, then the values); `keep=False` drops the other columns | the parser and palette know `keep=` |
+| S1 | a `#` column as a tool argument is refused, problem code `id_argument` | show the code |
+| S1 | `stack` of an input holding only row ids is refused (`bad_combine`) | — |
+| S1 | under `map` / `filter` / `expand` a column argument passes **each row's cell, whatever the parameter's type** (CA-D1); a column whose rows would leave a row without a value is refused, code `bad_pairing`, the message writing the join. A list parameter no longer gets a whole column: gather it into one cell (`op("gather")[mod.collapse()]`), which goes to every row | rewrite formulas that relied on a list parameter getting the whole column; show `bad_pairing` |
+| S1 | a one-cell argument holding a list passes that list, not wrapped in another | — |
+| S1 | a `zip_` of one origin whose row ids differ is refused once both inputs have run (`bad_combine`), instead of failing the run | — |
+| S1 | an object's data version is its own `data_version()`, else its fields, else its pickle: readers of an object column no longer look stale after every run | — |
+| S1 | a step is stale when a column its output carries changes, not only a bound one | more steps show `stale`, correctly |
+| S1 | an int column stays int across a `join` gap | — |
+| S2 | a numeric or empty column name becomes `var<n>` (`0`, `"0"` → `var0`, `2023` → `var2023`); a clash is refused naming both | expressions that named `"0"` name `var0` |
+
+**Coming** (planned; this list becomes "landed" row by row)
+
+| Step | Change | What the app will do |
+|---|---|---|
+| S5 | the view's `#` is the row number `0…n-1`; the `id` field goes; `k.cell(step, row)` takes a row number; lineage columns are listed apart (`view["lineage"]`), each cell the parent's current row number | show `#` as is; collapse lineage under "from r" |
+| S5 | a typed row number (`wf["s"][3]`) is resolved at staging and **saved as the row's lineage** (`wf["s"][row["r"] == 2]`, `cols["ward"] == "A"` after a collapse); a range stays a range; `rows["A"]` is refused | the parser parses conditions; the grid shows the saved form; a click writes a row number |
+| S5 | conditions in a pick: `cols["x"]`, `row["s"]`, `row["s"].idx`, comparisons, `.isin`, `&`, `\|`, `~`; `row`, `rows`, `cols` reserved | the parser accepts them (never evaluated as Python) |
+| S5 | `join(…, on="#r")`; `mod.copy`; column arguments and `zip_` only between aligned steps | offer "join back to parent" |
+| S4 | one output column is named after its step (not `value`); a dict result gives a column per key; step names are identifiers, no `.` | rewrite `"value"` references |
+| S3 | plain strings choose columns (`wf["p"]["temp"]`); a pick can be a tool's input; binding decided at staging and **saved explicitly** (`n=wf["d"]["d"]`); `mod.cast`; an inferred verb is written, never `filter`; nothing added unseen | the parser accepts the new forms; show what staging decided as core's |
+| S11 | a reader whose column disappeared is `invalid` at once; stale steps say why; a rename rewrites what core wrote; `k.remove(name, force=True)` | show the reasons |
 
 ## 4. Done means
 
@@ -200,7 +250,7 @@ Additive, each a small pass in the app (cleanup-map.md stage C rows):
 
 | | Decision | Recommended |
 |---|---|---|
-| G-D1 | move the app now, before steps D–F | yes: §1 |
+| G-D1 | move the app now, before steps D–F | **superseded 2026-11-02 by N1**: after S0–S11, before D–F |
 | G-D2 | older saved workspaces (K17) | refuse with core's message, as the app's own rule says; a converter only if a named user has files to keep |
 | G-D3 | the app's stage A, B, D deletions before the move | yes: less to port, and none of them needs the new core |
 
@@ -234,6 +284,11 @@ one piece, confirmed before it lands; ✓ when done.
 |---|---|
 | T7 ✓ | `where: expect` on a failure note from an `expect` modifier, like `where: timeout` |
 | T8 ✓ | a source tool returning a record gives one row, a list of records a row per record, a column per field; an item that doesn't fit fails the step, `where: declared`. An undeclared `list[dict]` stays one cell |
+
+### Before the move: the expression cleanup
+
+phase4-plan S0–S11 (S0, S1, S2 done 2026-11-02; S5 next). Each adds its rows
+to §3.8 as it lands.
 
 ### After the move: the rest of phase 4
 
