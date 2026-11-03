@@ -894,7 +894,7 @@ def _widen_cell(cell: Any, wanted: Sequence[str], explicit: bool) -> tuple[dict,
             f"got {type(cell).__name__}")
 
 
-def widen_(source: Any, fn: Callable = identity, *,
+def widen_(source: Any, fn: Callable = identity, *, column: str | None = None,
            columns: Sequence[str] | None = None, retries: int = 0,
            axis: str = "rows") -> Output:
     """``unnest_wider`` — one cell's fields become columns. n rows in, n rows out.
@@ -906,27 +906,28 @@ def widen_(source: Any, fn: Callable = identity, *,
         value                          ->  city   temp
         {"city": "SF", "temp": 18}         SF     18
 
+    The column it spreads: ``column`` (``mod.widen("info")``), else the only
+    data column, else the one data column holding dicts; none or several is
+    refused, naming them (B1, D31). One layer: a nested dict stays a value.
+
     Two kinds of cell widen, by two matching rules:
 
-    - a **mapping** is matched **by key**, and ``columns=`` is **required** — a
-      record's fields live in the data, so guessing them at run time would make
-      this the one verb whose column set is unknowable before it runs, which
-      `check` and staging both depend on knowing.
+    - a **mapping** is matched **by key**: ``columns=`` names the fields, else
+      they are the records' keys, known only once it runs.
     - a **sequence** (tuple/list) is matched **by position**. With ``columns=``
       it names the positions; **without it the columns default to** ``c0, c1,
       …`` (width = the longest row), so a column of tuples widens instead of
       failing. Positional names are unambiguous where a record's keys are not,
       which is why only this case is auto-named.
 
-    Applies **no tool** — ``identity`` resolves which cell holds the record
-    (an explicit ``column=``, else ``value``, else the only column). It runs per
-    row, so it has a real ledger: a cell that is neither a mapping nor a
+    Applies **no tool**. It runs per row, so it has a real ledger: a cell that is neither a mapping nor a
     sequence, or an explicitly declared field a cell cannot supply, is a
     **per-unit failure** — inspectable and re-drivable like any other.
     """
     _no_tool("widen", fn)
     frame = rows(source, axis=axis)
     blocked = _upstream_failures(source)
+    spread = _spread_column(frame, column, source)
 
     cells: list[Any] = []
     records: list[dict] = []
@@ -935,7 +936,7 @@ def widen_(source: Any, fn: Callable = identity, *,
             cells.append(None)
             records.append(_blocked(*blocked[index]))
             continue
-        cell, record = _call(fn, row, retries)
+        cell, record = _call(fn, {spread: row.get(spread)}, retries)
         cells.append(cell)
         records.append(record)
 
@@ -963,8 +964,7 @@ def widen_(source: Any, fn: Callable = identity, *,
     # order a reader sees. A field that shadows a carried column wins, because
     # naming it is what the step was asked to do.
     data = frame.copy()
-    spread = _spread_column(frame)
-    if spread is not None and spread not in wanted:
+    if spread not in wanted:
         data = data.drop(columns=[spread])   # its fields are the columns now (G10)
     absent: dict = {}
     for column in wanted:
@@ -978,13 +978,23 @@ def widen_(source: Any, fn: Callable = identity, *,
     return out
 
 
-def _spread_column(frame: pd.DataFrame) -> str | None:
-    """The column ``widen`` spreads, as ``identity`` resolves it: ``value``, or
-    the only variable. None for a row whose whole self is the record."""
+def _spread_column(frame: pd.DataFrame, column: str | None = None, source: Any = None) -> str:
+    """The column ``widen`` spreads: *column*, else the only variable, else the
+    one variable holding dicts. Refused when that can't be told (B1, D31)."""
+    if column is not None:
+        _require_columns("widen", frame, [column])
+        return column
     names = variables(frame.columns)
-    if VALUE_COLUMN in names:
-        return VALUE_COLUMN
-    return names[0] if len(names) == 1 else None
+    if len(names) == 1:
+        return names[0]
+    holding = [c for c in names
+               if any(isinstance(v, Mapping) for v in frame[c] if not _is_missing(v))]
+    if len(holding) == 1:
+        return holding[0]
+    sid = (source.meta.get("name") if isinstance(source, Output) else None) or "the input"
+    which = (f"{', '.join(holding)} hold dicts" if holding else "none holds dicts")
+    raise ValueError(f"widen which column? {sid!r} has {', '.join(map(str, names))} and "
+                     f"{which}: name one, mod.widen({(holding or names or ['info'])[0]!r})")
 
 
 def pack_(source: Any, fn: Callable = identity, *, columns: Sequence[str] | None = None,

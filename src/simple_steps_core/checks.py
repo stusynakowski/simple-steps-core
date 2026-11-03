@@ -1735,7 +1735,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         ordered = [c for c in upstream_columns if c not in chosen]
     elif kind == "widen":
         names_ = variables(upstream_columns)
-        spread = VALUE_COLUMN if VALUE_COLUMN in names_ else (names_[0] if len(names_) == 1 else None)
+        spread = verb.settings.get("column") or (names_[0] if len(names_) == 1 else None)
         fields = list(verb.settings.get("columns") or
                       (workflow._declared_fields(operation) if workflow is not None else None) or [])
         # the column it spreads goes: its fields are the columns now (G10)
@@ -1792,6 +1792,8 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     elif kind == "widen" and not verb.settings.get("columns") and not (
             workflow is not None and workflow._declared_fields(operation)):
         columns_open = True             # undeclared fields are only known by running
+    elif kind == "widen" and not verb.settings.get("column") and len(variables(upstream_columns)) > 1:
+        columns_open = True             # which column holds the dicts is known by running (B1)
     elif kind == "collapse" and unsettled:
         columns_open = True             # the key's column is named by a tool
     elif kind == "collapse" and reducer_form(operation.fn or BUILTIN_TOOLS.get(operation.tool)) == "per_column" \

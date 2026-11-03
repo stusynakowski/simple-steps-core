@@ -621,6 +621,11 @@ class _Mods:
             )
 
         def make(*given, **params) -> Modifier:
+            if given and kind == "widen":
+                # mod.widen("info"): the column it spreads (B1, D31).
+                if len(given) != 1 or "column" in params:
+                    raise TypeError("mod.widen() takes one column name: mod.widen(\"info\")")
+                params["column"], given = given[0], ()
             if given:
                 # mod.name("temp_f"): the one modifier that takes its value first.
                 if kind != "name" or len(given) != 1 or "to" in params:

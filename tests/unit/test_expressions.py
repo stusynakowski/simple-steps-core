@@ -92,12 +92,17 @@ def values(k: Kernel, step: str, column: str | None = None) -> list:
 
 
 def refused(k: Kernel, name: str, make, mention: str = "") -> bool:
-    """True if declaring or running *make* is refused (mentioning *mention*)."""
+    """True if declaring *make* is refused, or running it fails the step
+    (mentioning *mention*)."""
     try:
         k[name] = make()
         if not k.step(name).problems:
             k.run(name)
-            return False
+            step = k.step(name)
+            if step.state != "failed":
+                return False
+            said = " ".join(str(n.get("error", "")) for n in step.output.notes.values())
+            return mention.lower() in said.lower()
         said = " ".join(map(str, k.step(name).problems))
     except Exception as e:
         said = str(e)
@@ -174,15 +179,18 @@ def test_E20_a_list_literal_is_one_value_and_expand_makes_rows(k):
     assert values(k, "rows") == [1, 2, 3]
 
 
-@pytest.mark.xfail(strict=True, reason="S1 (B1, D31): widen names its column")
-def test_E23_B1_widen_spreads_the_named_column():
+def test_E23_B1_widen_spreads_the_named_column_or_the_one_dict_column():
     k = Kernel(Catalog([]))
-    k["p"] = pd.DataFrame({"name": ["Ann"], "info": [{"age": 30, "bed": 4}]})
+    k["p"] = pd.DataFrame({"name": ["Ann"], "info": [{"age": 30, "bed": {"ward": "A"}}]})
     k["w"] = mod.widen("info")(wf["p"])
-    k.run("w")
-    data = k.step("w").output.data
-    assert [c for c in data.columns if not str(c).startswith("#")] == ["name", "age", "bed"]
-    assert refused(k, "x", lambda: mod.widen()(wf["p"]), "info")
+    k["guess"] = mod.widen()(wf["p"])                   # info is the one column holding dicts
+    k.run_all()
+    for s in ("w", "guess"):
+        data = k.step(s).output.data
+        assert [c for c in data.columns if not str(c).startswith("#")] == ["name", "age", "bed"]
+        assert data["bed"].iloc[0] == {"ward": "A"}       # one layer: a nested dict stays a value
+    k["two"] = pd.DataFrame({"a": [{"x": 1}], "b": [{"y": 2}]})
+    assert refused(k, "x", lambda: mod.widen()(wf["two"]), "widen which column")
 
 
 @pytest.mark.xfail(strict=True, reason="S1 (B2, D32): expand(columns=) takes dicts as key/value rows")

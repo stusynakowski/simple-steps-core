@@ -200,8 +200,7 @@ class Operation:
             head = f"op({_src(self.tool)})"
         if self.modifiers:
             head += "[" + ", ".join(
-                _name_source(m.settings) if m.kind == "name" else
-                f"mod.{m.kind}(" + ", ".join(f"{k}={_src(v)}" for k, v in m.settings.items()) + ")"
+                _name_source(m.settings) if m.kind == "name" else _modifier_source(m)
                 for m in self.layers) + "]"
         kwargs = [f"{k}={_src(v)}" for k, v in self.arguments.items()]
         verb = self.shape_verb.kind if self.shape_verb else None
@@ -245,8 +244,7 @@ class Operation:
             # header[k] drops its rows when printed (C28): say it explicitly.
             if not (isinstance(columns, dict) and columns.get("header") and rows_ is not None):
                 return _src(replace(self.input, rows=rows_, columns=columns))
-        settings = ", ".join(f"{k}={_src(v)}" for k, v in m.settings.items())
-        return f"mod.{m.kind}({settings})({_src(self.input)})"
+        return f"{_modifier_source(m)}({_src(self.input)})"
 
     def check(self, workflow: "Workflow | None" = None,
               step_id: str | None = None) -> tuple[str, ...]:
@@ -536,6 +534,14 @@ from .references import (  # noqa: E402
 from .run import compile_operation  # noqa: E402
 from .values import _bind_positional, _decode_argument, _encode_argument  # noqa: E402
 from .workflow import Workflow  # noqa: E402
+
+
+def _modifier_source(m: Any) -> str:
+    """``mod.<kind>(…)`` as written: ``widen``'s column first (B1), then settings by keyword."""
+    settings = dict(m.settings)
+    parts = [_src(settings.pop("column"))] if m.kind == "widen" and "column" in settings else []
+    parts += [f"{k}={_src(v)}" for k, v in settings.items()]
+    return f"mod.{m.kind}({', '.join(parts)})"
 
 
 def _name_source(settings: dict) -> str:
