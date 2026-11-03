@@ -402,6 +402,24 @@ def test_reassigning_an_upstream_marks_dependents_stale():
     assert wf.step("s").output.values == [90, 90]
 
 
+def test_an_edit_rechecks_everything_downstream_at_once():
+    """M7 rule 3: a step invalid because of what it read is re-decided when
+    that changes, and one that depends on an invalid step is invalid, naming
+    it: here through collapse(by="#s1"), which reads s1 without taking it as
+    input (found by L40c at STRESS=1)."""
+    from simple_steps_core.operation import op
+    wf = Workflow()
+    wf["s0"] = pd.DataFrame({"k": []})
+    wf["s1"] = wf["s0"][[0, -1]]                     # no rows yet: no row 0
+    wf["s2"] = op("count")[mod.collapse(by="#s1")](wf["s0"])
+    assert wf.step("s1").state == "invalid"
+    assert "'s1', which is invalid" in str(wf.step("s2").problems[0])
+    wf["s0"] = pd.DataFrame({"k": ["A", "B"]})
+    assert wf.step("s1").problems == () and wf.step("s2").problems == ()
+    wf.run_all()
+    assert len(wf.step("s1").output.data) == len(wf.step("s2").output.data) == 2
+
+
 def test_remove_refuses_when_a_later_step_reads_it():
     @tool
     def times10(n):

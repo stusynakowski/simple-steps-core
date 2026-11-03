@@ -487,6 +487,10 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                    for m in operation.modifiers
                    for name, value in m.settings.items()
                    if isinstance(value, StepRef)]
+    # collapse(by="#s") reads s's rows: s is validated like an input
+    grouped = workflow._groups_by_step_of(operation) if workflow is not None else None
+    if grouped is not None:
+        references.append((f"collapse's by={grouped[0]!r} reads", grouped[1]))
 
     coded(problems, "bad_combine")
 

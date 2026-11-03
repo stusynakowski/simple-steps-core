@@ -33,7 +33,8 @@ HOLDS = frozenset({
     "TEST-L27", "TEST-L28", "TEST-L29a", "TEST-L29b", "TEST-L30a", "TEST-L30b",
     "TEST-L31", "TEST-L31b", "TEST-L35", "TEST-L36", "TEST-L48a", "TEST-L48b",   # M4
     "TEST-L37b", "TEST-L38", "TEST-L39",                      # M5
-    "TEST-L41a", "TEST-L41b", "TEST-L43a", "TEST-L43b", "TEST-L43c", "TEST-L52",   # M6
+    "TEST-L40", "TEST-L41a", "TEST-L41b", "TEST-L43a", "TEST-L43b", "TEST-L43c",
+    "TEST-L52",                                               # M6
 })
 
 #: The phase4-plan.md step that makes a milestone's tests pass.

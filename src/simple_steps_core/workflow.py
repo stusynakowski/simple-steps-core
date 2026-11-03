@@ -214,6 +214,7 @@ class Workflow:
             self.steps[step_id] = self._literal_step(step_id, operation, kept_extras)
             if existed:
                 self._mark_stale_dependents(step_id)
+                self._recheck_downstream(step_id)
             if not existed or was_empty or self.steps[step_id].output.meta.get("empty"):
                 self._recheck_readers(step_id)    # an empty step written, or emptied (G17)
             return
@@ -250,6 +251,7 @@ class Workflow:
                 step_.warnings = tuple(step_.warnings) + found
         if existed:
             self._mark_stale_dependents(step_id)
+            self._recheck_downstream(step_id)
             # What reads this step may need what its new formula won't give.
             for sid, st in self.steps.items():
                 if step_id in st.operation.reads:
@@ -372,9 +374,26 @@ class Workflow:
 
     # ── editing: delete, rename, and staleness ───────────────────────
     def _dependents(self, step_id: str) -> list[str]:
-        """Steps that read *step_id* — as input or as a reference argument."""
-        return [sid for sid, st in self.steps.items()
-                if step_id in st.operation.reads]
+        """Steps that read *step_id* — as input, as a reference argument, or as
+        the step a ``collapse(by="#s")`` groups by."""
+        return [sid for sid in self.steps if step_id in self._depends_on(sid)]
+
+    def _recheck_downstream(self, step_id: str) -> None:
+        """Re-check, in workflow order, every step that depends on *step_id*,
+        directly or not, after it changed (M7 rule 3): a step invalid because
+        of what it read is re-decided, and one whose input became invalid is
+        invalid, saying which. Nothing runs; a step whose problems are the same
+        keeps its output."""
+        changed = {step_id}
+        for sid, st in self.steps.items():
+            if sid in changed or not changed & set(self._depends_on(sid)):
+                continue
+            changed.add(sid)
+            problems = check(st.operation, self, sid)
+            if problems != st.problems:
+                st.problems = problems
+                st.output = stage(st.operation, self, problems, sid)
+                st.warnings = warn(st.operation, self, sid)
 
     def __delitem__(self, step_id: str) -> None:
         self.remove(step_id)
