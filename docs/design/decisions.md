@@ -15,15 +15,13 @@ the evidence is in [history/session-states.md](history/session-states.md)).
 Each was run; each has a recommendation.
 
 **States in a session.** Today a step's state is kept as flags, set by edits
-and cleared by runs. The proposal: compute every state from the step's spec
-id, its inputs' data versions and its problems now.
+and cleared by runs, so it remembers the order of events instead of saying
+what the workflow is now.
 
 | | Decision | Today (run 2026-11-03) | Recommended |
 |---|---|---|---|
-| SS1 | Step states are computed, never flagged: `completed` = made with its spec id now and each input's data version now; `stale` = one differs, saying which ("the step changed", "input p's data changed") | flags: an expression put back to exactly what ran stays `stale` | yes |
-| SS2 | An `invalid` step keeps its last output, marked, and is `completed` again when fixed if nothing else changed | an upstream change that makes a reader `invalid` drops its values; restoring the upstream leaves it `staged` | yes |
-| SS3 | A step run on a stale input is itself `stale`, "read h while it was stale" (reverses **D40**'s *read stale* mark on `completed`) | `completed`, the stale read only in hidden metadata | yes |
-| SS4 | An `invalid` step shows no stale reason | `invalid` with "updated args" | yes |
+| **SM** | **The session model** ([model.md §8.1](model.md#81-the-proposed-session-model-sm)): the session keeps only the workflow and a store of results filed by **run key** (spec id + the data versions read). An edit changes the workflow and re-checks at once; a run adds the missing keys, `run(x)` making `x` current. Every state is derived: `completed` when the store holds its key now; `stale` when it holds an earlier one, saying what differs; `invalid` when it has problems now, still showing its last result. Replaces SS1–SS4 below (proposed earlier the same day); reverses **D40**'s *read stale* mark; brings K22 (several results per step) into S11 | flags: an expression put back stays `stale`; a reader made `invalid` loses its values; a run on a stale input says `completed`; an `invalid` step carries a stale reason | **yes** |
+| ~~SS1–SS4~~ | computed states; keep an `invalid` step's values; a run on a stale input is `stale`; no stale reason on `invalid` | — | → **SM** |
 | SS5 | `needs_run()` leaves out empty steps, and failed steps whose spec and inputs haven't changed (relates to **D37**, an `empty` state) | lists an empty step as `staged`; leaves out a failed step | yes, both |
 | SS6 | Core has no `running` state; it stays the app's | none in core | yes |
 | SS7 | A stale step's reason is among its warnings, where the app reads it (core-asks L42); delete-anyway, `k.remove(name, force=True)` (L43d, **CA-6**) | the reason is in output metadata only; no delete-anyway | yes, both |

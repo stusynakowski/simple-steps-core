@@ -283,20 +283,75 @@ parameter without a default, then the one column whose type fits, else
 
 | | Today | Decision |
 |---|---|---|
-| F1 | an expression put back to exactly what last ran stays `stale` | SS1 |
-| F2 | a reader made `invalid` by an upstream change loses its values, and is `staged` when the upstream is restored | SS2 |
-| F3 | running one step on a `stale` input gives `completed`; the stale read is only in hidden metadata | SS3 |
-| F4 | an `invalid` step can still carry a stale reason | SS4 |
+| F1 | an expression put back to exactly what last ran stays `stale` | SM |
+| F2 | a reader made `invalid` by an upstream change loses its values, and is `staged` when the upstream is restored | SM |
+| F3 | running one step on a `stale` input gives `completed`; the stale read is only in hidden metadata | SM |
+| F4 | an `invalid` step can still carry a stale reason | SM |
 | F5 | `needs_run()` lists an empty step | SS5 |
 | F6 | a failed step isn't listed by `needs_run()` | SS5 |
 | — | the stale reason isn't among the step's warnings, where the app reads (core-asks L42); no delete-anyway (L43d) | SS7 |
 
-**The proposed simpler model (SS1):** every state computed from facts core
-already holds, never kept as a flag. `completed` means the output was made
-with the step's spec id now and each input's data version now; `stale` means
-one of them differs, and the reason says which ("the step changed" or "input
-p's data changed"); `invalid` means problems now. An edit then can't leave a
-wrong state behind, whatever order the edits came in.
+They share one cause: **states are kept as flags**, marks set by an edit and
+cleared by a run, so a state remembers the order of events instead of saying
+what the workflow is now. Each kind of edit has to set and clear the right
+marks on the right steps, and a path that forgets leaves a wrong state behind.
+
+### 8.1 The proposed session model (SM)
+
+*Proposed 2026-11-03; decision SM in [decisions.md](decisions.md). Planned,
+plan step S11.* The session is managed the way build tools manage a build:
+the workflow, plus a store of results, and every state read off the two.
+
+**Two things are kept, and nothing else:**
+
+- **the workflow**: each step's expression, as it is now;
+- **a result store**: every output computed, filed under its **run key**, a
+  hash of the step's spec id and the data versions of the inputs it read:
+  *this expression, with this tool code, on exactly this data*.
+
+**Two kinds of action:**
+
+- **Edit** (assign, rename, move, delete, insert) changes the workflow. Core
+  re-checks every step after it at once and runs no tools. No stored result
+  changes.
+- **Run** computes the run keys missing from the store, in dependency order,
+  and adds them. `run(x)` means *make `x` current*: it first runs whatever
+  `x` needs that isn't. Computing on outdated inputs on purpose is an
+  explicit option, and its result is itself `stale`.
+
+**Every state is derived, when asked:**
+
+| A step is | When | It shows |
+|---|---|---|
+| `invalid` | its expression has problems now | its last result, marked; the problems |
+| `completed` | the store holds a result for its run key now | that result |
+| `failed` | as `completed`, and that result has failed cells | that result |
+| `stale` | no result for its run key now, but an earlier one | the latest earlier result, marked, with the reason: the difference between the two keys ("the step changed", "input p's data changed", "tool changed") |
+| `staged` | no result at all | its plan |
+
+**What follows:**
+
+- **Undo is free.** An expression put back is `completed` at once: its result
+  is still in the store (F1).
+- **The order of edits never matters.** States depend only on the workflow
+  and the store, so any sequence of edits ends where a fresh kernel with the
+  same workflow and store would (F2–F4; the law L40c).
+- **Nothing shown is ever dropped**: an `invalid` step keeps showing its last
+  result (F2).
+- **Autorun is a policy, not new machinery**: after an edit, run what is
+  stale and marked cheap (the planned scheduling modifier).
+- **The flags go**: `edited`, `stale`, `stale_reason`, `read_stale`, and the
+  code that keeps them in sync, replaced by *compute the key, look it up*.
+
+**What exists already:** spec ids (`workflow.identity()`), data versions,
+each output's `read` stamps, and per-row staleness, all built. **To build:** the
+store keeping several results per step (K22, plan step D, brought into S11),
+and states derived from it.
+
+**To decide with it:** how many results the store keeps per step in a
+terminal session (the app's eviction is its hosting); tools that read the
+outside world, whose run key needs an *as of* (D43–D46); source data
+replaced underneath (D-picks).
 
 ## 9. The guarantees, and how they're checked
 
