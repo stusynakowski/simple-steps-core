@@ -319,6 +319,17 @@ def test_R8_C10_a_failed_cell_keeps_the_type_and_blocks_its_row(failing):
                           "cause": "a[1]: ValueError: boom", "where": "upstream"}
 
 
+def test_R8_a_join_gap_keeps_an_int_column_int():
+    w = Workflow()
+    w["r"] = pd.DataFrame({"ward": ["A", "B", "C"], "n": [10, 20, 30]})
+    w["o"] = pd.DataFrame({"ward": ["A", "C"], "pop": [1, 2]})
+    w["j"] = join(w["r"], w["o"], on="ward", how="left")
+    w.run_all()
+    data = w.step("j").output.data
+    assert str(data["pop"].dtype) == "Int64"              # not float64: merge filled the gap with NaN
+    assert list(data["pop"]) == [1, pd.NA, 2]
+
+
 def test_C10_the_root_cause_travels_through_every_verb(failing):
     failing["kept"] = is_pos_008[mod.filter()](failing["a"])
     failing["ordered"] = mod.sort(by="value", ascending=False)(failing["a"])

@@ -29,4 +29,5 @@ STRESS=1 .venv/bin/python -m pytest tests/unit/test_reshape_properties.py   # th
 .venv/bin/python examples/all_orchestrations/pipeline.py
 .venv/bin/python examples/kernel_session.py            # the working guide's session
 .venv/bin/python scripts/core_asks.py                  # one probe per ask: OPEN / DONE
+.venv/bin/python docs/design/core-asks/probe.py        # the core-asks tests L1–L52: PASS / FAIL / SKIP
 ```

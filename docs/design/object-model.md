@@ -16,6 +16,11 @@ One word per idea, used the same way in code, API and docs. The right column
 lists words that are retired: they are renamed in code and not used in new
 docs.
 
+> **2026-11-02:** the words for references, rows, lineage and binding are now
+> those of [core-asks/model.md §M0](core-asks/model.md#m0-the-words)
+> (decisions.md CA-F). The rows below marked *(CA-F)* follow it; where a row
+> here and M0 differ, M0 wins.
+
 | Word | Means | Retired |
 |---|---|---|
 | **kernel** | one live workflow together with what it runs with: its catalog, its loaded resources and its outputs. What you hold in a Python session. The app hosts many; a terminal session works on one | *engine*, *session* (in core), *app* (in core) |
@@ -25,27 +30,27 @@ docs.
 | **resource** | one named instance of a resource type in a workflow: its spec, plus the loaded object | — |
 | **modifier** | a decorator on a tool, stored as data in the step and applied each time it runs. It decides how the tool meets the grid (**shape**: `map`, `filter`, … and the tool-less **reshapes** `select`, `sort`, …), how each call runs (**execution**: `retry`, `timeout`, `breaker`), what a failure becomes (**error handling**: `try_except`), what staging promises (**expectation**: `expect`), what the output columns are called (**naming**: `mod.name`) when it runs (**scheduling**, planned: an autorun modifier) and, planned, what is reported while it runs (**observation**: progress) | *orchestration*, *orchestrator*, *mode* |
 | **combine** | an operation that reads several steps: `join`, `stack`, `zip_` | — |
-| **reference** | points at earlier data: a step (`wf["p"]`), part of a step (rows, columns, a cell) or a resource (`res["db"]`) | `step1.col`, *link* |
+| **reference** | points at earlier data: a step (`wf["p"]`), part of a step (a **pick**: rows, columns, a cell) or a resource (`res["db"]`) | `step1.col`, *link*, *selection* (CA-F) |
 | **operation** | what a step does, and nothing run: tool, modifiers, inputs and arguments | *compiled step* |
 | **step** | one named entry in a workflow: an operation, and once declared, its output | *node*, *task* |
 | **output** | what a step produced: a DataFrame, a state per cell, notes per row | *result*, *ledger* |
 | **workflow** | the ordered steps of a kernel, the stages that group them, and the resources they use | *pipeline* |
 | **stage** | a named group of consecutive steps, managed and run as one. Defined on top of steps; changes no step | *section*, *block* |
-| **formula** | a step's operation written as text, as in the formula bar. Text belongs to the app; core prints it (`to_source()`) but does not parse it | *expression* (same thing; one word now) |
+| **expression** | a step's operation written as text, as in the expression bar. Text belongs to the app; core prints it (`to_source()`) but does not parse it. What staging decides (a verb, a binding) is written into it *(CA-F)* | *formula* (same thing; one word now) |
 | **spec** | the saved form of any object: everything needed to produce the same output, assuming what it references holds the same data. Never holds output data | *declaration*, *saved step*, `ResourceDecl` |
 | **status** | what is live about an object: a step's output, state and problems; a resource's loaded instance. A live object is its spec plus its status | — |
 | **state** | one value from a fixed list. A **step state** is one of `staged`, `completed`, `stale`, `failed`, `invalid`. A **cell state** is one of `absent`, `known`, `maybe`, `pending`, `blocked`, `failed`, `invalid` | step *status* (the field is renamed `state`) |
 | **problem** | a structured reason a step can't run or ran badly: code, message, step, and the row or argument when there is one. A **warning** is a problem that doesn't block | plain-string problems |
-| **row id** | the stable label of a row: the output DataFrame's index, shown and referenced as the `#` column (owner, 2026-10-27; [reshaping-plan.md](reshaping-plan.md) R-D11). Kept by verbs that keep rows, so it follows a row through a sort | — |
-| **row number** | a row's position 0…n-1 as displayed. It has no name: never stored, never referenced, never used to pair rows | `#` (for the row number) |
+| **row id** | core's internal identity for a row: follows a row through a sort, and drives staleness, lineage and "reference moved". **Never shown or written** *(CA-B1; was: shown as `#`, R-D11)* | — |
+| **row number** | a row's position `0…n-1` in its step's current order, shown as `#<step>`. Integers in a pick are row numbers *(CA-B1)* | *placement* |
 | **value column** | the column a tool's result is written to: `value` unless named with `mod.name`. A declared record writes one column per field | *payload* |
-| **`#` column** | a column core writes and keeps: `#`, the row id, and `#v`, the row (or, for a group, the list of rows) of step `v` each row came from. Ids, not variables: tools never see them, and nothing but core writes a name starting with `#` ([reshaping.md §1](reshaping.md#1-the-model)) | — |
+| **`#` column** | a column core writes and keeps: `#<step>`, the row number, and the **lineage** columns `#v`, the row number (or, for a group, the list) of ancestor `v` each row came from; every step carries its input's lineage *(CA-L1)*. Ids, not variables: tools never see them, and nothing but core writes a name starting with `#` ([reshaping.md §1](reshaping.md#1-the-model)) | — |
 | **trace** | following a row back through `#` columns to the rows it came from, step by step; never by reading an id or a position ([reshaping.md §2](reshaping.md#2-the-five-guarantees)) | *ancestors* (parsing `"i.j"`) |
-| **origin** | the step that decided which samples a step's rows are. Two rows line up only within one origin, or as a child and its parent ([reshaping.md §6](reshaping.md#6-matching-rows)) | — |
+| **aligned** | two steps whose rows are the same rows in the same order: one step, or connected only through one-to-one steps. Only aligned steps pair row by row; others meet in a `join` *(CA-F, CA-C)* | *origin* |
 | **pack** | to put a selection into one cell: a column into a list (`gather[collapse()]`), a row into a dict (`mod.pack`). **Unpack** is the way back (`expand`, `widen`) | — |
 | **absent** | a cell state: no value here at all (a key a record lacks, a `stack` or `join` gap), kept apart from a `None` value | — |
 | **empty step** | a step with no expression yet (`k["x"] = None`): a 1×1 grid holding `"empty"`, which nothing reads until it has one | — |
-| **rebuild**, **trace**, **opaque**, **generated** | what a step's plan says about going back: rebuild its input from its output alone (with the formula), trace to its input rows, trace to its whole input, or nothing to go back to ([reshaping.md §7](reshaping.md#7-going-back)) | — |
+| **rebuild**, **trace**, **opaque**, **generated** | what a step's plan says about going back: rebuild its input from its output alone (with the expression), trace to its input rows, trace to its whole input, or nothing to go back to ([reshaping.md §7](reshaping.md#7-going-back)) | — |
 | **mapping** | a dict whose keys are data, not variables: `expand` gives a row per key; a **record** is a dict whose keys are variables: `widen` gives a column per key | — |
 | **extras** | an open mapping on every spec, keyed by namespace (`"simple_steps.ui"`), that core saves and loads but never reads or hashes. The app's extensions (step notes, colours, tool widgets, agent permissions) live here. Removing them never changes an output ([extensions.md](extensions.md)) | — |
 
@@ -148,7 +153,7 @@ and `grid.TOOL_TAGS`.
 A **resource type** is a class decorated `@resource`. Its settings are its
 `__init__` parameters, each typed as a literal. A setting can be marked secret
 (`Secret[str]`): left out of hashes and of anything displayed. Its methods
-decorated `@tool` are tools bound to an instance, used in a formula as
+decorated `@tool` are tools bound to an instance, used in an expression as
 `res["db"].lookup`. A type may define `data_version()`, which feeds the
 staleness of steps that use it (K25).
 
@@ -276,7 +281,7 @@ What a step does. All spec, nothing run.
 | `inputs` | references to the steps it reads: none for a source, one for a normal step, two or more only for a combine |
 | `arguments` | name → a literal or a reference |
 
-- `op.to_source()` prints the formula: `to_f[mod.map()](wf["sick"])`.
+- `op.to_source()` prints the expression: `to_f[mod.map()](wf["sick"])`.
 - `Operation.from_spec(dict)` builds one from plain data. This is the seam the
   app's parser uses: text → its own AST → `from_spec` → core checks it.
 - Building an operation never raises for a wrong *workflow* fact. Declaring it
@@ -437,7 +442,7 @@ k = Kernel.from_json(text, cat)      # or a saved spec
 | `k.run(name)`, `k.run_all()` | run on what the inputs show now: stale inputs pass through (the result is marked as having read them), never-run inputs run first. `observe=[…]` attaches observing modifiers (progress) for this run only, without editing any step |
 | `k.cell(step, row, column)`, `k.view(step, rows=(a, b))` | read one cell with its inputs; read a page of rows |
 | `k.spec`, `k.to_json()` | save |
-| `repr(k)`, `k._repr_html_()` | a table: index, step, formula, state, shape, first problem |
+| `repr(k)`, `k._repr_html_()` | a table: index, step, expression, state, shape, first problem |
 | later: `k.id`, `k.run_id`, `k.diff(other)`, progress, `cancel()` | K20, K23 |
 
 **One kernel per session.** In a terminal you work on one kernel. Core doesn't

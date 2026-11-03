@@ -180,9 +180,11 @@ def _combine_join(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
     keys = {keys} if isinstance(keys, str) else set(keys or [])
     sfx = tuple(config.get("suffixes") or ("_left", "_right"))
     sides = []                                   # each side's columns, as named after the merge
+    ints = set()                                 # of those, the ones that were ints before the merge
     for this, other, s in ((left, right, sfx[0]), (right, left, sfx[1])):
-        sides.append([c if c not in other.columns else f"{c}{s}"
-                      for c in this.columns if c not in keys])
+        named = {c: c if c not in other.columns else f"{c}{s}" for c in this.columns if c not in keys}
+        sides.append(list(named.values()))
+        ints |= {named[c] for c in named if pd.api.types.is_integer_dtype(this[c].dtype)}
     left = left.assign(**{own[0]: _ids_as_column(left, list(frames[0].index))})
     right = right.assign(**{own[1]: _ids_as_column(right, list(frames[1].index))})
     suffixes = tuple(config.get("suffixes") or ("_left", "_right"))
@@ -200,14 +202,18 @@ def _combine_join(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
         for c in names:
             if c in out.columns and missing:
                 absent[c] = missing
-    return _retyped(out, absent)
+    return _retyped(out, absent, ints)
 
 
-def _retyped(out: pd.DataFrame, absent: dict) -> pd.DataFrame:
+def _retyped(out: pd.DataFrame, absent: dict, ints: set = frozenset()) -> pd.DataFrame:
     """*out* with gaps as None in typed columns (an int stays an int), and the
-    absent cells named for the step's states."""
+    absent cells named for the step's states. *ints* names columns that were
+    ints before a merge filled their gaps with ``NaN`` and made them floats (R8)."""
     for c in absent:
-        out[c] = _typed([None if _is_missing(v) else v for v in out[c]], out.index)
+        values = [None if _is_missing(v) else v for v in out[c]]
+        if c in ints:
+            values = [None if v is None else int(v) for v in values]
+        out[c] = _typed(values, out.index)
     out.attrs["absent"] = absent
     return out
 
