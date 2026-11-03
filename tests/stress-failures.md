@@ -1,0 +1,43 @@
+# Property-test failures
+
+Every failure of the property tests (`tests/unit/test_reshape_properties.py`),
+appended by `tests/conftest.py` as it happens: what broke and the shrunk
+example that shows it. An example already here isn't added twice. When one is
+fixed, set its status to the commit that fixed it and pin the example
+(`@example(...)`) so it's checked on every run.
+
+## 2026-11-02 · `test_L40_reshaping_is_closed` · at `ea946d2` · STRESS=1
+
+- **Broke:** A6 s6: planned columns ['#s0', '#s0_1', '#s0_2', 'k', 'value', 'n3'], got ['#s0', 'k', 'value', '#s0_1', '#s0_2', 'n3']: a sort of a `zip_` planned its `#` columns in front, the run kept them in place
+- **Status:** fixed in `03ab207`, example pinned
+
+```
+test_L40_reshaping_is_closed(
+    frame=Empty DataFrame
+    Columns: [k, n, tags, rec]
+    Index: [],
+    chain=[(93, 0, 0, 0),
+     (121, 0, 0, 0),
+     (824, 38, 1, 0),
+     (921, 0, 0, 0),
+     (0, 0, 0, 0),
+     (0, 65, 0, 0)],
+)
+```
+
+## 2026-11-02 · `test_L40c_an_edit_then_a_rerun_matches_a_fresh_run` · at `03ab207` · STRESS=1
+
+- **Broke:** edited: s2 op("count")[mod.collapse(by="#s1")](wf["s0"]) shape mismatch, (1, 3) vs (2, 3): after a source edit, a pick invalid for want of rows stayed invalid, and a collapse grouped by it completed anyway
+- **Status:** fixed in `baec929`; covered by `test_an_edit_rechecks_everything_downstream_at_once` (tests/unit/test_grid.py)
+
+```
+test_L40c_an_edit_then_a_rerun_matches_a_fresh_run(
+    frame=Empty DataFrame
+    Columns: [k, n, tags, rec]
+    Index: [],
+    changed=   k     n  tags rec
+    0  A  <NA>  None  {}
+    1  A  <NA>  None  {},
+    chain=[(993, 0, 0, 0), (811, 0, 0, 1)],
+)
+```

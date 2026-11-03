@@ -332,6 +332,12 @@ def test_L40b_a_saved_workflow_runs_the_same(frame, chain):
 @pytest.mark.no_invariants
 @SETTINGS
 @given(grids(), grids(), chains())
+# a pick that had no rows yet, and a collapse grouped by it: after the edit the
+# pick stayed invalid and the collapse ran anyway (found at STRESS=1)
+@example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
+         changed=pd.DataFrame({"k": ["A", "A"], "n": [pd.NA, pd.NA], "tags": [None, None],
+                               "rec": [{}, {}]}),
+         chain=[(993, 0, 0, 0), (811, 0, 0, 1)])
 def test_L40c_an_edit_then_a_rerun_matches_a_fresh_run(frame, changed, chain):
     k, names = _build(_catalog(frame), chain)
     _run(k)
