@@ -9,6 +9,7 @@ import pytest
 from simple_steps_core import Catalog, Kernel, cols, mod, rows, tool, wf
 from simple_steps_core.catalog import formula_names
 from simple_steps_core.errors import SelectionError
+from simple_steps_core.operation import op
 
 
 @tool
@@ -142,20 +143,24 @@ def test_a_column_pairs_with_the_rows_that_share_its_ids(kw, tool_):
     assert "match_ids=True" in kw.step("u").problems[0]
 
 
-def test_a_list_parameter_still_gets_the_whole_column(kw):
+def test_a_list_parameter_gets_the_whole_column_as_one_cell(kw):
+    """CA-D1: under map a column passes each row's cell, whatever the type; a
+    column of unrelated rows is refused. The whole column is one gathered cell."""
     kw["s"] = sum_ws_r[mod.map()](wf["p"], ws=wf["weights"][cols["w"]])
+    assert [p.code for p in kw.step("s").problems] == ["unmatched_rows"]
+    kw["all"] = op("gather")[mod.collapse()](wf["weights"])
+    kw["s2"] = sum_ws_r[mod.map()](wf["p"], ws=wf["all"])
     kw.run_all()
-    assert kw.step("s").data["value"].tolist() == [60, 60, 60]
+    assert kw.step("s2").data["value"].tolist() == [60, 60, 60]
 
 
-def test_a_row_the_column_has_no_value_for_is_blocked_with_the_reason(kw):
-    kw["few"] = mod.slice(stop=2)(wf["wts"])                      # p's rows 0, 1: no row 2
+def test_a_column_that_leaves_a_row_without_a_value_is_refused(kw):
+    """L1: few has p's rows 0 and 1, not 2; pairing would leave row 2 with no
+    value, so it's refused when declared, pointing to a join."""
+    kw["few"] = mod.slice(stop=2)(wf["wts"])
     kw["s"] = scale_r[mod.map()](wf["p"], w=wf["few"][cols["w"]])
-    kw.run_all()                                                  # doesn't stop the run
-    out = kw.step("s").output
-    assert out.data["value"].tolist()[:2] == [366.0, 764.0]
-    assert list(out.row_states) == ["known", "known", "blocked"]
-    assert out.notes[2]["cause"] == "w: 'few' has no row 2"
+    assert [p.code for p in kw.step("s").problems] == ["bad_pairing"]
+    assert "join" in str(kw.step("s").problems[0])
 
 
 def test_under_a_whole_table_verb_a_column_stays_whole():
@@ -191,9 +196,9 @@ def test_zip_refuses_rows_one_side_doesnt_have(k):
     k["hot"] = mod.slice(start=0, stop=2)(wf["srt"])                  # ids 1, 2
     k["renamed"] = mod.rename(columns={"name": "who", "temp_c": "t"})(wf["hot"])
     k["side"] = zip_(wf["p"], wf["renamed"])
-    k.run("side")
-    assert k.step("side").state == "failed"
-    assert "no matching row in 'renamed'" in str(k.step("side").output.notes)
+    k.run_all()
+    assert k.step("side").state == "invalid"          # L2: refused once both have run
+    assert "Use join" in str(k.step("side").problems[0])
 
 
 

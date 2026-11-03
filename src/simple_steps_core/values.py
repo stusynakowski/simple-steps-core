@@ -172,8 +172,9 @@ def _value_fits(value: Any, annotation: Any) -> bool | None:
 
 
 def _shape_kind(frame: pd.DataFrame) -> str:
-    """``cell``, ``column``, ``row`` or ``block`` — what a referenced grid is."""
-    n_rows, n_cols = frame.shape
+    """``cell``, ``column``, ``row`` or ``block`` — what a referenced grid is,
+    counting its data columns only: a `#` column never counts (B9)."""
+    n_rows, n_cols = len(frame), len(variables(frame.columns))
     if (n_rows, n_cols) == (1, 1):
         return "cell"
     if n_cols == 1:
@@ -232,6 +233,7 @@ def _ref_value(frame: pd.DataFrame, annotation: Any, step_id: str) -> Any:
     list/Series); anything else the DataFrame. Untyped, the natural form.
     """
     kind = _shape_kind(frame)
+    frame = frame[variables(frame.columns)]       # ids aren't data: never a tool's (B9, rule 15)
     problem = _shape_problem(kind, annotation, "argument", step_id)
     if problem:
         raise TypeError(problem)
@@ -243,7 +245,9 @@ def _ref_value(frame: pd.DataFrame, annotation: Any, step_id: str) -> Any:
         value = frame.iloc[0, 0]
         return None if _is_missing(value) else value
     if kind == "cell":
-        return clean([frame.iloc[0, 0]])
+        value = frame.iloc[0, 0]
+        # a cell passes its value (CA-D1): a list in it is the list, not wrapped
+        return clean(value) if isinstance(value, (list, tuple)) else clean([value])
     if kind == "column":
         return frame.iloc[:, 0] if wanted == "series" else clean(frame.iloc[:, 0])
     if kind == "row":
@@ -847,7 +851,7 @@ from .catalog import (  # noqa: E402
 from .checks import columns_unknown, predicted_columns  # noqa: E402
 from .errors import PayloadError  # noqa: E402
 from .operation import Operation  # noqa: E402
-from .output import Output, _is_missing, _state_column  # noqa: E402
+from .output import Output, _is_missing, _state_column, variables  # noqa: E402
 from .references import (  # noqa: E402
     ResRef,
     StepRef,

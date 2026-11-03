@@ -546,8 +546,16 @@ def test_C7_a_selection_as_an_argument_converts_by_type(prices):
 
     prices["l"] = total_l_008[mod.map()](prices["o"], prices=prices["p"][cols["price"]])
     prices["f"] = total_f_008[mod.map()](prices["o"], prices=prices["p"][cols["price"]])
-    prices.run("l")
-    assert prices.step("l").output.values == [151.0, 152.0]      # a list: the whole column
+    # CA-D1: under map a column passes each row's cell, whatever the type, so
+    # a list parameter no longer gets the whole column of an unrelated step ...
+    assert [p.code for p in prices.step("l").problems] == ["unmatched_rows"]
+    # ... the whole column to every row is one cell, a gathered list.
+    prices["pp"] = prices["p"][cols["price"]]
+    prices["all"] = op("gather")[mod.collapse()](prices["pp"])
+    prices["l2"] = total_l_008[mod.map()](prices["o"], prices=prices["all"])
+    for s in ("pp", "all", "l2"):
+        prices.run(s)
+    assert prices.step("l2").output.values == [151.0, 152.0]
     # A float takes one value per row, from its partner row: o is unrelated
     # to p, so it has none (R-D7) ...
     assert [p.code for p in prices.step("f").problems] == ["unmatched_rows"]
@@ -1012,16 +1020,11 @@ def test_009_zip_never_drops_a_row(r3):
     r3["long_first"] = zip_(r3["r"], r3["kept"])
     r3.run("head")
     r3.run("kept")
-    r3.run("short_first")
-    r3.run("long_first")
-    assert r3.step("short_first").output.notes[0]["error"] == (
-        "zip_ pairs rows by id: row 2 of 'r' has no matching row in 'kept'. "
-        "For a partial match, use join")
-    assert r3.step("long_first").output.notes[0]["error"] == (
-        "zip_ pairs rows by id: row 2 of 'r' has no matching row in 'kept'. "
-        "For a partial match, use join")
-    with pytest.raises(StepFailed, match="use join"):
-        r3.run_all()
+    # L2: once both have run, rows that don't all pair are refused when
+    # declared (re-checked), before anything runs.
+    for s in ("short_first", "long_first"):
+        said = " ".join(map(str, r3.step(s).problems))
+        assert "aren't the same (2 in only one)" in said and "Use join" in said
 
 
 def test_009_zip_of_loaded_tables_pairs_by_id_and_refuses_extra_rows():

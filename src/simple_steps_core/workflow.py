@@ -1186,6 +1186,53 @@ class Workflow:
                         return found
         return None
 
+    def aligned(self, a: str, b: str) -> bool:
+        """Are steps *a* and *b* the same rows in the same order: one step, or
+        connected only through one-to-one steps (core-asks model §M3)? A
+        filter, sort or slice makes other rows; a row pick does too."""
+        return self._aligned_root(a) == self._aligned_root(b)
+
+    def _covers(self, a: str, b: str) -> bool:
+        """Does every row of step *a* have one row of step *b* (L1)? True when
+        they're aligned, when *a* is *b*'s rows filtered or reordered, or when
+        each row of *a* traces to a parent row in *b*. A subset *b* of *a*'s
+        rows doesn't cover it."""
+        if self.aligned(a, b) or self._aligned_root(b) in self._same_ids(a):
+            return True
+        if self._same_ids(a) & self._same_ids(b):
+            # one origin: once both have run, their ids say; before, b may lack some
+            ran = [self.steps[s].output for s in (a, b)
+                   if s in self.steps and not self.steps[s].output.meta.get("staged")]
+            if len(ran) == 2:
+                return {str(i) for i in ran[0].data.index} <= {str(i) for i in ran[1].data.index}
+            return False
+        return a in self.steps and self.trace(a, list(self.steps[a].output.data.index), b) is not None
+
+    def _aligned_root(self, step_id: str) -> str:
+        """The furthest step back that *step_id* reaches through one-to-one steps."""
+        seen, names = step_id, {step_id}
+        while seen in self.steps:
+            op_ = self.steps[seen].operation
+            kind = self._kind(seen)
+            columns_only = kind == "select" and op_.shape_verb.settings.get("rows") is None
+            if op_.input is None or is_combine(op_) or getattr(op_.input, "rows", None) is not None \
+                    or not (kind in _ONE_TO_ONE or columns_only):
+                break
+            seen = str(op_.input)
+            if seen in names:
+                break
+            names.add(seen)
+        return seen
+
+    def _step_column_type(self, step_id: str, column: str) -> Any:
+        """The Python type of *column* of step *step_id*, as far as known, or None."""
+        step = self.steps.get(step_id)
+        if step is None:
+            return None
+        if not step.output.meta.get("staged"):
+            return _dtype_type(step.output.data[column]) if column in step.output.data.columns else None
+        return (step.output.meta.get("column_types") or {}).get(column)
+
     def _kind(self, step_id: str) -> str | None:
         """The verb a step runs as: an `auto` step's, once it has resolved."""
         step = self.steps[step_id]
@@ -1216,11 +1263,16 @@ class Workflow:
             found.append(f"A1 {step_id}: its {ROW_ID!r} column isn't its row ids")
         op_ = step.operation
         # None only where a row has no partner on that side (reshaping.md §5).
-        def may_be_none(column: str) -> bool:
-            """A `#` column a stack or an outer join wrote, here or carried."""
-            seen = step_id
+        def may_be_none(column: str, start: str = step_id) -> bool:
+            """A `#` column a stack or an outer join wrote, here or carried
+            (through a zip_ too: an empty lineage cell is allowed, CA-L2)."""
+            seen = start
             while seen in self.steps:
                 o = self.steps[seen].operation
+                if is_combine(o) and o.tool == "zip":
+                    return any(column in self.steps[str(g)].output.data.columns
+                               and may_be_none(column, str(g))
+                               for g in o.grids if str(g) in self.steps)
                 if is_combine(o):
                     return o.tool == "stack" or (o.tool == "join" and o.arguments.get("how", "inner") != "inner")
                 if not keeps_ids(self._kind(seen), o.shape_verb) or o.input is None:
@@ -2389,6 +2441,8 @@ def _spread_record(operation: Operation, output: Output) -> None:
 
 
 _MISSING = object()
+#: Verbs whose output rows are their input's rows, in order (core-asks §M3, aligned).
+_ONE_TO_ONE = frozenset({"map", "group", "rename", "drop", "widen", "pack"})
 _SNAKE = re.compile(r'^[a-z0-9]+(_[a-z0-9]+)*$')
 _CAMEL = re.compile(r'^[a-z][a-zA-Z0-9]*$')
 

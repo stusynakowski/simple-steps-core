@@ -450,6 +450,20 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                     problems.append(f"{said}, which holds only row ids "
                                     f"({', '.join(map(str, picked))}): there is nothing to stack; "
                                     f"pick its data columns")
+        if operation.tool == "zip" and workflow is not None and not operation.arguments.get("match_ids"):
+            # L2: rows of one origin pair by id; once both have run, ids that
+            # differ are refused here rather than failing the run.
+            ran = [str(g) for g in operation.grids if str(g) in workflow.steps
+                   and not workflow.steps[str(g)].output.meta.get("staged")]
+            for i, a in enumerate(ran):
+                for b in ran[i + 1:]:
+                    ids_a = {str(x) for x in workflow.steps[a].output.data.index}
+                    ids_b = {str(x) for x in workflow.steps[b].output.data.index}
+                    if workflow._same_ids(a) & workflow._same_ids(b) and ids_a != ids_b:
+                        only = sorted((ids_a - ids_b) or (ids_b - ids_a))[:3]
+                        problems.append(f"zip_ pairs {a!r} and {b!r} row by row, but their rows "
+                                        f"aren't the same ({', '.join(only)} in only one): "
+                                        f"some would have no partner. Use join instead")
         if operation.tool == "zip" and len({str(g) for g in operation.grids}) < len(operation.grids):
             twice = next(str(g) for g in operation.grids if
                          [str(x) for x in operation.grids].count(str(g)) > 1)
@@ -700,6 +714,44 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                                 f"{value.id!r}: a `#` column is a row id, not data, and never "
                                 f"reaches a tool; use it to pick rows instead")
     coded(problems, "id_argument")
+
+    # 6c''. a column argument under a row-by-row verb pairs row by row: only
+    #       with an aligned step (L1), and its cells must fit the parameter (L3).
+    if fn is not None and workflow is not None and operation.input is not None:
+        try:
+            wanted_of = {k: _wants(p.annotation) for k, p in _signature(fn).parameters.items()}
+        except (TypeError, ValueError):
+            wanted_of = {}
+        source = str(operation.input)
+        for name, value in _paired_arguments(operation, workflow).items():
+            if value.id not in workflow.steps or source not in workflow.steps:
+                continue
+            # Until S5 (row numbers, joins on lineage), a step whose every row has
+            # one row of the argument's step it came from still pairs by id: only
+            # a pairing that would leave a row without a value is refused here.
+            if value.rows is None and not workflow._matched(source, value.id):
+                continue                       # unrelated rows: unmatched_rows says so (R-D7)
+            if value.rows is not None or not workflow._covers(source, value.id):
+                problems.append(
+                    f"argument {name!r} reads a column of {value.id!r}: the rows of "
+                    f"{value.id!r} aren't the rows of {source!r}, so some rows would get no "
+                    f"value. A column argument pairs row by row only with an aligned step; "
+                    f"bring them together with a join first: join(wf[{source!r}], "
+                    f"wf[{value.id!r}], on=…)")
+                continue
+            column = (value.columns or {}).get("names", [None])[0] \
+                if isinstance(value.columns, dict) else None
+            cell = workflow._step_column_type(value.id, column) if column else None
+            wanted = wanted_of.get(name)
+            if (wanted == "list" and cell in (int, float, str, bool)) or \
+                    (wanted == "scalar" and cell in (list, tuple, dict)):
+                verb_name = operation.shape_verb.kind if operation.shape_verb else "map"
+                problems.append(
+                    f"{name}: {_type_name(_signature(fn).parameters[name].annotation)}, but under "
+                    f"{verb_name} each call gets one cell of {value.id!r}[{column!r}], "
+                    f"{_type_name(cell)}: the verb decides what a column passes, not the "
+                    f"parameter's type")
+    coded(problems, "bad_pairing")
 
     # 6c'. a reference argument arrives whole, shaped by the parameter's type
     #      (008 C1) — a shape that can't convert is refused here, not on every row.
@@ -1110,9 +1162,11 @@ def _paired_arguments(operation: Operation, workflow: "Workflow | None") -> dict
         annotations = {k: p.annotation for k, p in _signature(fn).parameters.items()}
     except (TypeError, ValueError):
         return {}
+    # CA-D1: under a row-by-row verb the verb decides: a column passes each
+    # row's cell whatever the parameter's type; only a DataFrame takes it whole.
     return {name: value for name, value in op_.arguments.items()
             if isinstance(value, StepRef) and _selection_kind(value) == "column"
-            and name in annotations and _wants(annotations[name]) in (None, "scalar")}
+            and name in annotations and _wants(annotations[name]) != "frame"}
 
 
 def _required_columns(operation: Operation, verb: Any) -> list[str]:

@@ -22,7 +22,8 @@ _spec.loader.exec_module(probe)
 
 #: Tests that pass (2026-11-02, from 6d9557c; S1 adds as it lands). Everything else waits.
 HOLDS = frozenset({
-    "TEST-L3b", "TEST-L3c", "TEST-L3e", "TEST-L4", "TEST-L5", "TEST-L5b",   # M0
+    "TEST-L1", "TEST-L2", "TEST-L3a", "TEST-L3b", "TEST-L3c", "TEST-L3d", "TEST-L3e",
+    "TEST-L4", "TEST-L5", "TEST-L5b",                         # M0
     "TEST-L7c",                                               # M1
     "TEST-L11b", "TEST-L14c", "TEST-L19",                    # M2
     "TEST-L20", "TEST-L24",                                   # M3
