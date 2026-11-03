@@ -643,6 +643,8 @@ class _Mods:
                 # Types are written as Python types and saved as their names.
                 params["columns"] = {k: _type_label(v)
                                      for k, v in params["columns"].items()}
+            if isinstance(params.get("rows"), Condition):
+                params["rows"] = {"where": params["rows"].tree}     # S5c: saved as data
             if isinstance(params.get("over"), str):
                 # 008 K5: in Python a string is data everywhere else
                 # (`scale[mod.map()]("readings")`), so it must not be a
@@ -664,6 +666,6 @@ mod = _Mods()
 from .system_tools import BUILTIN_TOOLS, DEFAULT_TOOL  # noqa: E402
 from .checks import ROWS_RULE  # noqa: E402
 from .operation import Operation  # noqa: E402
-from .references import TOOL_SETTINGS, _deref  # noqa: E402
+from .references import TOOL_SETTINGS, Condition, _deref  # noqa: E402
 from .values import _type_label  # noqa: E402
 from .verbs import _Caught, _Stopped, _Tolerated  # noqa: E402

@@ -26,7 +26,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from simple_steps_core import Catalog, Kernel, cols, join, mod, stack, tool, wf, zip_
+from simple_steps_core import Catalog, Kernel, cols, join, mod, row, stack, tool, wf, zip_
 from simple_steps_core.errors import SelectionError, StepFailed
 from simple_steps_core.operation import op
 from simple_steps_core.output import is_id_column, variables
@@ -166,6 +166,9 @@ def _moves(k: Kernel, name: str, src: str, other: str, ancestor: str):
         ("group", lambda: key_pp[mod.group(), mod.name("g")](wf[src])),
         ("distinct", lambda: mod.distinct(columns=["k"])(wf[src])),
         ("slice", lambda: mod.slice(stop=2)(wf[src])),
+        ("where_value", lambda: wf[src][cols["k"] == "A"]),                     # S5c
+        ("where_own", lambda: wf[src][row[src].isin([0, 2])]),
+        ("where_lineage", lambda: wf[src][(row[ancestor] == 0) | ~(cols["k"] == "A")]),
         ("expand", lambda: mod.expand(columns=["tags"])(wf[src])),
         ("expand_one", lambda: op("identity")[mod.expand()](part(["tags"]))),
         ("expand_tool", lambda: explode_pp[mod.expand()](wf[src])),

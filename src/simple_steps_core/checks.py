@@ -805,7 +805,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 frame = pd.DataFrame(columns=predicted_columns(step.output))
                 row_sel = None                # row count not known yet
             else:
-                frame, row_sel = step.output.data, ref.rows
+                frame, row_sel = step.output.data, workflow._with_lineage(ref.rows, ref.id)
             try:
                 _apply_selection(frame, row_sel, ref.columns, ref.id)
             except SelectionError as exc:

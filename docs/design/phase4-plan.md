@@ -207,6 +207,10 @@ row numbers `0, 0, 1, 1`.
 **Progress.** S5a and S5b done 2026-11-02: `Workflow.lineage(step)` works the
 lineage out from core's ids; the view lists it apart and shows row numbers;
 cell inputs give row numbers. 14 core-asks tests now hold (L6, L10–L16a, L52).
+S5c done 2026-11-02: conditions (`references.Condition`, saved as
+`{"where": …}`, evaluated against the data and the picked step's lineage, never
+run as Python); 10 more hold (L29–L31, L35, L36, L48); the property test
+generates conditions. Found on the way: `tool(fn, id=…)` ignored its id.
 
 **Existing tests that change** (counted at `65865bb`): the view's `#` (12
 uses), `k.cell` by id (31; most read a source, where the id is the row

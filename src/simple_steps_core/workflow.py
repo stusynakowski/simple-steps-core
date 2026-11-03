@@ -1891,7 +1891,9 @@ class Workflow:
         """
         settings_refs = any(isinstance(v, StepRef)
                             for m in operation.modifiers for v in m.settings.values())
-        if operation.bound_to is None and not settings_refs and not any(
+        conditions = any(_uses_lineage((m.settings.get("rows") or {}).get("where"))
+                         for m in operation.modifiers if isinstance(m.settings.get("rows"), dict))
+        if operation.bound_to is None and not settings_refs and not conditions and not any(
                 isinstance(v, (StepRef, ResRef)) for v in operation.arguments.values()):
             return operation
         fn_for_types = operation.fn \
@@ -1905,7 +1907,8 @@ class Workflow:
         for name, value in operation.arguments.items():
             if isinstance(value, StepRef):
                 data = _apply_selection(self.steps[str(value)].output.data,
-                                        value.rows, value.columns, value.id)
+                                        self._with_lineage(value.rows, value.id),
+                                        value.columns, value.id)
                 # 008 C1: the parameter's type decides the shape that arrives.
                 try:
                     resolved[name] = _ref_value(data, annotations.get(name), value.id)
@@ -1923,11 +1926,20 @@ class Workflow:
             Modifier(m.kind, {k: (_ref_value(_apply_selection(
                                       self.steps[v.id].output.data, v.rows,
                                       v.columns, v.id), None, v.id)
-                                  if isinstance(v, StepRef) else v)
+                                  if isinstance(v, StepRef) else
+                                  self._with_lineage(v, str(operation.input))
+                                  if k == "rows" and operation.input is not None else v)
                               for k, v in m.settings.items()})
             for m in operation.modifiers)
         return Operation(operation.tool, modifiers, resolved,
                          fn, operation.input)
+
+    def _with_lineage(self, row_sel: Any, step_id: str) -> Any:
+        """A condition that tests ``row[…]``, with the lineage of the step it
+        picks from (S5c); anything else unchanged."""
+        if not (isinstance(row_sel, dict) and _uses_lineage(row_sel.get("where"))):
+            return row_sel
+        return {**row_sel, "lineage": self.lineage(step_id), "step": step_id}
 
     def run(self, step_id: str, tools: dict[str, Callable] | None = None,
             resources: Mapping[str, Any] | None = None) -> Step:
@@ -2128,6 +2140,8 @@ class Workflow:
                     found.append(f"read {read!r} while it's stale (version "
                                  f"{upstream.output.version}): an earlier step changed since "
                                  f"{read!r} ran; run it first for current values")
+            if step.output.meta.get("matched_nothing"):     # CA-5: zero rows, said
+                found.append(step.output.meta["matched_nothing"])
             defaulted = [i for i, n in step.output.notes.items()
                          if n.get("caught") and str(step.output.row_states.get(i)) == "known"]
             if defaulted:                         # G7: a default stood in for a result
@@ -2484,6 +2498,7 @@ from .references import (  # noqa: E402
     _UNKNOWN,
     _apply_selection,
     _check_caller_scope,
+    _uses_lineage,
     rows,
 )
 from .run import _is_auto, _resolve_auto  # noqa: E402

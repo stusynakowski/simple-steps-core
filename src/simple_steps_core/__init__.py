@@ -41,14 +41,14 @@ from .modifiers import mod  # noqa: E402
 from .operation import Operation, op  # noqa: E402
 from .output import Output  # noqa: E402
 from .problems import Problem  # noqa: E402
-from .references import cols, res, rows, wf  # noqa: E402
+from .references import cols, res, row, rows, wf  # noqa: E402
 from .specs import CatalogSpec, KernelSpec, Naming, ResourceSpec, StepSpec, WorkflowSpec  # noqa: E402
 from .step import Step, StepStatus  # noqa: E402
 from .values import Secret  # noqa: E402
 
 __all__ = [
     "Catalog", "Kernel", "Tool", "tool", "resource", "bound_tool", "Secret",
-    "mod", "wf", "res", "rows", "cols", "join", "stack", "zip_",
+    "mod", "wf", "res", "rows", "cols", "row", "join", "stack", "zip_",
     "Operation", "op", "Step", "StepStatus", "Output", "Problem",
     "StepFailed", "SelectionError", "ResourceNotLoaded", "PayloadError",
     "ResourceSpec", "StepSpec", "WorkflowSpec", "CatalogSpec", "KernelSpec", "Naming",

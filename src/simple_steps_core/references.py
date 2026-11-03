@@ -26,6 +26,11 @@ def _row_part(key: Any, strings: bool = False) -> Any:
     """
     if isinstance(key, Rows):
         return key.sel
+    if isinstance(key, Condition):
+        return {"where": key.tree}            # S5c: rows chosen by a condition
+    if isinstance(key, Cols) or isinstance(key, _Operand):
+        raise SelectionError("a row part takes a condition, a comparison: "
+                             "wf[…][cols['n'] > 15], not cols['n'] on its own")
     if isinstance(key, str):
         if strings:
             return key
@@ -95,8 +100,230 @@ class Rows:
 
 @dataclass(frozen=True)
 class Cols:
-    """``cols["name":"price"]`` — the only way to select columns."""
+    """``cols["name":"price"]`` selects columns; ``cols["n"] > 15`` is a
+    condition on one column's values (S5c)."""
     sel: Any = field(hash=False)
+
+    def _operand(self) -> "_Operand":
+        names = self.sel.get("names") if isinstance(self.sel, dict) else None
+        if not names or len(names) != 1:
+            raise SelectionError("a condition compares one column: cols['n'] > 15")
+        return _Operand({"col": names[0]})
+
+    def __eq__(self, other: Any) -> Any:
+        if isinstance(other, Cols):
+            return self.sel == other.sel
+        return self._operand() == other
+
+    def __ne__(self, other: Any) -> Any:
+        if isinstance(other, Cols):
+            return self.sel != other.sel
+        return self._operand() != other
+
+    __hash__ = object.__hash__
+
+    def __lt__(self, other: Any) -> "Condition":
+        return self._operand() < other
+
+    def __le__(self, other: Any) -> "Condition":
+        return self._operand() <= other
+
+    def __gt__(self, other: Any) -> "Condition":
+        return self._operand() > other
+
+    def __ge__(self, other: Any) -> "Condition":
+        return self._operand() >= other
+
+    def isin(self, values: Any) -> "Condition":
+        return self._operand().isin(values)
+
+
+_LITERALS = (type(None), bool, int, float, str)
+
+
+def _literal(value: Any) -> Any:
+    """A condition's literal, as saved: a number, text, a bool, None, or a list of them."""
+    if isinstance(value, _LITERALS) and not isinstance(value, Condition):
+        return value
+    if isinstance(value, (list, tuple)) and all(isinstance(v, _LITERALS) for v in value):
+        return list(value)
+    raise SelectionError(f"a condition compares with a literal (a number, text, True, None "
+                         f"or a list of them), got {type(value).__name__}")
+
+
+class _Operand:
+    """One side of a test: ``cols["n"]`` (a value) or ``row["r"]`` (a row number)."""
+
+    def __init__(self, on: dict):
+        self.on = on
+
+    def _test(self, op: str, other: Any) -> "Condition":
+        return Condition({"test": op, "on": dict(self.on), "value": _literal(other)})
+
+    def __eq__(self, other: Any) -> "Condition":           # type: ignore[override]
+        return self._test("==", other)
+
+    def __ne__(self, other: Any) -> "Condition":           # type: ignore[override]
+        return self._test("!=", other)
+
+    __hash__ = object.__hash__
+
+    def __lt__(self, other: Any) -> "Condition":
+        return self._test("<", other)
+
+    def __le__(self, other: Any) -> "Condition":
+        return self._test("<=", other)
+
+    def __gt__(self, other: Any) -> "Condition":
+        return self._test(">", other)
+
+    def __ge__(self, other: Any) -> "Condition":
+        return self._test(">=", other)
+
+    def isin(self, values: Any) -> "Condition":
+        return Condition({"test": "isin", "on": dict(self.on), "value": _literal(list(values))})
+
+    @property
+    def idx(self) -> "_Operand":
+        """``row["r"].idx``: the item's place in r's cell, after an expand."""
+        if "row" not in self.on or self.on.get("idx"):
+            raise SelectionError(".idx follows row['step']: row['r'].idx")
+        return _Operand({**self.on, "idx": True})
+
+    def __repr__(self) -> str:
+        return _operand_source(self.on)
+
+
+class _RowIndexer:
+    """``row["r"]``: this row's row number in step r, its own or its lineage's (S5c)."""
+
+    def __getitem__(self, step_id: str) -> _Operand:
+        if not isinstance(step_id, str) or not step_id:
+            raise SelectionError(f"row[…] takes a step name, got {step_id!r}")
+        return _Operand({"row": step_id})
+
+    def __repr__(self) -> str:
+        return "row"
+
+
+class Condition:
+    """Tests on one step's rows, joined by ``&``, ``|``, ``~``: plain data in
+    ``tree``, read by core, never run as Python (S5c, core-asks rule 9)."""
+
+    def __init__(self, tree: dict):
+        self.tree = tree
+
+    def __and__(self, other: "Condition") -> "Condition":
+        return Condition({"and": [self.tree, _tree(other)]})
+
+    def __or__(self, other: "Condition") -> "Condition":
+        return Condition({"or": [self.tree, _tree(other)]})
+
+    def __invert__(self) -> "Condition":
+        return Condition({"not": self.tree})
+
+    def __bool__(self) -> bool:
+        raise TypeError("a condition joins with &, | and ~, each test in brackets: "
+                        "(cols['n'] > 15) & (cols['ward'] == 'A')")
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, Condition) and self.tree == other.tree
+
+    __hash__ = object.__hash__
+
+    def __repr__(self) -> str:
+        return condition_source(self.tree)
+
+
+def _tree(value: Any) -> dict:
+    if not isinstance(value, Condition):
+        raise SelectionError(f"&, | and ~ join conditions, got {type(value).__name__}")
+    return value.tree
+
+
+def _operand_source(on: dict) -> str:
+    if "col" in on:
+        return f'cols["{on["col"]}"]'
+    return f'row["{on["row"]}"]' + (".idx" if on.get("idx") else "")
+
+
+def condition_source(tree: dict, top: bool = True) -> str:
+    """A condition as written: ``cols["n"] > 15``, ``(a) & (b)``, ``~(a)``."""
+    if "test" in tree:
+        literal = tree["value"]
+        shown = repr(literal).replace("'", '"') if isinstance(literal, (str, list)) else repr(literal)
+        if tree["test"] == "isin":
+            text = f"{_operand_source(tree['on'])}.isin({shown})"
+        else:
+            text = f"{_operand_source(tree['on'])} {tree['test']} {shown}"
+        return text if top else f"({text})"
+    if "not" in tree:
+        return f"~{condition_source(tree['not'], False)}"
+    joiner, parts = ("&", tree["and"]) if "and" in tree else ("|", tree["or"])
+    text = f" {joiner} ".join(condition_source(t, False) for t in parts)
+    return text if top else f"({text})"
+
+
+def _cell_test(op: str, value: Any, literal: Any, where: str) -> bool:
+    """One test on one cell (CA-L3): a list cell is matched by membership; an
+    empty cell fails every test."""
+    if value is None or (isinstance(value, float) and value != value) or value is pd.NA:
+        return False
+    if isinstance(value, list):
+        if op == "==":
+            return literal in value
+        if op == "!=":
+            return literal not in value
+        if op == "isin":
+            return any(v in literal for v in value)
+        raise SelectionError(f"{where}: {op} isn't defined on a list cell; use ==, != or .isin")
+    if op == "isin":
+        return value in literal
+    try:
+        return bool({"==": lambda: value == literal, "!=": lambda: value != literal,
+                     "<": lambda: value < literal, "<=": lambda: value <= literal,
+                     ">": lambda: value > literal, ">=": lambda: value >= literal}[op]())
+    except TypeError:
+        raise SelectionError(f"{where}: can't compare {value!r} {op} {literal!r}") from None
+
+
+def _where(frame: pd.DataFrame, tree: dict, lineage: dict | None, step_id: str) -> list:
+    """Which rows of *frame* *tree* keeps: a mask, in row order."""
+    n = len(frame)
+
+    def operand(on: dict) -> list:
+        if "col" in on:
+            if on["col"] not in frame.columns:
+                raise SelectionError(f"the condition reads cols[{on['col']!r}], which "
+                                     f"{step_id!r} doesn't have")
+            return list(frame[on["col"]])
+        if on["row"] == step_id and not on.get("idx"):
+            return list(range(n))                  # its own row number
+        name = f"{ROW_ID}{on['row']}" + (".idx" if on.get("idx") else "")
+        if lineage is None or name not in lineage:
+            have = ", ".join(lineage or {}) or "none"
+            raise SelectionError(f"{step_id!r} has no lineage {name} to test "
+                                 f"(its lineage: {have})")
+        return list(lineage[name])
+
+    def mask(t: dict) -> list:
+        if "test" in t:
+            where = condition_source(t)
+            return [_cell_test(t["test"], v, t["value"], where) for v in operand(t["on"])]
+        if "not" in t:
+            return [not m for m in mask(t["not"])]
+        parts = [mask(x) for x in (t["and"] if "and" in t else t["or"])]
+        join = all if "and" in t else any
+        return [join(ms) for ms in zip(*parts)]
+    return mask(tree)
+
+
+def _uses_lineage(tree: Any) -> bool:
+    if not isinstance(tree, dict):
+        return False
+    if "test" in tree:
+        return "row" in tree["on"]
+    return any(_uses_lineage(t) for t in (tree.get("and") or tree.get("or") or [tree.get("not")]))
 
 
 class _RowsIndexer:
@@ -126,10 +353,13 @@ rows = _RowsIndexer()
 
 cols = _ColsIndexer()
 
+#: ``row["r"]`` in a condition (S5c).
+row = _RowIndexer()
+
 
 #: Names a tool, bound tool or resource type can't take: the formula bar's own
 #: vocabulary (008 C7).
-RESERVED_NAMES = frozenset({"wf", "res", "mod", "rows", "cols", "op", "join",
+RESERVED_NAMES = frozenset({"wf", "res", "mod", "rows", "cols", "row", "op", "join",
                             "stack", "zip_"})
 
 
@@ -268,6 +498,14 @@ def _apply_selection(frame: pd.DataFrame, row_sel: Any, col_sel: Any,
         if ROW_ID in wanted:
             out = out.assign(**{ROW_ID: list(out.index)})  # the row ids (R-D11)
         out = out[wanted]
+    if isinstance(row_sel, dict) and "where" in row_sel:
+        # S5c: rows a condition keeps; lineage comes with it when it tests row[…]
+        keep = _where(out, row_sel["where"], row_sel.get("lineage"), row_sel.get("step") or step_id)
+        out = out.iloc[[i for i, k in enumerate(keep) if k]]
+        if not len(out):
+            out.attrs["matched_nothing"] = (f"no row of {step_id!r} has "
+                                            f"{condition_source(row_sel['where'])}")
+        return out
     if row_sel is not None:
         n = len(out)
         if isinstance(row_sel, dict):

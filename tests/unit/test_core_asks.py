@@ -29,13 +29,15 @@ HOLDS = frozenset({
     "TEST-L10", "TEST-L11a", "TEST-L11b", "TEST-L12", "TEST-L12b", "TEST-L13",
     "TEST-L14a", "TEST-L14b", "TEST-L14c", "TEST-L15", "TEST-L16a", "TEST-L19",   # M2
     "TEST-L20", "TEST-L21a", "TEST-L21b", "TEST-L24",         # M3
-    "TEST-L27", "TEST-L28", "TEST-L31b",                     # M4
+    "TEST-L27", "TEST-L28", "TEST-L29a", "TEST-L29b", "TEST-L30a", "TEST-L30b",
+    "TEST-L31", "TEST-L31b", "TEST-L35", "TEST-L36", "TEST-L48a", "TEST-L48b",   # M4
     "TEST-L38", "TEST-L39",                                   # M5
     "TEST-L43a", "TEST-L43b", "TEST-L43c", "TEST-L52",       # M6
 })
 
 #: The phase4-plan.md step that makes a milestone's tests pass.
 STEP = {"M0": "S1", "M1": "S5", "M2": "S5", "M3": "S4", "M4": "S3", "M5": "S3", "M6": "S11"}
+#: Conditions moved from S3 into S5 (S5-D1); their tests are M4's.
 #: Tests whose step isn't their milestone's.
 STEP_OF = {"TEST-L21a": "S2", "TEST-L21b": "S2", "TEST-L41a": "S5", "TEST-L41b": "S5"}
 

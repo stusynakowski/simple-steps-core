@@ -452,13 +452,17 @@ def op(tool_id: str, **arguments) -> Operation:
 
 def _src(value: Any) -> str:
     """A value as formula text: a reference, a tool, or a Python literal."""
+    if isinstance(value, dict) and set(value) == {"where"}:
+        return condition_source(value["where"])          # a condition (S5c)
     if isinstance(value, StepRef):
         text = f"wf[{_src(value.id)}]"
         if isinstance(value.columns, dict) and value.columns.get("header"):
             return text + ".header"
         rows_ = value.rows
         if rows_ is not None:
-            if isinstance(rows_, dict):
+            if isinstance(rows_, dict) and "where" in rows_:
+                text += f"[{condition_source(rows_['where'])}]"
+            elif isinstance(rows_, dict):
                 lo = "" if rows_.get("start") is None else rows_["start"]
                 hi = "" if rows_.get("stop") is None else rows_["stop"]
                 text += f"[{lo}:{hi}]"
@@ -530,6 +534,7 @@ from .references import (  # noqa: E402
     ToolRef,
     _decode_ref,
     _encode_ref,
+    condition_source,
 )
 from .run import compile_operation  # noqa: E402
 from .values import _bind_positional, _decode_argument, _encode_argument  # noqa: E402

@@ -859,7 +859,10 @@ def select_(source: Any, fn: Callable = identity, *,
         data = _apply_selection(frame, row_sel, columns or None,
                                 (source.meta.get("name") if isinstance(source, Output)
                                  else None) or "the input")
-        return _column_output("select", frame, data, index=data.index, source=source)
+        out = _column_output("select", frame, data, index=data.index, source=source)
+        if data.attrs.get("matched_nothing"):
+            out.meta["matched_nothing"] = data.attrs["matched_nothing"]
+        return out
     _require_columns("select", frame, columns)
     return _column_output("select", frame, frame[list(columns)], source=source)
 

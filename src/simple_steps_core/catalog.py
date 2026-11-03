@@ -697,7 +697,7 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
         return handle
 
     if fn is not None:
-        return make(fn, None)
+        return make(fn, id)              # tool(fn, id="x") names it too
     return lambda f: make(f, id)
 
 
