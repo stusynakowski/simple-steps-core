@@ -347,6 +347,7 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
     reduced = [c for c in variables(frame.columns) if c != by]
     rows_params = rows_parameters(fn) if form == "group" else []
     results, keys, records, index = [], [], [], []
+    cell_failures = []                       # (group position, column, error), per_column only
     for position, (key, chunk) in enumerate(groups):
         started = time.perf_counter()
         failed_in = [i for i in chunk.index if i in blocked]
@@ -363,13 +364,21 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
                 units = list(_units(chunk))
                 if form == "per_column":
                     # A built-in reducer, once per variable; never the key (R-D1).
+                    # A column that won't reduce fails its own cell, not the
+                    # group's other columns (L5).
                     accumulator = {}
                     for c in reduced:
                         acc_c = initial if initial is not None else empty_value(fn)
-                        for _index, row in units:
-                            acc_c, caught_now = _unwrap(fn(acc_c, {c: row.get(c)}))
-                            if caught_now is not None:
-                                caught, error = True, f"caught {caught_now}; used the default"
+                        try:
+                            for _index, row in units:
+                                acc_c, caught_now = _unwrap(fn(acc_c, {c: row.get(c)}))
+                                if caught_now is not None:
+                                    caught, error = True, f"caught {caught_now}; used the default"
+                        except _Tolerated:
+                            raise
+                        except Exception as exc:
+                            cell_failures.append((position, c, f"{type(exc).__name__}: {exc}"))
+                            acc_c = None
                         accumulator[c] = acc_c
                 elif form == "group":
                     # Once per group: each column as a list, the key as itself, the
@@ -422,7 +431,10 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
     if by is not None:                       # key first reads better
         data[by] = keys
     if form == "per_column":
-        # One column per variable, under its own name (R-D1).
+        # One column per variable, under its own name (R-D1); a column any
+        # group left out (`total(numeric_only=True)`: not numbers) isn't written (L5).
+        reduced = [c for c in reduced
+                   if not any(isinstance(r, dict) and r.get(c) is LEFT_OUT for r in results)]
         for c in reduced:
             data[c] = _typed([r.get(c) if isinstance(r, dict) else None for r in results],
                              data.index)
@@ -431,13 +443,16 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
     # Which input rows each output row was made from, so a change to one of
     # them marks only its group's row stale (owner, 2026-10-27).
     members = [[out_id, list(chunk.index)] for out_id, (_, chunk) in zip(index, groups)]
-    return Output(data=data, records=records, index=index,
+    out = Output(data=data, records=records, index=index,
                   meta={"verb": "collapse", "form": "scalar" if by is None
                         else "column",
                         # one variable reduced per column: that column is the payload
                         "value_column": (reduced[0] if len(reduced) == 1 else None)
                         if form == "per_column" else name, "by": by,
                         "n_in": len(frame), "groups": members})
+    out.fail_cells([(index[position], c, error) for position, c, error in cell_failures
+                    if c in out.data.columns])
+    return out
 
 
 def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
@@ -1204,7 +1219,7 @@ def _source_failure(error: str, caught: Any) -> Output:
 
 # Names used only inside functions, imported last so the modules can refer
 # to each other (see grid.py).
-from .system_tools import empty_value, is_identity, reducer_form, rows_parameters  # noqa: E402
+from .system_tools import LEFT_OUT, empty_value, is_identity, reducer_form, rows_parameters  # noqa: E402
 from .errors import SelectionError  # noqa: E402
 from .modifiers import _d_apply  # noqa: E402
 from .output import (  # noqa: E402

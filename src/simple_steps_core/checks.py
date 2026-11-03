@@ -1770,6 +1770,9 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         columns_open = True             # undeclared fields are only known by running
     elif kind == "collapse" and unsettled:
         columns_open = True             # the key's column is named by a tool
+    elif kind == "collapse" and reducer_form(operation.fn or BUILTIN_TOOLS.get(operation.tool)) == "per_column" \
+            and (operation.arguments or {}).get("numeric_only") is True:
+        columns_open = True             # which columns are numbers is known by running (L5)
     elif kind == "collapse" and reducer_form(operation.fn or BUILTIN_TOOLS.get(operation.tool)) == "per_column":
         # one column per input variable: known when the input's columns are (P4)
         columns_open = workflow._columns_open(operation) if workflow is not None else False

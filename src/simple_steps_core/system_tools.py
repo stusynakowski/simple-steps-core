@@ -6,6 +6,7 @@ Moved from grid.py unchanged (phase 2 of docs/design/cleanup-plan.md).
 from __future__ import annotations
 
 import inspect
+import numbers
 import typing
 from typing import Any
 from typing import Callable
@@ -82,9 +83,33 @@ def count(acc: Any = None, **row: Any) -> int:
     return (acc or 0) + 1
 
 
-def total(acc: Any = None, **row: Any) -> float:
-    """Sum of the payloads. Raises on a payload that will not add."""
-    return (acc or 0) + identity(**row)
+class _LeftOut:
+    def __repr__(self) -> str:
+        return "<left out>"
+
+
+#: What ``total(numeric_only=True)`` gives for a column that isn't numbers:
+#: ``collapse`` leaves that column out.
+LEFT_OUT = _LeftOut()
+
+
+def total(acc: Any = None, numeric_only: bool = False, **row: Any) -> float:
+    """Sum of the payloads; with ``numeric_only=True``, columns that aren't numbers are left out.
+
+    Without it, a payload that isn't a number fails its cell, naming the fix
+    (L5), as pandas' ``numeric_only``.
+    """
+    if acc is LEFT_OUT:
+        return acc
+    value = identity(**row)
+    if value is None:
+        raise TypeError("total: a value is missing")
+    if isinstance(value, bool) or not isinstance(value, numbers.Number):
+        if numeric_only:
+            return LEFT_OUT
+        raise TypeError(f"total: {value!r} is not a number; "
+                        f"total(…, numeric_only=True) leaves such columns out")
+    return (acc or 0) + value
 
 
 def first(acc: Any = None, **row: Any) -> Any:

@@ -906,6 +906,8 @@ class Workflow:
                         cell["value"] = _plain(out.data.at[row_id, c])
                     if state in ("failed", "blocked"):
                         cell.update({k: v for k, v in note.items() if k in ("error", "cause")})
+                        if str(c) in (note.get("cells") or {}):
+                            cell["error"] = note["cells"][str(c)]
                     cells[str(c)] = cell
                 row_state = str(row_states[row_id])
                 result.append({ROW_ID: _plain(row_id), "position": position, "id": _plain(row_id),

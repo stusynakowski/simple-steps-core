@@ -269,3 +269,14 @@ here (core-asks D1 is CA-D1, and so on).
 | CA-B2 | **Three ways to pick rows:** by row number (what you see, `wf['s'][3]`), by value (a condition), by parent (`row['r'] == 3`). Clicking a cell writes a row number. Lineage shows under an expander, collapsed to "from r", nearest parent first; picking by parent is offered from a lineage cell, never written by a click. Default row order: sorted after `sort`; the parent's after filter, slice, pick; first appearance after collapse, distinct; parent then item after expand; the left side's after join; inputs in order after stack | **D35** decided |
 | CA-C | **Merging a step with its ancestor is never implicit.** A column argument from a step that isn't aligned is refused (today it silently gives `None`), and the refusal writes the join: `join(wf['filtered'], wf['r'], on='#r')`, or `how='left'` for every row of `r` back, `absent` where the filter dropped one. A column passed through unchanged from the shared ancestor appears once, not as a clash | **K19** reversed for unaligned steps |
 | CA-E | **Column names that aren't identifiers** (`'Patient ID'`) are kept as written, never renamed silently; picked by string; bound by keyword or type (CA-A), never by name. Numeric names still become `var<n>` | **D3** decided: no |
+
+### S1, answered (2026-11-02)
+
+| | Owner | As built |
+|---|---|---|
+| L5 | `total` needs a literal setting to ignore what isn't a number, like pandas' `numeric_only=True` | `total(…, numeric_only=False)`: by default a column that isn't numbers is a failed cell saying so and naming `numeric_only=True`; with `True` it's left out |
+| D31 (B1) | `widen` names its column, or assumes the one dict column; one layer, never recursive | `mod.widen("info")`; with no name, the one column holding dicts; none or several: refused, naming them. Nested dicts stay values |
+| D32 (B2) | `expand(columns=…)` of a dict: add a parameter for keeping the other columns | key/value rows; `keep=` (default: as a list column today) |
+| D27 (B3) | yes: a `#` column never reaches a tool; it may still be used to pick | refused as an argument; settings and conditions may name it |
+| D29 (B4) | yes, refused with its reason | refused |
+| B9, D57 (B10), B11 | yes | — |

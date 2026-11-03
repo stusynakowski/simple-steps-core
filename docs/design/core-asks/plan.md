@@ -97,7 +97,7 @@ The same steps are in the app's `scripts/ui_status` workflows 06 and 07.
 | L2 | `zip_` of steps whose rows don't line up is **refused** | — |
 | L3 | What a column argument passes depends on the verb, never on the parameter's type (D1). A type that doesn't fit what the verb sends is refused | **supersedes K19** |
 | L4 | A source whose data has a key starting with `#` is refused | — |
-| L5 | `total` over mixed columns sums what it can and fails the rest by name; never every column `None` | — |
+| L5 | `total` over mixed columns sums what it can and fails the rest by name; never every column `None`. `total(…, numeric_only=True)` leaves out what isn't numbers, as in pandas (owner, 2026-11-02) | — |
 
 | Test | Formula | Expected | Today |
 |---|---|---|---|
@@ -109,7 +109,8 @@ The same steps are in the app's `scripts/ui_status` workflows 06 and 07.
 | TEST-L3d | `g = gather[mod.collapse(by="ward")](wf["r"])`; then `total_of[mod.map()](wf["g"], k=wf["g"][cols["n"]])` (cells hold lists) | `40, 20, 40`: each row's list summed | `None` in every row, no error (the whole column of lists was sent) |
 | TEST-L3e | `g` with `n` renamed `k`; `total_of[mod.map()](wf["g2"])` (bound by name) | `40, 20, 40` | same (keep green) |
 | TEST-L4 | a source with data `{"ward": ["A"], "#n": [1]}` | refused: `#` names are reserved | **core passes** (a DataFrame with a `#` key is refused). The app's `to_rows` tool gives one null row instead: an app bug, not core's |
-| TEST-L5 | `op("total")[mod.collapse()]` over `{"t": ["x","y"], "a": [1,2], "b": [10,20]}` | `a` 3, `b` 30; `t` failed with its reason | every column `None` |
+| TEST-L5 | `op("total")[mod.collapse()]` over `{"t": ["x","y"], "a": [1,2], "b": [10,20]}` | `a` 3, `b` 30; `t` failed with its reason, naming `numeric_only=True` | every column `None` |
+| TEST-L5b | the same, `numeric_only=True` | columns `a` 3, `b` 30; no `t` | every column `None` |
 
 ---
 

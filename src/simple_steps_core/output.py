@@ -150,6 +150,19 @@ class Output:
                     if i in self.states.index:
                         self.states.at[i, column] = "absent"
 
+    def fail_cells(self, cells: list) -> None:
+        """Put each ``(row id, column, error)`` cell in state ``failed``, its
+        error in the row's note under ``cells`` (one column of a row can fail
+        while the others hold: L5)."""
+        notes = dict(self.meta.get("notes") or {})
+        for row_id, column, error in cells:
+            self.states.at[row_id, column] = "failed"
+            note = dict(notes.get(row_id) or {})
+            note["cells"] = {**(note.get("cells") or {}), column: error}
+            notes[row_id] = note
+        if notes:
+            self.meta["notes"] = notes
+
     def absent_cells(self) -> set:
         """``{(row id, column)}`` of the cells in state ``absent``."""
         if not len(self.states.columns):

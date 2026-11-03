@@ -273,6 +273,15 @@ def _():
     expect(v["rows"][0]["cells"].get("t", {}).get("state"), "failed", "t: ")
 
 
+@test("M0", "TEST-L5b", "total(numeric_only=True) leaves out what isn't numbers")
+def _():
+    k = kernel()
+    put(k, "m", lambda: pd.DataFrame({"t": ["x", "y"], "a": [1, 2], "b": [10, 20]}))
+    v = put(k, "x", lambda: op("total")[mod.collapse()](wf["m"], numeric_only=True))
+    expect(data_names(v), ["a", "b"], "columns: ")
+    expect(data(v, "a") + data(v, "b"), [3, 30], "a, b: ")
+
+
 # ── M1: rows are placements ──────────────────────────────────────────────
 
 for _step, _want in [("filtered", [0, 1, 2]), ("sorted_", [0, 1, 2, 3]),
