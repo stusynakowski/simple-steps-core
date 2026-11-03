@@ -429,6 +429,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         elif operation.tool == "join" and workflow is not None:
             on = operation.arguments.get("on")
             keys = [on] if isinstance(on, str) else list(on or [])
+            keys = [key for key in keys if not is_id_column(key)]     # lineage: checked at run (S5e)
             for g in operation.grids:
                 if str(g) not in workflow.steps or columns_unknown(workflow.steps[str(g)].output):
                     continue

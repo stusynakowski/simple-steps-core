@@ -199,6 +199,8 @@ def _moves(k: Kernel, name: str, src: str, other: str, ancestor: str):
         ("stack", lambda: stack(wf[src], wf[other])),
         ("join", lambda: join(wf[src], wf[other], on="k")),
         ("join_left", lambda: join(wf[src], wf[other], on="k", how="left")),
+        ("join_lineage", lambda: join(wf[src], wf[ancestor], on=f"#{ancestor}")),    # S5e
+        ("join_back", lambda: join(wf[ancestor], wf[src], on=f"#{ancestor}", how="left")),
         ("sweep", lambda: grid_pp[mod.sweep(a=[1, 2], b=["x", "y"])]()),
         ("source", lambda: named_pp[mod.source()]()),
         ("empty", lambda: None),

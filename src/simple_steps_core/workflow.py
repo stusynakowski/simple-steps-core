@@ -2157,6 +2157,23 @@ class Workflow:
                     frame.attrs["traces"] = {
                         j: self.trace(frame.attrs["name"], list(frame.index), other.attrs["name"])
                         for j, other in enumerate(frames) if other is not frame}
+            on = step.operation.arguments.get("on") if step.operation.tool == "join" else None
+            if isinstance(on, str) and is_id_column(on):
+                # a join on lineage (S5e): each side's row numbers in the step it names
+                target = self._id_source(on) or on[len(ROW_ID):]
+                for frame in frames:
+                    name = frame.attrs["name"]
+                    if name == target:
+                        values = list(range(len(frame)))
+                    else:
+                        values = self.lineage(name).get(on)
+                    if values is None or any(isinstance(v, list) for v in values):
+                        frame.attrs["on_problem"] = (     # the step fails with it, below
+                            f"join on {on!r}: {name!r} has no lineage {on}" if values is None else
+                            f"join on {on!r}: {name!r} holds lists there (a collapse); join on "
+                            f"its key instead")
+                        break
+                    frame.attrs["on_values"] = values
             try:
                 step.output = _run_combine(step.operation, frames)
                 if step.operation.tool == "zip":

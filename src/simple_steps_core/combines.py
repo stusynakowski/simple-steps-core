@@ -174,9 +174,19 @@ def _rows_text(keys: list) -> str:
 
 
 def _combine_join(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
+    problem = next((f.attrs["on_problem"] for f in frames if f.attrs.get("on_problem")), None)
+    if problem:
+        raise ValueError(problem)
     own = own_id_columns(_input_names(frames))
     left, right = _variables_only(frames)
     keys = config.get("on")
+    on_lineage = all("on_values" in f.attrs for f in frames)
+    if on_lineage:
+        # a join on lineage (S5e): matched by row number, through a temporary key
+        left = left.assign(**{_ON: frames[0].attrs["on_values"]})
+        right = right.assign(**{_ON: frames[1].attrs["on_values"]})
+        keys = _ON
+    merge_on = keys
     keys = {keys} if isinstance(keys, str) else set(keys or [])
     sfx = tuple(config.get("suffixes") or ("_left", "_right"))
     sides = []                                   # each side's columns, as named after the merge
@@ -188,9 +198,11 @@ def _combine_join(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
     left = left.assign(**{own[0]: _ids_as_column(left, list(frames[0].index))})
     right = right.assign(**{own[1]: _ids_as_column(right, list(frames[1].index))})
     suffixes = tuple(config.get("suffixes") or ("_left", "_right"))
-    out = pd.merge(left, right, on=config.get("on"),
+    out = pd.merge(left, right, on=merge_on,
                    how=config.get("how", "inner"),
                    suffixes=suffixes).reset_index(drop=True)
+    if on_lineage:
+        out = out.drop(columns=[_ON])
     for column in own:                       # each row's pair of input rows, in front
         ids = out.pop(column)
         out.insert(own.index(column), column,
@@ -202,7 +214,35 @@ def _combine_join(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
         for c in names:
             if c in out.columns and missing:
                 absent[c] = missing
+    if on_lineage:
+        out, absent, ints = _merge_shared(out, absent, ints, left, right, sfx)
     return _retyped(out, absent, ints)
+
+
+#: A join on lineage matches through this column, dropped once matched.
+_ON = "__on__"
+
+
+def _merge_shared(out: pd.DataFrame, absent: dict, ints: set, left: pd.DataFrame,
+                  right: pd.DataFrame, sfx: tuple) -> tuple:
+    """In a join on lineage, a column both sides have with the same values on
+    every matched row came through from the shared ancestor: it appears once
+    (CA-C). One that differs keeps both, suffixed."""
+    for c in [c for c in left.columns if c in right.columns and c != _ON]:
+        a, b = f"{c}{sfx[0]}", f"{c}{sfx[1]}"
+        if a not in out.columns or b not in out.columns:
+            continue
+        pairs = [(x, y) for x, y in zip(out[a], out[b]) if not _is_missing(x) and not _is_missing(y)]
+        if any(x != y for x, y in pairs):
+            continue
+        out[a] = [y if _is_missing(x) else x for x, y in zip(out[a], out[b])]
+        out = out.drop(columns=[b]).rename(columns={a: c})
+        gone = set(absent.pop(a, [])) & set(absent.pop(b, []))
+        if gone:
+            absent[c] = sorted(gone, key=list(out.index).index)
+        if a in ints or b in ints:
+            ints = (ints - {a, b}) | {c}
+    return out, absent, ints
 
 
 def _retyped(out: pd.DataFrame, absent: dict, ints: set = frozenset()) -> pd.DataFrame:
@@ -312,6 +352,9 @@ def _stage_combine(operation: Operation, workflow: "Workflow | None") -> Output:
                       if st.output.meta.get("staged") else len(st.output.data))
     columns = _combine_columns(operation, schemas)
     columns_open = any(st is None or columns_unknown(st.output) for st in steps)
+    on = operation.arguments.get("on") if operation.tool == "join" else None
+    if isinstance(on, str) and is_id_column(on):
+        columns_open = True           # shared columns merge when their values agree (S5e)
     rule, expected = spec["rows"], None
     known = bool(counts) and all(c is not None for c in counts)
     if rule == "sum" and known:
