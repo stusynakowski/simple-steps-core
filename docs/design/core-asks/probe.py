@@ -318,6 +318,26 @@ def _():
     expect(data(put(kernel(), "x", lambda: wf["per_ward"][0]), "ward"), ["A"])
 
 
+@test("M1", "TEST-L7f", "a row number is saved as the row's lineage")
+def _():
+    k = kernel()
+    want = {"a": (lambda: wf["sorted_"][1], ['row["r"] == 2']),
+            "b": (lambda: wf["expanded"][2], ['row["r"] == 1', 'row["r"].idx == 0']),
+            "c": (lambda: wf["per_ward"][0], ['cols["ward"] == "A"']),
+            "d": (lambda: wf["r"][3], ['wf["r"][3]'])}
+    wrong = {}
+    for name, (make, parts) in want.items():
+        try:
+            put(k, name, make)
+            saved = str(k.step(name).formula)
+        except Refused as e:
+            saved = f"refused ({str(e)[:40]})"
+        if not all(part in saved for part in parts):
+            wrong[name] = saved
+    if wrong:
+        raise Fail(f"saved as {wrong}")
+
+
 @test("M1", "TEST-L8", "text row ids are refused")
 def _():
     expect_refused(kernel(), lambda: wf["per_ward"][rows["A"]])
@@ -747,16 +767,33 @@ def _():
         raise Fail(f"state {st.state!r}, problems {list(st.problems)}")
 
 
-@test("M6", "TEST-L41", "a pick whose row moved warns after it runs")
+@test("M6", "TEST-L41a", "a pick follows its row after an upstream change")
 def _():
     k = kernel()
-    put(k, "first", lambda: wf["filtered"][0])
-    k["r"] = pd.DataFrame({"ward": ["A", "B", "A", "C"], "n": [50, 10, 20, 30]})
+    put(k, "first", lambda: wf["filtered"][0])            # r's row 1, n 20
+    k["r"] = pd.DataFrame({"ward": ["A", "B", "A", "C"], "n": [10, 25, 30, 40]})
     k.run("filtered")
     k.run("first")
-    warnings = [str(w) for w in k.step("first").warnings]
-    if not any("moved" in w.lower() for w in warnings):
-        raise Fail(f"warnings {warnings}")
+    expect(data(k.view("first"), "n"), [25])
+
+
+@test("M6", "TEST-L41b", "a pick whose row is gone fails, saying so")
+def _():
+    k = kernel()
+    put(k, "first", lambda: wf["filtered"][0])            # r's row 1
+    k["r"] = pd.DataFrame({"ward": ["A", "B", "A", "C"], "n": [50, 10, 20, 30]})
+    k.run("filtered")
+    try:
+        k.run("first")
+    except Exception as e:
+        said = str(e)
+    else:
+        st = k.step("first")
+        said = " ".join([*map(str, st.problems)] + [str(n) for n in st.output.notes.values()])
+        if st.state not in ("failed", "invalid"):
+            raise Fail(f"state {st.state!r}, {short(k.view('first'))}")
+    if "1" not in said:
+        raise Fail(f"didn't name r's row 1: {said[:120]}")
 
 
 @test("M6", "TEST-L42", "a stale step says which step made it stale")

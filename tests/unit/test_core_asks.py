@@ -35,7 +35,7 @@ HOLDS = frozenset({
 #: The phase4-plan.md step that makes a milestone's tests pass.
 STEP = {"M0": "S1", "M1": "S5", "M2": "S5", "M3": "S4", "M4": "S3", "M5": "S3", "M6": "S11"}
 #: Tests whose step isn't their milestone's.
-STEP_OF = {"TEST-L21a": "S2", "TEST-L21b": "S2"}
+STEP_OF = {"TEST-L21a": "S2", "TEST-L21b": "S2", "TEST-L41a": "S5", "TEST-L41b": "S5"}
 
 
 def _cases():

@@ -118,10 +118,10 @@ The same steps are in the app's `scripts/ui_status` workflows 06 and 07.
 
 | ID | Change | Overlaps |
 |---|---|---|
-| L6 | Every output's row number is `#<step>`, `0..n-1` | C7 |
-| L7 | Every plain integer row form selects by placement: `[i]`, `[[i, k]]`, `[i:j]`, `[-1]`, and the same inside `rows[…]` | C7 |
-| L8 | Text row ids retired: `rows["A"]` refused with the placement to use | — |
-| L9 | Row ids stay inside core, never in `#<step>`, never written by a formula | — |
+| L6 | Every output shows its row number as `#<step>`, `0..n-1` (a translation in the view: core's row ids stay its identity, CA-B1) | C7 |
+| L7 | Every plain integer row form selects by row number as typed: `[i]`, `[[i, k]]`, `[i:j]`, `[-1]`, and the same inside `rows[…]`. Staging saves the rows' lineage: back to the source row, `.idx` through an expand, the key through a collapse; into a source it stays a row number | C7 |
+| L8 | Text row ids retired: `rows["A"]` refused with the row number to use | — |
+| L9 | Row ids stay inside core, never in `#<step>`, never written by an expression | — |
 
 | Test | Formula / check | Expected | Today |
 |---|---|---|---|
@@ -135,6 +135,7 @@ The same steps are in the app's `scripts/ui_status` workflows 06 and 07.
 | TEST-L7d | `wf["sorted_"][-1]` and `wf["sorted_"][rows[-1]]` | `n` = 10 | refused |
 | TEST-L7e | `wf["per_ward"][0]` | ward A | refused: *no row 0 (its row ids are A, B, C)* |
 | TEST-L8 | `wf["per_ward"][rows["A"]]` | refused; message: use `wf["per_ward"][0]` | works |
+| TEST-L7f | `wf["sorted_"][1]`, `wf["expanded"][2]`, `wf["per_ward"][0]`, `wf["r"][3]`: the saved expressions | `row["r"] == 2`; `row["r"] == 1` and `row["r"].idx == 0`; `cols["ward"] == "A"`; `wf["r"][3]` | saved as written |
 
 ---
 
@@ -276,7 +277,7 @@ The same steps are in the app's `scripts/ui_status` workflows 06 and 07.
 | ID | Change | Overlaps |
 |---|---|---|
 | L40 | An edit re-checks every step downstream at once: a step whose bound or picked column disappeared is `invalid`, naming it | — |
-| L41 | A step whose picked placement now holds a different row (by row id) warns "reference moved" after it runs | — |
+| L41 | A pick follows its row after an upstream change (it's saved as lineage); a pick whose row is gone fails, naming it (CA-B1) | — |
 | L42 | Each stale step says which upstream step made it stale | — |
 | L43 | Renames rewrite references and keep the output; deleting a step that is read is refused, naming the readers, and `k.remove(name, force=True)` deletes anyway, making each reader `invalid` (D11); a move that puts a reader before what it reads is refused | K29 |
 | L52 | A rename rewrites everything core wrote: `wf["old"]`, the column named after the step, staging's bindings, `#old` downstream, `row["old"]`. Anything else that breaks is `invalid` with its reason (D11) | K29 |
@@ -284,7 +285,8 @@ The same steps are in the app's `scripts/ui_status` workflows 06 and 07.
 | Test | Session | Expected | Today |
 |---|---|---|---|
 | TEST-L40 | run `doubled`; replace `r` with `{"m": [5]}` | `doubled` is `invalid`: *needs 'n'* | `stale`, no problem |
-| TEST-L41 | step `first = wf["filtered"][0]`; run; change `r` so `n` = `[50, 10, 20, 30]`; run | warning: reference moved (was r row 1, now r row 0) | blocked by M1: `[0]` is a row id, and `filtered` has no row 0 |
+| TEST-L41a | `first = wf["filtered"][0]` (r's row 1, `n` 20); change `r`'s `n` to `[10, 25, 30, 40]`; run | `first` is still r's row 1: `n` 25 | blocked by M1: `[0]` is a row id, and `filtered` has no row 0 |
+| TEST-L41b | the same; change `r`'s `n` to `[50, 10, 20, 30]` (r's row 1 is filtered out); run | `first` fails, saying r's row 1 isn't in `filtered` | as L41a |
 | TEST-L42 | edit `r`; read `doubled`'s status | `stale`, reason names `r` | `stale` |
 | TEST-L43a | rename `r` → `readings` | every `wf["r"]` reads `wf["readings"]`; outputs kept | passes (keep green) |
 | TEST-L43b | delete `filtered` while a step reads it | refused naming the reader | passes: *cannot remove 'filtered': 'after' read it* (keep green) |
@@ -308,7 +310,8 @@ done when all its tests pass; "keep green" tests must stay passing.
 
 **First run, 2026-11-02:** 16 pass, 49 fail, 1 skip. **After the owner's
 answers (same day, core at `11a7ca0`):** 17 pass, 64 fail, 1 skip. **After
-the R8 fix for joins (L24):** 18 pass, 63 fail, 1 skip. By milestone:
+the R8 fix for joins (L24):** 18 pass, 63 fail, 1 skip. **After S1, and
+CA-B1 amended (L7f, L41a/b):** 24 pass, 60 fail, 1 skip. By milestone, before S1:
 
 | | Pass | Fail | Skip |
 |---|---|---|---|

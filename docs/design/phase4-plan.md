@@ -55,9 +55,9 @@ change is confirmed before it lands.
 | C | Identity | tool hashes, ids, `diff`, `data_version()`, `Secret` | — | — | ✓ (seed: S9) |
 | — | Conditions | `mod.map(where=…)`, `first_present` | — | — | ✓ |
 | **S0** | **The tests** | the laws E1–E27, expected-to-fail until their step; core-asks `probe.py` (L1–L52) turned into tests the same way | all | small | ✓ 2026-11-02 |
-| **S1** | **Bugs, and no wrong answers** (**next**) | B1–B11; a column argument from an unaligned step refused, the message writing the join; `zip_` of unaligned steps refused; `total` over mixed columns | M0 (L1–L5) | small | needs D27, D29, D31, D32, D57 (recommended) |
-| **S2** | **Values and keys** | tools get plain Python values; numeric names become `var<n>`; other names kept (CA-E) | L21 | small | needs D17 (recommended) |
-| **S5** | **Row numbers and lineage** (moved up) | `#<step>` = `0…n-1`; every row form by row number; row ids hidden; every step carries its ancestors' lineage; `.idx`; `#r.2`; lineage apart from data; joins on lineage; `mod.copy` | M1, M2 (L6–L19, L44, L45) | **the largest** | N1 decided |
+| **S1** | **Bugs, and no wrong answers** | B1–B11; a column argument from an unaligned step refused, the message writing the join; `zip_` of unaligned steps refused; `total` over mixed columns | M0 (L1–L5) | small | ✓ 2026-11-02 |
+| **S2** | **Values and keys** (**next**) | tools get plain Python values; numeric names become `var<n>`; other names kept (CA-E) | L21 | small | needs D17 (recommended) |
+| **S5** | **Row numbers and lineage** (moved up) | **a change of surface** (CA-B1, amended): rows shown and typed as `0…n-1`, picks saved as lineage; core's lineage-based row ids stay its identity. Every step carries its ancestors' lineage; `.idx`; `#r.2`; lineage apart from data; joins on lineage; `mod.copy`; strict alignment (CA-11) | M1, M2 (L6–L19, L41, L44, L45) | medium (was the largest) | N1 decided |
 | **S4** | **Naming** | one output named after its step; a dict's keys as columns; `var<n>`; ints stay ints; step names identifiers; sources and literals (D12) | M3 (L20–L24, L46, L47) | medium | needs D12 (recommended) |
 | **S3** | **Grammar and binding** | strings choose columns, integers rows, conditions (`cols`, `row`); pickers before the verb; a pick as an input; **binding at staging, saved explicitly** (CA-A); `mod.cast`; verbs inferred and written (`auto` resolved, D20); nothing unseen (D21) | M4, M5 (L25–L39, L48–L51) | **large** | N2, N3 decided; D8, D18, D19, D21 (recommended) |
 | **S11** | **Live editing** | readers re-checked at once; "reference moved"; stale reasons; renames rewrite what core wrote; delete anyway | M6 (L40–L43, L52) | small–medium | — |
@@ -197,7 +197,7 @@ Phase 4 is done when:
    syntax;
 3. `scripts/core_asks.py` says **39 of 39** (K14, K15, K16 close with D and E;
    K19 is re-probed for CA-C), and `docs/design/core-asks/probe.py` passes
-   every test (today 18 of 82);
+   every test (today 24 of 85);
 4. every feature in features.md is done, or moved to "Later, by decision";
 5. rules.md opens with the model, kernel-session.md shows what was built,
    and its example runs as a test;

@@ -20,8 +20,8 @@ One word per idea. The right column lists the words this model retires.
 | **step** | a unique name, one expression, and the output it produces | *node*, *task* |
 | **expression** | what a step does, as written: a literal, a pick, a tool call or a combine | *formula* |
 | **pick** | part of an earlier step: `wf['s']` with up to one row part and one column part | *selection* |
-| **row number** | a row's position in its step's output, `0..n-1`, shown as `#<step>`. Integers in a pick are row numbers | *placement*, *row id* (as something shown or written) |
-| **row id** | core's internal identity for a row, used for staleness, lineage and "reference moved". Never shown, never written | — |
+| **row number** | a row's position in its step's output, `0..n-1`, shown as `#<step>`. Integers in a pick are row numbers, **as typed**: staging saves the row's lineage | *placement*, *row id* (as something shown or written) |
+| **row id** | core's internal identity for a row, and already its lineage (`0.1`: item 1 of the parent's row 0; a group's key). Used for staleness, pairing and picks. Never shown, never written | — |
 | **condition** | a test that keeps the rows it's true for, on data (`cols['x']`) or lineage (`row['s']`) | — |
 | **lineage** | the `#<ancestor>` columns: for each ancestor step, the row number(s) this row came from | *`#v` column*, *trace column* |
 | **aligned** | two steps whose rows are the same rows in the same order | *origin* |
@@ -72,6 +72,7 @@ combine (on a value, or on lineage), or a pick. Nothing fails silently.
 | renaming lineage is refused | `rename` on a `#` column copies, saved as `mod.copy` | CA-D |
 | a pick matching nothing fails | a condition matching nothing gives zero rows and a warning; a row number out of range fails | CA-5 |
 | join clashes refused | refused, except a column passed through unchanged from a shared ancestor | CA-C |
+| a pick is a row number; "reference moved" when the row changes | typed as a row number, saved as the row's lineage, so it follows its row; core's lineage-based row ids stay its identity | CA-B1 (amended) |
 | modifiers: pickers, one verb, execution | also column modifiers, error handling, expectation; written order is applied order; an inferred verb is never `filter` | N2, N3 |
 | deleting a read step: refused or readers invalid | refused, naming readers; `k.remove(…, force=True)` deletes anyway | CA-6 |
 
@@ -230,7 +231,7 @@ classDiagram
 | Term | Definition |
 |---|---|
 | Row selector | Which rows: row numbers or a condition |
-| Row number | A row's position in its step's output, `0..n-1`. Written as an integer: `3`, `-1` (last) |
+| Row number | A row's position in its step's output, `0..n-1`. Typed as an integer: `3`, `-1` (last). Staging resolves it to that row and the pick is **saved as the row's lineage**: back to its source row (`row['r'] == 2`), through an expand with `.idx`, through a collapse by its key (`cols['ward'] == 'A'`); into a source, sweep or table it stays a row number |
 | Range | Rows `a` to `b-1`: `0:10`. In a modifier setting, `slice(0, 10)` |
 | Row number list | Chosen rows in order: `[[0, 2]]` (`[0, 2]` is refused: rule 7) |
 | Condition | A test that keeps the rows it's true for: `cols['n'] > 15`, `row['r'] == 3`, joined by `&`, `\|`, `~` |
@@ -243,7 +244,7 @@ classDiagram
 
 | You want | Write | After a re-run |
 |---|---|---|
-| the row you see | `wf['s'][3]`: a click writes this | the row now at 3; "reference moved" if it's a different row |
+| the row you see | `wf['s'][3]`: a click writes this; saved as its lineage (`wf['s'][row['r'] == 2]`) | the same row, wherever it is now; if it's gone, the step fails saying so |
 | the row with this value | `wf['s'][cols['id'] == 'P-17']` | the same row, wherever it is |
 | the rows from that ancestor row | `wf['s'][row['r'] == 3]`: offered from a lineage cell, never written by a click | the rows that came from r's row 3 |
 
@@ -312,7 +313,7 @@ hint.
 
 | # | Hard rule |
 |---|---|
-| 6 | Integers choose rows, by row number, as in a Python list. Strings choose columns, as in a dict |
+| 6 | Integers choose rows, by row number, as in a Python list. Strings choose columns, as in a dict. A row number is resolved at staging and saved as the row's lineage, so a pick follows its row; a pick whose row is gone fails, naming it |
 | 7 | A pick has at most one row part and one column part, in either order, in one bracket or two. A list mixing integers and strings is refused; so are two integers in one bracket (`[0, 2]`), pointing to `[[0, 2]]` |
 | 8 | A pick covers data only: never `#<step>` or lineage columns |
 | 9 | A condition uses only `cols['x']`, `row['s']`, comparisons, `.isin`, `&`, `\|`, `~`, brackets and literals. It's read by the parser, never run as code |
@@ -356,7 +357,7 @@ hint.
 |---|---|
 | S1 | Many spellings are accepted; the grid, picks and hover always show the list/dict-style one (`wf['s'][0:10]['a', 'b']`) |
 | S2 | Hover on a pick shows the cells it covers and what the tool gets: a value, a row's value, a list or a table |
-| S3 | When a re-run puts a different row at a picked row number, the step is flagged "reference moved" |
+| S3 | A pick saved as lineage shows, on hover, the row number it points at now |
 | S4 | When staging decides something (a verb, a binding), the grid shows it as decided by core, not by the user, until the user edits it |
 | S5 | The grid shows lineage (collapsed), `#<step>` and data apart. Each data header says whether the tool read it, the step made it, or it passed through |
 | S6 | Clicking a lineage cell highlights the parent rows; it never writes a pick |
@@ -440,7 +441,7 @@ stateDiagram-v2
 | Run it (Cmd+Enter) | `running` → `completed` or `failed` | stay `stale` until run; "run stale" runs them in order |
 | Change a source's data | `stale` | `stale` |
 | A column a reader binds or picks disappears | — | `invalid` at once, naming the column (core today: `stale`, no problem, until run) |
-| Rows move (row numbers shift) | — | `stale`, and "reference moved" on picks whose row changed (S3) |
+| Rows move (row numbers shift) | — | `stale`; a pick follows its row (rule 6), or fails if the row is gone |
 | Rename the step | references rewritten; output kept (a rename isn't a recompute) | what core wrote is rewritten (rule 14, M6); anything else that breaks is `invalid` with its reason, for the user to rename or redefine |
 | Move the step | allowed only if every reader stays after it (rule 1) | — |
 | Delete the step | refused while something reads it, naming the reader (core today); `k.remove(name, force=True)` deletes anyway | each reader `invalid`, naming the deleted step |
@@ -450,7 +451,7 @@ Rules for the session:
 1. **Nothing is replaced silently.** A step's old values stay, dimmed and
    marked stale, until it runs again.
 2. **The reason is always shown:** which upstream step changed, which column
-   went missing, which reference moved.
+   went missing, which picked row is gone.
 3. **Checking is immediate; running is on request.** An edit re-checks every
    step downstream at once (cheap, no tools run); values change only when
    the user runs.

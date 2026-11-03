@@ -33,7 +33,8 @@ it passes; tests marked "keep green" in plan.md must stay passing throughout.
 First run, 2026-11-02, at the app's current core pin: **16 pass, 49 fail,
 1 skip.** After the owner's answers to core's review (the same day; core's
 `docs/design/decisions.md` §4): **17 pass, 64 fail, 1 skip**; after the R8
-fix for joins, **18 pass, 63 fail, 1 skip**. Per milestone
+fix for joins, **18 pass, 63 fail, 1 skip**; after S1, **24 pass, 60 fail,
+1 skip**. Per milestone
 in [plan.md §12](plan.md#12-the-script).
 
 **Where this is edited.** Since 2026-11-02 the copy in core
