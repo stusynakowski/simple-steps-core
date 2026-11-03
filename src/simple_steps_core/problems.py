@@ -26,6 +26,7 @@ CODES: dict[str, str] = {
     "missing_setting": "a modifier is missing a setting it needs",
     "wrong_setting_type": "a modifier setting has the wrong type",
     "bad_tool_setting": "a setting names a tool where none is taken, or a tool that doesn't fit",
+    "id_argument": "an argument picks a `#` column: row ids pick rows, they never reach a tool",
     "bad_combine": "a combine's inputs or settings don't fit together",
     "contradicts_verb": "an expectation contradicts what the verb produces",
     "bad_name": "a naming modifier names nothing, or names a column badly",

@@ -132,7 +132,6 @@ def test_E9_a_column_to_a_list_parameter_is_one_call(k):
     assert "auto" not in str(k.step("m").formula)
 
 
-@pytest.mark.xfail(strict=True, reason="S1 (B3, D27): a # column never reaches a tool")
 def test_E14_B3_a_hash_column_is_refused_as_an_argument(k):
     assert refused(k, "x", lambda: show[mod.source()](value=wf["p"][cols["#"]]), "#")
 

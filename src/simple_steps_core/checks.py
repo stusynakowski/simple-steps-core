@@ -677,6 +677,17 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
 
     coded(problems, "bad_tool_setting")
 
+    # 6c. a `#` column never reaches a tool (B3, D27): ids pick rows, they
+    #     aren't data. A condition or a setting may still name one.
+    for name, value in operation.arguments.items():
+        if isinstance(value, StepRef) and isinstance(value.columns, dict):
+            hashed = [c for c in value.columns.get("names") or [] if is_id_column(c)]
+            if hashed:
+                problems.append(f"argument {name!r} picks {', '.join(map(repr, hashed))} of "
+                                f"{value.id!r}: a `#` column is a row id, not data, and never "
+                                f"reaches a tool; use it to pick rows instead")
+    coded(problems, "id_argument")
+
     # 6c'. a reference argument arrives whole, shaped by the parameter's type
     #      (008 C1) — a shape that can't convert is refused here, not on every row.
     if fn is not None and workflow is not None:
