@@ -1538,6 +1538,8 @@ def _with_id_columns(kind: str | None, verb: Any, operation: "Operation",
         own = [c for c in upstream_columns if is_id_column(c) and c != ROW_ID and c not in named]
         if kind == "distinct" and operation.input is not None:
             own = [f"{ROW_ID}{operation.input}", *own]   # the rows each kept row stands for
+        elif all(c in ordered for c in own):
+            return ordered                   # carried where its input has them (a zip_'s are inside)
     else:
         return ordered
     return [*own, *[c for c in ordered if c not in own]]

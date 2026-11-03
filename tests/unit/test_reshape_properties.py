@@ -23,7 +23,7 @@ import os
 
 import pandas as pd
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from simple_steps_core import Catalog, Kernel, cols, join, mod, row, stack, tool, wf, zip_
@@ -268,6 +268,11 @@ def _same(a: Kernel, b: Kernel, names: list[str], why: str) -> None:
 @pytest.mark.no_invariants                       # checked here, so hypothesis can shrink
 @SETTINGS
 @given(grids(), chains())
+# a sort of a zip_ whose `#` columns sit between its data columns: the plan
+# put them in front, the run kept them in place (found at STRESS=1)
+@example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
+         chain=[(93, 0, 0, 0), (121, 0, 0, 0), (824, 38, 1, 0), (921, 0, 0, 0),
+                (0, 0, 0, 0), (0, 65, 0, 0)])
 def test_L40_reshaping_is_closed(frame, chain):
     k, names = _build(_catalog(frame), chain)
     plans = {s: k.workflow.steps[s].output.meta.get("plan") for s in names
