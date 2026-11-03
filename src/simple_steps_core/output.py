@@ -7,8 +7,12 @@ from __future__ import annotations
 
 from typing import Any
 from typing import Sequence
+from collections.abc import Mapping
+import dataclasses
 import hashlib
+import json
 import math
+import pickle
 import numbers
 import pandas as pd
 
@@ -444,11 +448,56 @@ def _data_version(data: pd.DataFrame) -> str:
     from their JSON.
     """
     columns = repr([str(c) for c in data.columns]).encode()
+    data = _stable_cells(data)
     try:
         values = pd.util.hash_pandas_object(data, index=True).values.tobytes()
     except TypeError:
         values = data.to_json(orient="split", default_handler=repr).encode()
     return hashlib.sha1(columns + values).hexdigest()[:12]
+
+
+_PLAIN = (str, numbers.Number, bytes, type(None))
+
+
+def _stable_cells(data: pd.DataFrame) -> pd.DataFrame:
+    """*data* with each object cell that isn't a plain value as a stable token,
+    so equal objects hash equal across runs (B10, D57). Plain cells are kept."""
+    out = None
+    for column in data.columns:
+        series = data[column]
+        if series.dtype != object or all(isinstance(v, _PLAIN) for v in series):
+            continue
+        out = data.copy() if out is None else out
+        out[column] = [v if isinstance(v, _PLAIN) else
+                       json.dumps(_stable(v), sort_keys=True, default=repr) for v in series]
+    return data if out is None else out
+
+
+def _stable(value: Any, depth: int = 0) -> Any:
+    """A value as plain data that stays the same while the value does (D57): its
+    own ``data_version()``, else its fields (a dataclass, a plain object), else a
+    hash of its pickle. Containers recursively."""
+    if isinstance(value, _PLAIN) or depth > 20:
+        return value if isinstance(value, _PLAIN) else repr(value)
+    if isinstance(value, Mapping):
+        return {str(k): _stable(v, depth + 1) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        items = [_stable(v, depth + 1) for v in value]
+        return sorted(items, key=repr) if isinstance(value, (set, frozenset)) else items
+    from .catalog import data_version       # catalog imports output: not at the top
+    kind = f"{type(value).__module__}.{type(value).__qualname__}"
+    version = data_version(value)
+    if version is not None:
+        return {"type": kind, "version": version}
+    if dataclasses.is_dataclass(value):
+        return {"type": kind, **{f.name: _stable(getattr(value, f.name), depth + 1)
+                                 for f in dataclasses.fields(value)}}
+    if type(value).__repr__ is object.__repr__ and hasattr(value, "__dict__"):
+        return {"type": kind, **{k: _stable(v, depth + 1) for k, v in vars(value).items()}}
+    try:
+        return {"type": kind, "pickle": hashlib.sha1(pickle.dumps(value)).hexdigest()}
+    except Exception:
+        return repr(value)
 
 
 def _failed_output(operation: Any, error: str, where: str | None = None) -> "Output":

@@ -247,7 +247,6 @@ def test_B9_a_hash_column_is_not_listed_as_data():
     assert said and "#xs" not in said
 
 
-@pytest.mark.xfail(strict=True, reason="S1 (B10, D57): an object's data version is stable")
 def test_B10_rerunning_an_object_step_leaves_readers_fresh():
     k = Kernel(Catalog([scan, scanned]))
     k["r"] = pd.DataFrame({"n": [1, 2]})
@@ -256,6 +255,30 @@ def test_B10_rerunning_an_object_step_leaves_readers_fresh():
     k.run_all()
     k.run("s")
     assert k.step("t").state == "completed"
+
+
+def test_B10_an_objects_version_is_its_own_then_its_fields():
+    from dataclasses import dataclass
+
+    from simple_steps_core.output import _data_version
+
+    @dataclass
+    class Point:
+        x: int
+
+    class Versioned:
+        def __init__(self, v):
+            self.v = v
+
+        def data_version(self):
+            return f"v{self.v}"
+
+    def version(cell):
+        return _data_version(pd.DataFrame({"c": [cell]}))
+
+    assert version(Point(1)) == version(Point(1)) != version(Point(2))
+    assert version(Versioned(1)) == version(Versioned(1)) != version(Versioned(2))
+    assert version(Scan(1)) == version(Scan(1)) != version(Scan(2))
 
 
 @pytest.mark.xfail(strict=True, reason="S1 (B11): a passed-through column makes its step stale")
