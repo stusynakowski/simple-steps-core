@@ -20,6 +20,7 @@ import pandas as pd
 import pytest
 
 from simple_steps_core import Catalog, Kernel, cols, mod, stack, tool, wf
+from simple_steps_core.operation import op
 
 
 @tool
@@ -154,6 +155,18 @@ def test_E15_a_row_holds_plain_python_values():
     k["x"] = look[mod.map()](wf["p"])
     k.run("x")
     assert [type(v) for v in seen] == [float, type(None)]
+
+
+def test_E15_D17_a_gathered_list_and_the_view_hold_plain_values():
+    k = Kernel(Catalog([]))
+    k["p"] = pd.DataFrame({"temp": [36.6, np.nan], "n": pd.array([1, None], dtype="Int64")})
+    k["t"] = wf["p"][cols["temp"]]
+    k["g"] = op("gather")[mod.collapse()](wf["t"])
+    k.run_all()
+    gathered = k.step("g").output.data["temp"].iloc[0]
+    assert [type(v) for v in gathered] == [float, type(None)]
+    cells = [{c: x.get("value") for c, x in r["cells"].items()} for r in k.view("p")["rows"]]
+    assert [type(v) for row in cells for v in row.values()] == [float, int, type(None), type(None)]
 
 
 @pytest.mark.xfail(strict=True, reason="S3 (N2): an inferred verb is never filter")

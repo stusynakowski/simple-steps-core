@@ -587,8 +587,8 @@ def test_C7_refusals(prices):
 def test_C7_column_names_are_strings():
     w = Workflow()
     w["y"] = pd.DataFrame({2023: [1, 2], 2024: [3, 4]})
-    assert list(w.step("y").output.data.columns) == ["2023", "2024"]
-    with pytest.raises(SelectionError, match="both become '1'"):
+    assert list(w.step("y").output.data.columns) == ["var2023", "var2024"]   # L21
+    with pytest.raises(SelectionError, match="are both 'var1'"):
         w["clash"] = pd.DataFrame({1: [1], "1": [2]})
 
 

@@ -26,7 +26,7 @@ HOLDS = frozenset({
     "TEST-L4", "TEST-L5", "TEST-L5b",                         # M0
     "TEST-L7c",                                               # M1
     "TEST-L11b", "TEST-L14c", "TEST-L19",                    # M2
-    "TEST-L20", "TEST-L24",                                   # M3
+    "TEST-L20", "TEST-L21a", "TEST-L21b", "TEST-L24",         # M3
     "TEST-L27", "TEST-L28", "TEST-L31b",                     # M4
     "TEST-L38", "TEST-L39",                                   # M5
     "TEST-L43a", "TEST-L43b", "TEST-L43c",                   # M6

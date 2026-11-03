@@ -410,20 +410,33 @@ def _normalize_missing(frame: pd.DataFrame) -> pd.DataFrame:
     return frame if out is None else out
 
 
-def _str_columns(frame: pd.DataFrame, step_id: str = "the step") -> pd.DataFrame:
-    """Every column name a string (008 C7: names are str, rows are int).
+def _column_name(name: Any, position: int) -> str:
+    """A data column's name as text (L21): a whole number (``0``, ``"0"``,
+    ``2023``) becomes ``var0``, ``var2023``; an empty name ``var<position>``."""
+    if isinstance(name, numbers.Integral) and not isinstance(name, bool):
+        return f"var{name}"
+    if isinstance(name, str) and name.isdigit():
+        return f"var{int(name)}"
+    if name is None or name == "":
+        return f"var{position}"
+    return str(name)
 
-    ``2023`` becomes ``"2023"``. Two names that collide once converted fail.
+
+def _str_columns(frame: pd.DataFrame, step_id: str = "the step") -> pd.DataFrame:
+    """Every column name text (008 C7: names are text, rows are int).
+
+    Numeric and empty names become ``var<n>`` (L21, core-asks M6). Two names
+    that collide once converted fail, naming both.
     """
-    if all(isinstance(c, str) for c in frame.columns):
+    names = [_column_name(c, i) for i, c in enumerate(frame.columns)]
+    if names == list(frame.columns):
         return frame
-    names = [str(c) for c in frame.columns]
     seen: dict[str, Any] = {}
     for original, name in zip(frame.columns, names):
         if name in seen:
             raise SelectionError(
-                f"columns {seen[name]!r} and {original!r} of {step_id!r} both "
-                f"become {name!r}; rename one")
+                f"columns {seen[name]!r} and {original!r} of {step_id!r} are both "
+                f"{name!r} (a numeric name becomes var<n>); rename one")
         seen[name] = original
     out = frame.copy()
     out.columns = names
