@@ -8,7 +8,8 @@
 > What the app needs from core is [core-asks/model.md](core-asks/model.md);
 > what's decided and what's open is [decisions.md](decisions.md); the order of
 > work is [plan.md](plan.md). Where this page and the code disagree, this page
-> is the intent and the gap is a bug or a planned item.
+> is the intent and the gap is a bug or a planned item. The model as a map,
+> with examples of the behaviour we want, is [model-map.md](model-map.md).
 
 ## 1. What core is
 
