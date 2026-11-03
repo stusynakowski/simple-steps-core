@@ -251,7 +251,7 @@ The same steps are in the app's `scripts/ui_status` workflows 06 and 07.
 
 | ID | Change | Overlaps |
 |---|---|---|
-| L37 | A column argument from a step **aligned** with the input pairs row by row (aligned = connected only through one-to-one steps) | K19 |
+| L37 | A column argument from a step **aligned** with the input pairs each row with the same row (aligned = the same rows, in any order: connected only through steps that keep every row) | K19 |
 | L38 | A block or whole step as an argument reaches only a `DataFrame` parameter | C7 table |
 | L39 | Join variants: `how="left"` (exists), `"right"`, `"outer"`; and a merge. Lineage: one `#<input>` per side, empty where unmatched | — |
 | L50 | **Binding at staging** (D6): what the user wrote, else a column with the parameter's name (only for a parameter without a default), else the one column whose type fits, else `invalid` naming the candidates and the fix. What staging decides is **saved in the expression** (`n=wf["doubled"]["doubled"]`), so nothing is guessed again; a binding that breaks later makes the step `invalid` | K19, B7, B8 |

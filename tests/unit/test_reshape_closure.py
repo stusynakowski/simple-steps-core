@@ -162,6 +162,21 @@ def test_L6_rows_given_back_carry_their_own_lineage_not_their_groups(k):
     assert k.workflow.lineage("back")["#v"] == [0, 1, 3, 2]
 
 
+def test_L6_rows_given_back_in_group_order_pair_with_their_own_by_id(k):
+    """CA-11: the rows come back in group order, still v's rows: zip_ and a
+    join on lineage pair each with its own, never by position."""
+    k["groups"] = gather[mod.collapse(by="ward")](wf["v"])
+    k["back"] = mod.expand(columns=["name", "temp"])(wf["groups"])
+    k["br"] = mod.rename(columns={"name": "name_b", "temp": "temp_b"})(wf["back"])
+    k["sel"] = mod.select(columns=["name_b", "temp_b"])(wf["br"])
+    k["z"] = zip_(wf["v"], wf["sel"])
+    k["j"] = join(wf["br"], wf["v"], on="#v")
+    k.run_all()
+    for s in ("z", "j"):
+        assert (data(k, s)["name_b"] == data(k, s)["name"]).all(), s      # Cy with Cy, not Ben
+        assert (data(k, s)["temp_b"] == data(k, s)["temp"]).all(), s
+
+
 def test_L7_expand_then_collapse_by_its_parent_gives_one_row_per_parent(k):
     k["e"] = readings_rc[mod.expand()](wf["v"])
     k["back"] = gather[mod.collapse(by="#v")](wf["e"])
@@ -631,7 +646,7 @@ def test_L42_a_parents_value_reaches_each_child_through_a_join_on_lineage(m):
     from simple_steps_core import cols
     m.run_all()
     m["c0"] = scale_rc[mod.map()](wf["e"], temp=wf["v"][cols["temp"]])
-    assert "join(wf['e'], wf['v'], on='#v')" in str(m.step("c0").problems[0])   # CA-11
+    assert "join(wf['e'], wf['v'], on='#v')" in str(m.step("c0").problems[0])   # CA-11, CA-C
     m["j"] = join(wf["e"], wf["v"], on="#v")
     m["c"] = scale_rc[mod.map()](wf["j"])
     m.run_all()

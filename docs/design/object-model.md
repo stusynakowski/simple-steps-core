@@ -46,7 +46,7 @@ docs.
 | **value column** | the column a tool's result is written to: `value` unless named with `mod.name`. A declared record writes one column per field | *payload* |
 | **`#` column** | a column core writes and keeps: `#<step>`, the row number, and the **lineage** columns `#v`, the row number (or, for a group, the list) of ancestor `v` each row came from; every step carries its input's lineage *(CA-L1)*. Ids, not variables: tools never see them, and nothing but core writes a name starting with `#` ([reshaping.md §1](reshaping.md#1-the-model)) | — |
 | **trace** | following a row back through `#` columns to the rows it came from, step by step; never by reading an id or a position ([reshaping.md §2](reshaping.md#2-the-five-guarantees)) | *ancestors* (parsing `"i.j"`) |
-| **aligned** | two steps whose rows are the same rows in the same order: one step, or connected only through one-to-one steps. Only aligned steps pair row by row; others meet in a `join` *(CA-F, CA-C)* | *origin* |
+| **aligned** | two steps whose rows are the same rows, in any order: one step, or connected only through steps that keep every row (one-to-one steps, a sort). Only aligned steps pair, each row with the same row by row id, never by position; others meet in a `join` *(CA-F, CA-C, CA-11 amended)* | *origin* |
 | **pack** | to put a selection into one cell: a column into a list (`gather[collapse()]`), a row into a dict (`mod.pack`). **Unpack** is the way back (`expand`, `widen`) | — |
 | **absent** | a cell state: no value here at all (a key a record lacks, a `stack` or `join` gap), kept apart from a `None` value | — |
 | **empty step** | a step with no expression yet (`k["x"] = None`): a 1×1 grid holding `"empty"`, which nothing reads until it has one | — |

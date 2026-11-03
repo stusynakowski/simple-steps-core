@@ -24,7 +24,7 @@ One word per idea. The right column lists the words this model retires.
 | **row id** | core's internal identity for a row, and already its lineage (`0.1`: item 1 of the parent's row 0; a group's key). Used for staleness, pairing and picks. Never shown, never written | — |
 | **condition** | a test that keeps the rows it's true for, on data (`cols['x']`) or lineage (`row['s']`) | — |
 | **lineage** | the `#<ancestor>` columns: for each ancestor step, the row number(s) this row came from | *`#v` column*, *trace column* |
-| **aligned** | two steps whose rows are the same rows in the same order | *origin* |
+| **aligned** | two steps whose rows are the same rows, in any order; they pair each row with the same row, by identity | *origin* |
 | **modifier** | `mod.<name>(…)` in a tool call's brackets: a picker, a verb, a column modifier, or a wrapper | *orchestration*, *mode* |
 | **picker** | a modifier that narrows or orders the input: `select`, `drop`, `slice`, `sort`, `distinct`, `cast` | *reshape* (for these) |
 | **verb** | the one modifier that says how the tool is applied, and so what the output rows are | *shape verb* |
@@ -290,7 +290,7 @@ Column modifiers, `cast` and column picks add none.
 | Row number column `#<step>` | This row's row number, `0..n-1` |
 | Data column | A named column of values, with a type. Names are unique, non-empty text, never starting with `#`, kept as written (`'Patient ID'` too); numeric names become `var<n>`. An int column stays int when a value is missing |
 | Cell | One value at (row number, data column), with a state: `known`, `absent`, `maybe`, `pending`, `blocked`, `failed`, `invalid` (core's states, CA-10) |
-| Aligned | Two steps whose rows are the same rows in the same order: one step, or connected only through one-to-one steps, a `zip_` of aligned steps, `collapse(by="#s")` (one row per row of `s`, in `s`'s order) or an expand that gives packed rows back. Only aligned steps pair row by row (a column argument, `zip_`); others meet in a join on lineage, `on="#s"` for their nearest shared ancestor `s`, which the refusal writes |
+| Aligned | Two steps whose rows are the same rows, in any order: one step, or connected only through steps that keep every row (one-to-one steps, a sort), a `zip_` of aligned steps, `collapse(by="#s")` (one row per row of `s`) or an expand that gives packed rows back. Only aligned steps pair (a column argument, `zip_`), each row with the same row by identity, never by position; others (a filtered copy, a child and its parent) meet in a join on lineage, `on="#s"` for their nearest shared ancestor `s`, which the refusal writes (CA-11, amended) |
 | Row id | Core's internal identity for a row. Never shown or written |
 
 ## M4. The ruleset
@@ -336,7 +336,7 @@ hint.
 | # | Hard rule |
 |---|---|
 | 18 | `join` pairs rows by a column's values (`on='ward'`) or by lineage (`on='#r'`: each child with its parent row) |
-| 19 | `zip_` pairs row `i` with row `i`, and only for aligned steps |
+| 19 | `zip_` pairs each row with the same row (by identity, in the first input's order), and only for aligned steps |
 | 20 | `stack` puts the inputs' rows one after another |
 | 21 | A combine has one lineage column per input, and carries each input's lineage. The same ancestor twice (or by two paths) is numbered `#r`, `#r.2`. `join(a, b, on='#r')` works whenever one descends from the other; a column passed through unchanged from the shared ancestor appears once, not as a clash |
 
@@ -586,7 +586,7 @@ add_all[mod.map()](wf['r'], k=wf['r']['n'])     # refused: k is a list, each row
 | Write | Rows | Lineage |
 |---|---|---|
 | `=join(wf['a'], wf['b'], on='ward')` | matched by the column's values | `#a`, `#b` |
-| `=zip_(wf['a'], wf['b'])` | row `i` beside row `i`; only if aligned | `#a`, `#b` |
+| `=zip_(wf['a'], wf['b'])` | each row of `a` beside the same row of `b`; only if aligned | `#a`, `#b` |
 | `=stack(wf['a'], wf['b'], wf['c'])` | one after another | `#a`, `#b`, `#c` |
 | a combine of a combine | as above | the inner combine's own, and its lineage carried |
 | `=join(wf['split'], wf['r'], on='#r')` | each child with its parent's data | `#split`, `#r` |

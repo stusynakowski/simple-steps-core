@@ -219,10 +219,13 @@ fresh run of the *saved* workflow. Found on the way: `collapse(by="#s")` could
 run before `s`, and didn't go stale with it.
 S5e done 2026-11-02: `mod.copy`, `rename` of `#` saved as copy, `#` picks
 refused; joins on lineage (a collapse's list meets each of its rows; shared
-columns merge); strict alignment (CA-11), "aligned" widened to a `zip_` of
+columns merge); alignment (CA-11), "aligned" widened to a `zip_` of
 aligned steps, `collapse(by="#s")` and a restoring expand, so the reshaping
 laws hold as they were; the tests that paired a child with its parent became
-joins. Found on the way: `run_all` could run a reader before an input that was
+joins. Amended the same day (owner): aligned is the same rows **in any order**,
+paired by identity, never by position, so a sort is aligned; the join on
+lineage looks an aligned side's rows up by id (it read their positions, and
+paired rows given back in group order with the wrong rows). Found on the way: `run_all` could run a reader before an input that was
 about to change. **S5 is done**: every M1/M2 core-asks test holds.
 
 **Existing tests that change** (counted at `65865bb`): the view's `#` (12

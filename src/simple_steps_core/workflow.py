@@ -1340,17 +1340,21 @@ class Workflow:
         return out
 
     def aligned(self, a: str, b: str) -> bool:
-        """Are steps *a* and *b* the same rows in the same order: one step, or
-        connected only through one-to-one steps (core-asks model §M3)? A
-        filter, sort or slice makes other rows; a row pick does too."""
+        """Are steps *a* and *b* the same rows, in any order: one step, or
+        connected only through steps that keep every row (one-to-one steps, a
+        sort, core-asks model §M3)? Rows pair by id, never by position. A
+        filter or slice makes other rows; a row pick does too."""
         return self._aligned_root(a) == self._aligned_root(b)
 
     def _join_hint(self, a: str, b: str) -> str:
         """The join that brings steps *a* and *b* together: on the lineage of
         their nearest shared ancestor (S5e), else on a column."""
-        common = [x for x in self._matchable(a) if x in self._matchable(b)]
-        if common:
-            return f"join(wf[{a!r}], wf[{b!r}], on={ROW_ID + common[0]!r})"
+        def meets(side: str, s: str) -> bool:
+            # the join reads side's rows as s's: it is s, aligned with it, or carries #s
+            return side == s or self.aligned(side, s) or f"{ROW_ID}{s}" in self.lineage(side)
+        for s in dict.fromkeys(self._matchable(a) + self._matchable(b)):
+            if meets(a, s) and meets(b, s):
+                return f"join(wf[{a!r}], wf[{b!r}], on={ROW_ID + s!r})"
         return f"join(wf[{a!r}], wf[{b!r}], on=…)"
 
     def _matchable(self, step_id: str) -> list[str]:
@@ -1363,23 +1367,24 @@ class Workflow:
         return list(dict.fromkeys(found))
 
     def _aligned_root(self, step_id: str) -> str:
-        """The furthest step back that *step_id* reaches through one-to-one steps."""
+        """The furthest step back that *step_id* reaches through steps that keep
+        every row, in any order."""
         seen, names = step_id, {step_id}
         while seen in self.steps:
             op_ = self.steps[seen].operation
             kind = self._kind(seen)
-            # one row per row of s, in s's order (R-D5), or packed rows given back (R-D3)
+            # one row per row of s (R-D5), or packed rows given back (R-D3)
             grouped, restored = self._groups_by_step(seen), self._restore_column(seen)
             nxt = grouped[1] if grouped else (self._id_source(restored) if restored else None)
             if is_combine(op_) and op_.tool == "zip" and op_.grids:
-                nxt = str(op_.grids[0])          # a zip_ of aligned steps is their rows, in order
+                nxt = str(op_.grids[0])          # a zip_ of aligned steps is their rows
             if nxt is not None and nxt not in names:
                 names.add(nxt)
                 seen = nxt
                 continue
             columns_only = kind == "select" and op_.shape_verb.settings.get("rows") is None
             if op_.input is None or is_combine(op_) or getattr(op_.input, "rows", None) is not None \
-                    or not (kind in _ONE_TO_ONE or columns_only):
+                    or not (kind in _ONE_TO_ONE or kind == "sort" or columns_only):
                 break
             seen = str(op_.input)
             if seen in names:
@@ -2183,8 +2188,12 @@ class Workflow:
                 target = self._id_source(on) or on[len(ROW_ID):]
                 for frame in frames:
                     name = frame.attrs["name"]
-                    if name == target or self.aligned(name, target):
-                        values = list(range(len(frame)))     # its rows are target's, in order
+                    if name == target:
+                        values = list(range(len(frame)))
+                    elif self.aligned(name, target):
+                        # its rows are target's, in any order: their numbers there, by id
+                        at = {str(i): n for n, i in enumerate(self.steps[target].output.data.index)}
+                        values = [at.get(str(i)) for i in frame.index]
                     else:
                         values = self.lineage(name).get(on)
                     if values is None:

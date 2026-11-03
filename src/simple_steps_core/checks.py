@@ -452,15 +452,16 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                                     f"({', '.join(map(str, picked))}): there is nothing to stack; "
                                     f"pick its data columns")
         if operation.tool == "zip" and workflow is not None and not operation.arguments.get("match_ids"):
-            # CA-11, L2: zip_ pairs row i with row i, only for aligned steps;
-            # match_ids=True is the user vouching for the order.
+            # CA-11, L2: zip_ pairs each row with the same row, by id, only for
+            # aligned steps (the same rows, any order); match_ids=True is the
+            # user vouching that unrelated ids match.
             names_ = [str(g) for g in operation.grids if str(g) in workflow.steps]
             for i, a in enumerate(names_):
                 for b in names_[i + 1:]:
                     if workflow._matched(a, b) and not workflow.aligned(a, b):
-                        problems.append(f"zip_ pairs row i of {a!r} with row i of {b!r}, but their "
-                                        f"rows aren't the same rows in the same order. Join them: "
-                                        f"{workflow._join_hint(a, b)}")
+                        problems.append(f"zip_ pairs each row of {a!r} with the same row of {b!r}, "
+                                        f"but they aren't the same rows: some would have no partner. "
+                                        f"Join them: {workflow._join_hint(a, b)}")
         if operation.tool == "zip" and len({str(g) for g in operation.grids}) < len(operation.grids):
             twice = next(str(g) for g in operation.grids if
                          [str(x) for x in operation.grids].count(str(g)) > 1)
@@ -734,16 +735,15 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         for name, value in _paired_arguments(operation, workflow).items():
             if value.id not in workflow.steps or source not in workflow.steps:
                 continue
-            # CA-11: a column pairs row by row only with an aligned step (the
-            # same rows in the same order); anything else meets in a join.
+            # CA-11, CA-C: a column pairs by id, only with an aligned step (the
+            # same rows, any order); anything else, a parent too, meets in a join.
             if value.rows is None and not workflow._matched(source, value.id):
                 continue                       # unrelated rows: unmatched_rows says so (R-D7)
             if value.rows is not None or not workflow.aligned(source, value.id):
                 problems.append(
-                    f"argument {name!r} reads a column of {value.id!r}, whose rows aren't "
-                    f"{source!r}'s rows in the same order: a column argument pairs row by row "
-                    f"only with an aligned step. Join them first: "
-                    f"{workflow._join_hint(source, value.id)}")
+                    f"argument {name!r} reads a column of {value.id!r}, which isn't {source!r}'s "
+                    f"rows: a column argument pairs each row with the same row, only between "
+                    f"aligned steps. Join them first: {workflow._join_hint(source, value.id)}")
                 continue
             column = (value.columns or {}).get("names", [None])[0] \
                 if isinstance(value.columns, dict) else None
