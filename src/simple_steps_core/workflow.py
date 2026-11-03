@@ -1326,6 +1326,16 @@ class Workflow:
                         return list(dict.fromkeys(flat)) if k_ == "rows" else flat
                     return None if v is None else by_id.get(str(v))
                 add(name, (ancestor, k_, [through(v) for v in ids]))
+        # packed rows given back (R-D3) are the source's own rows, each one of
+        # them, not the group it was packed in: its lineage, by their ids
+        restored = self._restore_column(step_id) if kind == "expand" else None
+        source = self._id_source(restored) if restored else None
+        if source in self.steps:
+            out[f"{ROW_ID}{source}"] = (source, "rows", [_plain(i) for i in index])
+            source_ids = list(map(str, self.steps[source].output.data.index))
+            for name, (ancestor, k_, cells) in self._lineage_ids(source, memo).items():
+                by_id = dict(zip(source_ids, cells))
+                out[name] = (ancestor, k_, [by_id.get(str(i)) for i in index])
         memo[step_id] = out
         return out
 

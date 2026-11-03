@@ -152,6 +152,16 @@ def test_L6_unpacking_groups_gives_back_the_rows(k):
     same_rows(data(k, "back"), data(k, "vt"))
 
 
+def test_L6_rows_given_back_carry_their_own_lineage_not_their_groups(k):
+    """R-D3: each row unpacked from a group is one row of the source, in group
+    order; its #v is that row's number, not the group's list."""
+    k["groups"] = gather[mod.collapse(by="ward")](wf["v"])
+    k["back"] = mod.expand(columns=["name", "temp"])(wf["groups"])
+    k.run_all()
+    assert list(data(k, "back")["name"]) == ["Ada", "Ada", "Cy", "Ben"]      # ward A, then B
+    assert k.workflow.lineage("back")["#v"] == [0, 1, 3, 2]
+
+
 def test_L7_expand_then_collapse_by_its_parent_gives_one_row_per_parent(k):
     k["e"] = readings_rc[mod.expand()](wf["v"])
     k["back"] = gather[mod.collapse(by="#v")](wf["e"])
