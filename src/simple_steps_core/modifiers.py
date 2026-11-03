@@ -24,6 +24,7 @@ from .verbs import (
     group_,
     map_,
     rename_,
+    copy_,
     select_,
     slice_,
     sort_,
@@ -358,6 +359,7 @@ MODIFIERS: dict[str, ModifierKind] = {k.name: k for k in (
     _kind("pack",     "shape", _lift(pack_), pack_),
     _kind("slice",    "shape", _lift(slice_), slice_),
     _kind("rename",   "shape", _lift(rename_), rename_),
+    _kind("copy",     "shape", _lift(copy_), copy_),
     _kind("sort",     "shape", _lift(sort_), sort_),
     _kind("distinct", "shape", _lift(distinct_), distinct_),
     _kind("group",    "shape", _lift(group_), group_),
@@ -426,6 +428,7 @@ REQUIRED_PARAMS: dict[str, tuple[str, ...]] = {
     "select": (),                      # columns= or rows= — checked in `check`
     "drop": ("columns",),
     "rename": ("columns",),
+    "copy": ("columns",),
     "sort": ("by",),
 }
 
@@ -513,7 +516,7 @@ _TAKES_TOOL: dict[str, Any] = {
     "map": True, "filter": True, "group": True, "sweep": True, "table": True,
     "auto": True,
     "select": False, "drop": False, "widen": False, "pack": False, "slice": False,
-    "rename": False, "sort": False, "distinct": False,
+    "rename": False, "copy": False, "sort": False, "distinct": False,
     "source": "optional", "expand": "optional", "collapse": "optional",
     "retry": None, "timeout": None, "expect": None, "try_except": None,
     "breaker": None,
@@ -643,6 +646,13 @@ class _Mods:
                 # Types are written as Python types and saved as their names.
                 params["columns"] = {k: _type_label(v)
                                      for k, v in params["columns"].items()}
+            if kind == "rename" and isinstance(params.get("columns"), dict) and any(
+                    isinstance(c, str) and c.startswith("#") for c in params["columns"]):
+                # lineage is read-only: renaming it copies it (CA-D), saved as copy
+                if not all(isinstance(c, str) and c.startswith("#") for c in params["columns"]):
+                    raise TypeError("rename moves data columns and copies lineage: split them, "
+                                    "mod.rename(columns={…}) and mod.copy(columns={'#r': …})")
+                return Modifier("copy", params)
             if isinstance(params.get("rows"), Condition):
                 params["rows"] = {"where": params["rows"].tree}     # S5c: saved as data
             if isinstance(params.get("over"), str):

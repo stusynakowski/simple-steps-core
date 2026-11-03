@@ -1696,15 +1696,17 @@ def test_row_ids_and_column_names_can_be_referenced(wf):
     def width_hdr(names: list) -> int:
         return len(names)
 
+    # Rule 8 (S5e): a pick covers data only; `#` columns become data by copying.
     wf["ids"] = wf["readings"][cols["#"]]
     wf["both"] = wf["readings"][1:3][cols[["#", "n"]]]
     wf["picked"] = op("identity")[mod.select(columns=["#", "city"])](wf["readings"])
+    for s in ("ids", "both", "picked"):
+        assert "mod.copy" in str(wf.step(s).problems[0])
+    for s in ("ids", "both", "picked"):
+        del wf[s]
     wf["hdr"] = wf["readings"].header
     wf["w"] = width_hdr.bind(names=wf["readings"].header)[mod.source()]
     wf.run_all()
-    assert wf.step("ids").output.data.to_dict("list") == {"#": [0, 1, 2, 3]}
-    assert wf.step("both").output.data.to_dict("list") == {"#": [1, 2], "n": [2, 3]}
-    assert list(wf.step("picked").output.data.columns) == ["#", "city"]
     assert wf.step("hdr").output.data.to_dict("list") == {"name": ["city", "n"]}
     assert wf.step("w").output.data.iloc[0, 0] == 2
     assert wf.step("w").operation.to_source() == 'width_hdr[mod.source()](names=wf["readings"].header)'

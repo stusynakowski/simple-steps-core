@@ -290,9 +290,6 @@ def test_a_new_group_makes_the_whole_step_stale(kc):
 def test_the_view_shows_row_numbers_and_lineage_not_row_ids(k):
     """S5a (CA-B1): `#` in the view is the row number; where a row came from
     is its lineage, the parent's row number. Core's ids stay in `.data`."""
-    from simple_steps_core import cols
-    k["ids"] = wf["srt"][cols["#"]]
-    k.run_all()
-    assert k.step("ids").data["#"].tolist() == [1, 2, 0]           # core's ids (S5-D5)
+    assert k.step("srt").data.index.tolist() == [1, 2, 0]         # core's ids (S5-D5)
     assert [r["#"] for r in k.view("srt")["rows"]] == [0, 1, 2]
     assert [r["lineage"]["#p"] for r in k.view("srt")["rows"]] == [1, 2, 0]   # Ben, Cy, Ada

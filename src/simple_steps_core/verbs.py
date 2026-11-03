@@ -1137,6 +1137,37 @@ def rename_(source: Any, fn: Callable = identity, *,
                           source=source)
 
 
+def copy_(source: Any, fn: Callable = identity, *,
+          columns: dict[str, str] | None = None, lineage: dict | None = None) -> Output:
+    """``copy`` — each named column into a new data column; the original stays.
+
+    The one way lineage becomes data (CA-D, core-asks rule 25): a ``#`` column's
+    copy holds the lineage as shown, the ancestor's row numbers. *lineage* is
+    the input's, attached by the workflow when it runs. Applies **no tool**.
+    """
+    _no_tool("copy", fn)
+    if not columns:
+        raise ValueError("copy needs columns={old: new}")
+    frame = rows(source)
+    data = frame.copy()
+    for old, new in columns.items():
+        if is_id_column(new):
+            raise ValueError(f"copy can't name a column {new!r}: names starting with "
+                             f"{ROW_ID!r} are lineage, which core writes")
+        if new in frame.columns:
+            raise ValueError(f"copy would overwrite {new!r}; pick another name")
+        if is_id_column(old):
+            values = (lineage or {}).get(old)
+            if values is None:
+                raise SelectionError(f"there's no lineage {old!r} to copy (its lineage: "
+                                     f"{', '.join(lineage or {}) or 'none'})")
+            data[new] = pd.Series(list(values), index=frame.index, dtype=object)
+        else:
+            _require_columns("copy", frame, [old])
+            data[new] = frame[old]
+    return _column_output("copy", frame, data, source=source)
+
+
 def sort_(source: Any, fn: Callable = identity, *, by: Sequence[str] | None = None,
           ascending: bool = True) -> Output:
     """``sort`` — reorder rows by one or more columns. Same rows, same columns.

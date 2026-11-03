@@ -696,7 +696,8 @@ def test_L47_naming_cant_forge_an_id_column(e):
     assert state(e, "r") == "invalid"                                  # refused when declared
     e["out"] = mod.rename(columns={"#v": "visit"})(wf["e"])               # copying out is allowed
     e.run_all()
-    assert list(data(e, "out").columns) == ["visit", "value"]
+    assert list(data(e, "out").columns) == ["#v", "value", "visit"]    # lineage stays (CA-D)
+    assert "mod.copy" in e.step("out").formula
 
 
 def test_L48_header_and_name_tools_see_variables_only(e):

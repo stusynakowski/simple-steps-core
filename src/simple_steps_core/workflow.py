@@ -1893,7 +1893,8 @@ class Workflow:
         settings_refs = any(isinstance(v, StepRef)
                             for m in operation.modifiers for v in m.settings.values())
         conditions = any(_uses_lineage((m.settings.get("rows") or {}).get("where"))
-                         for m in operation.modifiers if isinstance(m.settings.get("rows"), dict))
+                         for m in operation.modifiers if isinstance(m.settings.get("rows"), dict)) \
+            or any(m.kind == "copy" for m in operation.modifiers)
         if operation.bound_to is None and not settings_refs and not conditions and not any(
                 isinstance(v, (StepRef, ResRef)) for v in operation.arguments.values()):
             return operation
@@ -1924,13 +1925,16 @@ class Workflow:
             instance = self._live(operation.bound_to.name, resources)
             fn = getattr(instance, operation.tool.rsplit(".", 1)[-1])
         modifiers = tuple(
-            Modifier(m.kind, {k: (_ref_value(_apply_selection(
+            Modifier(m.kind, {**{k: (_ref_value(_apply_selection(
                                       self.steps[v.id].output.data, v.rows,
                                       v.columns, v.id), None, v.id)
                                   if isinstance(v, StepRef) else
                                   self._with_lineage(v, str(operation.input))
                                   if k == "rows" and operation.input is not None else v)
-                              for k, v in m.settings.items()})
+                              for k, v in m.settings.items()},
+                           # copy reads lineage as shown (CA-D): the input's
+                           **({"lineage": self.lineage(str(operation.input))}
+                              if m.kind == "copy" and operation.input is not None else {})})
             for m in operation.modifiers)
         return Operation(operation.tool, modifiers, resolved,
                          fn, operation.input)
@@ -2696,7 +2700,7 @@ def _hashable(value: Any) -> bool:
     return True
 
 #: Verbs whose output rows are their input's rows, in order (core-asks §M3, aligned).
-_ONE_TO_ONE = frozenset({"map", "group", "rename", "drop", "widen", "pack"})
+_ONE_TO_ONE = frozenset({"map", "group", "rename", "copy", "drop", "widen", "pack"})
 _SNAKE = re.compile(r'^[a-z0-9]+(_[a-z0-9]+)*$')
 _CAMEL = re.compile(r'^[a-z][a-zA-Z0-9]*$')
 

@@ -433,7 +433,7 @@ class Operation:
 
 
 #: The verbs that run no tool, and so print as ``mod.<verb>(…)(wf["x"])``.
-_RESHAPES = frozenset({"select", "drop", "rename", "sort", "slice", "distinct", "widen", "pack"})
+_RESHAPES = frozenset({"select", "drop", "rename", "copy", "sort", "slice", "distinct", "widen", "pack"})
 
 
 def _with_tool(value: Any, table: dict) -> Any:
