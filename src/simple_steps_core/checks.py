@@ -437,6 +437,19 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 if lacking and have:
                     problems.append(f"join on {lacking[0]!r}, which {str(g)!r} does not have "
                                     f"(it has {', '.join(map(str, variables(have)))})")
+        if operation.tool == "stack":
+            # B4 (D29): an input of nothing but row ids gives rows with nothing in them.
+            for g in operation.grids:
+                picked = g.columns.get("names") if isinstance(getattr(g, "columns", None), dict) else None
+                if picked is None and workflow is not None and str(g) in workflow.steps \
+                        and not columns_unknown(workflow.steps[str(g)].output):
+                    picked = workflow._predicted_of(str(g))
+                said = f"stack reads {_src(g)}"
+                if picked and not variables(picked) and not any(x.startswith(said) for x in problems
+                                                                 if isinstance(x, str)):
+                    problems.append(f"{said}, which holds only row ids "
+                                    f"({', '.join(map(str, picked))}): there is nothing to stack; "
+                                    f"pick its data columns")
         if operation.tool == "zip" and len({str(g) for g in operation.grids}) < len(operation.grids):
             twice = next(str(g) for g in operation.grids if
                          [str(x) for x in operation.grids].count(str(g)) > 1)

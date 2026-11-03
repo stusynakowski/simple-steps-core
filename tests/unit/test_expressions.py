@@ -223,7 +223,6 @@ def test_E27_an_expression_round_trips(k):
 
 # ── bugs ─────────────────────────────────────────────────────────────────────
 
-@pytest.mark.xfail(strict=True, reason="S1 (B4, D29): stack of an ids-only step is refused")
 def test_B4_stack_of_nothing_but_ids_is_refused(k):
     assert refused(k, "s", lambda: stack(wf["p"][cols["#"]], wf["p"][cols["#"]]))
 
