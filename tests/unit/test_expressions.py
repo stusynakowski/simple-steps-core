@@ -228,7 +228,6 @@ def test_B4_stack_of_nothing_but_ids_is_refused(k):
     assert refused(k, "s", lambda: stack(wf["p"][cols["#"]], wf["p"][cols["#"]]))
 
 
-@pytest.mark.xfail(strict=True, reason="S1 (B9): # is never counted as a step's data")
 def test_B9_a_hash_column_is_not_listed_as_data():
     k = Kernel(Catalog([to_f_v]))
     k["xs"] = [1, 2, 3]

@@ -1205,7 +1205,7 @@ def _missing_columns(operation: Operation, fn: Callable,
     return [
         f"{operation.tool}() needs {', '.join(repr(m) for m in missing)}, "
         f"which {str(operation.input) if operation.input is not None else 'the input'!r} does not have "
-        f"(it has {', '.join(sorted(available)) or 'no columns'}){hint}"
+        f"(it has {', '.join(sorted(variables(available))) or 'no columns'}){hint}"
     ]
 
 
