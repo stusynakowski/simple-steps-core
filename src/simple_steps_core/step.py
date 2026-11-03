@@ -36,16 +36,19 @@ def _changes_text(changes: list[dict]) -> str:
     return ", ".join(parts)
 
 
-def _row_fps(frame: pd.DataFrame, columns: list) -> dict:
-    """A short hash of each row's values in *columns*, by row id."""
+def _row_fps(frame: pd.DataFrame, columns: list) -> pd.Series:
+    """A hash of each row's values in *columns*, by row id: one uint64 a row,
+    on the frame's own index, so a step keeps 8 bytes a row for it, not a
+    Python list (ST, decisions.md §0)."""
     if not columns:
-        return {i: "" for i in frame.index}
+        return pd.Series(0, index=frame.index, dtype="uint64")
     try:
         hashes = pd.util.hash_pandas_object(frame[columns], index=False)
-        return {i: format(int(h), "x")[:12] for i, h in zip(frame.index, hashes)}
+        return pd.Series(hashes.to_numpy(), index=frame.index, dtype="uint64")
     except TypeError:
-        return {i: hashlib.sha1(repr(row).encode()).hexdigest()[:12]
-                for i, row in zip(frame.index, frame[columns].itertuples(index=False))}
+        return pd.Series([int(hashlib.sha1(repr(row).encode()).hexdigest()[:16], 16)
+                          for row in frame[columns].itertuples(index=False)],
+                         index=frame.index, dtype="uint64")
 
 
 

@@ -601,7 +601,7 @@ class Workflow:
         return stamps
 
     def _row_reads(self, step: Step) -> dict | None:
-        """``{"step", "columns", "fp": [[row id, hash], …]}`` for a row-aligned step."""
+        """``{"step", "columns", "fp": a uint64 hash a row, by row id}`` for a row-aligned step."""
         op_ = step.operation
         if is_combine(op_) or op_.input is None or op_.shape_verb is None:
             return None
@@ -631,7 +631,7 @@ class Workflow:
                 columns = list(dict.fromkeys([*columns, step.output.meta["by"]]))
         columns = [c for c in columns if c in upstream.output.data.columns]
         return {"step": source, "columns": columns,
-                "fp": [[_plain(i), h] for i, h in _row_fps(upstream.output.data, columns).items()]}
+                "fp": _row_fps(upstream.output.data, columns)}
 
     def stale_rows(self, step_id: str) -> list | None:
         """The rows of a stale step that are out of date — None when all of them are."""
@@ -762,15 +762,17 @@ class Workflow:
         upstream = self.steps.get(row_reads["step"])
         if upstream is None or upstream.output.meta.get("staged"):
             return None
-        before = {k: h for k, h in row_reads["fp"]}
+        before = row_reads["fp"]
         columns = [c for c in row_reads["columns"] if c in upstream.output.data.columns]
         if len(columns) != len(row_reads["columns"]):
             return None
         now = _row_fps(upstream.output.data, columns)
-        if {str(k) for k in now} != {str(k) for k in before}:
+        if now.index.equals(before.index):          # the usual case: compare as arrays
+            return set(now.index[now.to_numpy() != before.to_numpy()])
+        if {str(k) for k in now.index} != {str(k) for k in before.index}:
             return None
-        by_str = {str(k): v for k, v in before.items()}
-        return {k for k, h in now.items() if by_str[str(k)] != h}
+        by_str = dict(zip(map(str, before.index), before.to_numpy()))
+        return {k for k, h in zip(now.index, now.to_numpy()) if by_str[str(k)] != h}
 
     # ── what a step reads ────────────────────────────────────────────────
     def _known_columns(self, operation: Operation) -> list[str]:

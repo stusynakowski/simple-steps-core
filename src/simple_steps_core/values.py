@@ -818,6 +818,11 @@ def _decode(blob: dict) -> Any:
 def _encode_output(output: Output) -> dict:
     meta = {k: v for k, v in output.meta.items()
             if k not in ("problems", "notes", "column_types")}
+    if isinstance(meta.get("row_reads"), dict):
+        # kept as a uint64 Series by row id; saved as [[row id, hash], …]
+        fp = meta["row_reads"]["fp"]
+        meta["row_reads"] = {**meta["row_reads"],
+                             "fp": [[_plain(i), int(h)] for i, h in zip(fp.index, fp.to_numpy())]}
     blob = {"data": _encode(output.data),
             "states": {str(c): [str(v) for v in output.states[c]] for c in output.states.columns},
             "meta": meta}
@@ -829,6 +834,12 @@ def _encode_output(output: Output) -> dict:
 def _decode_output(blob: dict) -> Output:
     data = _decode(blob["data"])
     meta = dict(blob["meta"])
+    if isinstance(meta.get("row_reads"), dict):
+        pairs = meta["row_reads"]["fp"]
+        meta["row_reads"] = {**meta["row_reads"], "fp": pd.Series(
+            [int(h, 16) if isinstance(h, str) else int(h) for _, h in pairs],
+            index=pd.Index([i for i, _ in pairs], dtype=object if any(
+                isinstance(i, str) for i, _ in pairs) else None), dtype="uint64")}
     if blob.get("notes"):
         meta["notes"] = {i: note for i, note in blob["notes"]}
     if "states" in blob:
