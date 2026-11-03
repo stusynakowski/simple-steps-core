@@ -41,6 +41,70 @@ disagree; the code follows the core asks.
 | D-subset | A column argument from a step missing some rows | blocks those rows, runs the rest | refused, writing the join | keep the code |
 | D-cell | A lineage cell shows the ancestor's row number as of the run, or now | — | now (S5-D4); core-asks model.md M3 says "as of the run" | now, and correct M3 |
 
+**Expressions: simple and robust** (opened 2026-11-03 from the tutorial,
+[tutorial/](../../tutorial/); lesson ids P…, V…, R…, A…, C… are in
+[tutorial/capabilities.md](../../tutorial/capabilities.md)). Most of the
+tutorial's ✗ share one cause: an expression can mean more than it shows. It
+can be written several ways, it takes settings that do nothing, and core fills
+in a verb, a binding or a name you didn't write. The aim: **one way to write
+each thing, and a saved expression that says exactly what runs.** In the
+order recommended: EX1–EX2 are small and close the five new findings; EX3–EX4
+are removals; EX5–EX6 are S3's binding work.
+
+| | Decision | Today (run 2026-11-03) | Recommended |
+|---|---|---|---|
+| **EX1** | **Every setting is checked, or refused.** Each modifier's settings come from one typed schema (`MODIFIERS`); an unknown setting, a setting that changes nothing, or a positional argument is refused when the step is declared, and the refusal writes the right form | `mod.map(axis="columns")` accepted and ignored (V10); `mod.widen(wf["i"])` accepted, the step fails with `None` (R11); an unknown argument says the tool "accepts (none)" (A7) | **yes** |
+| **EX2** | **A verb owns its output columns.** A `filter` returns exactly its input's columns, a `map` exactly its named output; the plan lists them, and a test checks run against plan for every verb | a `filter` given a column argument adds it as a column (A4b) | **yes** |
+| EX3 | **One grammar**: `tool[modifiers](input, arguments)`, `mod.reshape(settings)(input)`, `join`/`zip_`/`stack(…)`, `wf["s"][rows][cols]`. Retire `mod.x(over=…)` and `op("identity")[mod.reshape(…)]` | all three spellings of a reshape work (F7); `examples/all_orchestrations` uses `over=` | yes; the examples and tests rewritten in the same piece |
+| EX4 | **Remove what doesn't earn its place**: `axis` everywhere; `retries=` on verbs (`mod.retry` does it); `map(where=, replace=)` (overlaps `filter` + `join`, V11). Build verbs from a few primitives where possible (pack, unpack, choose, reorder, match), as grouping already is (H3) | all present | yes for `axis` and `retries=`; `where=`/`replace=` yours to choose |
+| EX5 | **An input is a step or a pick, never a computation.** A pick may be a tool's input (D6, P16); an inline tool call or combine may not (C11), so every grid shown is a named step with a state | a pick as input refused (P16); an inline operation as a combine's input is `invalid` (C11) | yes; carries out **D6** |
+| EX6 | **Inference is written into the expression at staging**, never decided again at run: the verb (`to_f(wf["v"])` saved as `to_f[mod.map()](…)`), the binding (`temp=wf["v"][cols["temp"]]`), the output name (after the step, **D9**). If core can't decide, the step is `invalid`, listing the candidates. `auto` chooses only verbs that can't change the row count | done for picks (P14); verb and binding inferred again at each run; `auto` chooses `filter` (V8b, against **D20b**) | yes; this is S3's binding (CA-A) and S4's naming, with **D20b** and **D21** |
+| EX7 | **One printed form that round-trips**: `parse(print(x)) == x` for every expression; the saved form is the printed form. A property test generates expressions and checks it (beside L40) | expressions print; no round-trip test | yes, with S3 |
+| EX8 | **The tutorial is the contract.** `tutorial/tutorial.py` runs in the test suite; a decision that lands changes its lesson's `want` in the same commit | run by hand | yes |
+| EX9 | Assigning a bare Python function as a value is refused, pointing to `@tool` and the catalog (D11) | stored as a value, `completed` | yes |
+| **EX10** | **`widen` applies only to a column of dicts** (owner, 2026-11-03: **decided**). Tuple and list cells no longer widen to `c0, c1, …`: a tool returns a dict for fields, `expand` unpacks a list. When the column's type is known and isn't a dict, the step is `invalid` at once; when it's unknown, a cell that isn't a dict fails, the other rows run; a `None` cell gives `absent` fields (with C6, one meaning of no value) | tuples and lists widen by position to `c0, c1, …`; a `None` cell fails | **decided**; lands as its own piece, with `examples/all_orchestrations` (`split`) and its tests |
+| EX11 | **A return type is declared or unknown, never guessed.** No annotation, `Any` or `object` is *unknown*: the tool runs, its plan says the type is unknown and why (*"declare the return type"*), `auto` may only infer `map` for it, and checks that need the type (EX10) happen per cell at run. A declared type (`-> float`, `-> dict`, `-> list[str]`, a record class) gets every check at declaration | unannotated tools run; `auto` infers `map` for them; the column name is planned `exact`, the type isn't stated | yes |
+
+**Conditions that make every expression easier** (opened 2026-11-03).
+Ten rules core enforces, each removing a group of the tutorial's findings.
+With them, every error is either `invalid` at once, writing the fix, or one
+`failed` or `absent` cell at run, the other rows running.
+
+| | Condition | Fixes | Owner, 2026-11-03 |
+|---|---|---|---|
+| C1 | Anything that can be checked when a step is written is checked then; a run fails only on data, cell by cell | `widen` which column and the `key` collision, both failing at run with no message; R11; V10 | **yes** |
+| C2 | A return type is declared or unknown, never guessed (EX11) | lets C1 work; safe inference; exact plans | **yes** |
+| C3 | A step's columns are its input's, plus or minus what its verb says, and nothing else. Shown in full; stored as **ST** below, so carrying a column costs no memory | A4b; the melt a bare `expand()` makes on several columns | **yes, with ST** |
+| C4 | A step never replaces a column by accident: a name that exists already is refused unless replacing is written (`mod.rename` first, or `replace=True`) | `widen` silently overwriting `name` with a field of that name | **yes** |
+| C5 | A reshape with no tool names the column it acts on (`widen(column=)`, `expand(columns=)`), unless only one column could be meant | the melt; `widen` guessing among dict columns | **yes** |
+| C6 | No value means one thing in every verb: a missing input gives `absent`, and one warning per step with the count; `[]` gives no rows, no warning | three behaviours today: a tool's `expand` of `None` warns, `expand(columns=)` doesn't, `widen` fails the cell | **yes** |
+| C7 | Each row of a source has an identity, from a key column or else from its content (**D-picks**) | P15 | **yes** |
+| C8 | What core infers is written into the saved expression; only verbs that can't drop rows are inferred (EX6) | V8b; bindings decided again each run; `value` | **yes** |
+| C9 | `run(x)` makes `x` current; a result computed from stale inputs is never `completed` (**SM**) | S5 | **yes** |
+| C10 | One way to write each thing (EX3) | three spellings of a reshape | **yes** |
+
+**Storage** (opened 2026-11-03). Measured by allocation (`tracemalloc`) on a
+200,000×10 source (16 MB), `sort` → `filter` → `rename` → `select` → `map`:
+**211 MB** held, about 35 MB a step, `rename` included. Counting the data's
+column buffers alone (8.2 MB on a 20,000-row copy; a first count, 11.4 MB,
+counted a shared buffer once per step) missed the main cost: each
+row-aligned step kept a fingerprint per input row for per-row staleness
+(`meta["row_reads"]`) as a Python list `[row id, hex string]`, about 160 bytes
+a row, twice the data. **Fixed 2026-11-03, no behaviour change:** kept as
+one uint64 a row on the input's own index, saved in the same
+`[[row id, hash], …]` form: **54 MB** held. What's left: `sort` copies every
+row (16 MB), since without a row map reordering means copying; `select`
+copies the columns it keeps (14 MB); each step's own fingerprints (1.6 MB).
+Images and files make a copy per step impossible.
+
+| | Decision | Today | Recommended |
+|---|---|---|---|
+| **ST** | **A step stores only what it adds; everything is filed by content.** (1) Each output is a **row map** (for each row, the input row it came from: one integer; none when the rows are the input's in order) plus **the columns it makes**. A column it carries stays with the step that made it, read back through the row maps, and gathered into memory only for the columns a tool is bound to. (2) **Columns are filed by content hash**, so a column is stored once however many steps and runs hold it. (3) **A large value (an image, a file, a big array) is a media handle**: its content hash, type, size and a preview, the bytes kept once in a blob store (memory up to a limit, then a folder or a bucket) and loaded only when a tool reads it or the view shows it. Its data version is its hash (D57). (4) **A result is a run key → a row map and column hashes**, so keeping earlier results for SM (undo, stale values shown) costs little. (5) **A memory budget**: keep each step's current result and its last few; drop any column or blob nothing points to; the app sets its own budget. The view shows every carried column, as today; none of this appears in an expression or the UI. Is SM's store, and brings in **E-D1**, **K22** (several results per step) and **R7** (media handles); the row map is the one link back per row that lineage needs (observations F1, H3) | every step that keeps rows copies them all; one result per step; no media handles | **yes**: owner, 2026-11-03. Lands with SM (plan step S11) in pieces: compact row fingerprints (**done**, 211 → 54 MB above); `select` sharing the columns it keeps; row maps and carried columns (no behaviour change, the tests green); then the content store; then media handles |
+
+The two silent wrong answers, **D-picks** (P15) and **SM** (S5), come before
+all of these: neither depends on grammar, and both break the rule that an
+expression means what it shows.
+
 **Already answered on 2026-11-02:**
 
 | | Decision | Owner, 2026-11-02 |
@@ -209,7 +273,7 @@ The largest change: it can be deferred (keep row ids) without blocking anything 
 
 | | Decision | You said | Recommended | Was |
 |---|---|---|---|---|
-| E-D1 | The output store's interface | — | `save(version, output)`, `load(version)`, `keep(versions)`, content-addressed by data version: a folder or a bucket | phase4 E-D1 |
+| E-D1 | The output store's interface **→ ST (§0)** | — | `save(version, output)`, `load(version)`, `keep(versions)`, content-addressed by data version: a folder or a bucket | phase4 E-D1 |
 
 ### S6. Modifiers
 

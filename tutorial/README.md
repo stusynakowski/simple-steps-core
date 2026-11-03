@@ -196,6 +196,10 @@ hashed. Each cell can say what it was computed from.
 
 ## 3. To hash out
 
+What to do about these is proposed as **EX1–EX9** in
+[decisions.md §0](../docs/design/decisions.md#0-needed-from-you-now): one way
+to write each thing, and a saved expression that says exactly what runs.
+
 **New: not in the design docs yet.** Each is small, and each changes
 behaviour, so each needs your yes before it lands.
 

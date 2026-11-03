@@ -347,7 +347,10 @@ the workflow, plus a store of results, and every state read off the two.
 **What exists already:** spec ids (`workflow.identity()`), data versions,
 each output's `read` stamps, and per-row staleness, all built. **To build:** the
 store keeping several results per step (K22, plan step D, brought into S11),
-and states derived from it.
+and states derived from it. **How it is stored** is decision **ST**
+([decisions.md §0](decisions.md#0-needed-from-you-now)): a step keeps only a
+row map and the columns it makes, columns and large values (images, files)
+are filed once by content hash, and a result is a run key pointing at them.
 
 **To decide with it:** how many results the store keeps per step in a
 terminal session (the app's eviction is its hosting); tools that read the
