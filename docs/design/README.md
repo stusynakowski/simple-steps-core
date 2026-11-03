@@ -18,6 +18,7 @@ done to a `Kernel` in a plain Python session**, with only core installed.
 | [kernel-session.md](kernel-session.md) | The working guide: a session in a terminal, with real output (run by `examples/kernel_session.py`) |
 | [decisions.md](decisions.md) | Every decision: the open ones first, then the decided ones |
 | [plan.md](plan.md) | What's left, in order, and what each step needs |
+| [observations.md](observations.md) | Key dev observations: what's good about the design, its biggest flaws, and what would help most |
 | [app-migration.md](app-migration.md) | What the app changes to run on this core, step by step |
 | [core-asks/](core-asks/) | **The app's requirements** of core: its model of references, picks and lineage (`model.md`), its plan and the probe (`probe.py`) that tests every ask |
 | [history/](history/) | Superseded pages: background only. Each says what replaced it |
