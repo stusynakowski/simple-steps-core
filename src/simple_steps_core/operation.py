@@ -454,6 +454,8 @@ def _src(value: Any) -> str:
     """A value as formula text: a reference, a tool, or a Python literal."""
     if isinstance(value, dict) and set(value) == {"where"}:
         return condition_source(value["where"])          # a condition (S5c)
+    if isinstance(value, dict) and set(value) == {"where", "named"}:
+        return f"rows[{condition_source(value['where'])}]"   # named rows (S5d)
     if isinstance(value, StepRef):
         text = f"wf[{_src(value.id)}]"
         if isinstance(value.columns, dict) and value.columns.get("header"):
@@ -461,7 +463,8 @@ def _src(value: Any) -> str:
         rows_ = value.rows
         if rows_ is not None:
             if isinstance(rows_, dict) and "where" in rows_:
-                text += f"[{condition_source(rows_['where'])}]"
+                cond = condition_source(rows_["where"])
+                text += f"[rows[{cond}]]" if rows_.get("named") else f"[{cond}]"
             elif isinstance(rows_, dict):
                 lo = "" if rows_.get("start") is None else rows_["start"]
                 hi = "" if rows_.get("stop") is None else rows_["stop"]

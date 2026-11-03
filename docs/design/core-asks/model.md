@@ -313,7 +313,7 @@ hint.
 
 | # | Hard rule |
 |---|---|
-| 6 | Integers choose rows, by row number, as in a Python list. Strings choose columns, as in a dict. A row number is resolved at staging and saved as the row's lineage, so a pick follows its row; a pick whose row is gone fails, naming it |
+| 6 | Integers choose rows, by row number, as in a Python list. Strings choose columns, as in a dict. A row number is resolved at staging and saved as the row's lineage, written `wf['s'][rows[row['r'] == 2]]`, so a pick follows its row. **`rows[condition]` names specific rows: one that's gone fails the step, naming it; a plain `wf['s'][condition]` filters, and matching nothing gives zero rows (rule 11).** A list naming one row twice is refused |
 | 7 | A pick has at most one row part and one column part, in either order, in one bracket or two. A list mixing integers and strings is refused; so are two integers in one bracket (`[0, 2]`), pointing to `[[0, 2]]` |
 | 8 | A pick covers data only: never `#<step>` or lineage columns |
 | 9 | A condition uses only `cols['x']`, `row['s']`, comparisons, `.isin`, `&`, `\|`, `~`, brackets and literals. It's read by the parser, never run as code |

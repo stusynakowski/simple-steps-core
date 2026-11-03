@@ -167,6 +167,8 @@ def _moves(k: Kernel, name: str, src: str, other: str, ancestor: str):
         ("distinct", lambda: mod.distinct(columns=["k"])(wf[src])),
         ("slice", lambda: mod.slice(stop=2)(wf[src])),
         ("where_value", lambda: wf[src][cols["k"] == "A"]),                     # S5c
+        ("pick_row", lambda: wf[src][0]),                                       # S5d
+        ("pick_rows", lambda: wf[src][[0, -1]]),
         ("where_own", lambda: wf[src][row[src].isin([0, 2])]),
         ("where_lineage", lambda: wf[src][(row[ancestor] == 0) | ~(cols["k"] == "A")]),
         ("expand", lambda: mod.expand(columns=["tags"])(wf[src])),
@@ -326,8 +328,9 @@ def test_L40b_a_saved_workflow_runs_the_same(frame, chain):
 def test_L40c_an_edit_then_a_rerun_matches_a_fresh_run(frame, changed, chain):
     k, names = _build(_catalog(frame), chain)
     _run(k)
-    new_catalog = _catalog(changed)
-    k2, _ = _build(new_catalog, chain)           # a fresh kernel on the new source…
+    # A fresh kernel of the same saved workflow on the new source… (saved, not
+    # rebuilt: a typed row number is saved as its row's lineage, S5d)
+    k2 = Kernel.from_json(k.to_json(), _catalog(changed))
     _run(k2)
     # …and the old one, its source edited in place, run again
     k["s0"] = changed

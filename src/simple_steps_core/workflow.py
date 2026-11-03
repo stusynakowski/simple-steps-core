@@ -220,6 +220,7 @@ class Workflow:
         operation = _attach_bound(operation, self.resources)
         if self.catalog is not None:
             operation = self.catalog.admit(operation)
+        operation = self._resolve_picks(operation)       # S5d: row numbers saved as lineage
         problems = check(operation, self, step_id)
         previous = self.steps.get(step_id)
         was_empty = previous is not None and previous.output.meta.get("empty")
@@ -1934,6 +1935,85 @@ class Workflow:
         return Operation(operation.tool, modifiers, resolved,
                          fn, operation.input)
 
+    # ── a typed row number, saved as the row's lineage (S5d, CA-B1) ───────
+    def _resolve_picks(self, operation: Operation) -> Operation:
+        """*operation* with each typed row number (or list of them) written as
+        the rows' lineage, where the picked step has run (S5-D3: else later)."""
+        changed = False
+        modifiers = []
+        for m in operation.modifiers:
+            rows_ = m.settings.get("rows")
+            if m.kind == "select" and operation.input is not None and rows_ is not None:
+                named = self._as_lineage(rows_, str(operation.input))
+                if named is not rows_:
+                    m, changed = Modifier(m.kind, {**m.settings, "rows": named}), True
+            modifiers.append(m)
+        arguments = {}
+        for name, value in operation.arguments.items():
+            if isinstance(value, StepRef) and value.rows is not None:
+                named = self._as_lineage(value.rows, value.id)
+                if named is not value.rows:
+                    value, changed = replace(value, rows=named), True
+            arguments[name] = value
+        if not changed:
+            return operation
+        return replace(operation, modifiers=tuple(modifiers), arguments=arguments)
+
+    def _as_lineage(self, row_sel: Any, step_id: str) -> Any:
+        """``{"where": …, "named": True}`` for a row number or a list of them in
+        *step_id*; *row_sel* itself when it can't be (not run yet, a source, a
+        row out of range, no lineage that names it alone)."""
+        ints = row_sel if isinstance(row_sel, list) else [row_sel]
+        if not ints or not all(isinstance(i, int) and not isinstance(i, bool) for i in ints):
+            return row_sel
+        step = self.steps.get(step_id)
+        if step is None or step.output.meta.get("staged") or not step.valid:
+            return row_sel
+        data = step.output.data
+        n = len(data)
+        if not all(-n <= i < n for i in ints) or len({i % n for i in ints}) < len(ints):
+            return row_sel                       # out of range, or a row twice: refused, saying so
+        lineage = self.lineage(step_id)
+        trees = []
+        for i in ints:
+            tree = self._identity(step_id, i % n, data, lineage)
+            if tree is None:
+                return row_sel
+            trees.append(tree)
+        return {"where": trees[0] if len(trees) == 1 else {"or": trees}, "named": True}
+
+    def _identity(self, step_id: str, position: int, data: pd.DataFrame, lineage: dict) -> dict | None:
+        """A condition that picks row *position* of *step_id* alone: a group's
+        key, else its lineage to the steps rows start in (with ``.idx``)."""
+        candidates = []
+        groups = [s for s in (step_id, *(n[len(ROW_ID):].split(".")[0] for n in lineage))
+                  if s in self.steps and self._kind(s) == "collapse"]
+        for s in groups:
+            by = self.steps[s].output.meta.get("by")
+            if by and by in data.columns and not is_id_column(by):
+                value = _plain(data[by].iloc[position])
+                if isinstance(value, (str, int, float, bool)):
+                    candidates.append({"test": "==", "on": {"col": by}, "value": value})
+                    break
+        tests = []
+        for name, cells in lineage.items():
+            ancestor, _, rest = name[len(ROW_ID):].partition(".")
+            value = cells[position]
+            if rest == "idx":
+                tests.append({"test": "==", "on": {"row": ancestor, "idx": True}, "value": value})
+            elif not rest and not self.lineage(ancestor) and (value is None or isinstance(value, int)):
+                tests.append({"test": "==", "on": {"row": ancestor}, "value": value})
+        if tests:
+            candidates.append(tests[0] if len(tests) == 1 else {"and": tests})
+        for tree in candidates:
+            try:
+                keep = _where(data, tree, lineage, step_id)
+            except SelectionError:
+                continue
+            if keep.count(True) == 1 and keep[position]:
+                return tree
+        return None
+
     def _with_lineage(self, row_sel: Any, step_id: str) -> Any:
         """A condition that tests ``row[…]``, with the lineage of the step it
         picks from (S5c); anything else unchanged."""
@@ -1955,6 +2035,9 @@ class Workflow:
         step = self.steps[step_id]
         self._ask_data_versions(step.operation, resources)
         read = self._read_stamps(step.operation) if step_id in self.steps else {}
+        grouped = self._groups_by_step(step_id)
+        if grouped is not None and grouped[1] in self.steps:
+            read.setdefault(grouped[1], self.version(grouped[1]))   # collapse(by="#s") reads s
         # Inputs that are stale as this runs pass through as they are; this
         # output is then up to date with them, and says it read them stale.
         read_stale = {name: self.steps[name].output.meta.get("stale_reason")
@@ -2189,7 +2272,10 @@ class Workflow:
         remaining = [sid for sid, st in self.steps.items() if st.valid]
         while remaining:
             ready = [sid for sid in remaining
-                     if all(w in done for w in self.pending(sid))]
+                     if all(w in done for w in self.pending(sid))
+                     # collapse(by="#s") runs after s, while s is still to run
+                     and not ((g := self._groups_by_step(sid)) and g[1] in remaining
+                              and g[1] not in done)]
             if not ready:                    # only reachable if a cycle slipped through
                 raise ValueError(
                     f"cannot order {remaining!r}: something reads a step that never runs"
@@ -2243,6 +2329,7 @@ class Workflow:
                 before = (other.output.meta.get("expected"), other.problems,
                           predicted_columns(other.output),
                           columns_unknown(other.output))
+                other.operation = self._resolve_picks(other.operation)   # S5-D3
                 other.problems = check(other.operation, self, other.name)
                 other.output = stage(other.operation, self, other.problems, other.name)
                 other.warnings = warn(other.operation, self, other.name)
@@ -2499,6 +2586,7 @@ from .references import (  # noqa: E402
     _apply_selection,
     _check_caller_scope,
     _uses_lineage,
+    _where,
     rows,
 )
 from .run import _is_auto, _resolve_auto  # noqa: E402

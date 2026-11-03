@@ -702,14 +702,14 @@ def tool(fn: Callable | None = None, *, id: str | None = None,
 
 
 def formula_names(tools: dict[str, Callable] | None = None) -> dict[str, Any]:
-    """The names a formula may use: ``wf res mod rows cols op join stack zip_``
+    """The names a formula may use: ``wf res mod rows cols row op join stack zip_``
     and every declared tool. What :meth:`Operation.to_source` is written against.
 
     For checking a formula round-trips in Python. A formula bar should parse
     with its own grammar, never ``eval`` text a user typed.
     """
     names: dict[str, Any] = {"wf": wf, "res": res, "mod": mod, "rows": rows,
-                             "cols": cols, "op": op, "join": join,
+                             "cols": cols, "row": row, "op": op, "join": join,
                              "stack": stack, "zip_": zip_}
     for tool_id, fn in (tools or {}).items():
         if tool_id.isidentifier():
@@ -1023,6 +1023,7 @@ from .references import (  # noqa: E402
     _reserved_problem,
     cols,
     res,
+    row,
     rows,
     wf,
 )

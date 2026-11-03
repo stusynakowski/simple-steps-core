@@ -32,18 +32,12 @@ def _row_part(key: Any, strings: bool = False) -> Any:
         raise SelectionError("a row part takes a condition, a comparison: "
                              "wf[…][cols['n'] > 15], not cols['n'] on its own")
     if isinstance(key, str):
-        if strings:
-            return key
         raise SelectionError(
-            f"a plain bracket selects rows by int id; a string row id goes "
-            f"through rows: wf[…][rows[{key!r}]]. Columns use cols: "
-            f"wf[…][cols[{key!r}]]")
+            f"rows are row numbers, as shown in #: {key!r} isn't one. Pick the row "
+            f"by its number (wf[…][0]) or by a condition (wf[…][cols['ward'] == {key!r}]); "
+            f"columns use cols: wf[…][cols[{key!r}]]")
     if _is_int(key):
-        if key < 0:
-            raise SelectionError(
-                f"row ids aren't negative, so [{key}] names no row; to count "
-                f"from the end, use a range of positions: [{key}:]")
-        return int(key)
+        return int(key)                       # a row number; -1 is the last (S5d)
     if isinstance(key, slice):
         if key.step is not None:
             raise SelectionError("a row range can't have a step (start:stop only)")
@@ -267,7 +261,10 @@ def condition_source(tree: dict, top: bool = True) -> str:
 def _cell_test(op: str, value: Any, literal: Any, where: str) -> bool:
     """One test on one cell (CA-L3): a list cell is matched by membership; an
     empty cell fails every test."""
-    if value is None or (isinstance(value, float) and value != value) or value is pd.NA:
+    empty = value is None or (isinstance(value, float) and value != value) or value is pd.NA
+    if literal is None and op in ("==", "!="):
+        return empty == (op == "==")          # row["other"] == None: an empty side (S5-D6)
+    if empty:
         return False
     if isinstance(value, list):
         if op == "==":
@@ -330,6 +327,9 @@ class _RowsIndexer:
     """``rows[…]`` selects rows; ``rows(value)`` is the old coercion to a frame."""
 
     def __getitem__(self, key: Any) -> Rows:
+        if isinstance(key, Condition):
+            # rows[condition]: these specific rows, which must exist (S5d)
+            return Rows({"where": key.tree, "named": True})
         return Rows(_row_part(key, strings=True))
 
     def __call__(self, value: Any, *, axis: str = "rows") -> pd.DataFrame:
@@ -405,7 +405,8 @@ def _selection_kind(ref: "StepRef") -> str | None:
     """cell / column / row / block for a selection, known without running."""
     if ref.rows is None and ref.columns is None:
         return None
-    one_row = _is_int(ref.rows) or isinstance(ref.rows, str)
+    one_row = _is_int(ref.rows) or isinstance(ref.rows, str) or (
+        isinstance(ref.rows, dict) and ref.rows.get("named") and "or" not in ref.rows["where"])
     columns = ref.columns or {}
     if columns.get("header"):
         return "column"
@@ -500,7 +501,15 @@ def _apply_selection(frame: pd.DataFrame, row_sel: Any, col_sel: Any,
         out = out[wanted]
     if isinstance(row_sel, dict) and "where" in row_sel:
         # S5c: rows a condition keeps; lineage comes with it when it tests row[…]
-        keep = _where(out, row_sel["where"], row_sel.get("lineage"), row_sel.get("step") or step_id)
+        lineage, owner = row_sel.get("lineage"), row_sel.get("step") or step_id
+        if row_sel.get("named"):
+            # named rows (a typed row number, saved as lineage): each must be there
+            tree = row_sel["where"]
+            for branch in (tree["or"] if "or" in tree else [tree]):
+                if not any(_where(out, branch, lineage, owner)):
+                    raise SelectionError(f"{step_id!r} no longer has the row "
+                                         f"{condition_source(branch)}: it's gone")
+        keep = _where(out, row_sel["where"], lineage, owner)
         out = out.iloc[[i for i, k in enumerate(keep) if k]]
         if not len(out):
             out.attrs["matched_nothing"] = (f"no row of {step_id!r} has "
@@ -513,16 +522,18 @@ def _apply_selection(frame: pd.DataFrame, row_sel: Any, col_sel: Any,
             lo, hi = _bound(n, row_sel.get("start"), row_sel.get("stop"), "row", step_id)
             out = out.iloc[lo:hi]
         else:
-            # A row id, or a list of them: the same rows wherever they are now.
+            # A row number, or a list of them, as shown in # (S5d).
             wanted = row_sel if isinstance(row_sel, list) else [row_sel]
-            missing = [i for i in wanted if i not in out.index]
+            missing = [i for i in wanted if not (_is_int(i) and -n <= i < n)]
             if missing:
-                have = list(out.index)
-                shown = ", ".join(map(repr, have[:6])) + (", …" if len(have) > 6 else "")
                 raise SelectionError(
                     f"{step_id!r} has no row {missing[0]!r}"
-                    + (f" (its row ids are {shown})" if have else " (it has no rows)"))
-            out = out.loc[wanted]
+                    + (f" (it has {n}: 0–{n - 1})" if n else " (it has no rows)"))
+            twice = [i % n for i in wanted]
+            twice = next((i for i in twice if twice.count(i) > 1), None)
+            if twice is not None:
+                raise SelectionError(f"{list(wanted)} names row {twice} of {step_id!r} twice")
+            out = out.iloc[list(wanted)]
     return out
 
 

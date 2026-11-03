@@ -40,13 +40,16 @@ def names(k, step):
     return k.step(step).data["name"].tolist()
 
 
-def test_a_row_is_picked_by_its_id_wherever_a_sort_put_it(k):
-    k["first"] = wf["srt"][0]                      # row id 0 is Ada, now last
-    k["pair"] = wf["srt"][[0, 2]]
+def test_a_row_is_picked_by_its_number_and_saved_as_its_lineage(k):
+    """S5d (CA-B1): a typed row number is the row shown there; staging saves
+    its lineage, so the pick follows the row."""
+    k["first"] = wf["srt"][0]                      # Ben, shown first
+    k["pair"] = wf["srt"][[0, 2]]                  # Ben and Ada
     k.run_all()
-    assert names(k, "first") == ["Ada"]
-    assert names(k, "pair") == ["Ada", "Cy"]
-    assert list(k.step("pair").data.index) == [0, 2]
+    assert names(k, "first") == ["Ben"]
+    assert names(k, "pair") == ["Ben", "Ada"]
+    assert k.step("first").formula == 'wf["srt"][rows[row["p"] == 1]]'
+    assert k.step("pair").formula == 'wf["srt"][rows[(row["p"] == 1) | (row["p"] == 0)]]'
 
 
 def test_a_range_is_positions_the_top_rows(k):
@@ -55,43 +58,44 @@ def test_a_range_is_positions_the_top_rows(k):
     k.run_all()
     assert names(k, "top2") == ["Ben", "Cy"]
     assert names(k, "last") == ["Ada"]
+    assert k.step("top2").formula == 'wf["srt"][0:2]'      # a range stays a range (S5-D2)
 
 
-def test_a_string_row_id_goes_through_rows(k):
+def test_a_text_row_id_is_refused_with_the_number_to_use(k):
     k["e"] = visits_r[mod.expand()](wf["p"])
     k.run("e")
-    k["one"] = wf["e"][rows["1.0"]]
-    k["two"] = wf["e"][rows[["0.1", "2.0"]]]
-    k.run_all()
-    assert k.step("one").data["value"].tolist() == ["Ben-1"]
-    assert k.step("two").data["value"].tolist() == ["Ada-2", "Cy-1"]
-    with pytest.raises(SelectionError, match=r"goes through rows: wf\[…\]\[rows\['1.0'\]\]"):
-        wf["e"]["1.0"]
+    for make in (lambda: wf["e"][rows["1.0"]], lambda: wf["e"]["1.0"]):
+        with pytest.raises(SelectionError, match="row numbers, as shown in #"):
+            make()
 
 
-def test_an_id_the_step_doesnt_have_is_a_problem(k):
+def test_a_row_the_step_doesnt_have_is_a_problem(k):
     k["far"] = wf["srt"][9]
     problem = k.step("far").problems[0]
     assert problem.code == "bad_selection"
-    assert "'srt' has no row 9 (its row ids are 1, 2, 0)" in problem
+    assert "'srt' has no row 9 (it has 3: 0–2)" in problem
 
 
-def test_a_negative_row_is_refused_with_the_range_to_use_instead():
-    with pytest.raises(SelectionError, match=r"row ids aren't negative.*\[-1:\]"):
-        wf["srt"][-1]
+def test_minus_one_is_the_last_row(k):
+    k["last"] = wf["srt"][-1]
+    k.run_all()
+    assert names(k, "last") == ["Ada"]
 
 
-def test_a_cell_picked_by_id_as_an_argument_follows_its_row(k):
-    # Ada's temperature, though a sort moved her row to the end.
-    k["over_ada"] = above_r[mod.filter()](wf["p"], limit=wf["srt"][0][cols["temp_c"]])
+def test_a_cell_picked_for_an_argument_follows_its_row(k):
+    # Ada's temperature: shown at row 2, saved as her lineage.
+    k["over_ada"] = above_r[mod.filter()](wf["p"], limit=wf["srt"][2][cols["temp_c"]])
     k.run("over_ada")
     assert names(k, "over_ada") == ["Ben", "Cy"]
+    assert 'row["p"] == 0' in k.step("over_ada").formula
 
 
-@pytest.mark.parametrize("text", ['wf["e"][rows["1.0"]]', 'wf["e"][rows[["0.1", "2.0"]]]',
-                                  'wf["srt"][[0, 2]]', 'wf["srt"][0:2]'])
-def test_selections_by_id_print_and_read_back(k, text):
+@pytest.mark.parametrize("text", ['wf["srt"][0:2]', 'wf["srt"][rows[row["p"] == 1]]',
+                                  'wf["e"][rows[(row["p"] == 1) & (row["p"].idx == 0)]]',
+                                  'wf["srt"][cols["temp_c"] > 37.0]'])
+def test_saved_picks_print_and_read_back(k, text):
     k["e"] = visits_r[mod.expand()](wf["p"])
+    k.run("e")
     names_ = formula_names(k.catalog.functions)
     k["s"] = eval(text, {"__builtins__": {}}, names_)
     assert k.step("s").formula == text
@@ -216,11 +220,13 @@ def add_temp_r(acc: float, temp_c: float) -> float:
 def test_a_source_tools_own_index_is_its_row_ids():
     k = Kernel(Catalog(tools=[by_name_r]))
     k["n"] = by_name_r[mod.source()]()
-    k["ben"] = wf["n"][rows["Ben"]]
     k.run_all()
-    assert list(k.step("n").data.index) == ["Ada", "Ben"]
+    k["ben"] = wf["n"][1]                          # a source's row stays a row number
+    k.run_all()
+    assert list(k.step("n").data.index) == ["Ada", "Ben"]       # core's ids (S5-D5)
     assert list(k.step("n").data.columns) == ["temp_c"]          # no "index" column
     assert k.step("ben").data["temp_c"].tolist() == [38.2]
+    assert k.step("ben").formula == 'wf["n"][1]'
 
 
 @tool
@@ -256,10 +262,11 @@ def kc():
     return k
 
 
-def test_a_groups_row_id_is_its_key(kc):
-    assert list(kc.step("per_ward").data.index) == ["A", "B"]
-    kc["b"] = wf["per_ward"][rows["B"]]
+def test_a_group_is_picked_by_its_key(kc):
+    assert list(kc.step("per_ward").data.index) == ["A", "B"]   # core's ids (S5-D5)
+    kc["b"] = wf["per_ward"][1]
     kc.run("b")
+    assert kc.step("b").formula == 'wf["per_ward"][rows[cols["ward"] == "B"]]'
     assert kc.step("b").data.to_dict("list") == {"#p": [[1, 3]], "ward": ["B"], "value": [77.2]}
 
 

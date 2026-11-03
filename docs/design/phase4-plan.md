@@ -211,6 +211,12 @@ S5c done 2026-11-02: conditions (`references.Condition`, saved as
 `{"where": …}`, evaluated against the data and the picked step's lineage, never
 run as Python); 10 more hold (L29–L31, L35, L36, L48); the property test
 generates conditions. Found on the way: `tool(fn, id=…)` ignored its id.
+S5d done 2026-11-02: integers are row numbers; staging saves a pick as its
+row's lineage (`rows[condition]`, which names rows that must exist: my reading
+of CA-B1's "fails if gone" beside CA-5's "zero rows"); 10 more hold (L7a–L8,
+L37b, L41a/b). The property test picks rows, and compares an edited run with a
+fresh run of the *saved* workflow. Found on the way: `collapse(by="#s")` could
+run before `s`, and didn't go stale with it.
 
 **Existing tests that change** (counted at `65865bb`): the view's `#` (12
 uses), `k.cell` by id (31; most read a source, where the id is the row

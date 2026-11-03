@@ -581,7 +581,7 @@ def test_C7_refusals(prices):
         scale_008[mod.map()](prices["p"][1:3])
     prices["far"] = prices["p"][9]
     assert prices.step("far").problems == (
-        "select: 'p' has no row 9 (its row ids are 0, 1, 2, 3, 4)",)
+        "select: 'p' has no row 9 (it has 5: 0–4)",)
 
 
 def test_C7_column_names_are_strings():
