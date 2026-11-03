@@ -182,15 +182,10 @@ def _combine_join(frames: list[pd.DataFrame], config: dict) -> pd.DataFrame:
     keys = config.get("on")
     on_lineage = all("on_values" in f.attrs for f in frames)
     if on_lineage:
-        # a join on lineage (S5e): matched by row number, through a temporary key;
-        # a collapse's cell lists its rows, so it meets each of them (CA-L3)
-        sides = []
-        for side, f in ((left, frames[0]), (right, frames[1])):
-            side = side.assign(**{_ON: f.attrs["on_values"]})
-            if any(isinstance(v, list) for v in side[_ON]):
-                side = side.explode(_ON)
-            sides.append(side)
-        left, right = sides
+        # a join on lineage (S5e): one row with one row, matched by row number
+        # through a temporary key (a group's list is refused before this)
+        left = left.assign(**{_ON: frames[0].attrs["on_values"]})
+        right = right.assign(**{_ON: frames[1].attrs["on_values"]})
         keys = _ON
     merge_on = keys
     keys = {keys} if isinstance(keys, str) else set(keys or [])
@@ -236,8 +231,8 @@ def _merge_shared(out: pd.DataFrame, absent: dict, ints: set, left: pd.DataFrame
     (CA-C). One that differs keeps both, suffixed."""
     for c in [c for c in left.columns if c in right.columns and c != _ON]:
         a, b = f"{c}{sfx[0]}", f"{c}{sfx[1]}"
-        if a not in out.columns or b not in out.columns:
-            continue
+        if a not in out.columns or b not in out.columns or c in out.columns:
+            continue                     # c taken (a side had c_left and c): keep both
         pairs = [(x, y) for x, y in zip(out[a], out[b]) if not _is_missing(x) and not _is_missing(y)]
         if any(x != y for x, y in pairs):
             continue

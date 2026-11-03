@@ -462,6 +462,12 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                         problems.append(f"zip_ pairs each row of {a!r} with the same row of {b!r}, "
                                         f"but they aren't the same rows: some would have no partner. "
                                         f"Join them: {workflow._join_hint(a, b)}")
+        on = operation.arguments.get("on") if operation.tool == "join" else None
+        if workflow is not None and isinstance(on, str) and is_id_column(on):
+            # a join on lineage pairs one row with one row: a group's list never joins
+            for g in operation.grids:
+                if str(g) in workflow.steps and workflow._lists_rows(str(g), on):
+                    problems.append(_group_join_refusal(on, str(g)))
         if operation.tool == "zip" and len({str(g) for g in operation.grids}) < len(operation.grids):
             twice = next(str(g) for g in operation.grids if
                          [str(x) for x in operation.grids].count(str(g)) > 1)
@@ -1514,6 +1520,15 @@ def _expands_into(operation: "Operation", fn: Any, workflow: "Workflow | None") 
             origin, collections.abc.Iterable) and origin not in (str, bytes)):
         return "list"
     return None
+
+
+def _group_join_refusal(on: str, step_id: str) -> str:
+    """Why a join on lineage refuses a side whose *on* holds a group's rows,
+    and the unpack that makes it one row per row (L33)."""
+    return (f"join on {on!r}: each row of {step_id!r} stands for a group of rows there; "
+            f"a join on lineage pairs one row with one row. Unpack the group first, one "
+            f"row per row it holds: wf[{step_id + '_rows'!r}] = "
+            f"mod.expand(columns=[{on!r}])(wf[{step_id!r}])")
 
 
 def keeps_ids(kind: str | None, verb: Any) -> bool:

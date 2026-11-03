@@ -9,6 +9,7 @@ only when it builds a broken state on purpose.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from datetime import date
 from pathlib import Path
@@ -76,7 +77,8 @@ def _log_stress_failure(test: str, text: str) -> None:
                 break
     example_text = "\n".join(example).strip()
     what = next((line for line in lines if line.startswith(("AssertionError", "assert", "Left "))),
-                "see the test output")
+                None) or next((line for line in reversed(lines)          # a crash: its error
+                               if re.match(r"\w+(Error|Exception): ", line)), "see the test output")
     found = STRESS_FAILURES.read_text() if STRESS_FAILURES.exists() else ""
     if example_text and example_text in found:
         return

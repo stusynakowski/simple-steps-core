@@ -177,6 +177,38 @@ def test_L6_rows_given_back_in_group_order_pair_with_their_own_by_id(k):
         assert (data(k, s)["temp_b"] == data(k, s)["temp"]).all(), s
 
 
+@pytest.mark.parametrize("group_first", [True, False])
+def test_L6_a_group_is_unpacked_before_it_joins_on_lineage(k, group_first):
+    """A join on lineage pairs one row with one row: a group is refused when
+    declared, and the refusal writes the unpack (L33); unpacked, each row
+    meets its own, carrying its group's value."""
+    k["n"] = op("count")[mod.collapse(by="ward")](wf["v"])
+    sides = (wf["n"], wf["v"]) if group_first else (wf["v"], wf["n"])
+    k["j0"] = join(*sides, on="#v")
+    assert "wf['n_rows'] = mod.expand(columns=['#v'])(wf['n'])" in str(k.step("j0").problems[0])
+    del k["j0"]
+    k["n_rows"] = mod.expand(columns=["#v"])(wf["n"])
+    sides = (wf["n_rows"], wf["v"]) if group_first else (wf["v"], wf["n_rows"])
+    k["j"] = join(*sides, on="#v")
+    k.run_all()
+    assert len(data(k, "j")) == 4
+    assert sorted(data(k, "j")["value"]) == [1, 3, 3, 3]               # Ben alone in B
+
+
+def test_A5_a_join_on_lineage_pairing_rows_of_different_origins_is_caught(k):
+    """A5 follows each side of a join on lineage back by id, not by the row
+    numbers the join used: two rows from different rows of v are a break."""
+    k["groups"] = gather[mod.collapse(by="ward")](wf["v"])
+    k["back"] = mod.expand(columns=["name", "temp"])(wf["groups"])
+    k["br"] = mod.rename(columns={"name": "name_b", "temp": "temp_b"})(wf["back"])
+    k["j"] = join(wf["br"], wf["v"], on="#v")
+    k.run_all()
+    assert k.workflow.check_invariants("j") == []
+    out = k.workflow.steps["j"].output.data
+    out["#v"] = list(out["#v"])[::-1]                                  # each row with another's
+    assert "come from different rows of 'v'" in k.workflow.check_invariants("j")[0]
+
+
 def test_L7_expand_then_collapse_by_its_parent_gives_one_row_per_parent(k):
     k["e"] = readings_rc[mod.expand()](wf["v"])
     k["back"] = gather[mod.collapse(by="#v")](wf["e"])

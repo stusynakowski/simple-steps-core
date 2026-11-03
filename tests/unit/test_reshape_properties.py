@@ -273,6 +273,11 @@ def _same(a: Kernel, b: Kernel, names: list[str], why: str) -> None:
 @example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
          chain=[(93, 0, 0, 0), (121, 0, 0, 0), (824, 38, 1, 0), (921, 0, 0, 0),
                 (0, 0, 0, 0), (0, 65, 0, 0)])
+# a self-join on lineage of a step whose columns already had join suffixes:
+# merging shared columns made two columns with one name (found at STRESS=1)
+@example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
+         chain=[(42, 0, 0, 0), (139, 1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0),
+                (44, 2, 0, 2)])
 def test_L40_reshaping_is_closed(frame, chain):
     k, names = _build(_catalog(frame), chain)
     plans = {s: k.workflow.steps[s].output.meta.get("plan") for s in names

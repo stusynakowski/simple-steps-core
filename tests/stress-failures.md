@@ -41,3 +41,22 @@ test_L40c_an_edit_then_a_rerun_matches_a_fresh_run(
     chain=[(993, 0, 0, 0), (811, 0, 0, 1)],
 )
 ```
+
+## 2026-11-03 · `test_L40_reshaping_is_closed` · at `718943b` · STRESS=1
+
+- **Broke:** AttributeError: 'DataFrame' object has no attribute 'dtype': a self-join on lineage of a step that already had `n_left`/`n_right` columns merged `n_left_left`/`n_left_right` back into `n_left`, beside the `n_left` made from `n`; two columns with one name crashed the run
+- **Status:** fixed (combines.py `_merge_shared` keeps a pair suffixed when the plain name is taken), example pinned
+
+```
+test_L40_reshaping_is_closed(
+frame=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],  # or any other generated value
+chain=[(42, 0, 0, 0),
+(139, 1, 0, 0),
+(0, 0, 0, 0),
+(0, 0, 0, 0),
+(0, 0, 0, 0),
+(44, 2, 0, 2)],
+)
+```

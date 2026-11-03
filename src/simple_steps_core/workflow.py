@@ -1497,6 +1497,9 @@ class Workflow:
         for a, b in meeting:
             if not self._matched(a, b):
                 found.append(f"A5 {step_id}: rows of {a!r} and {b!r} met with no recorded match")
+        on = op_.arguments.get("on") if is_combine(op_) and op_.tool == "join" else None
+        if isinstance(on, str) and is_id_column(on):
+            found += self._lineage_join_breaks(step_id, on)
         columns, rows_ = (plan or {}).get("columns") or {}, (plan or {}).get("rows") or {}
         if columns.get("certainty") == "exact" and list(columns.get("names") or []) != list(data.columns):
             found.append(f"A6 {step_id}: planned columns {columns.get('names')}, got {list(data.columns)}")
@@ -1504,6 +1507,34 @@ class Workflow:
                 and rows_["count"] != len(data):
             found.append(f"A6 {step_id}: planned {rows_['count']} rows, got {len(data)}")
         return found
+
+    def _lineage_join_breaks(self, step_id: str, on: str) -> list[str]:
+        """A5 for a join on lineage: each row's two sides come from the same
+        row of the step *on* names. Followed back by id, step by step (a
+        trace), never through the row numbers the join matched on."""
+        data, grids = self.steps[step_id].output.data, [str(g) for g in self.steps[step_id].operation.grids]
+        target = self._id_source(on) or on[len(ROW_ID):]
+        written = own_id_columns(grids)
+        if target not in self.steps or len(grids) != 2 or any(c not in data.columns for c in written):
+            return []
+
+        def origin(side: str, row_id: Any) -> str | None:
+            """The row of *target* that row *row_id* of *side* came from."""
+            traced = self.trace(side, [row_id], target)
+            return None if traced is None or traced[0] is None else str(traced[0])
+
+        for i in data.index:
+            ends = [data.at[i, c] for c in written]
+            if any(e is None or (not isinstance(e, list) and pd.isna(e)) for e in ends):
+                continue                                         # an outer join's gap
+            found = [origin(side, e) for side, e in zip(grids, ends)]
+            if None in found:
+                continue                                         # nothing to follow back
+            if found[0] != found[1]:
+                return [f"A5 {step_id}: row {_plain(i)!r} joins row {_plain(ends[0])!r} of "
+                        f"{grids[0]!r} with row {_plain(ends[1])!r} of {grids[1]!r}, which come "
+                        f"from different rows of {target!r}"]
+        return []
 
     def _reaches(self, a: str, b: str) -> bool:
         """Does each row of step *a* have one row of step *b* it came from, or is
@@ -2215,9 +2246,10 @@ class Workflow:
                         values = [at.get(str(i)) for i in frame.index]
                     else:
                         values = self.lineage(name).get(on)
-                    if values is None:
+                    if values is None or any(isinstance(v, list) for v in values):
                         frame.attrs["on_problem"] = (     # the step fails with it, below
-                            f"join on {on!r}: {name!r} has no lineage {on}")
+                            f"join on {on!r}: {name!r} has no lineage {on}" if values is None
+                            else _group_join_refusal(on, name))
                         break
                     frame.attrs["on_values"] = values
             try:
@@ -2613,6 +2645,7 @@ from .catalog import (  # noqa: E402
     resource_problems,
 )
 from .checks import (  # noqa: E402
+    _group_join_refusal,
     _paired_arguments,
     ROWS_RULE,
     ROW_ALIGNED,
