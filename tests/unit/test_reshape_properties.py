@@ -317,6 +317,8 @@ def test_L40b_a_saved_workflow_runs_the_same(frame, chain):
     _same(k, back, names, "saved and loaded")
 
 
+# Not strict: the generator finds B11 on most runs, not on every one.
+@pytest.mark.xfail(strict=False, reason="S1 (B11): a passed-through column doesn't make its step stale")
 @pytest.mark.no_invariants
 @SETTINGS
 @given(grids(), grids(), chains())

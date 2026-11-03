@@ -54,8 +54,8 @@ change is confirmed before it lands.
 | B | Seeing the data | sizes, pages, observed types, stale reads | — | — | ✓ |
 | C | Identity | tool hashes, ids, `diff`, `data_version()`, `Secret` | — | — | ✓ (seed: S9) |
 | — | Conditions | `mod.map(where=…)`, `first_present` | — | — | ✓ |
-| **S0** | **The tests** | the laws E1–E27, expected-to-fail until their step; core-asks `probe.py` (L1–L52) turned into tests the same way | all | small | **next** |
-| **S1** | **Bugs, and no wrong answers** | B1–B11; a column argument from an unaligned step refused, the message writing the join; `zip_` of unaligned steps refused; `total` over mixed columns | M0 (L1–L5) | small | needs D27, D29, D31, D32, D57 (recommended) |
+| **S0** | **The tests** | the laws E1–E27, expected-to-fail until their step; core-asks `probe.py` (L1–L52) turned into tests the same way | all | small | ✓ 2026-11-02 |
+| **S1** | **Bugs, and no wrong answers** (**next**) | B1–B11; a column argument from an unaligned step refused, the message writing the join; `zip_` of unaligned steps refused; `total` over mixed columns | M0 (L1–L5) | small | needs D27, D29, D31, D32, D57 (recommended) |
 | **S2** | **Values and keys** | tools get plain Python values; numeric names become `var<n>`; other names kept (CA-E) | L21 | small | needs D17 (recommended) |
 | **S5** | **Row numbers and lineage** (moved up) | `#<step>` = `0…n-1`; every row form by row number; row ids hidden; every step carries its ancestors' lineage; `.idx`; `#r.2`; lineage apart from data; joins on lineage; `mod.copy` | M1, M2 (L6–L19, L44, L45) | **the largest** | N1 decided |
 | **S4** | **Naming** | one output named after its step; a dict's keys as columns; `var<n>`; ints stay ints; step names identifiers; sources and literals (D12) | M3 (L20–L24, L46, L47) | medium | needs D12 (recommended) |
@@ -106,6 +106,25 @@ your yes on its decisions ([decisions.md](decisions.md)).
 
 Running it shows exactly what fails today: the starting line.
 
+**Done 2026-11-02.** `tests/unit/test_core_asks.py` runs every core-asks
+test from `probe.py` (18 hold, 63 wait, 1 skip); `tests/unit/test_expressions.py`
+has the laws and bugs the probe doesn't cover (3 hold, 15 wait). Each waiting
+test is `xfail(strict=True)` naming its step. Found while writing them:
+
+- **E15 already holds** for a tool's parameters (plain `float`, `None`); D17
+  is left for row dicts, which CA-A no longer passes (E10 superseded).
+- **B9 as written didn't reproduce** (*"'list' is a block"*); what remains is
+  `#xs` listed among a step's columns in a refusal. The test checks that.
+- **B11** (new): a step stays `completed` when a column it passes through
+  changes. The property test `test_L40c` found it; it's marked `xfail`, not
+  strict, as the generator doesn't find it every run.
+- Laws not written as tests: E10, E11, E16 (superseded by CA-A, CA-E); E1–E5,
+  E12, E13, E17, E21 (covered by core-asks tests or `test_where.py`); E22
+  (per-row staleness: core has none to test yet, written when S5 is detailed).
+  The property test learns the new references step by step, from S5.
+
+Suite: 720 passed, 1 skipped, 79 xfailed; `STRESS=1` property tests green.
+
 ### S1. Bugs
 
 | | Today | After | Where | Needs |
@@ -118,7 +137,7 @@ Running it shows exactly what fails today: the starting line.
 | B6 | `DataFrame([[1, 2]])` gets keys `"0"`, `"1"` | refused: *"columns must be named: mod.name(["a", "b"])"* | `verbs.grid` and the source path | D3 |
 | B7 | a `scale` column silently replaces `scale=1.8` | a warning: *"scale comes from p's column, not its default 1.8"* (S3 then removes binding by name) | `modifiers._d_apply`, `checks` | — |
 | B9 | a one-key list counts as a "block" (its `#` counted) | `#` columns never count towards a shape | `values._shape_kind` | — |
-| B11 | **an edit to a source isn't seen downstream** in one property-test chain: a `rec` cell edited from `{}` to `{'a': None}`, then `key_pp[mod.group(), mod.name("g")](wf["s0"])` keeps `{}` after a re-run. `test_reshape_properties.py::test_L40c` fails at `11a7ca0`, before today's changes. The two data versions differ, so the cause is in staleness or in the re-run, not in the hash | the re-run gives what a fresh run gives | `output`, `workflow` (staleness), to find | — |
+| B11 | **a step stays `completed` when a column it passes through changes.** Staleness looks only at the columns a tool binds: `key_pp[mod.group()](wf["s0"])` binds `k`, so editing `s0`'s `n` leaves it `completed` while its output still holds the old `n`. Found by `test_reshape_properties.py::test_L40c` (a `rec` cell `{}` → `{'a': None}`), failing at `11a7ca0` | stale when any column the output carries changed, not only the bound ones | `checks` / `workflow` (column-level staleness) | — |
 | B10 | an object without a `repr` gets a new data version every run | its own `data_version()`, else its fields, else pickle; else the plan says it has no stable version | `output._data_version` | D57 |
 
 (B5, `auto` stored, is S4. B8 is S3.)
