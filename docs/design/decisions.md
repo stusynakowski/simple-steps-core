@@ -1,16 +1,49 @@
 # Decisions
 
-> **Every decision, in one place** (organised 2026-10-31). Open ones are
-> grouped by the step of [phase4-plan.md](phase4-plan.md) that needs them, in
-> the order the steps run, so the next one to make is always near the top.
-> The design they decide is [syntax-review.md](syntax-review.md) (the model,
-> the rules, the bugs, the tests). When a decision is made, its row moves to
-> §3 with the date.
+> **Every decision, in one place** (organised 2026-10-31; the open ones
+> brought to the top 2026-11-03). Open ones are grouped by the step of
+> [plan.md](plan.md) that needs them, in the order the steps run, so the next
+> one to make is always near the top. The design they decide is
+> [model.md](model.md); the app's requirements are
+> [core-asks/model.md](core-asks/model.md). When a decision is made, its row
+> moves to §3 with the date.
 
 ## 0. Needed from you now
 
-Nothing: N1–N4 were answered on 2026-11-02. The next decisions are the
-recommended ones in §2, each confirmed when its step lands.
+Opened by the 2026-11-03 review ([model.md §5, §8, §10](model.md#8-states-in-a-session);
+the evidence is in [history/session-states.md](history/session-states.md)).
+Each was run; each has a recommendation.
+
+**States in a session.** Today a step's state is kept as flags, set by edits
+and cleared by runs. The proposal: compute every state from the step's spec
+id, its inputs' data versions and its problems now.
+
+| | Decision | Today (run 2026-11-03) | Recommended |
+|---|---|---|---|
+| SS1 | Step states are computed, never flagged: `completed` = made with its spec id now and each input's data version now; `stale` = one differs, saying which ("the step changed", "input p's data changed") | flags: an expression put back to exactly what ran stays `stale` | yes |
+| SS2 | An `invalid` step keeps its last output, marked, and is `completed` again when fixed if nothing else changed | an upstream change that makes a reader `invalid` drops its values; restoring the upstream leaves it `staged` | yes |
+| SS3 | A step run on a stale input is itself `stale`, "read h while it was stale" (reverses **D40**'s *read stale* mark on `completed`) | `completed`, the stale read only in hidden metadata | yes |
+| SS4 | An `invalid` step shows no stale reason | `invalid` with "updated args" | yes |
+| SS5 | `needs_run()` leaves out empty steps, and failed steps whose spec and inputs haven't changed (relates to **D37**, an `empty` state) | lists an empty step as `staged`; leaves out a failed step | yes, both |
+| SS6 | Core has no `running` state; it stays the app's | none in core | yes |
+| SS7 | A stale step's reason is among its warnings, where the app reads it (core-asks L42); delete-anyway, `k.remove(name, force=True)` (L43d, **CA-6**) | the reason is in output metadata only; no delete-anyway | yes, both |
+
+**Rows when a source's data changes** (model.md §10).
+
+| | Decision | Today | Recommended |
+|---|---|---|---|
+| D-picks | A saved pick into a source's rows: when the source's data is replaced, core hashes its rows, gives rows it has seen their ids back, and **rewrites the pick's row number** in the expression when its row moves; a pick whose row's hash is gone (deleted, or a value edited) is `invalid`, naming it | the pick follows the position: a row inserted at the top makes it pick another row, silently | yes; a declared key column later, for value edits |
+
+**How rows pair** (model.md §5). The older reshaping rules and the core asks
+disagree; the code follows the core asks.
+
+| | Decision | Reshaping rules (2026-10-27) | Core asks / code now | Recommended |
+|---|---|---|---|---|
+| D-child | A column argument from a parent into its child: each item takes its parent's value | allowed | refused, writing `join(…, on="#v")` (**CA-C**) | keep the code: one rule, a join |
+| D-subset | A column argument from a step missing some rows | blocks those rows, runs the rest | refused, writing the join | keep the code |
+| D-cell | A lineage cell shows the ancestor's row number as of the run, or now | — | now (S5-D4); core-asks model.md M3 says "as of the run" | now, and correct M3 |
+
+**Already answered on 2026-11-02:**
 
 | | Decision | Owner, 2026-11-02 |
 |---|---|---|

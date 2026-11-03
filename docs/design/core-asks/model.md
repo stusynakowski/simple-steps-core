@@ -6,7 +6,7 @@
 > [`decisions.md` §0 and §4](../decisions.md#4-core-asks-reconciled-2026-11-02),
 > IDs `N…`, `CA-…`). Nothing here is built yet; the work and its tests are in
 > [plan.md](plan.md), and the order in core's
-> [phase4-plan.md](../phase4-plan.md). IDs such as R1, T4 or H-R2 refer to the
+> [phase4-plan.md](../plan.md). IDs such as R1, T4 or H-R2 refer to the
 > history in the app's `docs/dev_plan/130-reference-selection.md`. **This copy,
 > in core, is the source** (N4).
 
@@ -456,6 +456,10 @@ Rules for the session:
    step downstream at once (cheap, no tools run); values change only when
    the user runs.
 4. **Runs go in workflow order,** so a step never runs on a stale input.
+
+Where core stands against these rules (run 2026-11-03), and the decisions
+that would make states computed rather than flagged:
+[session-states.md](../history/session-states.md).
 
 ## M8. Notes for later
 

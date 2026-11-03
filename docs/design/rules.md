@@ -1,78 +1,71 @@
 # The rules of the game
 
 > Ten rules for how data moves through a workflow. If you know these, you
-> know what core will do. The detail behind each rule, with the laws that
-> test it, is in [reshaping.md](reshaping.md).
+> know what core will do. Updated 2026-11-03, in step with the code at
+> `d69b5f1`; the detail behind each rule is in [model.md](model.md).
 
 **1. Everything is a grid.** Rows are samples, columns are variables. One
-value is a 1×1 grid; a list or dict in a cell is still a grid.
+value is a 1×1 grid; a list or dict in a cell is still a grid. A step with
+no expression yet (`k["x"] = None`) is **empty**: one cell, `"empty"`, that
+nothing can read until it has an expression.
 
-**2. Every row has an id, `#`.** It follows the row through sorts and filters.
-Core makes the ids: your tools never see them, and nothing but core can write
-a column whose name starts with `#`.
+**2. Rows are numbered `0…n-1`, as you see them.** `wf["s"][3]`, `[-1]`,
+`[[0, 2]]`, `[1:3]` pick rows by number. A row you pick is saved as the row
+it is, so the pick follows it when rows are sorted or filtered upstream.
+Core keeps its own identity for each row; you never see or type it.
 
-*Picking rows and columns:* one row or a list of rows is **by id**
-(`wf["s"][3]`, `rows[[1, 3]]`, `rows["0.1"]`), so a pick survives a sort; a
-range is **by position** as shown now (`wf["s"][0:2]`, `[-2:]`, or the step
-`mod.slice`). Columns are **by name** (`cols["temp"]`), or by position over
-variables only (`cols[0]`). To choose rows by what they hold, `filter`.
-
-**3. Every row remembers where it came from.** `#v` holds the row of step `v`
-it came from:
+**3. Every row remembers where it came from.** Its lineage, `#v`, is the row
+of step `v` it came from, carried all the way down:
 
 ```
-expand(v): the readings of each visit      collapse(by="ward"): one row per ward
-#    #v  value                             #  #v         ward  temp
-0.0  0   3                                 A  [0, 1, 3]  A     114.6
-0.1  0   30                                B  [2]        B     36.9
+expand(v): items of each row          collapse(by="ward"): one row per ward
+#e  #v  #v.idx  value                 #c  #v      ward  value
+0   0   0       3                     0   [0, 2]  A     2
+1   0   1       30                    1   [1]     B     1
 ```
 
-**4. One step, one change.** A step moves its data one level, along one axis:
+Lineage is read-only. To use it as data, copy it: `mod.copy(columns={"#v": "parent"})`.
+
+**4. Choose rows by what they hold, or by where they came from.**
+`wf["s"][cols["n"] > 15]` keeps the rows where `n > 15`; `wf["s"][row["v"] == 3]`
+keeps the rows that came from row 3 of `v`. A condition that matches nothing
+gives zero rows and a warning.
+
+**5. One step, one change.** A step moves its data one level along one axis:
 rows ↔ a list, or columns ↔ a dict. Longer changes are several steps.
 
-**5. Anything packs into a cell, and unpacks back, without loss.**
+**6. Anything packs into a cell, and unpacks back, without loss.**
 
 | Pack | Unpack |
 |---|---|
 | a column → a list: `gather[collapse()]` | `expand` |
 | a row → a dict: `pack` | `widen` |
 
-**6. Rows line up only when core knows how they match.** That means the same
-row, or a row beside the one it came from. Anything else is refused: `join` on
-a key, or say `zip_(…, match_ids=True)` if you know the ids mean the same
-samples. Equal size is never enough.
+**7. Rows line up only when they are the same rows.** `zip_` and a column
+argument pair each row with the same row, in any order: a step beside its
+`map` or its `sort`. Anything else is refused, and core writes the join for
+you: a filtered copy, or a child and its parent, meet in
+`join(…, on="#v")`. A group meets its rows after unpacking,
+`mod.expand(columns=["#v"])`. Equal size is never enough.
 
-**7. You see the shape before you run.** Each step's plan says its rows and
-columns, and how to go back: `rebuild` (with the step that does it), `trace`,
-`opaque` or `generated`. A result that breaks the plan fails.
+**8. You see the shape before you run.** Each step's plan says its rows and
+columns, and how to go back: `rebuild`, `trace`, `opaque` or `generated`. A
+result that breaks the plan fails.
 
-**8. Nothing is lost silently.** Filters and statistics drop values on
-purpose, but every row still traces back to the rows it came from. Only you
-can drop a trace, by dropping its `#` column.
+**9. Nothing is lost silently, and core never guesses.** Filters and
+statistics drop values on purpose, but every row still traces back. A `null`
+(a value: nothing), `absent` (no value here at all: a key a record lacks, a
+`stack` or `join` gap) and `[]` are three different things. Core never tidies
+your data and never matches rows by position.
 
-**9. Core never guesses.** It never tidies your data, never matches by
-position, and never reads meaning into an id. Uneven data stays visible: a
-`null` (a value: nothing), `absent` (no value here at all: a key a record
-lacks, a column one input of a `stack` doesn't have, the unmatched side of a
-`join`) and an empty list `[]` are three different things. A step with no
-expression yet (`k["x"] = None`) is **empty**: one cell, `"empty"`, which
-nothing can read until it has one.
+**10. An edit is checked at once; a run is on request.** Editing a step
+re-checks everything after it straight away: a step that can't run is
+`invalid`, naming why. Steps that ran keep their values, marked `stale`,
+until you run them again. Runs go in workflow order.
 
-**10. Grouping is a new index; a reduction is a map over lists.**
-`gather[collapse(by="ward")]` re-indexes by the key and packs: one row per
-ward, each column a list of the group's values. A reducer is then an
-ordinary `map` over those lists (`def mean_temp(temp: list[float])`), so
-`mean_temp[collapse(by="ward")]` is exactly that pack followed by that map,
-and it keeps the key as a column too (`ward`), since tools never see `#`. A
-parameter named after the key gets the key. A key is one value: to group by
-two columns, make one key from them first.
-
-*Applying on a condition:* `to_f[mod.map(where=is_hot)](wf["p"])` runs
-`to_f` only where `is_hot` is true. Every row stays, so the result lines up
-with `p`; the rows it skipped are `absent`. Fill them in a next step with
-`first_present` (`default=` the value to use instead). One value, whether
-written (`38`) or referenced (`wf["limit"]`, `wf["c"][0]["limit"]`), is the
-same in every call.
+*Grouping* is a new index plus a map: `mean_temp[collapse(by="ward")]` packs
+each ward's rows into lists, then calls `mean_temp(temp: list[float])` once
+per ward, keeping `ward` as a column.
 
 ## What core can't do, by design
 
@@ -81,3 +74,5 @@ same in every call.
 - Rebuild the input of a lossy step. You can trace back to it.
 - Line up unrelated grids without being told.
 - Flatten JSON of any depth in one step: one level per step.
+- Follow a picked row when a source's own data is replaced underneath it
+  (open: [model.md §10](model.md#10-uncertain-operations-and-their-boundaries)).

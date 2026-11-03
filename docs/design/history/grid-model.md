@@ -1,5 +1,7 @@
 # The grid model
 
+> **Superseded 2026-11-03** by [model.md §4 and §6](../model.md#4-rows-identity-position-lineage). Kept as background: where it differs, the newer page holds.
+
 > Proposed 2026-10-26. Behaviour marked *today* was run at `86170a3`
 > (scripts in §8). This is what a step's output is and how each modifier
 > shapes it. The words are defined in [object-model.md §1](object-model.md#1-the-words).

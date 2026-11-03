@@ -79,9 +79,9 @@ Each has a test that runs it (`tests/integration/`).
 | doc | what |
 |---|---|
 | [docs/design/](docs/design/README.md) | **the redesign**: the object model, the grid model, step expressions, outputs, extensions, interactive sessions, and the plan |
-| [shape-algebra.md](docs/shape-algebra.md) | the concept: verbs, tidy intent, row/column conventions |
-| [grid-model.md](docs/grid-model.md) | how `grid.py` was built, before it was split into modules |
-| [step-expressions.md](docs/step-expressions.md) | the step grammar, as written before the redesign |
+| [shape-algebra.md](docs/design/history/pre-redesign/shape-algebra.md) | the concept: verbs, tidy intent, row/column conventions |
+| [grid-model.md](docs/design/history/pre-redesign/grid-model.md) | how `grid.py` was built, before it was split into modules |
+| [step-expressions.md](docs/design/history/pre-redesign/step-expressions.md) | the step grammar, as written before the redesign |
 
 The three older docs use some retired words (ledger, `over=`, payload). They
 are folded into `docs/design/` as the redesign lands.
@@ -98,7 +98,7 @@ pytest -q                        # the suite
 - `src/simple_steps_core` — the library: one module per object (`kernel`,
   `catalog`, `workflow`, `step`, `operation`, `modifiers`, `references`,
   `output`, `specs`, `problems`, …). The public API is what the package
-  exports; see [cleanup-plan.md §3](docs/design/cleanup-plan.md#3-the-new-package-layout).
+  exports; see [cleanup-plan.md §3](docs/design/history/cleanup-plan.md#3-the-new-package-layout).
 - `examples` — the two examples above.
 - `tests` — unit and integration suites.
 - `docs` — the documents above.

@@ -2,13 +2,13 @@
 
 > Updated 2026-10-26, at phase 3e. How a workflow is built, changed, seen,
 > saved, loaded and run, in a Python terminal, IPython or a notebook. The app
-> does the same things through its UI ([interactive-sessions.md §8](interactive-sessions.md#8-the-same-session-in-the-app)).
+> does the same things through its UI ([interactive-sessions.md §8](history/interactive-sessions.md#8-the-same-session-in-the-app)).
 >
 > Everything marked **built** runs today. The walkthrough is
 > [`examples/kernel_session.py`](../../examples/kernel_session.py), and
 > `tests/integration/test_kernel_session_example.py` checks it, so the outputs
 > below are real. **Planned** marks what this migration still adds, with where it
-> is tracked ([features.md](features.md)).
+> is tracked ([features.md](history/features.md)).
 
 ## 1. Import core, and say what a workflow may use
 
@@ -70,7 +70,7 @@ Kernel: 6 steps, 3 tools (+ built-ins), 1 resource
 5  beds   res["ward"].bed[mod.map()](wf["sick"])              staged     —
 ```
 
-The kinds of step ([step-expressions.md](step-expressions.md) has the grammar):
+The kinds of step ([step-expressions.md](history/step-expressions.md) has the grammar):
 
 | Step | Example | |
 |---|---|---|
@@ -85,7 +85,7 @@ The kinds of step ([step-expressions.md](step-expressions.md) has the grammar):
 | a resource's tool, or a resource as an argument | `res["ward"].bed[...]`, `tool(..., ward=res["ward"])` | built |
 | a value step as an argument: a control | `limit=wf["limit"]` | built |
 | execution modifiers | `to_f[mod.map(), mod.retry(times=2), mod.try_except(default=None)]` | built (`timeout` isn't enforced yet, K18) |
-| naming outputs | `mod.name("temp_f")`, `mod.name(pattern="{step}_{field}")` | planned ([outputs-and-reshaping.md §4](outputs-and-reshaping.md#4-naming-outputs-modname)) |
+| naming outputs | `mod.name("temp_f")`, `mod.name(pattern="{step}_{field}")` | planned ([outputs-and-reshaping.md §4](history/outputs-and-reshaping.md#4-naming-outputs-modname)) |
 | a record return, spread into columns | `-> LoHi` gives `lo`, `hi` | planned (G8) |
 | an empty step, a placeholder line | `k["x"] = None` gives a 1×1 `"empty"`, staged; a step reading it is refused until it has an expression | built (G17, phase 4) |
 | a stage: steps run and shown as one | `k.stage("triage", ["p", "sick", "f"])` | planned (R9) |
@@ -107,9 +107,9 @@ step's input, giving the input twice, a value that isn't a step reference.
 | | Shows | |
 |---|---|---|
 | `k` | the table above; in a notebook, an HTML table | built |
-| `k.step("f")`, `k.step(3)` | the live step | built; its `repr` is one line today. Later: the workflow printed as a table of step blocks, and a step's rows labelled with their references (G18, [features.md](features.md#seeing-a-workflow-as-a-table-later)) |
+| `k.step("f")`, `k.step(3)` | the live step | built; its `repr` is one line today. Later: the workflow printed as a table of step blocks, and a step's rows labelled with their references (G18, [features.md](history/features.md#seeing-a-workflow-as-a-table-later)) |
 | `k.step("f").data` | its values, a DataFrame on its row ids | built |
-| `k.step("f").output.view()` | the grid as a user sees it: `#` (the row id; *today* the row number, [reshaping-plan.md](reshaping-plan.md) R-D11), values, each row's state and note | built |
+| `k.step("f").output.view()` | the grid as a user sees it: `#` (the row id; *today* the row number, [reshaping-plan.md](history/reshaping-plan.md) R-D11), values, each row's state and note | built |
 | `k.view("p", rows=(0, 50))` | a page of rows, with each cell's state and type, and how many rows there are in all | built |
 | `k.cell("f", 1)` | one cell, by row id (as selections are): value, type, state, and the input cells it came from, with their values | built |
 | `k.step("f").output.plan` | before running: rows, columns, types, each `exact`, `bounded` or `unknown` and why | built |
@@ -132,7 +132,7 @@ Row `1` is Ben's row id: it follows him through the filter and the zip, and
 ## 4. Change it, and see what changed
 
 Status reacts at once; computing waits until you ask
-([interactive-sessions.md](interactive-sessions.md)).
+([interactive-sessions.md](history/interactive-sessions.md)).
 
 ```python
 k["limit"] = 37.0                       # move the control
@@ -156,7 +156,7 @@ k.step("sick").data["name"].tolist()    # ['Ben', 'Cy']
 | `k.needs_run()` | every step not up to date, in run order, with why | built |
 | `k.on_change(callback)` | after any edit or run, the host hears which steps changed and which were removed | built |
 | `k.check(name, op)` | the problems a proposal would have, without adding it | built |
-| a step that re-runs on its own when its input changes | an autorun modifier | planned, to be designed ([interactive-sessions.md §6.2](interactive-sessions.md#62-an-autorun-modifier-planned-to-be-designed)) |
+| a step that re-runs on its own when its input changes | an autorun modifier | planned, to be designed ([interactive-sessions.md §6.2](history/interactive-sessions.md#62-an-autorun-modifier-planned-to-be-designed)) |
 | progress while a step runs; cancel | observing modifiers | planned (K23) |
 | an edited tool, in a live kernel | a kernel's catalog is fixed: make a new catalog and kernel, keeping the steps (`Kernel.from_json(k.to_json(), new_cat)`) | built; swapping a kernel's catalog is a possible later feature |
 | what a stale step showed before its input re-ran | outputs kept by data version while something reads them | planned (K22) |
@@ -193,7 +193,7 @@ class ClinicalDB:
 | `k.to_json()`, `Kernel.from_json(text, catalog)`, `Kernel.from_spec(spec, catalog)` | save and load; a reloaded kernel has an equal spec | built |
 | loading against a different catalog | anything not in it is a problem on its step, and never runs | built |
 | `extras` on steps, resources, the workflow | the app's notes, colours, widgets; kept, never read, never hashed | built |
-| an app's saved workflow, in plain Python | `Kernel.from_json(app_file, Catalog.from_modules(app_tools))` runs the same steps; extras are kept and ignored ([extensions.md §1](extensions.md#1-the-guarantee)) | built |
+| an app's saved workflow, in plain Python | `Kernel.from_json(app_file, Catalog.from_modules(app_tools))` runs the same steps; extras are kept and ignored ([extensions.md §1](history/extensions.md#1-the-guarantee)) | built |
 | resources | built from their spec the first time a step needs them; `k.resources.attach(name, obj)` hands over one the host built | built |
 | secret settings, left out of saves, hashes and display | `password: Secret[str]` (`from simple_steps_core import Secret`); a loaded kernel asks for it again: define the resource with it, or attach an object | built (R3) |
 | saving outputs with the spec, so a reloaded kernel opens with its data | a pluggable output store | planned (C32) |

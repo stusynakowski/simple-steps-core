@@ -1,5 +1,7 @@
 # The object model
 
+> **Superseded 2026-11-03** by [model.md §2–3, §11](../model.md#2-the-words). Kept as background: where it differs, the newer page holds.
+
 > Proposed 2026-10-26. *Today* notes say what exists at `86170a3` (checked by
 > running), so the distance to the design is visible. Where this document and
 > the code disagree, this document is the intent.
@@ -17,7 +19,7 @@ lists words that are retired: they are renamed in code and not used in new
 docs.
 
 > **2026-11-02:** the words for references, rows, lineage and binding are now
-> those of [core-asks/model.md §M0](core-asks/model.md#m0-the-words)
+> those of [core-asks/model.md §M0](../core-asks/model.md#m0-the-words)
 > (decisions.md CA-F). The rows below marked *(CA-F)* follow it; where a row
 > here and M0 differ, M0 wins.
 

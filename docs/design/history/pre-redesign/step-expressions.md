@@ -1,10 +1,12 @@
 # Step expressions — the rules, the syntax, and the reasons
 
+> **Superseded 2026-11-03** by [model.md](../../model.md). Kept as background: where it differs, the newer page holds.
+
 > **Kept from before the redesign** (branch `core-handover`). It still uses
 > some retired words (ledger, `over=`, payload), and links to documents
 > removed in phase 1 (`writing-tools.md`, `defining-operations.md`,
 > `status.md`, …), which are in git history before that commit. The current
-> design is [docs/design/](design/README.md); this document is folded into it.
+> design is [docs/design/](../../README.md); this document is folded into it.
 
 A workflow is built one assignment at a time:
 

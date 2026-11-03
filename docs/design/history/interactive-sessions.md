@@ -1,10 +1,12 @@
 # The grid model in an interactive session
 
+> **Superseded 2026-11-03** by [model.md §8](../model.md#8-states-in-a-session) and [kernel-session.md](../kernel-session.md). Kept as background: where it differs, the newer page holds.
+
 > Proposed 2026-10-26; **built through phase 3e**, except what is marked
 > planned. How a kernel behaves while someone builds a workflow step by step, in
 > a terminal, a notebook or the app's UI. *Today* notes were run at `86170a3`,
 > before the kernel existed. The working guide, with real output, is
-> [kernel-session.md](kernel-session.md); what is still to come is
+> [kernel-session.md](../kernel-session.md); what is still to come is
 > [features.md](features.md).
 
 ## 1. The idea

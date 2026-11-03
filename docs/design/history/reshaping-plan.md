@@ -1,5 +1,7 @@
 # Reshaping: the plan to a closed system
 
+> **Superseded 2026-11-03** by [plan.md](../plan.md). Kept as background: where it differs, the newer page holds.
+
 > The one place for the reshaping work: what is done, what is left, in what
 > order, and what "done" means. The rules and laws it builds are in
 > [reshaping.md](reshaping.md). Updated 2026-10-27 at `464e423`. Part of
@@ -13,7 +15,7 @@ someone using core. A step starts when its decisions are confirmed and ends
 when its laws pass, the whole suite is green, and it is committed.
 
 The laws are the tests in
-[tests/unit/test_reshape_closure.py](../../tests/unit/test_reshape_closure.py).
+[tests/unit/test_reshape_closure.py](../../../tests/unit/test_reshape_closure.py).
 A law that doesn't hold yet is marked `xfail(strict=True)` with the step
 that fixes it, so it fails loudly the day it starts to hold, and the mark
 comes off.

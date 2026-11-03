@@ -1,5 +1,7 @@
 # Step expressions: what a step may say
 
+> **Superseded 2026-11-03** by [model.md §6](../model.md#6-verbs-and-modifiers) and the app's grammar in [core-asks/model.md](../core-asks/model.md). Kept as background: where it differs, the newer page holds.
+
 > Proposed 2026-10-26. A step is declared as `k["name"] = <expression>`. The
 > same expression is a line in a Python session and, as text, a formula in the
 > app's formula bar. This document is the grammar both must accept. Core

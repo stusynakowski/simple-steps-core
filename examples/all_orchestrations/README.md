@@ -6,8 +6,8 @@ of tools** and one tiny tabular dataset, then wires a workflow that exercises
 
 Everything here uses the grid model through `simple_steps_core`, with a
 `CATALOG` of the example's tools —
-the authoring surface being designed. See [docs/grid-model.md](../../docs/grid-model.md)
-and [docs/shape-algebra.md](../../docs/shape-algebra.md).
+the authoring surface being designed. See [docs/grid-model.md](../../docs/design/history/pre-redesign/grid-model.md)
+and [docs/shape-algebra.md](../../docs/design/history/pre-redesign/shape-algebra.md).
 
 ## Three ways to use it, one source of truth
 
@@ -67,7 +67,7 @@ need no registration — the no-tool reshapers (`select`, `drop`, `rename`,
 ## Resources (`build_resources()`)
 
 A second workflow that uses a dummy database and a dummy LLM, for the resource
-model in [docs/design/object-model.md §4.2](../../docs/design/object-model.md#42-resource-type-and-resource).
+model in [docs/design/object-model.md §4.2](../../docs/design/history/object-model.md#42-resource-type-and-resource).
 Both dummies are deterministic and count their calls.
 
 **The notation:**

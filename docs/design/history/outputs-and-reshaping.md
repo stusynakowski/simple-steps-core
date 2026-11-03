@@ -1,5 +1,7 @@
 # Outputs and reshaping
 
+> **Superseded 2026-11-03** by [model.md §6](../model.md#6-verbs-and-modifiers). Kept as background: where it differs, the newer page holds.
+
 > Proposed 2026-10-26. What a step's output should look like, how a tool that
 > returns several values is laid out, how outputs are named, what happens with
 > inconsistent data, and how the reshapes fit together. *Today* lines were run

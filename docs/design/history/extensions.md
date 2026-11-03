@@ -1,5 +1,7 @@
 # Extensions, and running the app's workflows in Python
 
+> **Superseded 2026-11-03** by [model.md §11](../model.md#11-extras-and-the-saved-file). Kept as background: where it differs, the newer page holds.
+
 > Proposed 2026-10-26. The app adds its own information to core's objects:
 > notes on a step, a step's colour in the UI, a custom input widget for a
 > tool's argument, which tools the agent may use. This document says where

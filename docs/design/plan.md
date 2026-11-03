@@ -1,21 +1,18 @@
 # The plan
 
-> **The dev plan for what's left of phase 4**: the goals, the order of work,
-> and what each step needs. Reorganised 2026-10-31 at `8f8de1e`; **reordered
-> 2026-11-02** for the core asks ([core-asks/](core-asks/): the target model,
-> changes L1–L52 and their probe), with the owner's answers in
-> [decisions.md §4](decisions.md#4-core-asks-reconciled-2026-11-02). Pages
-> that go together:
+> **The one plan**: the goals, the order of work, and what each step needs.
+> Reorganised 2026-10-31; reordered 2026-11-02 for the core asks; brought up
+> to date 2026-11-03 (it was phase4-plan.md). Pages that go together:
 >
 > | Page | Holds |
 > |---|---|
 > | **this one** | the goals, the order of work, and the changes in detail |
-> | [decisions.md](decisions.md) | every decision, grouped by the step that needs it |
-> | [syntax-review.md](syntax-review.md) | the design of the expression cleanup: the model, the rules, the bugs, the tests |
-| [core-asks/model.md](core-asks/model.md), [core-asks/plan.md](core-asks/plan.md) | the target for references, selection, lineage and binding; where it and syntax-review differ, core-asks wins (binding: CA-A replaces syntax-review §3.1 rule 7) |
+> | [model.md](model.md) | what core is: each rule marked built or planned |
+> | [decisions.md](decisions.md) | every decision, the open ones first |
+> | [core-asks/model.md](core-asks/model.md), [core-asks/plan.md](core-asks/plan.md) | the app's requirements: references, selection, lineage, binding, and the probe that tests them |
 >
-> Done work keeps its own record: [reshaping-plan.md](reshaping-plan.md), and
-> §4 below. The overall phases are in [cleanup-plan.md](cleanup-plan.md#4-order-of-work).
+> Done work keeps its own record in §4 below, and in [history/](history/)
+> (the reshaping and cleanup plans).
 
 ## 1. The goals
 
@@ -58,9 +55,10 @@ change is confirmed before it lands.
 | **S1** | **Bugs, and no wrong answers** | B1–B11; a column argument from an unaligned step refused, the message writing the join; `zip_` of unaligned steps refused; `total` over mixed columns | M0 (L1–L5) | small | ✓ 2026-11-02 |
 | **S2** | **Values and keys** | tools get plain Python values (already held on every path; now tested); numeric names become `var<n>`; other names kept (CA-E) | L21 | small | ✓ 2026-11-02 |
 | **S5** | **Row numbers and lineage** (moved up) | **a change of surface** (CA-B1, amended): rows shown and typed as `0…n-1`, picks saved as lineage; core's lineage-based row ids stay its identity. Every step carries its ancestors' lineage; `.idx`; `#r.2`; lineage apart from data; conditions (`cols`, `row`, from S3); joins on lineage; `mod.copy`; strict alignment (CA-11). Five pieces, §3 | M1, M2, conditions (L6–L19, L29–L31, L35, L36, L41, L44, L45, L48) | medium (was the largest) | ✓ 2026-11-02 |
-| **S4** | **Naming** (**next**) | one output named after its step; a dict's keys as columns; `var<n>`; ints stay ints; step names identifiers; sources and literals (D12) | M3 (L20–L24, L46, L47) | medium | needs D12 (recommended) |
+| **S5f** | **Freeze** (2026-11-03) | pairing by identity: aligned means the same rows in any order (CA-11, amended); the A5 check traces every join on lineage back by id; a group never joins on lineage (unpack it first); an edit re-checks everything downstream, and a step reading an `invalid` one is `invalid`; three crashes found at `STRESS=1` fixed; every property-test failure listed ([tests/stress-failures.md](../../tests/stress-failures.md)); the docs consolidated into model.md | M2, M6 L40 | — | ✓ 2026-11-03 |
+| **S4** | **Naming** | one output named after its step; a dict's keys as columns; `var<n>`; ints stay ints; step names identifiers; sources and literals (D12) | M3 (L20–L24, L46, L47) | medium | needs D12 (recommended) |
 | **S3** | **Grammar and binding** | strings choose columns; pickers before the verb; a pick as an input; **binding at staging, saved explicitly** (CA-A); `mod.cast`; verbs inferred and written (`auto` resolved, D20); nothing unseen (D21) | M4, M5 (L25–L39, L48–L51) | **large** | N2, N3 decided; D8, D18, D19, D21 (recommended) |
-| **S11** | **Live editing** | readers re-checked at once; "reference moved"; stale reasons; renames rewrite what core wrote; delete anyway | M6 (L40–L43, L52) | small–medium | — |
+| **S11** | **Live editing** (**recommended next**) | states computed from spec ids and data versions, never flagged (SS1–SS6); stale reasons among the warnings, delete anyway (SS7); picks into a source follow their rows when its data changes (D-picks); readers re-checked at once ✓ (`baec929`); renames rewrite what core wrote ✓ | M6 (L41–L43, L52) | medium | needs SS1–SS7, D-picks ([decisions.md §0](decisions.md#0-needed-from-you-now)) |
 | **G** | **The app moves** | [app-migration.md](app-migration.md), onto the new syntax; core's to-dos T6, T9–T13 | — | medium (in the app) | needs D50, D52, D53 |
 | **D** | **Sessions** | outputs kept by version (K22), progress and `cancel()` (K23, K14), re-run failed or stale rows (K15, D42), stages (R9), autorun | — | medium–large | needs D-D1, D-D2, D42 |
 | **E** | **Storage** | the output store (C32, K16); media handles (R7) | — | medium | needs E-D1 |
@@ -298,7 +296,7 @@ Then phase 5, the final docs, starts.
 
 | | |
 |---|---|
-| **reshaping, closed** | row ids and `#` columns, matching rows, round trips, reductions as lists, uneven data (`absent`), the empty step, plans that say how to go back, the invariant check on every test, the property tests ([reshaping-plan.md](reshaping-plan.md)) |
+| **reshaping, closed** | row ids and `#` columns, matching rows, round trips, reductions as lists, uneven data (`absent`), the empty step, plans that say how to go back, the invariant check on every test, the property tests ([reshaping-plan.md](history/reshaping-plan.md)) |
 | K19, K28 | selections, column arguments and `zip_` by row id; each cell's lineage |
 | G1, G2, G4, G10, G12, G13, G17, R8 | `group` labels rows; missing is `None`; formulas print as written; `widen` replaces its column; `mod.name`; readers re-checked; the empty step; ints stay ints |
 | **Step A**, 2026-10-27 | G5 (a fold's start), G8 (records spread), G9, G12 (every form, kernel naming), G6, G7 (warnings, *where*), K18 (`timeout`). `tests/unit/test_outputs.py` |

@@ -1,6 +1,6 @@
 # Moving Simple Steps onto the new core
 
-> Step G of [phase4-plan.md](phase4-plan.md), brought forward: what the app
+> Step G of [phase4-plan.md](plan.md), brought forward: what the app
 > repo (`Simple_Steps`) changes to run on this core, in what order, and what
 > it adopts later. Derived 2026-10-27 at core `fdd3b62`, from the app at
 > `1139779` (pin `86170a3`, 69 core commits behind). The app's own maps of
@@ -298,7 +298,7 @@ to §3.8 as it lands.
 
 ### After the move: the rest of phase 4
 
-In order, each as its step in [phase4-plan.md](phase4-plan.md), and each
+In order, each as its step in [phase4-plan.md](plan.md), and each
 followed by its small pass in the app (§5):
 
 | | Step | Needs first |

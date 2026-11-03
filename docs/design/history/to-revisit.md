@@ -1,12 +1,14 @@
 # To revisit
 
+> **Superseded 2026-11-03** by [decisions.md](../decisions.md). Kept as background: where it differs, the newer page holds.
+
 > **Consolidated into [syntax-review.md](syntax-review.md)** (2026-10-30): read that first; this page is background.
 
 > The owner's list of design choices to reconsider in a later update
 > (2026-10-29). Nothing here is decided or built: each entry says what core
 > does today (each line was run at `adeda02`), why it's a concern, and the
 > options. When one is taken up, it becomes a decision in
-> [decisions.md](decisions.md) and is confirmed before it lands.
+> [decisions.md](../decisions.md) and is confirmed before it lands.
 
 **The dev plan for V1–V5 is [expressions-plan.md](expressions-plan.md).**
 **A proposal answering V1, V3 and V4 is in

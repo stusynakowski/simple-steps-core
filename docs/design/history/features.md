@@ -1,11 +1,13 @@
 # What this migration delivers
 
+> **Superseded 2026-11-03** by [plan.md](../plan.md). Kept as background: where it differs, the newer page holds.
+
 > Updated 2026-10-26, at phase 3e. One list of every feature the redesign
 > includes: what is built, what is next, and what still needs a decision.
 > Details live in the documents linked; IDs (K…, C…, R…) are the app's asks in
 > `core-handover/008-core-changes-full.md`, G… are gaps found while writing the
 > design (grid-model.md §8, outputs-and-reshaping.md §8, interactive-sessions.md §9).
-> How a session looks with these features is [kernel-session.md](kernel-session.md).
+> How a session looks with these features is [kernel-session.md](../kernel-session.md).
 
 ## Built
 
@@ -44,7 +46,7 @@ become `.name` later.
 ## Phase 4: behaviour, one change at a time
 
 Each is confirmed before it lands, and gets a probe. The order of what's left
-is [phase4-plan.md](phase4-plan.md). The reshaping work (row ids, `#` columns,
+is [phase4-plan.md](../plan.md). The reshaping work (row ids, `#` columns,
 matching rows, round trips, uneven data) is finished:
 [reshaping-plan.md](reshaping-plan.md).
 
@@ -161,7 +163,7 @@ as `examples/kernel_session.py` already is.
 
 ## Decisions still open
 
-They are all in [decisions.md](decisions.md), grouped by the step of
-[phase4-plan.md](phase4-plan.md) that needs them, each with a recommendation.
+They are all in [decisions.md](../decisions.md), grouped by the step of
+[phase4-plan.md](../plan.md) that needs them, each with a recommendation.
 (G3, a source's own index as its row ids, was decided as D2 in row-ids.md and
 is built.)

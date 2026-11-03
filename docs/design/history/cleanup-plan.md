@@ -1,5 +1,7 @@
 # Cleanup and restructure plan
 
+> **Superseded 2026-11-03** by [plan.md](../plan.md). Kept as background: where it differs, the newer page holds.
+
 > Proposed 2026-10-26, branch `core-handover`. Checked at `86170a3`:
 > 599 tests pass; `grid.py` imports nothing else from core; the app reaches the
 > older engine in two places only (`core_bridge.py`, `main.py:139`).
@@ -112,8 +114,8 @@ Each phase ends with every test passing. Phases 1 and 2 change no behaviour.
 | **0** | These design docs | the owner confirms them |
 | **1. Remove** | §1: delete the older engine, its tests, docs and extras; cut `__init__.py` down to the grid; drop `pydantic` | the 3 grid test files pass; `python examples/all_orchestrations/pipeline.py` runs |
 | **2. Split** | §3 layout, moving code without changing it. `simple_steps_core.grid` re-exports everything for this phase only | the same tests pass, unchanged |
-| **3. Object model** | §2 and [object-model.md](object-model.md): `Catalog`, `Tool`, `Kernel`, specs, `Problem`, step state, `Output` fields, `insert`/`move`, `k.check`, display. Remove `grid`. Rewrite the tests and examples on the kernel | `examples/kernel_session.py` and its test pass (the guide in [kernel-session.md](kernel-session.md)); every example runs |
-| **4. Behaviour** | the K-asks, one at a time, each confirmed before it lands: K19 (row ids, column arguments), K20 (hashes, ids), K22 (outputs by version), K23 (progress, cancel), K25–K29, R7, R8, R9 (stages), C28–C32, K18, G1–G15 found while writing these docs, and the autorun modifier once its design is settled ([interactive-sessions.md §6.2](interactive-sessions.md#62-an-autorun-modifier-planned-to-be-designed)) | each ask's probe passes; for reshaping, every law in [reshaping.md §10](reshaping.md#10-the-laws) passes ([reshaping-plan.md](reshaping-plan.md) is that path, finished); the rest is [phase4-plan.md](phase4-plan.md) |
+| **3. Object model** | §2 and [object-model.md](object-model.md): `Catalog`, `Tool`, `Kernel`, specs, `Problem`, step state, `Output` fields, `insert`/`move`, `k.check`, display. Remove `grid`. Rewrite the tests and examples on the kernel | `examples/kernel_session.py` and its test pass (the guide in [kernel-session.md](../kernel-session.md)); every example runs |
+| **4. Behaviour** | the K-asks, one at a time, each confirmed before it lands: K19 (row ids, column arguments), K20 (hashes, ids), K22 (outputs by version), K23 (progress, cancel), K25–K29, R7, R8, R9 (stages), C28–C32, K18, G1–G15 found while writing these docs, and the autorun modifier once its design is settled ([interactive-sessions.md §6.2](interactive-sessions.md#62-an-autorun-modifier-planned-to-be-designed)) | each ask's probe passes; for reshaping, every law in [reshaping.md §10](reshaping.md#10-the-laws) passes ([reshaping-plan.md](reshaping-plan.md) is that path, finished); the rest is [phase4-plan.md](../plan.md) |
 | **5. Docs** | the final docs set (§6) | each doc's examples run as tests |
 
 ### Phase 3, piece by piece

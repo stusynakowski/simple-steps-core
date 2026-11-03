@@ -1,11 +1,13 @@
 # Reshaping: the rules and the laws
 
-> The ten rules on one page are [rules.md](rules.md); this is the detail behind
+> **Superseded 2026-11-03** by [model.md §4–7, §9, §12](../model.md#4-rows-identity-position-lineage); the laws are tests in `tests/unit/test_reshape_closure.py`. Kept as background: where it differs, the newer page holds.
+
+> The ten rules on one page are [rules.md](../rules.md); this is the detail behind
 > them. What a user of core needs to know to reshape data and trust the result. This
 > describes the system as designed, closed and airtight; how far today's core
 > is from it is in reshaping-plan.md. The rules are the owner's (2026-10-27);
 > the laws are tests, in
-> [tests/unit/test_reshape_closure.py](../../tests/unit/test_reshape_closure.py).
+> [tests/unit/test_reshape_closure.py](../../../tests/unit/test_reshape_closure.py).
 > What is built, what is left and in what order is in
 > [reshaping-plan.md](reshaping-plan.md). The words are in
 > [object-model.md §1](object-model.md#1-the-words).

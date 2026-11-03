@@ -1,5 +1,7 @@
 # The syntax review: what you want, what's open, what's next
 
+> **Superseded 2026-11-03** by [decisions.md](../decisions.md) and [core-asks/model.md](../core-asks/model.md). Kept as background: where it differs, the newer page holds.
+
 > **The one page for the expression cleanup** (2026-10-30). It gathers the
 > owner's thoughts and wishes from the review sessions, the concerns raised
 > with them, the bugs found, every decision still to make, the dev plan and
@@ -10,8 +12,8 @@
 
 **How to use it.** This page is the design: §1–§3 (the model and its
 rules), §4 (today and the bugs), §6 (concerns) and §8 (the tests). The
-decisions are in [decisions.md](decisions.md); the order of work is in
-[phase4-plan.md](phase4-plan.md).
+decisions are in [decisions.md](../decisions.md); the order of work is in
+[phase4-plan.md](../plan.md).
 
 ## 1. What you want
 
@@ -163,7 +165,7 @@ What core does today against §3, run at `20a7980`:
 
 ## 5. The decisions
 
-All of them, D1–D56, are in [decisions.md](decisions.md), grouped by the
+All of them, D1–D56, are in [decisions.md](../decisions.md), grouped by the
 step that needs them, with what you said and what is recommended.
 
 A **single cell broadcasts like a literal** (§3.1 rule 4, checked by
@@ -193,7 +195,7 @@ is a list, not a cell: it pairs by row, so take its cell, `[0]`.
 
 ## 7. The dev plan
 
-In [phase4-plan.md](phase4-plan.md) §2: steps S0–S10 in order among the rest
+In [phase4-plan.md](../plan.md) §2: steps S0–S10 in order among the rest
 of phase 4 (the app's move, sessions, storage, the table view).
 
 ## 8. The tests
