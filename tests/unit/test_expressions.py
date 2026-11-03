@@ -193,13 +193,15 @@ def test_E23_B1_widen_spreads_the_named_column_or_the_one_dict_column():
     assert refused(k, "x", lambda: mod.widen()(wf["two"]), "widen which column")
 
 
-@pytest.mark.xfail(strict=True, reason="S1 (B2, D32): expand(columns=) takes dicts as key/value rows")
 def test_E24_B2_expand_of_a_dict_column_keeps_the_others():
     k = Kernel(Catalog([]))
     k["p"] = pd.DataFrame({"name": ["Ann"], "info": [{"age": 30, "bed": 4}]})
     k["e"] = mod.expand(columns=["info"])(wf["p"])
-    k.run("e")
+    k["only"] = mod.expand(columns=["info"], keep=False)(wf["p"])
+    k.run_all()
     assert values(k, "e", "name") == ["Ann", "Ann"]
+    assert values(k, "e", "key") == ["age", "bed"] and values(k, "e", "info") == [30, 4]
+    assert list(k.step("only").output.data.columns) == ["#p", "key", "info"]
 
 
 @pytest.mark.xfail(strict=True, reason="S7 (D33): melt and pivot")

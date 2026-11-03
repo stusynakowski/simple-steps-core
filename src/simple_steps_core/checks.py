@@ -1409,6 +1409,25 @@ def _selected_index(verb: Any, operation: "Operation", workflow: "Workflow | Non
     return chosen, len(chosen)
 
 
+def _unpacks(operation: "Operation", columns: list, workflow: "Workflow") -> str | None:
+    """What ``expand(columns=…)``'s columns hold, as far as is known: "list",
+    "mapping", or None (not known until it runs, or a mix)."""
+    kinds = set()
+    for c in columns:
+        if is_id_column(c):
+            kinds.add("list")                 # a `#` list core packed
+            continue
+        hint = workflow._column_types(operation).get(c)
+        origin = typing.get_origin(hint) or hint
+        if origin in (dict, collections.abc.Mapping):
+            kinds.add("mapping")
+        elif origin in (list, tuple):
+            kinds.add("list")
+        else:
+            return None
+    return kinds.pop() if len(kinds) == 1 else None
+
+
 def _expands_into(operation: "Operation", fn: Any, workflow: "Workflow | None") -> str | None:
     """What an expand's tool returns per row, as far as is declared: "list",
     "mapping", or None (not known until it runs)."""
@@ -1748,7 +1767,13 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     elif kind == "collapse" and verb.settings.get("by"):
         ordered = [verb.settings["by"]]
     elif kind == "expand" and verb.settings.get("columns"):
-        ordered, payload = variables(upstream_columns), None   # a reshape: keeps the grid's columns
+        # a reshape: keeps the grid's columns (unless keep=False); a dict column
+        # unpacks by key, so a `key` column comes before it (B2)
+        named_ = list(verb.settings["columns"])
+        ordered, payload = [c for c in variables(upstream_columns)
+                            if verb.settings.get("keep", True) or c in named_], None
+        if workflow is not None and _unpacks(operation, named_, workflow) == "mapping":
+            ordered.insert(next((i for i, c in enumerate(ordered) if c in named_), len(ordered)), "key")
     if kind == "collapse" and reducer_form(operation.fn or BUILTIN_TOOLS.get(operation.tool)) == "per_column":
         # A built-in reducer: one column per variable, under its own name (R-D1).
         by_ = verb.settings.get("by")
@@ -1804,7 +1829,10 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         columns_open = workflow._columns_open(operation) if workflow is not None else False
     elif kind == "expand" and verb.settings.get("columns"):
         # a reshape: keeps the grid's columns, known when the input's are (P5)
-        columns_open = workflow._columns_open(operation) if workflow is not None else False
+        # and when it's known whether the columns hold lists or dicts (B2)
+        columns_open = (workflow._columns_open(operation)
+                        or _unpacks(operation, list(verb.settings["columns"]), workflow) is None) \
+            if workflow is not None else False
     elif kind == "expand" and not verb.settings.get("columns") and \
             _expands_into(operation, fn_ := operation.fn or BUILTIN_TOOLS.get(operation.tool),
                           workflow) != "list":

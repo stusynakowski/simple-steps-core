@@ -20,6 +20,9 @@ import traceback
 from .system_tools import identity
 from .output import VALUE_COLUMN
 
+#: Where a dict's keys go when it unpacks into rows (J-D4, B2).
+KEY_COLUMN = "key"
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Input coercion — "what is a row?"
@@ -457,7 +460,7 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
 
 def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
             retries: int = 0, axis: str = "rows", replace: bool = False,
-            columns: Sequence[str] | None = None) -> Output:
+            columns: Sequence[str] | None = None, keep: bool = True) -> Output:
     """``unnest`` — each unit yields an iterable; results are concatenated.
 
     Output rows outnumber units, so they cannot share the input's index: each
@@ -468,11 +471,13 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
     (reshaping.md §3, R-D4). When the lists are ones core packed, the items
     get back the row ids they were packed from (§6.2, R-D3): the workflow
     names the ``#`` list that lines up with them, as ``meta["restore"]``.
+    Dict columns unpack into a row per key, the key in a ``key`` column
+    (B2, D32). ``keep=False`` leaves the grid's other columns out.
     """
     restore = source.meta.get("restore") if isinstance(source, Output) else None
     if columns is not None:
         _no_tool("expand", fn)
-        return _unpack(source, list(columns), restore)
+        return _unpack(source, list(columns), restore, keep=keep)
     frame = rows(source, axis=axis)
     none_rows = 0
     blocked = _upstream_failures(source)
@@ -565,12 +570,19 @@ def _id_index(ids: list) -> pd.Index:
     return pd.Index(ids, dtype=object if any(isinstance(i, str) for i in ids) or not ids else None)
 
 
-def _unpack(source: Any, columns: list[str], restore: str | None) -> Output:
-    """``expand(columns=[…])``: unpack list columns together, keep the rest."""
+def _unpack(source: Any, columns: list[str], restore: str | None, keep: bool = True) -> Output:
+    """``expand(columns=[…])``: unpack list columns together, keep the rest.
+    Dict columns unpack by key: a ``key`` column, then each column's values
+    (B2, D32)."""
     frame = rows(source)
     _require_columns("expand", frame, columns)
     blocked = _upstream_failures(source)
-    keep = [c for c in variables(frame.columns) if c not in columns]
+    kept = [c for c in variables(frame.columns) if c not in columns] if keep else []
+    dicts = any(isinstance(v, Mapping) for c in columns for v in frame[c]
+                if not is_id_column(c) and not _is_missing(v))
+    if dicts and KEY_COLUMN in frame.columns and KEY_COLUMN not in columns:
+        raise ValueError(f"expand of a dict writes its keys to {KEY_COLUMN!r}, which the input "
+                         f"already has: rename it first")
     out_rows, records, ids = [], [], []
     for index, row in _units(frame):
         if index in blocked:
@@ -581,6 +593,22 @@ def _unpack(source: Any, columns: list[str], restore: str | None) -> Output:
         lists = {c: (frame.at[index, c] if is_id_column(c) else row.get(c)) for c in columns}
         if all(v is None for v in lists.values()):
             continue                         # no list: no rows (J-D3)
+        keys = None
+        if dicts:
+            # a dict unpacks by key: every column's dict must have the same keys
+            mapped = {c: v for c, v in lists.items() if isinstance(v, Mapping)}
+            key_sets = {c: list(v) for c, v in mapped.items()}
+            if len(mapped) == len(lists) and len({tuple(k) for k in key_sets.values()}) == 1:
+                keys = next(iter(key_sets.values()))
+                lists = {c: [v[k] for k in keys] for c, v in mapped.items()}
+            else:
+                records.append({"status": "failed", "attempts": 1, "seconds": 0.0, "unit": index,
+                                "error": "the dicts don't line up: "
+                                         + ", ".join(f"{c} has keys {list(v)!r}" if isinstance(v, Mapping)
+                                                     else f"{c} isn't a dict" for c, v in lists.items())})
+                out_rows.append({c: None for c in variables(frame.columns)})
+                ids.append(_child_id(index, 0))
+                continue
         bad = [c for c, v in lists.items() if not isinstance(v, list)]
         lengths = {c: len(v) for c, v in lists.items() if isinstance(v, list)}
         error = (f"not a list: {type(lists[bad[0]]).__name__} in {bad[0]!r}" if bad else
@@ -596,12 +624,16 @@ def _unpack(source: Any, columns: list[str], restore: str | None) -> Output:
         packed_ids = frame.at[index, restore] if restore in frame.columns else None
         n = next(iter(lengths.values()), 0)
         for k in range(n):
-            out_rows.append({**{c: row.get(c) for c in keep}, **{c: lists[c][k] for c in columns}})
+            out_rows.append({**{c: row.get(c) for c in kept}, **{c: lists[c][k] for c in columns},
+                             **({KEY_COLUMN: keys[k]} if keys is not None else {})})
             records.append({"status": "completed", "error": None, "attempts": 0,
                             "seconds": 0.0, "unit": index})
             ids.append(packed_ids[k] if isinstance(packed_ids, list) and k < len(packed_ids)
                        else _child_id(index, k))
-    order = [c for c in variables(frame.columns)]
+    order = [c for c in variables(frame.columns) if c in kept or c in columns]
+    if dicts:
+        first = order.index(next(c for c in order if c in columns))
+        order.insert(first, KEY_COLUMN)
     data = pd.DataFrame(index=_id_index(ids))
     for c in order:
         data[c] = _typed([r.get(c) for r in out_rows], data.index)
