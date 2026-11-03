@@ -502,7 +502,8 @@ def ch11():
     k.run("f")
     lesson("S5", "run('f') makes f current: runs h first",
            (k.step("h").state, k.step("f").data["value"].tolist()), ("completed", [98.6, 101.3]),
-           "h stays stale; f computed from h's old rows and shown completed. Decision SM")
+           "h stays stale; f computed from h's old rows and shown completed, with a warning "
+           "naming h. Decision SM")
     k.run_all()
     k["lim"] = 38.0
     k["lim"] = 37.0

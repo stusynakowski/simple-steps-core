@@ -14,7 +14,7 @@ done to a `Kernel` in a plain Python session**, with only core installed.
 | Page | For |
 |---|---|
 | [rules.md](rules.md) | **Start here.** The rules of the game on one page, for anyone using core |
-| [tutorial/](../../tutorial/) | Learning core from the top: why each part exists, and 109 lessons run against the code ([capabilities.md](../../tutorial/capabilities.md): each one's expression and status) |
+| [tutorial/](../../tutorial/) | Learning core from the top: why each part exists, and 109 lessons run against the code ([capabilities.md](../../tutorial/capabilities.md): each one's expression and status); [handover.py](../../tutorial/handover.py) checks everything `core-handover/` asked for; `scripts/sweep.py` runs every check under coverage |
 | [model-map.md](model-map.md) | The model as a map, in four layers (session, step, between steps, row), with the behaviour we want from each beside what core does today |
 | [model.md](model.md) | **The model**: the words, the objects, rows and lineage, how rows meet, verbs, plans, states in a session, the guarantees and how they're checked, the uncertain operations, what core can't do. Each rule marked built or planned |
 | [kernel-session.md](kernel-session.md) | The working guide: a session in a terminal, with real output (run by `examples/kernel_session.py`) |

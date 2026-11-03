@@ -158,7 +158,7 @@
 | S2 | The same value again | `k["lim"] = 38.0` twice | nothing goes `stale` | ✓ | |
 | S3 | A change | `k["lim"] = 37.0` | readers `stale`, keeping their values | ✓ | |
 | S4 | Why it's stale | `k.step("h").warnings` | the reason, among the warnings | ✗ | only in `needs_run()` and metadata. SS7 |
-| S5 | Run one step | `k.run("f")`, `h` stale | runs `h` first | ✗ | **looks right, isn't:** `f` computed from old rows and shown `completed`. SM |
+| S5 | Run one step | `k.run("f")`, `h` stale | runs `h` first | ✗ | `f` computed from old rows and shown `completed`; a warning names `h` and its version. SM |
 | S6 | A value put back | 37 → 38 → 37 | `completed`, no re-run | ✓ | |
 | S7 | An expression put back | change `f`, then restore it | `completed`, no re-run | ✗ | stays `stale`. SM |
 | S8 | Column removed upstream | drop `temp` from `w` | `invalid`, keeping its last values | ✗ | values dropped. SM |
@@ -179,7 +179,7 @@
 
 ## Watch out for
 
-- **Silent wrong answers:** P15 (a pick into a replaced source) and S5 (running one step on stale input). Both look correct and aren't.
+- **Wrong answers:** P15 (a pick into a replaced source) is silent. S5 (running one step on a stale input) is `completed` with a warning naming the stale input.
 - **Three spellings for one reshape:** `mod.sort(by=…)(wf[…])`, `op("identity")[mod.sort(by=…)](wf[…])` and `mod.sort(over=wf[…], by=…)` all work. Pick one (F7).
 - **Inputs must be named steps:** a pick (P16) or an inline expression (C11) can't be an input yet.
 - **Output columns are called `value`,** so chaining verbs needs a `mod.name` or a written binding (V1b, A10).

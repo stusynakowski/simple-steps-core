@@ -3,8 +3,10 @@
 > A walkthrough of what the library is for, what it refuses to do, and why,
 > one part at a time. Every claim is a lesson in [tutorial.py](tutorial.py),
 > run against the code: `.venv/bin/python tutorial/tutorial.py`. Written
-> 2026-11-03 at `2bd150e`: 109 lessons, **89 ✓ · 17 ✗ · 3 ?**. The rules in
-> full are in [docs/design/model.md](../docs/design/model.md).
+> 2026-11-03 at `2bd150e`: 109 lessons, **89 ✓ · 17 ✗ · 3 ?**. What the app
+> asked for is checked by [handover.py](handover.py) (§5), and everything at
+> once by `scripts/sweep.py` (§6). The rules in full are in
+> [docs/design/model.md](../docs/design/model.md).
 
 ## 0. The idea: a spreadsheet's usability, inside Python's limits
 
@@ -181,7 +183,7 @@ values stay, marked `stale`, until a run replaces them. `run(x)` makes `x`
 current. Putting something back exactly as it was is free.
 **Status:** ✓ S1–S3, S6, S10–S13. Every ✗ here has one cause: states are kept
 as flags, not derived (decision **SM**).
-- ✗ **S5:** `run("f")` computes `f` from `h`'s outdated rows and shows `completed`, while `h` stays `stale`. Like P15, it looks right and isn't.
+- ✗ **S5:** `run("f")` computes `f` from `h`'s outdated rows and shows `completed`, while `h` stays `stale`. A warning on `f` names `h` and the version it read, so unlike P15 it isn't silent, but the state is wrong.
 - ✗ S7: an expression put back stays `stale`.
 - ✗ S8: a step made `invalid` upstream loses its values.
 - ✗ S9: when the column is put back, that step is `staged` and has to re-run.
@@ -228,3 +230,60 @@ behaviour, so each needs your yes before it lands.
 Work through it in order, with `tutorial.py` open beside it; chapter *n*
 there is §2.*n* here. When a decision lands, change the lesson's `want` in
 `tutorial.py` to what was decided, run it, and update this page's count.
+
+## 5. The handover: did core do what the app asked?
+
+[`core-handover/`](../core-handover/) is what the app asked of core on
+2026-10-26. [handover.py](handover.py) runs all of it against today's core:
+`.venv/bin/python tutorial/handover.py`. Run 2026-11-03: **58 checks,
+50 ✓ · 6 ✗ · 2 ?**.
+
+| Part | What | Result |
+|---|---|---|
+| A | the acceptance session (`plan.md`, "What should work"), line by line, on `Kernel` and `Catalog` | 13 of 14 ✓ |
+| B | the requests K19–K29, R7–R9, and the "Fix in core" table (K1–K18 are `scripts/core_asks.py`'s: 36 of 39 done) | 24 ✓ · 5 ✗ · 1 ? |
+| C | the six probes in `core-handover/probes/`, ported | 13 ✓ · 1 ? |
+
+**Not done (✗):**
+
+| | Ask | Where it stands |
+|---|---|---|
+| A3 | formula text parsed against the catalog: `k["g"] = "to_f[mod.map()](wf['p'])"` | **stored as a string literal, silently.** No parser in core; the app's `operation_formula.py` is still to port (S3) |
+| K22 | earlier outputs kept while something reads them | one output per step; decision ST, built with SM (S11) |
+| K23 | progress modifiers and `cancel()` | not built (plan step D) |
+| K28b | each output stores, per cell, the cells it came from | worked out on request by `k.cell`; ST's row map is the stored part |
+| R7 | media handles | not built: ST's third piece |
+| R9 | stages | not built. model.md said *built*; corrected |
+
+**Changed by a later decision (?):** K19 asked for a column argument to pair
+by position and type, and the probes ran `zip_` of two unrelated sources by
+position. CA-11 (2026-11-02) made pairing by identity only: both are refused
+now, and the refusal writes the join or `match_ids=True`.
+
+**The probes as written don't run:** all six import `simple_steps_core.grid`,
+which is gone. [app-migration.md](../docs/design/app-migration.md) lists the
+renames; part C is each probe on today's names.
+
+**The sweep corrected three things the docs said:** stages aren't built;
+running a step on a stale input gives `completed` *with a warning* naming the
+input (S5 isn't silent; only P15 is); and an undeclared return type is already
+planned `unknown` (K27).
+
+## 6. The whole sweep
+
+`.venv/bin/python scripts/sweep.py` runs every check core has under coverage:
+the tests, both tutorials, both examples, `scripts/core_asks.py` and the
+core-asks probe (`--stress` adds the property test at 2,000 examples). Run
+2026-11-03, every suite exits 0:
+
+| Suite | Result |
+|---|---|
+| tests | 783 passed, 1 skipped, 27 xfailed |
+| tutorial.py | 109 lessons: 89 ✓ · 17 ✗ · 3 ? |
+| handover.py | 58 checks: 50 ✓ · 6 ✗ · 2 ? |
+| both examples | run |
+| core_asks.py | 36 of 39 done |
+| core-asks probe | 65 pass, 19 fail, 1 skip |
+
+Together they run **92% of core** (6,509 of 7,047 lines). The least run:
+`references.py` and `values.py` (86%), `run.py` (87%), `verbs.py` (88%).

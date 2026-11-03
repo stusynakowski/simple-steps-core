@@ -84,7 +84,8 @@ Kernel ── catalog (tools, resource types, modifiers, combines) ── resour
   spec and a catalog, imports nothing and runs nothing. A tool whose code
   changed makes its steps `stale` ("tool changed"). *Built.*
 - **Stages** group consecutive steps to run and show them as one; a stage is
-  not a reference and changes no output. *Built.*
+  not a reference and changes no output. *Planned* (R9; marked built until
+  2026-11-03, when the handover sweep found no stage in core or its tests).
 
 ## 4. Rows: identity, position, lineage
 
@@ -286,7 +287,7 @@ parameter without a default, then the one column whose type fits, else
 |---|---|---|
 | F1 | an expression put back to exactly what last ran stays `stale` | SM |
 | F2 | a reader made `invalid` by an upstream change loses its values, and is `staged` when the upstream is restored | SM |
-| F3 | running one step on a `stale` input gives `completed`; the stale read is only in hidden metadata | SM |
+| F3 | running one step on a `stale` input gives `completed`, with a warning naming the input and the version read (K29) | SM |
 | F4 | an `invalid` step can still carry a stale reason | SM |
 | F5 | `needs_run()` lists an empty step | SS5 |
 | F6 | a failed step isn't listed by `needs_run()` | SS5 |
