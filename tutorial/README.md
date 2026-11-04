@@ -96,7 +96,7 @@ run as Python.
 **Don't want:** picks that silently change meaning. Lineage (`#v`) is
 read-only and becomes data only through `mod.copy` (P13).
 **Status:** ✓ P1–P10, P12–P15. P15 was a silent wrong answer until D-picks (2026-11-04): a pick into a source now follows its row when the source's data is replaced.
-- ✗ P11: `wf["v"]["temp"]` is refused; columns still need `cols["temp"]`. Planned S3 (D2).
+- ✓ P11, 2026-11-04 (D2): `wf["v"]["temp"]` picks the column.
 - ✗ P16: a pick can't be a tool's input; it must be its own step first. Planned S3 (D6).
 - ✗ **P9b, new:** a lineage condition, `wf["e"][row["v"] == 1]`, warns that its rows "are positions and expand doesn't fix row order". It is lineage, not position, so the warning is wrong.
 
@@ -217,7 +217,7 @@ behaviour, so each needs your yes before it lands.
 | C11 | Must every input to a combine or tool be a named step? |
 | F7 | One way to write each thing? | **decided (EX3), and `over=` refused since 2026-11-03**; `op("identity")[mod.x(…)]` is the same operation as `mod.x(…)`, so it goes with the parser (S3) |
 
-**Known, already planned:** P11 and P16 (S3), and V8b (D20b, decided).
+**Known, already planned:** P16 (S3), and V8b (D20b, decided).
 
 ## 4. How to use this page
 

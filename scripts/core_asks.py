@@ -511,9 +511,11 @@ def c7_selection():
     wf["block"] = wf["p"][1:3][c["name":"price"]]
     wf.run("block")
     got = wf.step("block").output.data.to_dict("list")
-    _, err = _try(lambda: wf["p"]["price"])
-    return (got == {"name": ["b", "c"], "qty": [2, 3], "price": [20.0, 30.0]} and err is not None,
-            f"block -> {got}; wf['p']['price'] -> {(err or 'accepted')[:70]}")
+    # D2 (S3, 2026-11-04): a string is a column, so wf["p"]["price"] picks it
+    picked, err = _try(lambda: wf["p"]["price"])
+    as_column = err is None and getattr(picked, "columns", None) == {"names": ["price"]}
+    return (got == {"name": ["b", "c"], "qty": [2, 3], "price": [20.0, 30.0]} and as_column,
+            f"block -> {got}; wf['p']['price'] -> {(err or 'the price column')[:70]}")
 
 
 class _C5Out(TypedDict):

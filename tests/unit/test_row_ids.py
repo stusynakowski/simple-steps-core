@@ -64,9 +64,9 @@ def test_a_range_is_positions_the_top_rows(k):
 def test_a_text_row_id_is_refused_with_the_number_to_use(k):
     k["e"] = visits_r[mod.expand()](wf["p"])
     k.run("e")
-    for make in (lambda: wf["e"][rows["1.0"]], lambda: wf["e"]["1.0"]):
-        with pytest.raises(SelectionError, match="row numbers, as shown in #"):
-            make()
+    with pytest.raises(SelectionError, match="row numbers, as shown in #"):
+        wf["e"][rows["1.0"]]
+    assert wf["e"]["1.0"].columns == {"names": ["1.0"]}       # D2: a string is a column
 
 
 def test_a_row_the_step_doesnt_have_is_a_problem(k):

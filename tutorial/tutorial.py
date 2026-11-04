@@ -240,7 +240,7 @@ def ch3():
            data(put(k, "col", wf["v"][cols["temp"]])), {"temp": [37.0, 38.5, 36.9]})
     s = put(k, "str", Later(lambda: wf["v"]["temp"]))
     lesson("P11", "a string chooses a column: wf['v']['temp']", type(s).__name__, "Step",
-           "refused today: 'temp' read as a row. Planned S3 (D2: an integer is a row, a string a key)")
+           "was refused, 'temp' read as a row, until S3 (D2), 2026-11-04")
     lesson("P12", "a row and a column: one cell",
            data(put(k, "cell", wf["v"][1][cols["temp"]])), {"temp": [38.5]})
     s = put(k, "lin", wf["hot"][cols["#v"]])

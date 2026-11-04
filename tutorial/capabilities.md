@@ -46,7 +46,7 @@
 | P9 | Condition on lineage | `wf["e"][row["v"] == 1]` | the rows that came from Ben | ✓ | |
 | P9b | …with no position warning | same | no warning | ✗ | **new:** warns the rows "are positions"; they're lineage |
 | P10 | Column | `wf["v"][cols["temp"]]` | the `temp` column | ✓ | |
-| P11 | Column by string | `wf["v"]["temp"]` | the `temp` column | ✗ | refused: read as a row. Planned S3 (D2) |
+| P11 | Column by string | `wf["v"]["temp"]` | the `temp` column | ✓ | S3 (D2), 2026-11-04: an integer is a row, a string a column; `[0:2]["name", "temp"]` is rows then columns |
 | P12 | One cell | `wf["v"][1][cols["temp"]]` | 38.5 | ✓ | |
 | P13 | Picking lineage | `wf["h"][cols["#v"]]` | refused, writing `mod.copy(…)` | ✓ | |
 | P14 | A pick follows its row | `wf["srt"][1]`, then re-sort | still Ada; saved as `rows[row["v"] == 0]` | ✓ | |

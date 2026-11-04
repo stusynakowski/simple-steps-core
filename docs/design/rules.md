@@ -10,7 +10,9 @@ no expression yet (`k["x"] = None`) is **empty**: one cell, `"empty"`, that
 nothing can read until it has an expression.
 
 **2. Rows are numbered `0…n-1`, as you see them.** `wf["s"][3]`, `[-1]`,
-`[[0, 2]]`, `[1:3]` pick rows by number. A row you pick is saved as the row
+`[[0, 2]]`, `[1:3]` pick rows by number; a string picks a column,
+`wf["s"]["temp"]`, and `wf["s"][0:2]["name", "temp"]` is rows, then columns.
+`[0, 2]` is refused: rows 0 and 2 are `[[0, 2]]`. A row you pick is saved as the row
 it is, so the pick follows it when rows are sorted or filtered upstream.
 Core keeps its own identity for each row; you never see or type it.
 

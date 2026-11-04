@@ -589,10 +589,21 @@ class StepRef:
         ``rows[…]``); ``cols[…]`` is columns. At most one of each, in one
         bracket or two. Refused as written when it can't be a selection.
         """
+        if isinstance(key, tuple) and key and all(isinstance(k, str) for k in key):
+            key = Cols({"names": list(key)})          # ["ward", "n"]: several columns (D2)
+        if isinstance(key, tuple) and len(key) > 1 and all(_is_int(k) for k in key):
+            shown = ", ".join(str(int(k)) for k in key)
+            raise SelectionError(
+                f"[{shown}] is {len(key)} parts, not a list of rows: rows {shown} are "
+                f"written as a list, wf[…][[{shown}]] (core-asks L49)")
         parts = key if isinstance(key, tuple) else (key,)
         if len(parts) > 2:
             raise SelectionError(
                 "a selection has at most two parts: rows, then cols[…]")
+        # D2: an integer is a row, a string a column (a key): wf["p"]["temp"]
+        parts = tuple(Cols({"names": [p]}) if isinstance(p, str)
+                      else Cols({"names": list(p)}) if isinstance(p, list) and p
+                      and all(isinstance(x, str) for x in p) else p for p in parts)
         row_sel, col_sel = self.rows, self.columns
         seen: set[str] = set()
         for part in parts:

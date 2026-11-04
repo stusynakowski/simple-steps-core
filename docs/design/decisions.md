@@ -186,6 +186,7 @@ failure needing a new decision were reverted and pinned in
 | W12 | An expand of dicts writes `key` and `value` | keeps both names: two columns, not one output (J-D4), so `gather_dict(key, value)` packs them back | S4 |
 | W13 | An untyped parameter, and binding by type | it fits any column, so it binds when its input has exactly one free column (an untyped `again(value)` after a map); with more, `invalid`, naming them. A lone column of unknown type (an empty result) binds too, checked per cell at run (EX11) | S3 |
 | W14 | A fold's parameters (`add(acc, value)` under `collapse`) | still bound by name only: binding one would pair a column row by row inside a collapse, which isn't built. After D9 a fold names the column it reads (`add(acc, scored)`) | S3 |
+| W15 | **For the owner**: core-asks L26 asks five spellings of one block to agree, including `identity[mod.select(rows=…, cols=…)]` | not made: `select` takes `columns=`, and a `cols=` alias would be a second spelling, against EX1 (every setting checked) and C10 (one way to write each thing). The other four agree (`[1:3]["n"]`, `["n"][1:3]`, `[1:3, "n"]`, `[rows[1:3], cols["n"]]`); L26 stays open until you say which wins | S3 |
 | W9 | **Open, found by L40d**: a condition on a *derived* step's row numbers (`row["s1_r"] == 0`, where `s1_r` keeps the source's rows) isn't rewritten when the source's rows move; only the source's own numbers are. Undo is still free (the rewrite is undone with the source) | left open: rewriting it needs each step's row map (PL2, later L6) | D-picks |
 
 ## 1. How to answer

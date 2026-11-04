@@ -571,8 +571,8 @@ def test_C7_a_selection_as_an_argument_converts_by_type(prices):
 
 
 def test_C7_refusals(prices):
-    with pytest.raises(SelectionError, match=r"cols\['price'\]"):
-        prices["p"]["price"]
+    # D2 (S3): a string is a column, no longer refused
+    assert prices["p"]["price"].columns == {"names": ["price"]}
     with pytest.raises(SelectionError, match="names or positions"):
         cols[["name", 2]]
     with pytest.raises(SelectionError, match="already has its rows"):

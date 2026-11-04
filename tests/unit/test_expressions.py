@@ -112,9 +112,13 @@ def refused(k: Kernel, name: str, make, mention: str = "") -> bool:
 
 # ── laws ─────────────────────────────────────────────────────────────────────
 
-@pytest.mark.xfail(strict=True, reason="S3 (D8): .header becomes .keys")
-def test_E6_keys_lists_a_steps_data_names():
-    assert wf["p"].keys == ["name", "temp", "ward"]
+def test_E6_header_stays_header(k):
+    # D8 (owner, 2026-11-04): no .keys, since a cell can hold a dict's keys
+    k.run_all()
+    assert not hasattr(wf["p"], "keys")
+    k["h"] = wf["p"].header
+    k.run_all()
+    assert k.step("h").data["name"].tolist() == ["name", "temp", "ward"]
 
 
 def test_E7_brackets_take_ints_and_strings_only(k):
@@ -358,7 +362,6 @@ def test_E26_a_setting_never_reaches_the_tool():
     assert values(k, "s") == [11, 21]
 
 
-@pytest.mark.xfail(strict=True, reason="S3 (core-asks M4): the new picks save, reload and print back")
 def test_E27_an_expression_round_trips(k):
     k["a"] = wf["p"][0:2]["name", "temp"]
     k["b"] = wf["p"][cols["temp"] > 37]
