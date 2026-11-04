@@ -2842,6 +2842,13 @@ class Workflow:
             # parameter has a default, which no column fills by name (L50c)
             resolved = replace(resolved, arguments={**resolved.arguments,
                                                     **{name: FROM_ROW for name in paired}})
+            # a column bound from a cast column is cast too (L51b)
+            resolved = replace(resolved, modifiers=tuple(
+                Modifier("cast", {**m.settings, **{
+                    name: m.settings[ref.columns["names"][0]] for name, ref in paired.items()
+                    if ref.id == str(step.operation.input) and isinstance(ref.columns, dict)
+                    and (ref.columns.get("names") or [None])[0] in m.settings}})
+                if m.kind == "cast" else m for m in resolved.modifiers))
         unnamed = resolved
         resolved = named_after_step(resolved, self, step_id)            # D9
         try:

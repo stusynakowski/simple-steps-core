@@ -203,7 +203,7 @@ def test_carried_function_is_not_part_of_the_data():
 # ─────────────────────────────────────────────────────────────────────────
 def test_shape_verbs_and_decorators_derive_from_modifiers():
     assert set(SHAPE_VERBS) | {"retry", "timeout", "expect", "try_except", "breaker",
-                               "name"} == set(MODIFIERS)
+                               "name", "cast"} == set(MODIFIERS)
     assert set(DECORATORS) == set(MODIFIERS)
 
 

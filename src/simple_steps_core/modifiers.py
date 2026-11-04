@@ -13,6 +13,8 @@ from typing import Callable
 from typing import Sequence
 import inspect
 
+import pandas as pd
+
 from .output import ABSENT  # noqa: E402
 from .verbs import (
     auto_,
@@ -108,6 +110,68 @@ def _d_try_except(fn: Callable, *, default: Any = _NO_DEFAULT,
                 return _Caught(default, error)
             raise _Tolerated(error) from exc
     run.__name__ = f"try_except({getattr(fn, '__name__', 'fn')})"
+    return run
+
+
+#: The types ``mod.cast`` converts a column to, by name (S3, core-asks L51b).
+CASTS: dict[str, Callable] = {"str": str, "int": int, "float": float, "bool": bool}
+
+
+def _cast_cell(value: Any, to: str) -> Any:
+    """*value* as type *to*; an absent or missing cell stays as it is."""
+    if value is None or value is ABSENT or (isinstance(value, float) and value != value):
+        return value
+    if to == "int" and isinstance(value, float) and not value.is_integer():
+        raise ValueError(f"{value!r} isn't a whole number")
+    if to == "bool" and isinstance(value, str):
+        if value.lower() not in ("true", "false"):
+            raise ValueError(f"{value!r} isn't true or false")
+        return value.lower() == "true"
+    return CASTS[to](value)
+
+
+def _d_cast(fn: Callable, **columns: str) -> Callable:
+    """``mod.cast(n="str")`` — convert input columns before the tool sees them
+    (S3, core-asks L51b), so a parameter binds the column by its new type.
+
+    Written before the verb it gets the input grid: each named column is
+    converted, and a cell that doesn't convert is a failed cell, so only its
+    row is blocked, saying why. Written after it, it gets one row at a time.
+    """
+    from .output import Output, _state_column
+
+    def convert_grid(source: Any) -> Any:
+        if not isinstance(source, Output):
+            return source
+        data, states = source.data.copy(), source.states.copy()
+        notes = dict(source.meta.get("notes") or {})
+        for column, to in columns.items():
+            if column not in data.columns:
+                continue
+            marks = list(states[column].astype(str))
+            values = []
+            for n, (i, cell) in enumerate(data[column].items()):
+                try:
+                    values.append(_cast_cell(cell, to) if marks[n] == "known" else cell)
+                except (TypeError, ValueError) as exc:
+                    values.append(None)
+                    marks[n] = "failed"
+                    if "error" not in notes.get(i, {}):     # the column written, first
+                        notes[i] = {**notes.get(i, {}), "error": f"cast {column} to {to}: {exc}",
+                                    "where": "cast"}
+            data[column] = pd.Series(values, index=data.index, dtype=object)
+            states[column] = _state_column(marks, data.index)
+        return Output(data, states, {**source.meta, "notes": notes})
+
+    def run(*args, **kwargs):
+        if args and isinstance(args[-1], dict):          # after the verb: one row
+            *leading, row = args
+            row = {k: _cast_cell(v, columns[k]) if k in columns else v for k, v in row.items()}
+            return fn(*leading, row, **kwargs)
+        if args:                                         # before it: the input grid
+            return fn(*(*args[:-1], convert_grid(args[-1])), **kwargs)
+        return fn(*args, **kwargs)
+    run.__name__ = f"cast({getattr(fn, '__name__', 'fn')})"
     return run
 
 
@@ -392,6 +456,7 @@ MODIFIERS: dict[str, ModifierKind] = {k.name: k for k in (
     _kind("expect",   "execution", _d_expect, _d_expect),
     _kind("try_except", "execution", _d_try_except, _d_try_except),
     _kind("breaker",  "execution", _d_breaker, _d_breaker),
+    _kind("cast",     "execution", _d_cast),
 )}
 
 
@@ -661,6 +726,9 @@ class _Mods:
                 on = params["on"]
                 on = [on] if isinstance(on, (str, type)) else list(on)
                 params["on"] = [o.__name__ if isinstance(o, type) else o for o in on]
+            if kind == "cast":
+                # written as a type or its name: saved by name (str, int, float, bool)
+                params = {k: v.__name__ if isinstance(v, type) else v for k, v in params.items()}
             if kind == "expect" and isinstance(params.get("columns"), dict):
                 # Types are written as Python types and saved as their names.
                 params["columns"] = {k: _type_label(v)

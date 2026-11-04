@@ -127,3 +127,24 @@ def test_a_one_value_step_is_the_same_for_every_row():
     k["x"] = add_b[mod.map()](wf["r"], k=wf["ten"])
     k.run_all()
     assert k.step("x").data["x"].tolist() == [11, 12, 13]
+
+
+def test_cast_converts_before_binding_and_a_cell_that_wont_fails_its_row():
+    # core-asks L51b
+    k = kernel()
+    k["x"] = shout_b[mod.cast(count="str"), mod.map()](wf["r"])     # name is str too: 2 fit
+    assert "2 columns are str" in k.step("x").problems[0]
+    k["nums"] = pd.DataFrame({"c": ["4", "x", "8"]})
+    k["h"] = double_b[mod.cast(c="int"), mod.map(), mod.try_except()](wf["nums"])
+    k.run_all()
+    assert k.step("h").formula == 'double_b[mod.cast(c="int"), mod.map(), mod.try_except()](wf["nums"], n=wf["nums"][cols["c"]])'
+    assert k.step("h").output.values == [8, None, 16]      # an int column stays int (R8)
+    assert "cast c to int" in str(k.step("h").output.notes[1].get("cause"))
+
+
+def test_cast_settings_are_checked():
+    k = kernel()
+    k["a"] = shout_b[mod.cast(count="date"), mod.map()](wf["r"])
+    assert "it converts to str, int, float, bool" in k.step("a").problems[0]
+    k["b"] = shout_b[mod.cast(nope="str"), mod.map()](wf["r"])
+    assert "mod.cast names 'nope'" in k.step("b").problems[0]

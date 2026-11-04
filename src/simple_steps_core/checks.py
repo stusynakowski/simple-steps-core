@@ -635,6 +635,23 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         acc_type = _type_name(_accumulator_type(fn))
         problems.append(f"{operation.tool}(acc: {acc_type}, …) has no starting value: "
                         f"give initial=, as a value or a reference")
+    # 6a''. mod.cast: a type it knows, on a column the input has (EX1, L51b)
+    for m in operation.modifiers:
+        if m.kind != "cast":
+            continue
+        if not m.settings:
+            problems.append("mod.cast names no column: mod.cast(n=\"str\")")
+        for column, to in m.settings.items():
+            if to not in CASTS:
+                problems.append(f"mod.cast({column}={to!r}): it converts to "
+                                f"{', '.join(CASTS)}, written as the type or its name")
+        if workflow is not None and operation.input is not None \
+                and not workflow._columns_open(operation):
+            have = variables(workflow._known_columns(operation))
+            gone = [c for c in m.settings if c not in have]
+            if gone and have:
+                problems.append(f"mod.cast names {', '.join(map(repr, gone))}, which the input "
+                                f"does not have (it has {', '.join(have)})")
     coded(problems, "missing_setting")
 
     # 6b'''. widen and expand(columns=), checked when the input's columns are
@@ -1108,7 +1125,7 @@ def bind_by_type(operation: Operation, workflow: "Workflow | None",
     if not required:
         return operation
     columns = variables(workflow._known_columns(operation))
-    types = workflow._column_types(operation)
+    types = {**workflow._column_types(operation), **_cast_types(operation)}
     named = {p.name for p in _all_parameters(operation, verb)}
     taken = {c for v in operation.arguments.values() if isinstance(v, StepRef)
              and v.id == str(operation.input) and isinstance(v.columns, dict)
@@ -1143,6 +1160,15 @@ def _all_parameters(operation: Operation, verb: Any) -> list:
         return []
     return [p for p in _tool_parameters(verb.kind, fn, parameters)
             if p.kind is not inspect.Parameter.VAR_POSITIONAL]
+
+
+def _cast_types(operation: Operation) -> dict:
+    """The types ``mod.cast`` gives input columns: what binding sees (L51b)."""
+    found = {}
+    for m in operation.modifiers:
+        if m.kind == "cast":
+            found.update({col: CASTS[to] for col, to in m.settings.items() if to in CASTS})
+    return found
 
 
 def _unbound_parameters(operation: Operation, verb: Any) -> list:
@@ -1482,7 +1508,7 @@ def _binding_hint(operation: Operation, missing: list, workflow: "Workflow") -> 
     verb = operation.shape_verb
     params = {p.name: p for p in _all_parameters(operation, verb)} if verb is not None else {}
     up = str(operation.input)
-    types = workflow._column_types(operation)
+    types = {**workflow._column_types(operation), **_cast_types(operation)}
     columns = [c for c in variables(workflow._known_columns(operation)) if c not in params]
     for name in missing:
         p = params.get(name)
@@ -2233,6 +2259,7 @@ from .combines import (  # noqa: E402
 )
 from .errors import SelectionError  # noqa: E402
 from .modifiers import (  # noqa: E402
+    CASTS,
     MODIFIERS,
     NAMED_VERBS,
     Modifier,

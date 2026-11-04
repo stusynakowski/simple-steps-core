@@ -82,7 +82,9 @@ names it otherwise. A tool that returns a `dict` gives one column per key.
 step is saved saying so: `double[mod.map()](wf["d"], n=wf["d"][cols["d"]])`.
 Two that fit, or none, and the step is `invalid`, writing the binding or a
 `mod.cast`. An `int` fits a `float`. A parameter with a default takes a
-column only when you bind it.
+column only when you bind it. `mod.cast(n="str")` before the verb converts a
+column first (to `str`, `int`, `float` or `bool`); a cell that won't convert
+fails its row.
 
 *Grouping* is a new index plus a map: `mean_temp[collapse(by="ward")]` packs
 each ward's rows into lists, then calls `mean_temp(temp: list[float])` once
