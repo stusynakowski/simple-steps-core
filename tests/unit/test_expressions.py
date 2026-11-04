@@ -282,6 +282,27 @@ def test_a_widen_field_never_replaces_a_column_unless_told():
     assert values(k, "apart", "name") == ["Ada", "Ben"]
 
 
+def test_an_expand_with_no_tool_names_its_column_when_there_are_several():
+    # C5: identity used to hand over the whole row, so every row melted into
+    # key, value rows. Refused, naming the list column; one column is fine.
+    @tool
+    def records() -> pd.DataFrame:
+        return pd.DataFrame({"name": ["Ann"], "a": [[1, 2]]})
+    k = Kernel(Catalog([records]))
+    k["s"] = pd.DataFrame({"name": ["Ann", "Ben"], "a": [[1], [2, 3]]})
+    k["bare"] = mod.expand()(wf["s"])
+    assert [(p.code, "mod.expand(columns=['a'])" in p.message)
+            for p in k.step("bare").problems] == [("missing_setting", True)]
+    k["r"] = records[mod.source()]()             # its columns known only by running
+    assert refused(k, "later", lambda: mod.expand()(wf["r"]), "name it, mod.expand(columns=")
+    del k["bare"], k["later"]
+    k["named"] = mod.expand(columns=["a"])(wf["s"])
+    k["one"] = [1, 2]
+    k["flat"] = mod.expand()(wf["one"])
+    k.run_all()
+    assert values(k, "named", "a") == [1, 2, 3] and values(k, "flat", "value") == [1, 2]
+
+
 @pytest.mark.xfail(strict=True, reason="S7 (D33): melt and pivot")
 def test_E25_melt_then_pivot_gives_back_the_table():
     k = Kernel(Catalog([]))

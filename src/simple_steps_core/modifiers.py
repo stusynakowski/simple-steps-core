@@ -261,6 +261,7 @@ def _d_apply(fn: Callable, **literals) -> Callable:
     # through this wrapper — compile_operation always applies it, so comparing
     # against the bare function would never match.
     run.__wrapped__ = fn
+    run.literals = literals              # what it was bound with: expand reads `column`
     return run
 
 

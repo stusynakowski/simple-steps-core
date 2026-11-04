@@ -2,7 +2,7 @@
 
 > Every capability the tutorial checks, with its expression, what it should
 > do, and its status. Run 2026-11-03 at `2bd150e` by
-> `.venv/bin/python tutorial/tutorial.py`: **95 ✓ · 15 ✗ · 3 ?** (113 lessons; R11, R13–R15, A4b and A4c since 2026-11-03's first run).
+> `.venv/bin/python tutorial/tutorial.py`: **96 ✓ · 15 ✗ · 3 ?** (114 lessons; R10b, R11, R13–R15, A4b and A4c since 2026-11-03's first run).
 > ✓ does what we want · ✗ doesn't yet · ? not decided. The reasoning is in
 > [README.md](README.md).
 >
@@ -85,6 +85,7 @@
 | R8 | `pack` | `op("identity")[mod.pack(columns=["name", "temp"]), mod.name("rec")](wf["v"])` | one dict per row | ✓ | |
 | R9 | `widen` | `mod.widen(column="rec")(wf["p"])` | the dict back into columns | ✓ | |
 | R10 | `expand`, no tool | `mod.expand()(wf["lst"])` | a list cell into rows | ✓ | |
+| R10b | `expand`, no tool, several columns | `mod.expand()(wf["v"])` | refused, writing `mod.expand(columns=[…])` | ✓ | fixed 2026-11-03 (C5): each row melted into key, value rows |
 | R11 | A step where a setting belongs | `mod.widen(wf["i"])` | refused | ✓ | fixed 2026-11-03: *"takes a column name, not StepRef"* |
 | R12 | A retired setting | `mod.pack(columns=[…], name="rec")` | refused, naming `mod.name` | ✓ | |
 | R13 | widen, two dict columns | `mod.widen()(wf["dd"])` | `invalid` when written, naming them | ✓ | fixed 2026-11-03 (C1): failed at run, the reason on a cell |

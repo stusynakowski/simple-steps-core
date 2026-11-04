@@ -331,6 +331,10 @@ def ch5():
     k["lst"] = [1, 2, 3]
     lesson("R10", "expand with no tool: a list cell into rows",
            data(put(k, "x", mod.expand()(wf["lst"])), "value"), [1, 2, 3])
+    s = put(k, "mx", mod.expand()(wf["v"]))
+    lesson("R10b", "expand with no tool on several columns is refused, asking which",
+           (s.state, [p.code for p in s.problems]), ("invalid", ["missing_setting"]),
+           "each row melted into key, value rows (C5)")
     k["i"] = info[mod.map()](wf["v"])
     k.run_all()
     s = put(k, "wb", Later(lambda: mod.widen(wf["i"])))

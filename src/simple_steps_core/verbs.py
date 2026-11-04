@@ -479,6 +479,13 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
         _no_tool("expand", fn)
         return _unpack(source, list(columns), restore, keep=keep)
     frame = rows(source, axis=axis)
+    names_ = variables(frame.columns)
+    if is_identity(fn) and VALUE_COLUMN not in names_ and len(names_) > 1 \
+            and "column" not in _literals(fn):
+        # C5: with no tool, identity would hand over the whole row, and every row
+        # would melt into key, value rows. One column is meant: name it.
+        raise ValueError(_expand_which(names_, (source.meta.get("name") if isinstance(
+            source, Output) else None) or "the input"))
     none_rows = 0
     blocked = _upstream_failures(source)
     out_rows, records, ids = [], [], []
@@ -563,6 +570,23 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
     return Output(data=data, records=records, index=data.index,
                   meta={"verb": "expand", "form": "column", "value_column": name,
                         "n_in": len(frame), "warnings": warnings_})
+
+
+def _literals(fn: Callable) -> dict:
+    """The literal arguments a tool was bound with, through any wrapper."""
+    seen = 0
+    while fn is not None and seen < 10:
+        if hasattr(fn, "literals"):
+            return fn.literals
+        fn, seen = getattr(fn, "__wrapped__", None), seen + 1
+    return {}
+
+
+def _expand_which(names: list, sid: str, lists: list | None = None) -> str:
+    """Why an expand with no tool is refused on several columns (C5)."""
+    pick = (lists or names)[0]
+    return (f"expand with no tool unpacks one column, and {sid!r} has "
+            f"{', '.join(map(str, names))}: name it, mod.expand(columns=[{pick!r}])")
 
 
 def _id_index(ids: list) -> pd.Index:
