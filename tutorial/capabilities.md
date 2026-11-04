@@ -2,7 +2,7 @@
 
 > Every capability the tutorial checks, with its expression, what it should
 > do, and its status. Run 2026-11-03 at `2bd150e` by
-> `.venv/bin/python tutorial/tutorial.py`: **100 ✓ · 13 ✗ · 2 ?** (115 lessons; R10b, R11, R13–R16, A4b, A4c, A7, V10 and V11 since 2026-11-03's first run).
+> `.venv/bin/python tutorial/tutorial.py`: **101 ✓ · 13 ✗ · 2 ?** (116 lessons; R10b, R11, R13–R16, A4b, A4c, A7, V2b, V10 and V11 since 2026-11-03's first run).
 > ✓ does what we want · ✗ doesn't yet · ? not decided. The reasoning is in
 > [README.md](README.md).
 >
@@ -60,6 +60,7 @@
 | V1 | `map` | `to_f[mod.map()](wf["v"])` | one value per row | ✓ | |
 | V1b | Output column name | same | column named `f`, after its step | ✗ | named `value`. Planned S4 (D9) |
 | V2 | `filter` | `hot[mod.filter()](wf["v"])` | the rows the test approves, all their columns | ✓ | |
+| V2b | `filter`, no tool, several columns | `op("identity")[mod.filter()](wf["v"])` | refused, writing `wf["v"][cols["a"] == True]` | ✓ | fixed 2026-11-03 (C5): kept every row, a whole row being always true |
 | V3 | `expand` | `two[mod.expand()](wf["v"])` | one row per item; lineage `#v`, `#v.idx` | ✓ | |
 | V4 | `collapse(by=)` | `mean_t[mod.collapse(by="ward")](wf["v"])` | one row per ward, the key kept; `#v` lists the members | ✓ | |
 | V5 | Accumulator | `add[mod.collapse(initial=0.0)](wf["v"])` | 112.4 | ✓ | the tool's first parameter is `acc` |

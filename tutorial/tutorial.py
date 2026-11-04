@@ -299,6 +299,10 @@ def ch4():
     s = put(k, "auto_f", hot(wf["v"]))
     lesson("V8b", "no verb written, a -> bool tool: a map of bools, never a filter (D20b)",
            len(s.data), 3, "inferred as filter: a bare call drops rows. D20b decided 2026-11-02")
+    s = put(k, "idf", op("identity")[mod.filter()](wf["v"]))
+    lesson("V2b", "a filter with no tool on several columns is refused, pointing to a pick",
+           (s.state, [p.code for p in s.problems]), ("invalid", ["missing_setting"]),
+           "kept every row: a whole row is always true (C5)")
     s = put(k, "two", to_f[mod.map(), mod.filter()](wf["v"]))
     lesson("V9", "one verb per step: two is refused", s.state, "invalid")
     s = put(k, "ax", to_f[mod.map(axis="columns")](wf["v"]))

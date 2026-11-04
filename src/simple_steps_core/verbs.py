@@ -196,6 +196,13 @@ def filter_(source: Any, fn: Callable) -> Output:
     ``meta["excluded"]``.
     """
     frame = rows(source)
+    names_ = variables(frame.columns)
+    if is_identity(fn) and VALUE_COLUMN not in names_ and len(names_) > 1 \
+            and "column" not in _literals(fn):
+        # C5: with no tool, identity would hand over the whole row, which is
+        # always true: every row would stay. Say which column is the test.
+        raise ValueError(_filter_which(names_, (source.meta.get("name") if isinstance(
+            source, Output) else None) or "the input"))
     blocked = _upstream_failures(source)
     keep, records = [], []
     for index, row in _units(frame, _absent_of(source)):
@@ -526,6 +533,14 @@ def _expand_which(names: list, sid: str, lists: list | None = None) -> str:
     pick = (lists or names)[0]
     return (f"expand with no tool unpacks one column, and {sid!r} has "
             f"{', '.join(map(str, names))}: name it, mod.expand(columns=[{pick!r}])")
+
+
+def _filter_which(names: list, sid: str, flags: list | None = None) -> str:
+    """Why a filter with no tool is refused on several columns (C5)."""
+    pick = (flags or names)[0]
+    return (f"filter with no tool keeps the rows whose one column is true, and {sid!r} has "
+            f"{', '.join(map(str, names))}: pick rows by a condition, "
+            f"wf[{sid!r}][cols[{pick!r}] == True], or give the filter a tool")
 
 
 def _id_index(ids: list) -> pd.Index:

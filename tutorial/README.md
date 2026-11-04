@@ -3,7 +3,7 @@
 > A walkthrough of what the library is for, what it refuses to do, and why,
 > one part at a time. Every claim is a lesson in [tutorial.py](tutorial.py),
 > run against the code: `.venv/bin/python tutorial/tutorial.py`. Written
-> 2026-11-03: 115 lessons, **100 ✓ · 13 ✗ · 2 ?**. What the app
+> 2026-11-03: 116 lessons, **101 ✓ · 13 ✗ · 2 ?**. What the app
 > asked for is checked by [handover.py](handover.py) (§5), and everything at
 > once by `scripts/sweep.py` (§6). The rules in full are in
 > [docs/design/model.md](../docs/design/model.md).
@@ -279,7 +279,7 @@ core-asks probe (`--stress` adds the property test at 2,000 examples). Run
 | Suite | Result |
 |---|---|
 | tests | 783 passed, 1 skipped, 27 xfailed |
-| tutorial.py | 115 lessons: 100 ✓ · 13 ✗ · 2 ? |
+| tutorial.py | 116 lessons: 101 ✓ · 13 ✗ · 2 ? |
 | handover.py | 59 checks: 51 ✓ · 6 ✗ · 2 ? |
 | both examples | run |
 | core_asks.py | 36 of 39 done |

@@ -634,7 +634,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
 
     # 6b'''. widen and expand(columns=), checked when the input's columns are
     #        known (C1, decisions.md §0); unknown types are left to the run.
-    if verb is not None and verb.kind in ("widen", "expand") and workflow is not None \
+    if verb is not None and verb.kind in ("widen", "expand", "filter") and workflow is not None \
             and operation.input is not None and not workflow._columns_open(operation):
         available = variables(workflow._known_columns(operation))
         types = workflow._column_types(operation)
@@ -673,6 +673,10 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             lists = [c for c in available if (typing.get_origin(types.get(c)) or types.get(c))
                      in (list, tuple)]
             problems.append(Problem(_expand_which(available, sid, lists), "missing_setting"))
+        if verb.kind == "filter" and is_identity(fn) and "column" not in (operation.arguments or {}) \
+                and VALUE_COLUMN not in available and len(available) > 1:
+            flags = [c for c in available if types.get(c) is bool]
+            problems.append(Problem(_filter_which(available, sid, flags), "missing_setting"))
         if verb.kind == "expand" and named_ and "key" in available and "key" not in named_ \
                 and _unpacks(operation, named_, workflow) == "mapping":
             problems.append(Problem(
@@ -2091,5 +2095,5 @@ from .values import (  # noqa: E402
     _type_name,
     _value_fits,
 )
-from .verbs import _expand_which  # noqa: E402
+from .verbs import _expand_which, _filter_which  # noqa: E402
 from .workflow import Workflow  # noqa: E402

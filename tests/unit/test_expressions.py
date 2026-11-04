@@ -325,6 +325,21 @@ def test_no_value_means_one_thing_in_every_verb():
     assert got[0] == 1.0 and pd.isna(got[1]) and got[2] == 0.0      # Cy's gap: the default
 
 
+def test_a_filter_with_no_tool_names_its_column_when_there_are_several():
+    # C5: identity handed over the whole row, which is always true, so every
+    # row stayed. Refused, pointing to a pick by a condition; one column works.
+    k = Kernel(Catalog([]))
+    k["s"] = pd.DataFrame({"a": [True, False], "b": [0, 0]})
+    k["flags"] = pd.DataFrame({"flag": [True, False]})
+    k["all"] = op("identity")[mod.filter()](wf["s"])
+    assert [(p.code, "wf['s'][cols['a'] == True]" in p.message)
+            for p in k.step("all").problems] == [("missing_setting", True)]
+    del k["all"]
+    k["kept"] = op("identity")[mod.filter()](wf["flags"])
+    k.run_all()
+    assert values(k, "kept", "flag") == [True]
+
+
 @pytest.mark.xfail(strict=True, reason="S7 (D33): melt and pivot")
 def test_E25_melt_then_pivot_gives_back_the_table():
     k = Kernel(Catalog([]))
