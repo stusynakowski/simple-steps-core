@@ -418,6 +418,29 @@ def _redeclare(k: Kernel, name: str, expression) -> bool:
 @pytest.mark.no_invariants
 @SETTINGS
 @given(grids(), grids(), chains(), st.integers(0, 999), st.integers(0, 999))
+# a source put back by its tool came back from the store, and a pick the edit
+# had rewritten to follow its row stayed rewritten (found by D-picks)
+@example(frame=pd.DataFrame({"k": list("AAACA"), "n": pd.array([pd.NA] * 5, dtype="Int64"),
+                             "tags": [None, None, None, None, [2, 3, 0]],
+                             "rec": [{"a": None, "b": None}, {"a": None, "b": 4}, {"b": 5, "a": None},
+                                     {}, {"a": 6}]}),
+         changed=pd.DataFrame({"k": list("CCABB"), "n": pd.array([pd.NA, pd.NA, pd.NA, -1, 0], dtype="Int64"),
+                               "tags": [None, [0, 4], None, [3], None],
+                               "rec": [{}, {"a": 8}, {"a": None}, {"a": None}, {"b": None}]}),
+         chain=[(187, 77, 160, 20), (938, 248, 373, 250), (307, 413, 500, 644),
+                (121, 565, 323, 665), (416, 99, 843, 352), (275, 238, 98, 281)],
+         which=126, other=86)
+# a condition written on an empty source, `row["s0"] == 0`, was read as a pick
+# of the row a later edit added, and gone when the source was put back
+@example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
+         changed=pd.DataFrame({"k": ["A"], "n": pd.array([pd.NA], dtype="Int64"), "tags": [None], "rec": [{}]}),
+         chain=[(309, 0, 0, 0)], which=0, other=0)
+# new data with an index of its own ("a") put back by the tool: core's ids and
+# the user's labels were compared, and the pick was read as gone
+@example(frame=pd.DataFrame({"k": ["A"], "n": pd.array([pd.NA], dtype="Int64"), "tags": [None], "rec": [{}]}),
+         changed=pd.DataFrame({"k": ["A"], "n": pd.array([pd.NA], dtype="Int64"), "tags": [None], "rec": [{}]},
+                              index=["a"]),
+         chain=[(649, 0, 0, 0)], which=0, other=0)
 # a pick turned invalid at run left a collapse grouped by its rows completed:
 # re-checks after a run followed only direct inputs (found by ST8)
 @example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]), changed=pd.DataFrame(columns=["k", "n", "tags", "rec"]),

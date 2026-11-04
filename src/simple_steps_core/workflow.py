@@ -22,6 +22,19 @@ import pandas as pd
 _GONE = object()          # a picked row that is gone (D-picks)
 
 
+def _name_problem(name: Any) -> str | None:
+    """Why *name* can't name a step (core-asks L47), or None. A `.` separates
+    a lineage column's parts (`#r.2`) and `#` starts core's own columns."""
+    if not isinstance(name, str) or not name:
+        return f"a step name must be a non-empty string, got {name!r}"
+    if "." in name:
+        return (f"a step name can't contain '.', which separates a lineage column's "
+                f"parts (#r.2): write {name.replace('.', '_')!r}")
+    if name.startswith("#"):
+        return f"a step name can't start with '#', which starts core's row columns: write {name.lstrip('#')!r}"
+    return None
+
+
 class Workflow:
     """Ordered Steps. Assign an Operation, get a Step that is already staged.
 
@@ -176,12 +189,12 @@ class Workflow:
         the user's identity."""
         out = self.steps[step_id].output
         data = out.data
-        if out.meta.get("empty") or before.meta.get("staged") or before.meta.get("empty") \
-                or not isinstance(data.index, pd.RangeIndex) or data.index.start != 0 \
-                or data.index.step != 1:
+        if out.meta.get("empty") or before.meta.get("staged") or before.meta.get("empty"):
             return
         old = before.data
-        if not pd.api.types.is_integer_dtype(old.index):
+        if not isinstance(data.index, pd.RangeIndex) or data.index.start != 0 \
+                or data.index.step != 1 or not pd.api.types.is_integer_dtype(old.index):
+            self._follow_rows(step_id, old, data)       # an index of its own: by its labels
             return
         columns = list(data.columns)
         memory = before.meta.get("rows_seen") or {}
@@ -217,12 +230,30 @@ class Workflow:
         out.meta["rows_seen"] = memory
         out.meta["next_row_id"] = fresh               # never given again, even after a delete
         out.meta["version"] = _data_version(data)
-        after = data.index
+        self._follow_rows(step_id, old, data, same)
+
+    def _follow_rows(self, source: str, old: pd.DataFrame, new: pd.DataFrame,
+                     same: set | None = None) -> None:
+        """*source* shows *new* where it showed *old*: each row number a step
+        names into it follows its row, by id (D-picks), however the rows came:
+        data assigned, its tool run again, or a result back from the store (an
+        undo). *same*: the ids whose rows are unchanged, if not every id kept."""
+        if old.index.equals(new.index) or \
+                pd.api.types.is_integer_dtype(old.index) != pd.api.types.is_integer_dtype(new.index):
+            # the same rows; or core's ids against labels of the user's own,
+            # which can't be compared: picks stay as written (W3)
+            if self._gone:
+                self._restore_picks(source)
+            return
+        after = new.index
 
         def number(n: int) -> Any:                     # its row number before -> now
             row_id = _plain(old.index[n])
-            return after.get_loc(row_id) if row_id in same else _GONE
-        self._follow_picks(step_id, len(old), number, old)
+            kept = row_id in after if same is None else row_id in same
+            return after.get_loc(row_id) if kept else _GONE
+        self._follow_picks(source, len(old), number, old)
+        if self._gone:
+            self._restore_picks(source)
 
     def _restore_picks(self, source: str) -> None:
         """A pick whose row of *source* is back (an undo, or the row given
@@ -247,8 +278,8 @@ class Workflow:
                       shown: pd.DataFrame, only: str | None = None) -> None:
         """Rewrite each row number of *source* a step names with *number*: its
         row's number now (D-picks), for a pick straight into it
-        (``wf["p"][1]``) and a condition on its rows anywhere later
-        (``row["p"] == 1``). A row that is gone (deleted, or edited while rows
+        (``wf["p"][1]``) and a pick core saved as its rows' lineage anywhere
+        later (``rows[row["p"] == 1]``). A row that is gone (deleted, or edited while rows
         were added or deleted too, so it can't be told apart) can't be written:
         the step is ``invalid``, naming it, until it is given a new pick or the
         row comes back. A negative number, a range or a comparison picks
@@ -269,21 +300,24 @@ class Workflow:
                 return value
             return now if isinstance(value, list) else now[0]
 
-        def follow(value: Any, direct: bool) -> Any:
+        def follow(value: Any, direct: bool, picked: bool = False) -> Any:
+            # *picked*: inside a pick core saved as its rows' lineage (`named`),
+            # which names rows; a condition someone wrote tests positions
             if direct and (isinstance(value, int) and not isinstance(value, bool)
                            or isinstance(value, list) and value
                            and all(isinstance(v, int) and not isinstance(v, bool) for v in value)):
                 return numbers(value)
             if isinstance(value, dict):
                 on = value.get("on")
-                if isinstance(on, dict) and on.get("row") == source and not on.get("idx") \
-                        and value.get("test") in ("==", "in"):
+                if picked and isinstance(on, dict) and on.get("row") == source \
+                        and not on.get("idx") and value.get("test") in ("==", "in"):
                     now = numbers(value.get("value"))
                     return value if now is value.get("value") else {**value, "value": now}
-                out = {k: follow(v, False) for k, v in value.items()}
+                inner = picked or value.get("named") is True
+                out = {k: follow(v, False, inner) for k, v in value.items()}
                 return value if all(out[k] is value[k] for k in value) else out
             if isinstance(value, (list, tuple)):
-                out = [follow(v, False) for v in value]
+                out = [follow(v, False, picked) for v in value]
                 return value if all(a is b for a, b in zip(out, value)) else type(value)(out)
             return value
 
@@ -373,6 +407,8 @@ class Workflow:
     def __setitem__(self, step_id: str, operation: Any) -> None:
         _check_caller_scope()
         existed = step_id in self.steps
+        if not existed and _name_problem(step_id):
+            raise ValueError(_name_problem(step_id))
         # The app's additions stay with the step when it is re-declared.
         kept_extras = self.steps[step_id].extras if existed else {}
         operation = self._as_operation(operation)
@@ -629,8 +665,8 @@ class Workflow:
         """
         if old not in self.steps:
             raise KeyError(f"no step {old!r}; have {list(self.steps)}")
-        if not isinstance(new, str) or not new:
-            raise ValueError("a step id must be a non-empty string")
+        if _name_problem(new):
+            raise ValueError(_name_problem(new))
         if new == old:
             return
         if new in self.steps:
@@ -937,8 +973,12 @@ class Workflow:
                     self._restage_after(sid)    # readers checked against what it shows
                 continue
             restored = found is not st.output
+            shown = st.output
             st.output = found
             found.meta.pop("edited", None)
+            if restored and self._kind(sid) == "source" and not shown.meta.get("staged") \
+                    and not shown.meta.get("empty"):
+                self._follow_rows(sid, shown.data, found.data)     # D-picks, on an undo
             if restored:
                 # its readers were re-checked against what it showed before:
                 # check them again against the result it holds now
@@ -2482,8 +2522,11 @@ class Workflow:
         read_stale = {name: self.steps[name].output.meta.get("stale_reason")
                       for name in read if name in self.steps
                       and self.steps[name].output.meta.get("stale")}
+        before = step.output
         result = self._run_step(step_id, tools, resources)
         out = self.steps[step_id].output
+        if out is not before and self._kind(step_id) == "source":
+            self._keep_row_ids(step_id, before)           # its tool gave new rows: D-picks
         if not out.meta.get("staged"):
             out.meta["version"] = _data_version(out.data)
             out.meta["run_key"] = self.run_key(step_id, read)

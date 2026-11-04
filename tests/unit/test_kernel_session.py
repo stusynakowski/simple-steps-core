@@ -300,3 +300,13 @@ def test_remove_refuses_a_step_that_is_read_unless_forced(k13):
     f = k13.step("f")
     assert f.state == "invalid" and any("sick" in str(p) for p in f.problems)
     assert [p.code for p in k13.step("g").problems] == ["invalid_input"]
+
+
+def test_a_step_name_with_a_dot_or_a_hash_is_refused(k):
+    with pytest.raises(ValueError, match="can't contain '.'.*write 'a_b'"):
+        k["a.b"] = to_f_i[mod.map()](wf["p"])
+    with pytest.raises(ValueError, match="can't start with '#'"):
+        k["#x"] = to_f_i[mod.map()](wf["p"])
+    with pytest.raises(ValueError, match="can't contain '.'"):
+        k.rename("f", "f.2")
+    assert "a.b" not in k and "f" in k

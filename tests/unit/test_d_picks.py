@@ -115,3 +115,38 @@ def test_a_renamed_step_keeps_its_gone_pick(k):
     k["p"] = people("Al", "Cy")
     k.rename("one", "uno")
     assert [p.code for p in k.step("uno").problems] == ["row_gone"]
+
+
+def _loaded():
+    """A source whose tool reads a 'file' that the test changes."""
+    from simple_steps_core import tool
+    file = {"rows": people("Al", "Ben", "Cy")}
+
+    @tool
+    def load_people() -> pd.DataFrame:
+        return file["rows"].copy()
+
+    k = Kernel(Catalog(tools=[load_people]))
+    k["p"] = load_people[mod.source()]()
+    k["one"] = wf["p"][1]                                # Ben
+    k.run_all()
+    return k, file, load_people
+
+
+def test_a_source_tool_run_on_new_data_keeps_the_pick_on_its_row():
+    k, file, _ = _loaded()
+    file["rows"] = people("Zed", "Al", "Ben", "Cy")
+    k.run("p")
+    assert k.step("one").formula == 'wf["p"][2]'
+    k.run_all()
+    assert names(k, "one") == ["Ben"]
+
+
+def test_a_source_put_back_by_its_tool_puts_the_pick_back():
+    k, _, load = _loaded()
+    held = k.step("one").output
+    k["p"] = people("Zed", "Al", "Ben", "Cy")             # the pick follows Ben to 2
+    assert k.step("one").formula == 'wf["p"][2]'
+    k["p"] = load[mod.source()]()                       # back: its result is in the store
+    assert k.step("one").formula == 'wf["p"][1]'
+    assert k.step("one").state == "completed" and k.step("one").output is held

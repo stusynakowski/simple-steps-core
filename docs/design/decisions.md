@@ -173,11 +173,13 @@ failure needing a new decision were reverted and pinned in
 | | Choice | Taken | Piece |
 |---|---|---|---|
 | W1 | A value edited in a picked row: D-picks says the row is gone; core-asks L41a says the pick follows it | **follows it**, when the edit is in place (as many rows left over on each side, paired in order): the core asks lead (N4), L41a passed before, and C25's per-row staleness needs the same pairing. Gone only when rows were added or deleted too, so the edited row can't be told apart | D-picks |
-| W2 | Which picks follow their row | a row number (`wf["p"][1]`, `[[0, 2]]`) and `row["p"] == n` / `in`; **not** a negative number, a range or a comparison (`row["p"] < 3`), which mean positions | D-picks |
+| W2 | Which picks follow their row | a row number (`wf["p"][1]`, `[[0, 2]]`) and the lineage form core saves a pick as (`rows[row["p"] == n]`, marked `named`); **not** a negative number, a range, a comparison (`row["p"] < 3`), or a condition someone wrote on row numbers (`(row["p"] == 0) \| …`), which test positions (L40d found one written on an empty source, read as a pick of a row added later) | D-picks |
 | W3 | A source with an index of its own (`set_axis(["a", "b"])`) | left alone: its index is its identity | D-picks |
 | W4 | A gone pick, when its row comes back (an undo, or the row given again) | the pick follows it again and the step is valid; a source remembers every row it has seen, so undo is free (L40d) | D-picks |
 | W5 | The laws L40c, L40e, L40f compared row ids with a fresh kernel's | they compare what is shown: values, and lineage as row numbers (ids are never shown, CA-B1, and a source keeps them across an edit). L40c and L40f's fresh kernel holds the workflow as it is after the edit, picks rewritten; L40e compares two orders only when they end with the same workflow (a pick written before a data change follows its row; after, it is read on the new data) | D-picks |
 | W6 | Which steps get a stale warning, now staleness isn't passed down | the stale step (`stale`), and each step that read it directly (`read_stale`, naming it); not steps further on, which read data that hasn't changed. What the app's toolbar maps (L8) | SS7 |
+| W7 | A step's name refused (core-asks L47) | a `.` (it separates lineage parts, `#r.2`) and a leading `#` (core's row columns), when declared and when renamed, writing a name that works (`a_b`); other names are kept (D3, CA-E: keys needn't be identifiers) | S4 |
+| W9 | **Open, found by L40d**: a condition on a *derived* step's row numbers (`row["s1_r"] == 0`, where `s1_r` keeps the source's rows) isn't rewritten when the source's rows move; only the source's own numbers are. Undo is still free (the rewrite is undone with the source) | left open: rewriting it needs each step's row map (PL2, later L6) | D-picks |
 
 ## 1. How to answer
 

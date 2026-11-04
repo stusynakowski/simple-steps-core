@@ -395,3 +395,105 @@ changed=   k     n  tags          rec
 chain=[(205, 0, 0, 0)],
 )
 ```
+
+## 2026-11-04 · `test_L40d_undo_is_free` · at `a9c7c54`
+
+- **Broke:** see the test output
+- **Status:** fixed (D-picks, follow-up): a source put back by its tool came back from the store, and a pick the edit had rewritten stayed rewritten. Picks now follow a source's rows however they change (data assigned, its tool run again, a result from the store); the example is pinned in L40d
+
+```
+no example printed
+```
+
+## 2026-11-04 · `test_L40d_undo_is_free` · at `a9c7c54`
+
+- **Broke:** see the test output
+- **Status:** fixed (D-picks, follow-up): a source put back by its tool came back from the store, and a pick the edit had rewritten stayed rewritten. Picks now follow a source's rows however they change (data assigned, its tool run again, a result from the store); the example is pinned in L40d
+
+```
+no example printed
+```
+
+## 2026-11-04 · `test_L40d_undo_is_free` · at `a9c7c54`
+
+- **Broke:** AssertionError: ('source put back', 's3', 'completed', 'invalid')
+- **Status:** fixed (D-picks): picks now follow a source's rows when its result comes back from the store; pinned in L40d
+
+```
+test_L40d_undo_is_free(
+frame=   k     n       tags                     rec
+0  A  <NA>       None  {'a': None, 'b': None}
+1  A  <NA>       None     {'a': None, 'b': 4}
+2  A  <NA>       None     {'b': 5, 'a': None}
+3  C  <NA>       None                      {}
+4  A  <NA>  [2, 3, 0]                {'a': 6},
+changed=   k     n    tags          rec
+0  C  <NA>    None           {}
+1  C  <NA>  [0, 4]     {'a': 8}
+2  A  <NA>    None  {'a': None}
+3  B    -1     [3]  {'a': None}
+4  B     0    None  {'b': None},
+chain=[(187, 77, 160, 20),
+(938, 248, 373, 250),
+(307, 413, 500, 644),
+(121, 565, 323, 665),
+(416, 99, 843, 352),
+(275, 238, 98, 281)],
+which=126,
+other=86,
+)
+```
+
+## 2026-11-04 · `test_L40d_undo_is_free` · at `a9c7c54` · STRESS=1
+
+- **Broke:** AssertionError: ('source put back', 's1', 'completed', 'invalid')
+- **Status:** fixed (D-picks): a condition someone wrote on row numbers tests positions, and isn't rewritten as a pick; pinned in L40d (W2)
+
+```
+test_L40d_undo_is_free(
+# The test always failed when commented parts were varied together.
+frame=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],
+changed=   k     n  tags rec
+0  A  <NA>  None  {},
+chain=[(309, 0, 0, 0)],
+which=0,  # or any other generated value
+other=0,  # or any other generated value
+)
+```
+
+## 2026-11-04 · `test_L40d_undo_is_free` · at `a9c7c54`
+
+- **Broke:** AssertionError: ('source put back', 's1', 'completed', 'invalid')
+- **Status:** fixed (D-picks): new data with an index of its own, put back by its tool: core's ids and the user's labels can't be compared, so picks stay as written (W3); pinned in L40d
+
+```
+test_L40d_undo_is_free(
+# The test always failed when commented parts were varied together.
+frame=   k     n  tags rec
+0  A  <NA>  None  {},
+changed=   k     n  tags rec
+a  A  <NA>  None  {},
+chain=[(649, 0, 0, 0)],
+which=0,  # or any other generated value
+other=0,  # or any other generated value
+)
+```
+
+## 2026-11-04 · `test_L40d_undo_is_free` · at `a9c7c54` · STRESS=1
+
+- **Broke:** AssertionError: ('source put back', 's1', 'completed', 'invalid')
+- **Status:** fixed (D-picks): new data with an index of its own, put back by its tool: core's ids and the user's labels can't be compared, so picks stay as written (W3); pinned in L40d
+
+```
+test_L40d_undo_is_free(
+frame=   k     n  tags rec
+0  A  <NA>  None  {},
+changed=   k     n  tags rec
+a  A  <NA>  None  {},
+chain=[(649, 0, 0, 0)],
+which=0,
+other=0,
+)
+```
