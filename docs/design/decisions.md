@@ -120,6 +120,25 @@ Images and files make a copy per step impossible.
 |---|---|---|---|
 | **ST** | **A step stores only what it adds; everything is filed by content.** (1) Each output is a **row map** (for each row, the input row it came from: one integer; none when the rows are the input's in order) plus **the columns it makes**. A column it carries stays with the step that made it, read back through the row maps, and gathered into memory only for the columns a tool is bound to. (2) **Columns are filed by content hash**, so a column is stored once however many steps and runs hold it. (3) **A large value (an image, a file, a big array) is a media handle**: its content hash, type, size and a preview, the bytes kept once in a blob store (memory up to a limit, then a folder or a bucket) and loaded only when a tool reads it or the view shows it. Its data version is its hash (D57). (4) **A result is a run key → a row map and column hashes**, so keeping earlier results for SM (undo, stale values shown) costs little. (5) **A memory budget**: keep each step's current result and its last few; drop any column or blob nothing points to; the app sets its own budget. The view shows every carried column, as today; none of this appears in an expression or the UI. Is SM's store, and brings in **E-D1**, **K22** (several results per step) and **R7** (media handles); the row map is the one link back per row that lineage needs (observations F1, H3) | every step that keeps rows copies them all; one result per step; no media handles | **yes**: owner, 2026-11-03. Lands with SM (plan step S11) in pieces: compact row fingerprints (**done**, 211 → 54 MB above); `select` and `drop` sharing the columns they keep (**done**, 54 → 40 MB); row maps and carried columns (no behaviour change, the tests green); then the content store; then media handles |
 
+**Storage, loosened** (owner, 2026-11-03). Correctness first: each result is
+kept as a plain copy, filed by run key; row maps, columns filed by content,
+data built on read and media handles wait until memory asks for them. A copy
+shares unchanged columns (pandas' copy-on-write) and the objects in object
+columns (an image cell is the same object after `.copy()`: checked). The one
+way the store can go wrong is a run key matching the wrong result, shown
+`completed`; these hold it off:
+
+| | Must hold | Status |
+|---|---|---|
+| ST1 | A data version never collides: different data, different version; a value with no content hash gets a version of its own each run, never reused, and the step says so | **done 2026-11-03**: an unpicklable object whose `repr` hid its contents (`<Model>`) shared one version; now unique, with *"Model has no stable version: … give Model a data_version()"* (D57) |
+| ST2 | A run key covers all that changes an output: the step's spec (expression, tool code, names), each input's data version, resource versions | the parts exist; next |
+| ST3 | A tool that reads the outside world is never reused blindly | **owner, 2026-11-03: it re-runs every time until an "as of" is designed (D43–D46). Later: a lazy re-run, kept until asked to refresh, so it isn't recomputed needlessly** |
+| ST4 | A filed result is never changed: a test hashes it when filed and when read | to do, with ST2 |
+| ST5 | States come only from the workflow and the store (SM) | to do: fixes S5–S9 |
+| ST6 | `run(x)` makes `x` current, computing missing keys in order (C9) | to do |
+| ST7 | One store per kernel; keep each step's current result and its last few; dropping one only costs a re-run | to do |
+| ST8 | The laws: any order of edits ends where a fresh kernel would; undo is free (L40c, extended) | to do |
+
 The two wrong answers, **D-picks** (P15, silent) and **SM** (S5: `completed`
 on a stale input, with a warning), come before all of these: neither depends
 on grammar, and both break the rule that an expression means what it shows.

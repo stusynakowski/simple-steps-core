@@ -2111,6 +2111,15 @@ class Workflow:
         out = self.steps[step_id].output
         if not out.meta.get("staged"):
             out.meta["version"] = _data_version(out.data)
+            unversioned = _unversioned(out.data)
+            if unversioned:                       # D57: said, with the fix
+                names = ", ".join(unversioned)
+                self.steps[step_id].warnings = tuple(dict.fromkeys([
+                    *self.steps[step_id].warnings,
+                    Problem(f"{names} {'has' if len(unversioned) == 1 else 'have'} no stable "
+                            f"version: the steps that read {step_id!r} re-run each time; "
+                            f"give {unversioned[0]} a data_version()", "run_warning",
+                            step=step_id, severity="warning")]))
             if not (step.operation.shape_verb and step.operation.shape_verb.kind == "source"
                     and is_identity(step.operation.fn)):
                 out.meta["read"] = read
@@ -2692,6 +2701,7 @@ from .output import (  # noqa: E402
     Output,
     ROW_ID,
     _data_version,
+    _unversioned,
     _failed_output,
     _str_columns,
     _uncaught_failure,

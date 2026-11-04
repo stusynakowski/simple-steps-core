@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 import pickle
+import secrets
 import numbers
 import pandas as pd
 
@@ -472,9 +473,10 @@ def _data_version(data: pd.DataFrame) -> str:
 _PLAIN = (str, numbers.Number, bytes, type(None))
 
 
-def _stable_cells(data: pd.DataFrame) -> pd.DataFrame:
+def _stable_cells(data: pd.DataFrame, unversioned: set | None = None) -> pd.DataFrame:
     """*data* with each object cell that isn't a plain value as a stable token,
-    so equal objects hash equal across runs (B10, D57). Plain cells are kept."""
+    so equal objects hash equal across runs (B10, D57). Plain cells are kept.
+    The types that have no stable token are added to *unversioned*."""
     out = None
     for column in data.columns:
         series = data[column]
@@ -482,35 +484,61 @@ def _stable_cells(data: pd.DataFrame) -> pd.DataFrame:
             continue
         out = data.copy() if out is None else out
         out[column] = [v if isinstance(v, _PLAIN) else
-                       json.dumps(_stable(v), sort_keys=True, default=repr) for v in series]
+                       json.dumps(_stable(v, unversioned=unversioned), sort_keys=True,
+                                  default=repr) for v in series]
     return data if out is None else out
 
 
-def _stable(value: Any, depth: int = 0) -> Any:
+def _unversioned(data: pd.DataFrame) -> list[str]:
+    """The types in *data* with no stable version: each run gives them a new
+    one, so the steps that read them never count as up to date (D57)."""
+    found: set = set()
+    _stable_cells(data, found)
+    return sorted(found)
+
+
+def _stable(value: Any, depth: int = 0, unversioned: set | None = None) -> Any:
     """A value as plain data that stays the same while the value does (D57): its
     own ``data_version()``, else its fields (a dataclass, a plain object), else a
-    hash of its pickle. Containers recursively."""
-    if isinstance(value, _PLAIN) or depth > 20:
-        return value if isinstance(value, _PLAIN) else repr(value)
+    hash of its pickle. Containers recursively.
+
+    **Never two values with one token.** A value none of these can read gets a
+    token of its own each time, so it never matches anything, itself included:
+    a step that reads it re-runs, which costs time but is never wrong. Its type
+    goes into *unversioned*. (Its ``repr`` would collide: ``<Model>`` for any
+    model.)"""
+    if isinstance(value, _PLAIN):
+        return value
+    kind = f"{type(value).__module__}.{type(value).__qualname__}"
+    if depth > 20:
+        return _pickled(value, kind, unversioned)
     if isinstance(value, Mapping):
-        return {str(k): _stable(v, depth + 1) for k, v in value.items()}
+        return {str(k): _stable(v, depth + 1, unversioned) for k, v in value.items()}
     if isinstance(value, (list, tuple, set, frozenset)):
-        items = [_stable(v, depth + 1) for v in value]
+        items = [_stable(v, depth + 1, unversioned) for v in value]
         return sorted(items, key=repr) if isinstance(value, (set, frozenset)) else items
     from .catalog import data_version       # catalog imports output: not at the top
-    kind = f"{type(value).__module__}.{type(value).__qualname__}"
     version = data_version(value)
     if version is not None:
         return {"type": kind, "version": version}
     if dataclasses.is_dataclass(value):
-        return {"type": kind, **{f.name: _stable(getattr(value, f.name), depth + 1)
+        return {"type": kind, **{f.name: _stable(getattr(value, f.name), depth + 1, unversioned)
                                  for f in dataclasses.fields(value)}}
     if type(value).__repr__ is object.__repr__ and hasattr(value, "__dict__"):
-        return {"type": kind, **{k: _stable(v, depth + 1) for k, v in vars(value).items()}}
+        return {"type": kind, **{k: _stable(v, depth + 1, unversioned)
+                                 for k, v in vars(value).items()}}
+    return _pickled(value, kind, unversioned)
+
+
+def _pickled(value: Any, kind: str, unversioned: set | None) -> dict:
+    """A hash of *value*'s pickle, or, when it can't be pickled, a token of its
+    own (see :func:`_stable`)."""
     try:
         return {"type": kind, "pickle": hashlib.sha1(pickle.dumps(value)).hexdigest()}
     except Exception:
-        return repr(value)
+        if unversioned is not None:
+            unversioned.add(kind.rsplit(".", 1)[-1])
+        return {"type": kind, "unversioned": secrets.token_hex(8)}
 
 
 def _failed_output(operation: Any, error: str, where: str | None = None) -> "Output":

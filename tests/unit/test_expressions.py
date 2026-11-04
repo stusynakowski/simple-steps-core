@@ -417,6 +417,45 @@ def test_B10_an_objects_version_is_its_own_then_its_fields():
     assert version(Scan(1)) == version(Scan(1)) != version(Scan(2))
 
 
+def test_two_different_values_never_share_a_version():
+    # A run key matching the wrong result would show it as completed. An object
+    # that can't be pickled, whose repr hides what's in it, used to version by
+    # its repr: <Model> for every model. Now it gets a version of its own each
+    # time, and the step says so; data_version() makes it stable.
+    import threading
+
+    from simple_steps_core.output import _data_version
+
+    class Model:
+        def __init__(self, w):
+            self.w, self.lock = w, threading.Lock()
+
+        def __repr__(self):
+            return "<Model>"
+
+    class Versioned(Model):
+        def data_version(self):
+            return f"w{self.w}"
+
+    def version(cell):
+        return _data_version(pd.DataFrame({"c": [cell]}))
+
+    assert version(Model(1)) != version(Model(2))
+    assert version(Model(1)) != version(Model(1))        # never reused: it re-runs
+    assert version(Versioned(1)) == version(Versioned(1)) != version(Versioned(2))
+
+    @tool
+    def fit(n: int) -> object:
+        return Model(n)
+    k = Kernel(Catalog([fit]))
+    k["v"] = pd.DataFrame({"n": [1]})
+    k["m"] = fit[mod.map()](wf["v"])
+    k.run_all()
+    assert [w.message for w in k.step("m").warnings] == [
+        "Model has no stable version: the steps that read 'm' re-run each time; "
+        "give Model a data_version()"]
+
+
 def test_B11_a_change_to_a_passed_through_column_makes_the_step_stale():
     k = Kernel(Catalog([key_pp]))
     k["s0"] = pd.DataFrame({"k": ["A"], "n": [1]})
