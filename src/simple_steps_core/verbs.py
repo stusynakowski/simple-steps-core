@@ -119,52 +119,48 @@ def _unwrap(value: Any) -> tuple[Any, str | None]:
     return value, None
 
 
-def _call(fn: Callable, arg: dict, retries: int) -> tuple[Any, dict]:
+def _call(fn: Callable, arg: dict) -> tuple[Any, dict]:
     """Run *fn* for one unit, returning (value, ledger record).
 
     A ``mod.try_except`` failure is recorded with ``caught: True``: completed
     with its fallback value (the error kept), or failed without stopping the run.
+    Retrying is ``mod.retry``'s, which says how many attempts it made.
     """
     started = time.perf_counter()
-    attempt = 0
-    while True:
-        try:
-            value, caught = _unwrap(fn(arg))
-            if caught is not None:
-                return value, {"status": "completed",
-                               "error": f"caught {caught}; used the default",
-                               "attempts": attempt + 1, "caught": True,
-                               "seconds": round(time.perf_counter() - started, 6)}
-            return value, {"status": "completed", "error": None,
-                           "attempts": attempt + 1,
+    try:
+        value, caught = _unwrap(fn(arg))
+        if caught is not None:
+            return value, {"status": "completed",
+                           "error": f"caught {caught}; used the default",
+                           "attempts": 1, "caught": True,
                            "seconds": round(time.perf_counter() - started, 6)}
-        except _Tolerated as exc:
-            cause = exc.__cause__
-            return None, {"status": "failed", "error": str(exc),
-                          "attempts": getattr(cause, "attempts", attempt + 1), "caught": True,
-                          "where": getattr(cause, "where", "tool"),
-                          "seconds": round(time.perf_counter() - started, 6)}
-        except _Stopped as exc:
-            # The breaker tripped earlier in this step: not run, nothing spent.
-            return None, {"status": "failed", "error": str(exc), "attempts": 0,
-                          "where": "breaker", "seconds": 0.0}
-        except Exception as exc:
-            if attempt >= retries:
-                # Where it failed (G7): the tool, or the layer that gave up on it.
-                return None, {"status": "failed",
-                              "error": f"{type(exc).__name__}: {exc}",
-                              "attempts": getattr(exc, "attempts", attempt + 1),
-                              "where": getattr(exc, "where", "tool"),
-                              "seconds": round(time.perf_counter() - started, 6),
-                              "traceback": traceback.format_exc()}
-            attempt += 1
+        return value, {"status": "completed", "error": None, "attempts": 1,
+                       "seconds": round(time.perf_counter() - started, 6)}
+    except _Tolerated as exc:
+        cause = exc.__cause__
+        return None, {"status": "failed", "error": str(exc),
+                      "attempts": getattr(cause, "attempts", 1), "caught": True,
+                      "where": getattr(cause, "where", "tool"),
+                      "seconds": round(time.perf_counter() - started, 6)}
+    except _Stopped as exc:
+        # The breaker tripped earlier in this step: not run, nothing spent.
+        return None, {"status": "failed", "error": str(exc), "attempts": 0,
+                      "where": "breaker", "seconds": 0.0}
+    except Exception as exc:
+        # Where it failed (G7): the tool, or the layer that gave up on it.
+        return None, {"status": "failed",
+                      "error": f"{type(exc).__name__}: {exc}",
+                      "attempts": getattr(exc, "attempts", 1),
+                      "where": getattr(exc, "where", "tool"),
+                      "seconds": round(time.perf_counter() - started, 6),
+                      "traceback": traceback.format_exc()}
 
 
 # ─────────────────────────────────────────────────────────────────────────
 # The verbs
 # ─────────────────────────────────────────────────────────────────────────
 def map_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
-         retries: int = 0, replace: bool = False,
+         replace: bool = False,
          where: Callable | None = None) -> Output:
     """``map`` — n rows in, n rows out: **only** *fn*'s result, one column.
 
@@ -189,7 +185,7 @@ def map_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
         elif test is not None and not _passes(test, row, index, skipped, records, values):
             continue
         else:
-            value, record = _call(fn, row, retries)
+            value, record = _call(fn, row)
         values.append(value)
         records.append(record)
 
@@ -234,7 +230,7 @@ def _plain_id(i: Any) -> Any:
     return i.item() if hasattr(i, "item") else i
 
 
-def filter_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
+def filter_(source: Any, fn: Callable) -> Output:
     """``filter`` — keep the rows where *fn* is truthy. Columns unchanged.
 
     Nothing is hidden: a row whose predicate **raised** stays, marked
@@ -253,7 +249,7 @@ def filter_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
             keep.append(True)
             records.append(record)
             continue
-        value, record = _call(fn, row, retries)
+        value, record = _call(fn, row)
         passed = record["status"] != "completed" or bool(value)
         keep.append(passed)
         records.append(record)
@@ -269,7 +265,7 @@ def filter_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
 
 
 def group_(source: Any, fn: Callable, *, name: str = "group",
-           retries: int = 0, replace: bool = False) -> Output:
+           replace: bool = False) -> Output:
     """``group`` — label each row with a key. n rows in, n rows out.
 
     The output is the input's rows and columns, on their row ids, plus the key
@@ -284,7 +280,7 @@ def group_(source: Any, fn: Callable, *, name: str = "group",
         if index in blocked:
             value, record = None, _blocked(*blocked[index])
         else:
-            value, record = _call(fn, row, retries)
+            value, record = _call(fn, row)
         keys.append(value)
         records.append(record)
 
@@ -446,7 +442,7 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
 
 
 def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
-            retries: int = 0, replace: bool = False,
+            replace: bool = False,
             columns: Sequence[str] | None = None, keep: bool = True) -> Output:
     """``unnest`` — each unit yields an iterable; results are concatenated.
 
@@ -486,7 +482,7 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
             out_rows.append({name: None})
             ids.append(_child_id(index, 0))
             continue
-        produced, record = _call(fn, arg, retries)
+        produced, record = _call(fn, arg)
         if record["status"] != "completed":
             records.append({**record, "unit": index})
             out_rows.append({name: None})
@@ -661,7 +657,7 @@ def _id_column_for(source: Any) -> str:
     return f"{ROW_ID}{name or 'input'}"
 
 
-def table_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
+def table_(source: Any, fn: Callable) -> Output:
     """``table`` — hand the tool the **whole grid**; what it returns is the step's grid.
 
     008 K12: the mirror of a tool-backed ``source``, for pivots, unpivots and
@@ -683,7 +679,7 @@ def table_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
         record = _blocked(*next(iter(blocked.values())))
         return Output(data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
                       records=[record], index=[0], meta=meta)
-    value, record = _call(fn, frame[variables(frame.columns)], retries)
+    value, record = _call(fn, frame[variables(frame.columns)])
     if record["status"] != "completed":
         return Output(data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
                       records=[record], index=[0], meta=meta)
@@ -715,7 +711,7 @@ def auto_(source: Any, fn: Callable) -> Output:
     raise RuntimeError("auto is resolved to a concrete verb before it runs")
 
 
-def sweep_(fn: Callable, *, name: str = VALUE_COLUMN, retries: int = 0,
+def sweep_(fn: Callable, *, name: str = VALUE_COLUMN,
            **params: Sequence[Any]) -> Output:
     """``expand_grid`` — run *fn* over the cross product of named parameters.
 
@@ -732,12 +728,6 @@ def sweep_(fn: Callable, *, name: str = VALUE_COLUMN, retries: int = 0,
             f"— it collides with the verb's own. Rename the tool's parameter, "
             f"or sweep it under another name and bind it."
         )
-    if not isinstance(retries, int) or isinstance(retries, bool):
-        raise ValueError(
-            f"sweep's retries= is a count and must be an int, got "
-            f"{type(retries).__name__}. A swept parameter cannot be called "
-            f"'retries' — it collides with the verb's own."
-        )
     if not params:
         raise ValueError("sweep_ needs at least one parameter list")
     names = list(params)
@@ -746,7 +736,7 @@ def sweep_(fn: Callable, *, name: str = VALUE_COLUMN, retries: int = 0,
     out_rows, records = [], []
     for combo in combos:
         arg = dict(zip(names, combo))
-        value, record = _call(fn, arg, retries)
+        value, record = _call(fn, arg)
         out_rows.append({**arg, name: value})
         records.append(record)
 
@@ -956,7 +946,7 @@ def _widen_cell(cell: Any, wanted: Sequence[str], explicit: bool) -> tuple[dict,
 
 
 def widen_(source: Any, fn: Callable = identity, *, column: str | None = None,
-           columns: Sequence[str] | None = None, retries: int = 0,
+           columns: Sequence[str] | None = None,
            replace: bool = False) -> Output:
     """``unnest_wider`` — one cell's fields become columns. n rows in, n rows out.
 
@@ -997,7 +987,7 @@ def widen_(source: Any, fn: Callable = identity, *, column: str | None = None,
             cells.append(None)
             records.append(_blocked(*blocked[index]))
             continue
-        cell, record = _call(fn, {spread: row.get(spread)}, retries)
+        cell, record = _call(fn, {spread: row.get(spread)})
         cells.append(cell)
         records.append(record)
 

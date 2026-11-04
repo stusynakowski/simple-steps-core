@@ -387,7 +387,6 @@ MODIFIERS: dict[str, ModifierKind] = {k.name: k for k in (
 PARAM_TYPES: dict[str, tuple[type, ...]] = {
     "name": (str,),
     "by": (str,),
-    "retries": (int,),
     "times": (int,),
     "seconds": (int, float),
     "columns": (list, tuple, dict),

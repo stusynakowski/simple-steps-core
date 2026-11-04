@@ -358,7 +358,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 continue
             names = " or ".join(t.__name__ for t in expected)
             extra = ""
-            if modifier.kind == "sweep" and parameter in ("name", "retries"):
+            if modifier.kind == "sweep" and parameter == "name":
                 extra = (f". A swept parameter cannot be called {parameter!r} — "
                          f"it collides with the verb's own")
             problems.append(
@@ -1828,7 +1828,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
             rule = "groups_of"
     elif kind == "sweep":
         lists = [v for k, v in verb.settings.items()
-                 if k not in ("name", "over", "retries")]
+                 if k not in ("name", "over")]
         if lists and all(isinstance(v, (list, tuple)) for v in lists):
             swept = 1
             for values in lists:
@@ -1903,7 +1903,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     elif kind in CARRIES_COLUMNS:
         ordered = list(upstream_columns)
     elif kind == "sweep":
-        ordered = [k for k in verb.settings if k not in ("name", "over", "retries")]
+        ordered = [k for k in verb.settings if k not in ("name", "over")]
     elif kind == "collapse" and verb.settings.get("by"):
         ordered = [verb.settings["by"]]
     elif kind == "expand" and verb.settings.get("columns"):

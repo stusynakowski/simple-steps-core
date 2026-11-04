@@ -2057,7 +2057,7 @@ def test_an_unknown_modifier_parameter_is_caught_at_declaration(three):
     wf["raw"] = three
     wf["t"] = score[mod.map(nmae="s")](wf["raw"])
     assert "map takes no parameter 'nmae'" in wf.step("t").problems[0]
-    assert "it accepts name, replace, retries" in wf.step("t").problems[0]
+    assert "it accepts name, replace" in wf.step("t").problems[0]
 
 
 def test_a_required_setting_is_caught_at_declaration(three):
