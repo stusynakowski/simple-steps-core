@@ -237,3 +237,161 @@ chain=[(115, 0, 0, 0),
 which=5,
 )
 ```
+
+## 2026-11-04 · `test_L40c_an_edit_then_a_rerun_matches_a_fresh_run` · at `af0348e`
+
+- **Broke:** AssertionError: edited: s1 mod.sort(by="k")(wf["s0"]).index are different
+- **Status:** open
+
+```
+test_L40c_an_edit_then_a_rerun_matches_a_fresh_run(
+frame=   k     n  tags rec
+0  A  <NA>  None  {},
+changed=   k     n tags rec
+0  A  <NA>   []  {},
+chain=[(0, 0, 0, 0)],
+)
+```
+
+## 2026-11-04 · `test_L40f_run_makes_a_step_current` · at `af0348e`
+
+- **Broke:** AssertionError: run(s0) <DataFrame 1×4>.index are different
+- **Status:** open
+
+```
+test_L40f_run_makes_a_step_current(
+# The test sometimes passed when commented parts were varied together.
+frame=   k     n  tags rec
+0  A  <NA>  None  {},
+changed=   k     n tags rec
+0  A  <NA>   []  {},
+chain=[(0, 0, 0, 0)],  # or any other generated value
+which=0,  # or any other generated value
+)
+```
+
+## 2026-11-04 · `test_L40c_an_edit_then_a_rerun_matches_a_fresh_run` · at `af0348e`
+
+- **Broke:** AssertionError: edited: s1 mod.sort(by="k")(wf["s0"]).index are different
+- **Status:** open
+
+```
+test_L40c_an_edit_then_a_rerun_matches_a_fresh_run(
+frame=   k     n  tags rec
+0  A  <NA>  None  {},
+changed=   k     n  tags rec
+0  A  <NA>    []  {}
+1  A  <NA>  None  {},
+chain=[(0, 0, 0, 0)],
+)
+```
+
+## 2026-11-04 · `test_L40d_undo_is_free` · at `af0348e`
+
+- **Broke:** AssertionError: ('source put back', 's1', 'completed', 'invalid')
+- **Status:** open
+
+```
+test_L40d_undo_is_free(
+# The test always failed when commented parts were varied together.
+frame=   k     n  tags rec
+0  A  <NA>  None  {},
+changed=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],
+chain=[(162, 0, 0, 0)],
+which=0,  # or any other generated value
+other=0,  # or any other generated value
+)
+```
+
+## 2026-11-04 · `test_L40f_run_makes_a_step_current` · at `af0348e`
+
+- **Broke:** AssertionError: run(s0) <DataFrame 2×4>.index are different
+- **Status:** open
+
+```
+test_L40f_run_makes_a_step_current(
+# The test sometimes passed when commented parts were varied together.
+frame=   k     n  tags          rec
+0  A  <NA>  None  {'a': None},
+changed=   k     n  tags rec
+0  A  <NA>  None  {}
+1  A  <NA>  None  {},
+chain=[(0, 0, 0, 0)],  # or any other generated value
+which=0,  # or any other generated value
+)
+```
+
+## 2026-11-04 · `test_L40d_undo_is_free` · at `af0348e`
+
+- **Broke:** AssertionError: ('source put back', 's1', 'completed', 'invalid')
+- **Status:** open
+
+```
+test_L40d_undo_is_free(
+frame=   k     n  tags rec
+0  A  <NA>  None  {},
+changed=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],
+chain=[(162, 0, 0, 0)],
+which=0,
+other=0,
+)
+```
+
+## 2026-11-04 · `test_L40f_run_makes_a_step_current` · at `af0348e`
+
+- **Broke:** AssertionError: run(s0) <DataFrame 2×4>.index are different
+- **Status:** open
+
+```
+test_L40f_run_makes_a_step_current(
+frame=   k     n  tags          rec
+0  A  <NA>  None  {'a': None},
+changed=   k     n  tags rec
+0  A  <NA>  None  {}
+1  A  <NA>  None  {},
+chain=[(0, 0, 0, 0)],
+which=0,
+)
+```
+
+## 2026-11-04 · `test_L40e_the_order_of_edits_doesnt_matter` · at `af0348e`
+
+- **Broke:** AssertionError: ('order', 's1_p', 's1_p', 'stale', 'invalid')
+- **Status:** open
+
+```
+test_L40e_the_order_of_edits_doesnt_matter(
+frame=   k     n  tags          rec
+0  A  <NA>  None  {'a': None},
+changed=   k     n  tags rec
+0  A  <NA>  None  {}
+1  A  <NA>  None  {},
+chain=[(164, 0, 0, 0),
+(0, 0, 0, 0),
+(0, 0, 0, 0),
+(61, 0, 0, 0),
+(0, 0, 0, 0)],
+which=1,
+other=47,
+)
+```
+
+## 2026-11-04 · `test_L40c_an_edit_then_a_rerun_matches_a_fresh_run` · at `af0348e`
+
+- **Broke:** AssertionError: edited: s1 mod.distinct(columns=["k"])(wf["s0"]).iloc[:, 0] (column name="#s0") are different
+- **Status:** open
+
+```
+test_L40c_an_edit_then_a_rerun_matches_a_fresh_run(
+frame=   k     n  tags rec
+0  A  <NA>  None  {},
+changed=   k     n  tags          rec
+0  A  <NA>  None  {'a': None}
+1  A  <NA>  None           {},
+chain=[(205, 0, 0, 0)],
+)
+```

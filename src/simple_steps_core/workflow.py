@@ -19,6 +19,9 @@ import typing
 import pandas as pd
 
 
+_GONE = object()          # a picked row that is gone (D-picks)
+
+
 class Workflow:
     """Ordered Steps. Assign an Operation, get a Step that is already staged.
 
@@ -49,6 +52,9 @@ class Workflow:
         #: The plan of each step with a new, unrun expression (PL), with what
         #: it was made from; made again when any of that is another object.
         self._plans: dict[str, tuple] = {}
+        #: Each step whose picked row of a source is gone (D-picks): why. It
+        #: is a problem on the step until the step is given a new expression.
+        self._gone: dict[str, str] = {}
 
     # ── resources ────────────────────────────────────────────────────────
     def define(self, name: str, type_: type, /, **settings: Any) -> ResRef:
@@ -159,6 +165,161 @@ class Workflow:
         step.output.meta["inverse"] = {"kind": "generated"}
         return step
 
+    def _keep_row_ids(self, step_id: str, before: Output) -> None:
+        """Give a source's rows the ids they had before its data was replaced
+        (D-picks): a row whose values it has seen takes that row's id back,
+        duplicates in order, even a row seen earlier and gone since (undo is
+        free); rows left over on both sides, as many each, are values edited in
+        place and keep their ids, in order (C25); any other row gets an id never
+        used. Then each pick of a row number into it follows its row. Only a
+        source with core's ids, a default 0…n-1 index: an index of its own is
+        the user's identity."""
+        out = self.steps[step_id].output
+        data = out.data
+        if out.meta.get("empty") or before.meta.get("staged") or before.meta.get("empty") \
+                or not isinstance(data.index, pd.RangeIndex) or data.index.start != 0 \
+                or data.index.step != 1:
+            return
+        old = before.data
+        if not pd.api.types.is_integer_dtype(old.index):
+            return
+        columns = list(data.columns)
+        memory = before.meta.get("rows_seen") or {}
+        if memory.get("columns") != columns:
+            memory = {"columns": columns, "ids": {}}        # other columns: start again
+        known: dict = {}                               # hash -> ids: shown now, then seen before
+        if list(old.columns) == columns:
+            for row_id, h in zip(old.index, _row_fps(old, columns).to_numpy()):
+                known.setdefault(int(h), []).append(_plain(row_id))
+                seen = memory["ids"].setdefault(int(h), [])
+                if _plain(row_id) not in seen:      # remembered, so it can come back
+                    seen.append(_plain(row_id))
+        for h, ids_ in memory["ids"].items():
+            known.setdefault(int(h), []).extend(i for i in ids_ if i not in old.index)
+        hashes = [int(h) for h in _row_fps(data, columns).to_numpy()] if columns else [0] * len(data)
+        ids: list = [known[h].pop(0) if known.get(h) else None for h in hashes]
+        same = {i for i in ids if i is not None}         # rows it has seen, values unchanged
+        left = [_plain(i) for i in old.index if _plain(i) not in same]
+        if left and len(left) == ids.count(None):     # values edited in place: picks follow (L41a)
+            ids = [left.pop(0) if i is None else i for i in ids]
+            same = set(ids)
+        fresh = before.meta.get("next_row_id", max(old.index, default=-1) + 1)
+        for n, i in enumerate(ids):
+            if i is None:
+                ids[n], fresh = fresh, fresh + 1
+        if ids != list(range(len(data))):
+            data.index = pd.Index(ids, dtype="int64")
+            out.states.index = data.index
+        for h, i in zip(hashes, ids):
+            seen = memory["ids"].setdefault(h, [])
+            if i not in seen:
+                seen.append(i)
+        out.meta["rows_seen"] = memory
+        out.meta["next_row_id"] = fresh               # never given again, even after a delete
+        out.meta["version"] = _data_version(data)
+        after = data.index
+
+        def number(n: int) -> Any:                     # its row number before -> now
+            row_id = _plain(old.index[n])
+            return after.get_loc(row_id) if row_id in same else _GONE
+        self._follow_picks(step_id, len(old), number, old)
+
+    def _restore_picks(self, source: str) -> None:
+        """A pick whose row of *source* is back (an undo, or the row given
+        again) follows it once more, and is checked again (D-picks)."""
+        out = self.steps[source].output
+        if out.meta.get("staged"):
+            return
+        after = out.data.index
+        for sid, note in list(self._gone.items()):
+            if note["source"] != source or not all(i in after for i in note["lost"].values()):
+                continue
+            del self._gone[sid]
+            lost = note["lost"]
+            self._follow_picks(source, None, lambda n: after.get_loc(lost[n]) if n in lost else n,
+                               out.data, only=sid)
+            st = self.steps[sid]
+            st.problems = check(st.operation, self, sid)
+            st.warnings = warn(st.operation, self, sid)
+            self._restage_after(sid)            # what read it, invalid through it, too
+
+    def _follow_picks(self, source: str, count: int | None, number: Callable,
+                      shown: pd.DataFrame, only: str | None = None) -> None:
+        """Rewrite each row number of *source* a step names with *number*: its
+        row's number now (D-picks), for a pick straight into it
+        (``wf["p"][1]``) and a condition on its rows anywhere later
+        (``row["p"] == 1``). A row that is gone (deleted, or edited while rows
+        were added or deleted too, so it can't be told apart) can't be written:
+        the step is ``invalid``, naming it, until it is given a new pick or the
+        row comes back. A negative number, a range or a comparison picks
+        positions, and stays as written. *count* bounds the numbers (None: any)."""
+        def one(n: Any) -> Any:
+            if not (isinstance(n, int) and not isinstance(n, bool) and n >= 0
+                    and (count is None or n < count)):
+                return n
+            return number(n)
+
+        gone: list = []
+
+        def numbers(value: Any) -> Any:
+            ints = value if isinstance(value, list) else [value]
+            now = [one(v) for v in ints]
+            gone.extend(v for v, w in zip(ints, now) if w is _GONE)
+            if _GONE in now or now == ints:
+                return value
+            return now if isinstance(value, list) else now[0]
+
+        def follow(value: Any, direct: bool) -> Any:
+            if direct and (isinstance(value, int) and not isinstance(value, bool)
+                           or isinstance(value, list) and value
+                           and all(isinstance(v, int) and not isinstance(v, bool) for v in value)):
+                return numbers(value)
+            if isinstance(value, dict):
+                on = value.get("on")
+                if isinstance(on, dict) and on.get("row") == source and not on.get("idx") \
+                        and value.get("test") in ("==", "in"):
+                    now = numbers(value.get("value"))
+                    return value if now is value.get("value") else {**value, "value": now}
+                out = {k: follow(v, False) for k, v in value.items()}
+                return value if all(out[k] is value[k] for k in value) else out
+            if isinstance(value, (list, tuple)):
+                out = [follow(v, False) for v in value]
+                return value if all(a is b for a, b in zip(out, value)) else type(value)(out)
+            return value
+
+        for sid, st in self.steps.items():
+            if sid == source or (only is not None and sid != only):
+                continue
+            if only is None and (self._gone.get(sid) or {}).get("source") == source:
+                continue          # its numbers name rows of the data it lost them in
+            op_ = st.operation
+            gone.clear()
+            modifiers = []
+            for m in op_.modifiers:
+                direct = m.kind == "select" and op_.input is not None and str(op_.input) == source
+                settings = {k: follow(v, direct and k == "rows") for k, v in m.settings.items()}
+                modifiers.append(m if all(settings[k] is m.settings[k] for k in settings)
+                                 else Modifier(m.kind, settings))
+            arguments = {}
+            for name, value in op_.arguments.items():
+                if isinstance(value, StepRef) and value.rows is not None:
+                    rows_ = follow(value.rows, value.id == source)
+                    value = value if rows_ is value.rows else replace(value, rows=rows_)
+                arguments[name] = value
+            if any(a is not b for a, b in zip(modifiers, op_.modifiers)) \
+                    or any(arguments[k] is not op_.arguments[k] for k in arguments):
+                st.operation = replace(op_, modifiers=tuple(modifiers), arguments=arguments)
+            if gone:
+                rows_ = sorted(set(gone))
+                was = "; ".join(", ".join(f"{c}={_plain(v)!r}" for c, v in shown.iloc[n].items())
+                                for n in rows_[:3])
+                self._gone[sid] = {
+                    "source": source,
+                    "lost": {n: _plain(shown.index[n]) for n in rows_},
+                    "text": (f"{source!r} row {', '.join(map(str, rows_))} is gone "
+                             f"(it was {was}): deleted, or edited while rows were "
+                             f"added or deleted. Pick the row again")}
+
     def _as_operation(self, operation: Any) -> Any:
         """What declaring *operation* means, before it is checked: a selection
         becomes a select step, a bare shape verb gets its default tool. Anything
@@ -222,7 +383,10 @@ class Workflow:
             # why a Workflow is only a list of Steps: literals have no separate
             # home, because they were never anything but a step's output.
             was_empty = existed and self.steps[step_id].output.meta.get("empty")
+            before = self.steps[step_id].output if existed else None
             self.steps[step_id] = self._literal_step(step_id, operation, kept_extras)
+            if before is not None:
+                self._keep_row_ids(step_id, before)          # D-picks
             self._file(step_id)
             if existed:
                 self._mark_stale_dependents(step_id)
@@ -238,6 +402,7 @@ class Workflow:
         if self.catalog is not None:
             operation = self.catalog.admit(operation)
         operation = self._resolve_picks(operation)       # S5d: row numbers saved as lineage
+        self._gone.pop(step_id, None)                    # a new pick (D-picks)
         problems = check(operation, self, step_id)
         previous = self.steps.get(step_id)
         was_empty = previous is not None and previous.output.meta.get("empty")
@@ -440,6 +605,7 @@ class Workflow:
                 "first."
             )
         del self.steps[step_id]
+        self._gone.pop(step_id, None)
         for key in self.kept.pop(step_id, []):
             self.store.pop(key, None)
 
@@ -462,6 +628,8 @@ class Workflow:
         self.steps[new].name = new
         if old in self.kept:                  # its results; their keys follow in SM
             self.kept[new] = self.kept.pop(old)
+        if old in self._gone:
+            self._gone[new] = self._gone.pop(old)
         for st in self.steps.values():
             op = st.operation
             changed = False
@@ -763,6 +931,8 @@ class Workflow:
                 # its readers were re-checked against what it showed before:
                 # check them again against the result it holds now
                 self._restage_after(sid)
+            if self._gone:
+                self._restore_picks(sid)        # its readers come later in the loop
 
     def _refresh_staleness(self) -> None:
         """Set every run step's ``stale``, and a short ``stale_reason``, from its stamps.

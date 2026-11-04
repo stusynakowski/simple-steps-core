@@ -862,6 +862,13 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
 
     coded(problems, "bad_selection")
 
+    # 6f'. a picked row of a source that is gone since (D-picks): said until
+    #      the step is given a new pick
+    gone = getattr(workflow, "_gone", {}).get(step_id) if step_id is not None else None
+    if gone and step_id in workflow.steps and workflow.steps[step_id].operation == operation:
+        problems.append(gone["text"])
+    coded(problems, "row_gone")
+
     # 6d. a bound value is a literal or a reference — anything else is refused
     #     here, not when the workflow is saved (008 C11).
     for name, value in operation.arguments.items():

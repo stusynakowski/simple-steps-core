@@ -95,8 +95,7 @@ after a re-sort (P14). A condition is data, saved and printed back, never
 run as Python.
 **Don't want:** picks that silently change meaning. Lineage (`#v`) is
 read-only and becomes data only through `mod.copy` (P13).
-**Status:** ✓ P1–P10, P12–P14.
-- ✗ **P15, a silent wrong answer.** A pick into a source follows the row's *position* when the source's data is replaced. Insert Zed at the top and `wf["src"][0]` gives Zed, `completed`, with no warning. Decision **D-picks**.
+**Status:** ✓ P1–P10, P12–P15. P15 was a silent wrong answer until D-picks (2026-11-04): a pick into a source now follows its row when the source's data is replaced.
 - ✗ P11: `wf["v"]["temp"]` is refused; columns still need `cols["temp"]`. Planned S3 (D2).
 - ✗ P16: a pick can't be a tool's input; it must be its own step first. Planned S3 (D6).
 - ✗ **P9b, new:** a lineage condition, `wf["e"][row["v"] == 1]`, warns that its rows "are positions and expand doesn't fix row order". It is lineage, not position, so the warning is wrong.
@@ -220,7 +219,7 @@ behaviour, so each needs your yes before it lands.
 | C11 | Must every input to a combine or tool be a named step? |
 | F7 | One way to write each thing? | **decided (EX3), and `over=` refused since 2026-11-03**; `op("identity")[mod.x(…)]` is the same operation as `mod.x(…)`, so it goes with the parser (S3) |
 
-**Known, already planned:** P15 (D-picks), S4–S9 (SM, SS7), P11, P16 and A8
+**Known, already planned:** S4–S9 (SM, SS7), P11, P16 and A8
 (S3), V1b and A10 (S4), and V8b (D20b, decided).
 
 ## 4. How to use this page

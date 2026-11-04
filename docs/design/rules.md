@@ -58,7 +58,11 @@ statistics drop values on purpose, but every row still traces back. A `null`
 `stack` or `join` gap) and `[]` are three different things. Core never tidies
 your data and never matches rows by position.
 
-**10. An edit is checked at once; a run is on request.** Editing a step
+**10. A pick keeps its row.** `wf["p"][1]` picks Ben; insert a row above
+him and the pick is rewritten to `wf["p"][2]`. Delete him and the step is
+`invalid`, saying Ben is gone, until you pick again.
+
+**11. An edit is checked at once; a run is on request.** Editing a step
 re-checks everything after it straight away: a step that can't run is
 `invalid`, naming why. A step is checked against what its inputs' expressions
 will produce, never against the old values they still show: after

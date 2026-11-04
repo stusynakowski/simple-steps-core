@@ -986,9 +986,10 @@ def test_a_workflow_is_only_steps(three):
     # additions, `naming` the kernel's naming conventions, `data_versions` the
     # versions resources reported (K25); none of them is data. `store` keeps
     # results by run key (ST7): the steps' own outputs, never a second copy.
-    # `_plans` keeps an edited step's plan (PL): what it will produce, no data.
+    # `_plans` keeps an edited step's plan (PL): what it will produce, no data;
+    # `_gone` says which steps picked a source row that is gone (D-picks).
     assert list(vars(wf)) == ["steps", "resources", "catalog", "extras",
-                              "data_versions", "naming", "store", "kept", "_plans"]
+                              "data_versions", "naming", "store", "kept", "_plans", "_gone"]
     assert wf.results("raw") == [wf.step("raw").output]
     assert wf.results("raw")[0] is wf.step("raw").output
 

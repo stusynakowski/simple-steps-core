@@ -50,7 +50,7 @@
 | P12 | One cell | `wf["v"][1][cols["temp"]]` | 38.5 | ✓ | |
 | P13 | Picking lineage | `wf["h"][cols["#v"]]` | refused, writing `mod.copy(…)` | ✓ | |
 | P14 | A pick follows its row | `wf["srt"][1]`, then re-sort | still Ada; saved as `rows[row["v"] == 0]` | ✓ | |
-| P15 | A pick into a source whose data is replaced | `wf["src"][0]`, then a row inserted at the top | still Ada | ✗ | **silent wrong answer:** gives Zed, `completed`, no warning. D-picks |
+| P15 | A pick into a source whose data is replaced | `wf["src"][0]`, then a row inserted at the top | still Ada | ✓ | D-picks, 2026-11-04: the pick is rewritten to `wf["src"][1]`; a deleted row makes it `invalid`, naming it. It gave Zed, silently |
 | P16 | A pick as a tool's input | `to_f[mod.map()](wf["v"][cols["temp"] > 37])` | runs on those rows | ✗ | refused: make the pick its own step. Planned S3 (D6) |
 
 ## Verbs

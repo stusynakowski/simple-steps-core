@@ -41,6 +41,7 @@ CODES: dict[str, str] = {
     "invalid_input": "the step reads a step that is invalid",
     "circular": "the step's references go round in a circle",
     "bad_selection": "a selection of rows or columns can't be made",
+    "row_gone": "a picked row of a source is gone since its data was replaced (D-picks)",
     # arguments and columns
     "bad_argument": "an argument isn't a literal or a reference",
     "unknown_argument": "an argument isn't a parameter the tool takes",

@@ -260,7 +260,7 @@ def ch3():
     k.run_all()
     lesson("P15", "a pick into a source still gives Ada after a row is inserted above",
            data(k.step("pk"), "name"), ["Ada"],
-           "gives Zed, completed, no warning: silent wrong answer. Decision D-picks")
+           "gave Zed, completed, no warning, until D-picks (2026-11-04)")
     e = put(k, "sub", Later(lambda: to_f[mod.map()](wf["v"][cols["temp"] > 37])))
     lesson("P16", "a pick can be a tool's input", type(e).__name__, "Step",
            "refused: make the pick its own step. Planned S3 (D6)")

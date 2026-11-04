@@ -30,7 +30,7 @@ what the workflow is now.
 
 | | Decision | Today | Recommended |
 |---|---|---|---|
-| D-picks | A saved pick into a source's rows: when the source's data is replaced, core hashes its rows, gives rows it has seen their ids back, and **rewrites the pick's row number** in the expression when its row moves; a pick whose row's hash is gone (deleted, or a value edited) is `invalid`, naming it | the pick follows the position: a row inserted at the top makes it pick another row, silently | yes; a declared key column later, for value edits. **yes**: owner, 2026-11-04 |
+| D-picks | A saved pick into a source's rows: when the source's data is replaced, core hashes its rows, gives rows it has seen their ids back, and **rewrites the pick's row number** in the expression when its row moves; a pick whose row's hash is gone (deleted, or a value edited) is `invalid`, naming it | the pick follows the position: a row inserted at the top makes it pick another row, silently | yes; a declared key column later, for value edits. **yes**: owner, 2026-11-04. **Done 2026-11-04**: `Workflow._keep_row_ids`, `_follow_picks`; [tests/unit/test_d_picks.py](../../tests/unit/test_d_picks.py) |
 
 **How rows pair** (model.md §5). The older reshaping rules and the core asks
 disagree; the code follows the core asks.
@@ -172,6 +172,11 @@ failure needing a new decision were reverted and pinned in
 
 | | Choice | Taken | Piece |
 |---|---|---|---|
+| W1 | A value edited in a picked row: D-picks says the row is gone; core-asks L41a says the pick follows it | **follows it**, when the edit is in place (as many rows left over on each side, paired in order): the core asks lead (N4), L41a passed before, and C25's per-row staleness needs the same pairing. Gone only when rows were added or deleted too, so the edited row can't be told apart | D-picks |
+| W2 | Which picks follow their row | a row number (`wf["p"][1]`, `[[0, 2]]`) and `row["p"] == n` / `in`; **not** a negative number, a range or a comparison (`row["p"] < 3`), which mean positions | D-picks |
+| W3 | A source with an index of its own (`set_axis(["a", "b"])`) | left alone: its index is its identity | D-picks |
+| W4 | A gone pick, when its row comes back (an undo, or the row given again) | the pick follows it again and the step is valid; a source remembers every row it has seen, so undo is free (L40d) | D-picks |
+| W5 | The laws L40c, L40e, L40f compared row ids with a fresh kernel's | they compare what is shown: values, and lineage as row numbers (ids are never shown, CA-B1, and a source keeps them across an edit). L40c and L40f's fresh kernel holds the workflow as it is after the edit, picks rewritten; L40e compares two orders only when they end with the same workflow (a pick written before a data change follows its row; after, it is read on the new data) | D-picks |
 
 ## 1. How to answer
 

@@ -19,6 +19,7 @@ still does. ``STRESS=1`` runs many more examples.
 
 from __future__ import annotations
 
+import json
 import os
 
 import pandas as pd
@@ -259,6 +260,32 @@ def _run(k: Kernel) -> None:
             pass
 
 
+def _fresh(k: Kernel, frame: pd.DataFrame) -> Kernel:
+    """A fresh kernel holding *k*'s workflow as it is now, its source giving
+    *frame*, run. As it is now: an edit to the source rewrites the row numbers
+    picks name, so they follow their rows (D-picks); the source is saved as
+    its tool, since a DataFrame isn't saved."""
+    saved = json.loads(k.to_json())
+    saved["steps"][0]["operation"] = {"tool": "origin_pp", "input": None, "arguments": {},
+                                      "modifiers": [{"kind": "source", "settings": {}}]}
+    fresh = Kernel.from_json(json.dumps(saved), _catalog(frame))
+    _run(fresh)
+    return fresh
+
+
+def _shown_equal(a: Kernel, b: Kernel, s: str, why: str) -> None:
+    """Step *s* shows the same in both: its values, and its lineage as row
+    numbers. Core's row ids aren't compared: they are never shown (CA-B1),
+    and a source keeps them across an edit (D-picks), where a fresh one
+    numbers its rows."""
+    x, y = a.workflow.steps[s], b.workflow.steps[s]
+    def values(frame):                    # `#` columns hold ids: compared as lineage
+        return frame[[c for c in frame.columns if not is_id_column(c)]].reset_index(drop=True)
+    pd.testing.assert_frame_equal(values(x.output.data), values(y.output.data), check_dtype=False,
+                                  check_index_type=False, obj=f"{why}: {s} {x.formula}")
+    assert a.workflow.lineage(s) == b.workflow.lineage(s), (why, s, "lineage")
+
+
 def _same(a: Kernel, b: Kernel, names: list[str], why: str) -> None:
     for s in names:
         x, y = a.workflow.steps[s], b.workflow.steps[s]
@@ -353,16 +380,15 @@ def test_L40c_an_edit_then_a_rerun_matches_a_fresh_run(frame, changed, chain):
     _run(k)
     # A fresh kernel of the same saved workflow on the new source… (saved, not
     # rebuilt: a typed row number is saved as its row's lineage, S5d)
-    k2 = Kernel.from_json(k.to_json(), _catalog(changed))
-    _run(k2)
-    # …and the old one, its source edited in place, run again
+    # …is what the old one, its source edited in place and run again, shows:
+    # the fresh one holds the old one's workflow as it is after the edit
     k["s0"] = changed
     _run(k)
+    k2 = _fresh(k, changed)
     for s in names[1:]:
         x, y = k.workflow.steps[s], k2.workflow.steps[s]
         if x.state == "completed" and y.state == "completed":
-            pd.testing.assert_frame_equal(x.output.data, y.output.data, check_dtype=False,
-                                          check_index_type=False, obj=f"edited: {s} {x.formula}")
+            _shown_equal(k, k2, s, "edited")
 
 
 # ── ST8: the session's laws, read off the result store (decisions.md SM) ─────
@@ -479,6 +505,13 @@ def test_L40e_the_order_of_edits_doesnt_matter(frame, changed, chain, which, oth
     b["s0"] = changed
     if not (ok_a and ok_b):
         return
+    # a pick names a row of the data as it is when written (D-picks): written
+    # before the source changed, it follows its row; after, it is read on the
+    # new data. Then the two orders hold different workflows, and the law,
+    # the same workflow gives the same states, doesn't compare them
+    if any(a.workflow.steps[s].operation != b.workflow.steps[s].operation for s in names) \
+            or a.workflow._gone.keys() != b.workflow._gone.keys():
+        return
     for s in names:
         x, y = a.workflow.steps[s], b.workflow.steps[s]
         assert x.state == y.state, ("order", step, s, x.state, y.state)
@@ -496,7 +529,6 @@ def test_L40f_run_makes_a_step_current(frame, changed, chain, which):
     and x is what a fresh kernel on the new source computes."""
     k, names = _build(_catalog(frame), chain)
     _run(k)
-    saved = k.to_json()            # saved before the edit: a DataFrame isn't saved (L40c)
     k["s0"] = changed
     x = names[which % len(names)]
     if k.workflow.steps[x].output.meta.get("empty") or k.workflow.steps[x].problems:
@@ -507,9 +539,7 @@ def test_L40f_run_makes_a_step_current(frame, changed, chain, which):
         return                                           # a failed row, or x can't run
     for s in [*k.workflow.not_current(x), x]:
         assert k.workflow.steps[s].state not in ("stale", "staged"), (x, s, k.workflow.steps[s].state)
-    fresh = Kernel.from_json(saved, _catalog(changed))
-    _run(fresh)
+    fresh = _fresh(k, changed)
     mine, theirs = k.workflow.steps[x], fresh.workflow.steps[x]
     if mine.state == "completed" and theirs.state == "completed":
-        pd.testing.assert_frame_equal(mine.output.data, theirs.output.data, check_dtype=False,
-                                      check_index_type=False, obj=f"run({x}) {mine.formula}")
+        _shown_equal(k, fresh, x, f"run({x})")

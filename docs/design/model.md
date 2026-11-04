@@ -157,10 +157,13 @@ Run, for `v` = Ada, Ben, Cy:
 - **Planned (S3):** strings choose columns in a pick (`wf['s']['n']`); a pick as
   a tool's input; `[0, 2]` refused, pointing to `[[0, 2]]`.
 
-**Known gap (open, D-picks):** a saved pick follows its row through every
-step core runs, but not through a change to a source's own data. Lineage
-holds the source's row *numbers*, so inserting a row at the top of a source
-makes `row['p'] == 0` a different row, silently. See §10.
+**A pick follows its row when a source's data is replaced** (D-picks, built
+2026-11-04). The source matches its rows to the ones it has seen by their
+values and keeps their ids, and every row number a step names into it is
+rewritten to that row's number now: `wf["p"][1]` becomes `wf["p"][2]` when
+a row is inserted above, and so does `row["p"] == 1` in any later step. A
+picked row that is gone makes the step `invalid` (`row_gone`), naming the
+row and its values, until it is picked again or comes back. See §10.
 
 ## 5. How rows from two steps meet
 
@@ -363,7 +366,7 @@ are filed once by content hash, and a result is a run key pointing at them.
 **To decide with it:** how many results the store keeps per step in a
 terminal session (the app's eviction is its hosting); tools that read the
 outside world, whose run key needs an *as of* (D43–D46); source data
-replaced underneath (D-picks).
+replaced underneath is decided (D-picks, §10).
 
 ## 9. The guarantees, and how they're checked
 
@@ -390,7 +393,7 @@ Everything not in this table is decided from the verbs, before anything runs.
 
 | Operation | What core can't know | Its boundary |
 |---|---|---|
-| a source's data is replaced | whether row *k* is the same sample as before | **open (D-picks):** today picks follow position here. Proposed: hash rows to give seen rows their ids back, and rewrite a saved pick's row number when its row moves; a pick whose row is gone is `invalid` |
+| a source's data is replaced | whether row *k* is the same sample as before | **by its values** (D-picks): a row it has seen, now or before, gets its id back (duplicates in order); rows left over on both sides, as many each, are values edited in place and keep their ids in order (so only their cells go stale, and a pick follows them); any other row is new, with an id never used. Each row number a step names is rewritten to its row's number now; a pick whose row is gone is `invalid`. Negative numbers, ranges and comparisons are positions, and stay as written. A source with an index of its own keeps it: that's its identity. A declared key column, for value edits alongside added rows, is later |
 | a `table` tool | which output row came from which input row | its own ids; traces only to the whole input; never pairs |
 | a list a tool wrote | whether item *j* means the same across runs | new ids, a child of its row |
 | `match_ids=True` | whether two sources number the same samples | vouched: the id sets must be equal at run |
