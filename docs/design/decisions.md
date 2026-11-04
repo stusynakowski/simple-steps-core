@@ -24,7 +24,7 @@ what the workflow is now.
 | ~~SS1–SS4~~ | computed states; keep an `invalid` step's values; a run on a stale input is `stale`; no stale reason on `invalid` | — | → **SM** |
 | SS5 | `needs_run()` leaves out empty steps, and failed steps whose spec and inputs haven't changed (relates to **D37**, an `empty` state) | lists an empty step as `staged`; leaves out a failed step | **yes**: owner, 2026-11-03 |
 | SS6 | Core has no `running` state; it stays the app's | none in core | **yes**: owner, 2026-11-03 |
-| SS7 | A stale step's reason is among its warnings, where the app reads it (core-asks L42); delete-anyway, `k.remove(name, force=True)` (L43d, **CA-6**) | the reason is in output metadata only; no delete-anyway | **yes**: owner, 2026-11-03 |
+| SS7 | A stale step's reason is among its warnings, where the app reads it (core-asks L42); delete-anyway, `k.remove(name, force=True)` (L43d, **CA-6**) | the reason is in output metadata only; no delete-anyway | **yes**: owner, 2026-11-03. **Done 2026-11-04**: a stale step warns `stale: <reason>` (code `stale`); a step that read a stale one warns `read 's', which is stale (…); run(x) runs it first` (`read_stale`, W6); `k.remove(name, force=True)` |
 
 **Rows when a source's data changes** (model.md §10).
 
@@ -177,6 +177,7 @@ failure needing a new decision were reverted and pinned in
 | W3 | A source with an index of its own (`set_axis(["a", "b"])`) | left alone: its index is its identity | D-picks |
 | W4 | A gone pick, when its row comes back (an undo, or the row given again) | the pick follows it again and the step is valid; a source remembers every row it has seen, so undo is free (L40d) | D-picks |
 | W5 | The laws L40c, L40e, L40f compared row ids with a fresh kernel's | they compare what is shown: values, and lineage as row numbers (ids are never shown, CA-B1, and a source keeps them across an edit). L40c and L40f's fresh kernel holds the workflow as it is after the edit, picks rewritten; L40e compares two orders only when they end with the same workflow (a pick written before a data change follows its row; after, it is read on the new data) | D-picks |
+| W6 | Which steps get a stale warning, now staleness isn't passed down | the stale step (`stale`), and each step that read it directly (`read_stale`, naming it); not steps further on, which read data that hasn't changed. What the app's toolbar maps (L8) | SS7 |
 
 ## 1. How to answer
 

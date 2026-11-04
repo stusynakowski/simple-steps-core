@@ -180,11 +180,10 @@ shape, and breaking it fails loudly.
 **Want:** an edit checks everything downstream at once and runs nothing. Old
 values stay, marked `stale`, until a run replaces them. `run(x)` makes `x`
 current. Putting something back exactly as it was is free.
-**Status:** ✓ S1–S3, S6, S10–S13. Every ✗ here has one cause: states are kept
-as flags, not derived (decision **SM**).
+**Status:** ✓ S1–S13. Every ✗ here had one cause, states kept as flags
+(decision **SM**); the last, S4, closed with SS7 on 2026-11-04.
 - ✓ **S5, fixed 2026-11-03 (C9):** `run("f")` makes `f` current, running the stale `h` first. To compute on what `h` shows, on purpose, `run("f", fresh=False)`, and `f` says it read `h` stale.
 - ✓ S7, S8, S9, fixed 2026-11-03 by the result store (SM, ST5): an expression put back is `completed` again with no re-run; a step made `invalid` upstream keeps showing its last values; when the column comes back, it's `completed` again.
-- ✗ S4: the stale reason isn't among the step's warnings (SS7).
 
 ### 2.12 Save, load, provenance (Y)
 
@@ -219,7 +218,7 @@ behaviour, so each needs your yes before it lands.
 | C11 | Must every input to a combine or tool be a named step? |
 | F7 | One way to write each thing? | **decided (EX3), and `over=` refused since 2026-11-03**; `op("identity")[mod.x(…)]` is the same operation as `mod.x(…)`, so it goes with the parser (S3) |
 
-**Known, already planned:** S4–S9 (SM, SS7), P11, P16 and A8
+**Known, already planned:** P11, P16 and A8
 (S3), V1b and A10 (S4), and V8b (D20b, decided).
 
 ## 4. How to use this page

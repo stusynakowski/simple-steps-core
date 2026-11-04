@@ -202,8 +202,9 @@ def test_editing_an_input_warns_a_reader_at_once_that_it_will_break(k13):
     k13["sick"] = label_i[mod.map()](wf["p"])        # re-declared, not run
     f = k13.step("f")
     assert f.problems == ()                          # it can still run on what sick shows
+    # and it read sick, which is stale now (SS7): run("f") runs sick first
     assert [(w.code, w.severity, w.step) for w in f.warnings] == [
-        ("likely_missing_column", "warning", "f")]
+        ("likely_missing_column", "warning", "f"), ("read_stale", "warning", "f")]
     assert "expects 'temp_c' from 'sick', which is predicted to produce (value)" in f.warnings[0]
     k13.run("sick")                                  # the warning becomes the problem
     assert [p.code for p in k13.step("f").problems] == ["missing_column"]
@@ -214,7 +215,7 @@ def test_an_edit_that_keeps_the_column_warns_as_before_any_run(k13):
     # PL: an edited input is planned again, so its reader is told what a
     # reader of a step that never ran is told (005 C), nothing more
     k13["sick"] = feverish_i[mod.filter()](wf["p"], limit=37)
-    assert [w.code for w in k13.step("f").warnings] == ["unconfirmed_column"]
+    assert [w.code for w in k13.step("f").warnings] == ["unconfirmed_column", "read_stale"]
 
 
 # ── PL: a step is checked against its inputs' plans, never what they show ──
@@ -269,3 +270,33 @@ def test_a_chain_of_edited_steps_is_planned_once_each():
     k["r"] = mod.sort(by="a")(wf["s29"])
     assert time.perf_counter() - start < 10
     assert k.step("r").state == "staged"
+
+
+# ── SS7: what is stale is among the warnings; delete anyway ───────────────
+def test_a_stale_step_says_why_among_its_warnings(k13):
+    k13["sick"] = feverish_i[mod.filter()](wf["p"], limit=37)
+    sick, f = k13.step("sick"), k13.step("f")
+    assert [(w.code, w.severity) for w in sick.warnings] == [("stale", "warning")]
+    assert "stale: updated args" in sick.warnings[0]
+    assert "read 'sick', which is stale (updated args); run('f') runs it first" in [
+        str(w) for w in f.warnings if w.code == "read_stale"][0]
+    assert [w.code for w in k13.step("g").warnings] == []      # g read f, which isn't stale
+    k13.run("f")
+    assert [w.code for w in k13.step("f").warnings] == []
+
+
+def test_a_check_writing_warnings_keeps_the_stale_note(k13):
+    k13["p"] = pd.DataFrame({"name": ["Al"], "temp_c": [39.0]})
+    sick = k13.step("sick")
+    sick.warnings = ()                               # what a re-check does
+    assert [w.code for w in sick.warnings] == ["stale"]
+
+
+def test_remove_refuses_a_step_that_is_read_unless_forced(k13):
+    with pytest.raises(ValueError, match="'f' read"):
+        k13.remove("sick")
+    k13.remove("sick", force=True)
+    assert "sick" not in k13
+    f = k13.step("f")
+    assert f.state == "invalid" and any("sick" in str(p) for p in f.problems)
+    assert [p.code for p in k13.step("g").problems] == ["invalid_input"]

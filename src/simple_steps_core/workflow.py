@@ -589,15 +589,27 @@ class Workflow:
     def __delitem__(self, step_id: str) -> None:
         self.remove(step_id)
 
-    def remove(self, step_id: str) -> None:
+    def remove(self, step_id: str, *, force: bool = False) -> None:
         """Delete a step, refusing when later steps still read it.
 
         The error names the readers so an editor can show exactly what breaks;
-        remove or rename them first.
+        remove or rename them first. ``force=True`` deletes it anyway: each
+        reader is then ``invalid``, naming it (SS7).
         """
         if step_id not in self.steps:
             raise KeyError(f"no step {step_id!r}; have {list(self.steps)}")
         readers = self._dependents(step_id)
+        if readers and force:
+            del self.steps[step_id]
+            self._gone.pop(step_id, None)
+            for key in self.kept.pop(step_id, []):
+                self.store.pop(key, None)
+            self._recheck_readers(step_id)          # "… which is not an earlier step"
+            self._recheck_downstream(readers[0])
+            for reader in readers[1:]:
+                self._recheck_downstream(reader)
+            self._refresh_staleness()
+            return
         if readers:
             raise ValueError(
                 f"cannot remove {step_id!r}: {', '.join(map(repr, readers))} "
@@ -1017,6 +1029,27 @@ class Workflow:
                     meta["stale_rows"] = [_plain(i) for i in st.output.data.index if i in rows_]
                 else:
                     meta.pop("stale_rows", None)
+        self._stale_notes()
+
+    def _stale_notes(self) -> None:
+        """Each step's stale warnings (SS7, core-asks L42): its own reason when
+        it is stale; else each step it read that is stale now, which run(x)
+        runs first. Staleness isn't passed down; this says which input is."""
+        for sid, st in self.steps.items():
+            notes = []
+            state = st.state
+            if state == "stale":
+                why = st.output.meta.get("stale_reason") or "an input changed"
+                notes.append(Problem(f"stale: {why}. Run it to bring it up to date",
+                                     "stale", step=sid, severity="warning"))
+            elif state in ("completed", "failed"):
+                for name in dict.fromkeys(str(r) for r in st.operation.reads):
+                    if name in self.steps and name != sid and self.steps[name].state == "stale":
+                        why = self.steps[name].output.meta.get("stale_reason") or "an input changed"
+                        notes.append(Problem(
+                            f"read {name!r}, which is stale ({why}); run({sid!r}) runs it first",
+                            "read_stale", step=sid, severity="warning"))
+            st.__dict__["stale_notes"] = tuple(notes)
 
     def _groups_of(self, output: Output, rows_in: set, source: str) -> set | None:
         """The output rows of a grouped step made from *rows_in* (D3): the

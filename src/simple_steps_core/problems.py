@@ -41,6 +41,8 @@ CODES: dict[str, str] = {
     "invalid_input": "the step reads a step that is invalid",
     "circular": "the step's references go round in a circle",
     "bad_selection": "a selection of rows or columns can't be made",
+    "stale": "the step is stale: the reason, and that a run brings it up to date (SS7)",
+    "read_stale": "the step read a step that is stale now: run(x) runs it first",
     "row_gone": "a picked row of a source is gone since its data was replaced (D-picks)",
     # arguments and columns
     "bad_argument": "an argument isn't a literal or a reference",

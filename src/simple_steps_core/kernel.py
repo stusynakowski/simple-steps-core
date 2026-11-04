@@ -161,6 +161,13 @@ class Kernel:
     def __delitem__(self, step: str | int) -> None:
         self.workflow.remove(self._name(step))
 
+    @_notifies("remove")
+    def remove(self, step: str | int, *, force: bool = False) -> None:
+        """Delete a step. Refused while later steps read it, naming them;
+        ``force=True`` deletes it anyway, and each reader is ``invalid``,
+        naming the deleted step (SS7, core-asks L43d)."""
+        self.workflow.remove(self._name(step), force=force)
+
     def __contains__(self, name: object) -> bool:
         return name in self.workflow.steps
 

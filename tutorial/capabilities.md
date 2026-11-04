@@ -165,13 +165,13 @@
 | S1 | Declaring runs nothing | `k["f"] = …` | `staged` | ✓ | |
 | S2 | The same value again | `k["lim"] = 38.0` twice | nothing goes `stale` | ✓ | |
 | S3 | A change | `k["lim"] = 37.0` | readers `stale`, keeping their values | ✓ | |
-| S4 | Why it's stale | `k.step("h").warnings` | the reason, among the warnings | ✗ | only in `needs_run()` and metadata. SS7 |
+| S4 | Why it's stale | `k.step("h").warnings` | the reason, among the warnings | ✓ | SS7, 2026-11-04: `stale: <reason>`; a step that read a stale one says `read 'h', which is stale` |
 | S5 | Run one step | `k.run("f")`, `h` stale | runs `h` first | ✓ | fixed 2026-11-03 (C9): `run(x)` makes `x` current; `k.run("f", fresh=False)` runs it on what `h` shows, on purpose |
 | S6 | A value put back | 37 → 38 → 37 | `completed`, no re-run | ✓ | |
 | S7 | An expression put back | change `f`, then restore it | `completed`, no re-run | ✓ | fixed 2026-11-03 (SM): its result is still in the store |
 | S8 | Column removed upstream | drop `temp` from `w` | `invalid`, keeping its last values | ✓ | fixed 2026-11-03 (SM): it shows its newest result |
 | S9 | Column put back | restore `temp` | `completed`, no re-run | ✓ | fixed 2026-11-03 (SM): the store holds its key |
-| S10 | Delete a step that's read | `del k["h"]` | refused, naming the reader | ✓ | no delete-anyway yet (SS7) |
+| S10 | Delete a step that's read | `del k["h"]` | refused, naming the reader | ✓ | delete anyway: `k.remove("h", force=True)`, each reader `invalid` (SS7) |
 | S11 | Rename | `k.rename("lim", "limit")` | rewrites every reference | ✓ | |
 | S12 | Move | `k.move("f", 0)` | refused: `f` reads `h` | ✓ | |
 | S13 | Check a proposal | `k.check("zz", …)` | its problems, nothing added | ✓ | |

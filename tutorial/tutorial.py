@@ -538,7 +538,7 @@ def ch11():
            (k.step("h").state, k.step("f").state, k.needs_run().get("f")),
            ("stale", "completed", "read stale 'h'"))
     lesson("S4", "the stale reason is among the step's warnings", len(k.step("h").warnings) > 0, True,
-           "only in needs_run() and output metadata. SS7")
+           "was only in needs_run() and output metadata, until SS7")
     k.run("f")
     lesson("S5", "run('f') makes f current: runs h first",
            (k.step("h").state, k.step("f").data["value"].tolist()), ("completed", [98.6, 101.3]),

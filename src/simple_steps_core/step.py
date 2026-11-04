@@ -74,6 +74,16 @@ class _NoLiteral:
 NO_LITERAL = _NoLiteral()
 
 
+def _get_warnings(step: "Step") -> tuple:
+    """What checks found, then what is stale (SS7): set apart, so a check
+    that writes a step's warnings never drops its stale note."""
+    return tuple(step.__dict__.get("_checked", ())) + tuple(step.__dict__.get("stale_notes", ()))
+
+
+def _set_warnings(step: "Step", value: Any) -> None:
+    step.__dict__["_checked"] = tuple(value)
+
+
 @dataclass
 class Step:
     """One node of a workflow: **an Operation and an Output**, always both.
@@ -253,6 +263,11 @@ from .operation import Operation, _src  # noqa: E402
 from .output import Output, _plan_words  # noqa: E402
 from .specs import StepSpec  # noqa: E402
 from .values import _dtype_type, _encode_argument, _literal_problem, _type_label  # noqa: E402
+
+
+# `warnings` is a field (``Step(…, warnings=…)``) read through these: what
+# checks wrote, then the step's stale notes (SS7), set by the workflow.
+Step.warnings = property(_get_warnings, _set_warnings)
 
 
 def _observed_label(series: "pd.Series") -> str:
