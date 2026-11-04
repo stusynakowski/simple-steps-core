@@ -310,6 +310,24 @@ def test_drop_applies_no_tool(wide):
         score[mod.drop(columns=["note"])](wide)
 
 
+def test_select_and_drop_share_the_columns_they_keep():
+    # pandas copies the columns `frame[names]` and `drop` keep; core doesn't
+    # (decision ST): each kept column is the input's own memory.
+    raw = pd.DataFrame({f"c{i}": [float(i), float(i + 1)] for i in range(4)})
+    wf = Workflow()
+    wf["raw"] = raw
+    wf["some"] = op("identity")[mod.select(columns=["c2", "c0"], over=wf["raw"])]
+    wf["less"] = op("identity")[mod.drop(columns=["c1"], over=wf["raw"])]
+    wf.run_all()
+
+    def address(frame, column):
+        return frame[column].to_numpy().__array_interface__["data"][0]
+    source = wf.step("raw").output.data
+    for step in ("some", "less"):
+        data = wf.step(step).output.data
+        assert all(address(data, c) == address(source, c) for c in data.columns), step
+
+
 def test_both_column_verbs_need_their_columns(wide):
     with pytest.raises(ValueError, match="select needs columns="):
         op("identity")[mod.select()](wide)

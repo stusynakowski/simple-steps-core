@@ -815,6 +815,19 @@ def _no_tool(verb: str, fn: Callable) -> None:
         )
 
 
+def _columns_of(frame: pd.DataFrame, names: Sequence[str]) -> pd.DataFrame:
+    """*frame*'s columns *names*, in that order, sharing their memory.
+
+    ``frame[names]`` and ``frame.drop(columns=…)`` copy the columns they keep
+    (pandas takes them out of its block); built from the columns themselves,
+    nothing is copied, and copy-on-write copies a column only if one side is
+    written to (decision ST, docs/design/decisions.md §0).
+    """
+    out = pd.DataFrame({c: frame[c] for c in names}, index=frame.index, copy=False)
+    out.attrs.update(frame.attrs)
+    return out
+
+
 def _require_columns(verb: str, frame: pd.DataFrame, names: Sequence[str]) -> None:
     """Refuse a column the frame does not have — a typo must not pass silently."""
     missing = [c for c in names if c not in frame.columns]
@@ -864,7 +877,7 @@ def select_(source: Any, fn: Callable = identity, *,
             out.meta["matched_nothing"] = data.attrs["matched_nothing"]
         return out
     _require_columns("select", frame, columns)
-    return _column_output("select", frame, frame[list(columns)], source=source)
+    return _column_output("select", frame, _columns_of(frame, list(columns)), source=source)
 
 
 def drop_(source: Any, fn: Callable = identity, *,
@@ -880,7 +893,9 @@ def drop_(source: Any, fn: Callable = identity, *,
         raise ValueError("drop needs columns= — the columns to remove")
     frame = rows(source)
     _require_columns("drop", frame, columns)
-    return _column_output("drop", frame, frame.drop(columns=list(columns)),
+    dropped = set(columns)
+    return _column_output("drop", frame, _columns_of(frame, [c for c in frame.columns
+                                                            if c not in dropped]),
                           source=source)
 
 
