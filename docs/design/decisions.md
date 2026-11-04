@@ -270,7 +270,7 @@ The heart: once these land, the list-of-dicts model is true.
 | D5 | `wf[…]` takes step names only (`wf[0]` goes) **→ core-asks rule 3: yes** | — | yes | Q10 |
 | D6 | A key or row selection can be a step's input **→ core-asks L34: yes** | (implied) | yes | X4 |
 | D7 | `cols[…]` / `rows[…]` stay? **→ core-asks: kept as the explicit spellings of any selector** | — | only for ranges of keys (`cols["a":"c"]`); otherwise plain brackets | X-D6, Q9 |
-| D8 | `.header` → `.keys` | **no**: owner, 2026-11-04: `.header` stays `.header` | yes | X-D7 |
+| D8 | `.header` → `.keys` | **no**: owner, 2026-11-04: `.header` stays `.header`, since a cell can hold a dict, and `.keys` would read as that dict's keys | yes | X-D7 |
 | D10 | `[i]` / `["k"]` never reach inside a cell | — | yes: `expand` / `widen` do | Q8 |
 | D13 | §3's table: by type, a list to a value parameter iterates **→ CA-D1, CA-A: superseded** | yes ("a mapping is implied") | yes | N6 |
 | D14 | Never choose a key when there is more than one **→ CA-A: yes** | yes | yes | N7 |
