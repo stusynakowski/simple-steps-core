@@ -441,14 +441,18 @@ class Kernel:
         the first 50 when not given. ``window`` says which, and how many in all."""
         return self.workflow.preview(self._name(step), rows if rows is not None else (0, self.PAGE))
 
-    def cell(self, step: str | int, row: int, column: str = VALUE_COLUMN) -> dict:
+    def cell(self, step: str | int, row: int, column: str | None = None) -> dict:
         """One cell: its value, type and state, its lineage, and the input
         cells it came from.
 
         *row* is a row number, as shown (``#``): ``k.cell("srt", 0)`` is the
-        first row on screen, ``-1`` the last (S5a, CA-B1).
+        first row on screen, ``-1`` the last (S5a, CA-B1). *column* defaults
+        to the one the step wrote, named after it (D9), else ``value``.
         """
-        return self.workflow.cell(self._name(step), row, column)
+        name = self._name(step)
+        if column is None:
+            column = self.workflow.steps[name].output.meta.get("value_column") or VALUE_COLUMN
+        return self.workflow.cell(name, row, column)
 
     # ── saving ───────────────────────────────────────────────────────────
     @property

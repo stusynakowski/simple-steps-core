@@ -42,7 +42,7 @@ k["r"] = readings[mod.source()]()                 # a source step
 k["scored"] = scale[mod.map()](wf["r"], weight=2) # one value per row
 k.run_all()
 
-k.step("scored").data["value"].tolist()           # [20, 40, 60]
+k.step("scored").data["scored"].tolist()          # [20, 40, 60]: named after its step
 k                                                 # a table of the steps
 ```
 

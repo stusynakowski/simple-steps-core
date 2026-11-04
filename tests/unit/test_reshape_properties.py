@@ -441,6 +441,12 @@ def _redeclare(k: Kernel, name: str, expression) -> bool:
          changed=pd.DataFrame({"k": ["A"], "n": pd.array([pd.NA], dtype="Int64"), "tags": [None], "rec": [{}]},
                               index=["a"]),
          chain=[(649, 0, 0, 0)], which=0, other=0)
+# a step re-declared to read itself was planned for its output's name (D9)
+# before its problems were seen, and planned itself until the stack ran out
+@example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
+         changed=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
+         chain=[(0, 0, 0, 0), (5, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)],
+         which=0, other=2)
 # a pick turned invalid at run left a collapse grouped by its rows completed:
 # re-checks after a run followed only direct inputs (found by ST8)
 @example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]), changed=pd.DataFrame(columns=["k", "n", "tags", "rec"]),

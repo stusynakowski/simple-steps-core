@@ -235,7 +235,7 @@ def k10_value_from_step():
         return False, f"weight=wf['params'] -> {err[:110]}"
     wf["x"] = built
     wf.run_all()
-    got = wf.step("x").output.data.get("value")
+    got = wf.step("x").output.data.get("x")              # named after its step (D9)
     return got is not None and list(got) == [20, 40, 60, 40], f"-> {None if got is None else list(got)}"
 
 
@@ -414,7 +414,7 @@ def c10_failure_flows_downstream():
     out = wf.step("b").output
     cause = (out.notes.get(1, {}).get("cause") if hasattr(out, "notes")
              else out.ledger["cause"].iloc[1])
-    dtype = str(wf.step("a").output.data["value"].dtype)
+    dtype = str(wf.step("a").output.data["a"].dtype)
     done = (not wf.step("bad").valid and calls["n"] == 2 and dtype == "Int64"
             and cause == "a[1]: ValueError: boom")
     return done, f"bad ref -> {wf.step('bad').state}; a: {dtype}; plus1 calls {calls['n']}; cause {cause!r}"
@@ -449,7 +449,7 @@ def r8_failed_rows_keep_int():
     wf = _wf()
     wf["out"] = risky[mod.map()](wf["readings"])
     wf.run("out")
-    dtype = str(wf.step("out").output.data["value"].dtype)
+    dtype = str(wf.step("out").output.data["out"].dtype)
     return dtype != "float64", f"out: {dtype} {wf.step('out').output.values}"
 
 
@@ -572,7 +572,7 @@ def stop_on_failure():
 
     wf = _wf()
     wf["a"] = risky[mod.map()](wf["readings"])
-    wf["b"] = I[mod.select(columns=["value"])](wf["a"])     # a map step holds only `value`
+    wf["b"] = I[mod.select(columns=["a"])](wf["a"])         # a map step holds only its own column
     _, err = _try(wf.run_all)
     stopped = err is not None and "StepFailed" in err and wf.step("b").state == "staged"
     wf["a"] = risky[mod.map(), mod.try_except(default=0)](wf["readings"])

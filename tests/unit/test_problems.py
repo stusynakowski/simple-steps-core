@@ -131,7 +131,7 @@ def test_step_state_and_data(k):
     assert k.step("s").state == "staged" and k.step("s").name == "s"
     k.run("s")
     assert k.step("s").state == "completed" == k.step("s").state
-    assert k.step("s").data["value"].tolist() == [10, 20]
+    assert k.step("s").data["s"].tolist() == [10, 20]
 
 
 def test_output_fields_say_what_a_result_was_computed_from(k):
@@ -141,7 +141,7 @@ def test_output_fields_say_what_a_result_was_computed_from(k):
     out = k.step("s").output
     assert not out.staged and len(out.version) == 12
     assert out.read == {"r": k.step("r").output.version}
-    assert out.value_column == "value"
+    assert out.value_column == "s"                       # named after its step (D9)
     assert out.ran_with["formula"] == 'scale_p[mod.map()](wf["r"], weight=10)'
     assert not out.stale and out.stale_reason is None
     k["s"] = scale_p[mod.map()](wf["r"], weight=2)

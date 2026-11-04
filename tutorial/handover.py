@@ -88,7 +88,7 @@ def part_a():
     lesson("A6", "f's rows keep their ids: Ben is row 1 of p",
            list(k.step("f").data.index), [1])
     lesson("A7", "a step prints its formula back", k.step("f").formula, 'to_f[mod.map()](wf["sick"])')
-    cell = k.cell("f", 0, "value")
+    cell = k.cell("f", 0, "f")
     lesson("A8", "a cell: its value, its type and the input row it came from",
            (cell["value"], cell["type"], cell["inputs"][0]["values"]),
            (100.76, "float", {"temp_c": 38.2}))
@@ -104,7 +104,7 @@ def part_a():
     lesson("A11", "a step reads only earlier steps", k.step("late").state, "invalid")
     del k["late"]
     s = put(k, "w", to_f[mod.map()](wf["p"], temp_c=wf["p"][cols["temp_c"]]))
-    lesson("A12", "a column argument pairs per row (K19)", data(s, "value"), [97.88, 100.76, 98.78])
+    lesson("A12", "a column argument pairs per row (K19)", data(s, "w"), [97.88, 100.76, 98.78])
     k["srt"] = mod.sort(by="temp_c")(wf["p"])
     k["s"] = wf["srt"][0]
     k.run_all()
@@ -116,7 +116,7 @@ def part_a():
     k2 = Kernel.from_json(k.to_json(), CAT)
     k2.run_all()
     lesson("A14", "to_json, then from_json(text, catalog): the same data",
-           data(k2.step("f"), "value"), data(k.step("f"), "value"))
+           data(k2.step("f"), "f"), data(k.step("f"), "f"))
 
 
 # ── B. the requests, and the "Fix in core" table ─────────────────────────
@@ -280,9 +280,9 @@ def part_b():
     before = u.step("t").plan.get("types", {})
     u.run_all()
     lesson("K27a", "an undeclared return type is unknown before it runs",
-           str(before.get("value", before)).lower().count("unknown") > 0, True,
+           str(before.get("t", before)).lower().count("unknown") > 0, True,
            "the plan doesn't state the type as unknown. EX11 (proposed 2026-11-03)")
-    lesson("K27b", "after a run, the type observed", u.step("t").plan["types"].get("value"), "bool")
+    lesson("K27b", "after a run, the type observed", u.step("t").plan["types"].get("t"), "bool")
 
     # K28 — lineage
     k["two"] = op("identity")[mod.expand(columns=["lst"])](wf["pl"])
@@ -314,7 +314,7 @@ def part_b():
     r["n"] = pd.DataFrame({"n": [1, 2, 3, 2]})
     r["out"] = risky[mod.map(), mod.try_except()](wf["n"])
     r.run_all()
-    lesson("R8", "failed rows keep an int column int", str(r.step("out").data["value"].dtype), "Int64")
+    lesson("R8", "failed rows keep an int column int", str(r.step("out").data["out"].dtype), "Int64")
     lesson("R9", "stages: a named group of steps that runs as one", hasattr(Kernel, "run_stage"), True,
            "not built, though model.md §3 said built: corrected")
 
@@ -366,11 +366,11 @@ def part_c():
     # probe_colarg.py
     k = base()
     lesson("Pc1", "colarg: an untyped column argument pairs per row",
-           data(put(k, "s", scale_untyped[mod.map()](wf["r"], weight=wf["r"][cols["w"]])), "value"), [30, 20, 60])
+           data(put(k, "s", scale_untyped[mod.map()](wf["r"], weight=wf["r"][cols["w"]])), "s"), [30, 20, 60])
     lesson("Pc2", "colarg: a typed column argument pairs per row",
-           data(put(k, "s2", scale[mod.map()](wf["r"], weight=wf["r"][cols["w"]])), "value"), [30, 20, 60])
+           data(put(k, "s2", scale[mod.map()](wf["r"], weight=wf["r"][cols["w"]])), "s2"), [30, 20, 60])
     lesson("Pc3", "colarg: the same with the verb inferred",
-           data(put(k, "s3", scale(wf["r"], weight=wf["r"][cols["w"]])), "value"), [30, 20, 60])
+           data(put(k, "s3", scale(wf["r"], weight=wf["r"][cols["w"]])), "s3"), [30, 20, 60])
     # probe_colarg2.py
     k["w"] = make_w[mod.source()]()
     k.run_all()
@@ -383,18 +383,18 @@ def part_c():
     # (core-asks L50c, 2026-11-04): the handover's route relied on the name
     k["s4"] = scale[mod.map()](wf["z2"], weight=wf["z2"][cols["weight"]])
     k.run("s4")
-    lesson("Pc5", "colarg2: vouched with match_ids, then a map", data(k.step("s4"), "value"), [30, 20, 60])
+    lesson("Pc5", "colarg2: vouched with match_ids, then a map", data(k.step("s4"), "s4"), [30, 20, 60])
     # probe_refs2.py
     k = base()
     lesson("Pr1", "refs: a selection as its own step", data(put(k, "a", wf["r"][0:2]), "n"), [3, 1])
     lesson("Pr2", "refs: a column as its own step", data(put(k, "b", wf["r"][cols["n"]])), {"n": [3, 1, 2]})
     lesson("Pr3", "refs: one cell as an argument",
-           data(put(k, "c", scale[mod.map()](wf["r"], weight=wf["r"][0][cols["w"]])), "value"), [30, 10, 20])
+           data(put(k, "c", scale[mod.map()](wf["r"], weight=wf["r"][0][cols["w"]])), "c"), [30, 10, 20])
     s = put(k, "d", op("identity")[mod.sort(by=wf["r"])](wf["r"]))
     lesson("Pr4", "refs: a step as a modifier setting is refused (modifiers take no data, D22)",
            getattr(s, "state", type(s).__name__) in ("invalid", "TypeError"), True)
     lesson("Pr5", "refs: a computed argument is a literal",
-           data(put(k, "e", scale[mod.map()](wf["r"], weight=len("abc"))), "value"), [9, 3, 6])
+           data(put(k, "e", scale[mod.map()](wf["r"], weight=len("abc"))), "e"), [9, 3, 6])
     lesson("Pr6", "refs: a reference to a later step is refused",
            put(k, "f", scale[mod.map()](wf["later"])).state, "invalid")
     k["srt"] = op("identity")[mod.sort(by="n")](wf["r"])

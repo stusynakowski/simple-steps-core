@@ -49,8 +49,8 @@ def test_G5_a_fold_starts_from_its_accumulator_types_empty_value(g5):
     g5["f"] = fold_float[mod.collapse()](wf["x"])
     g5["l"] = fold_list[mod.collapse()](wf["x"])
     g5.run_all()
-    assert g5.step("f").data["value"].tolist() == [6.0]
-    assert g5.step("l").data["value"].tolist() == [[3, 1, 2]]
+    assert g5.step("f").data["f"].tolist() == [6.0]
+    assert g5.step("l").data["l"].tolist() == [[3, 1, 2]]
 
 
 def test_G5_a_fold_whose_type_has_no_empty_value_is_refused_when_declared(g5):
@@ -62,7 +62,7 @@ def test_G5_a_fold_whose_type_has_no_empty_value_is_refused_when_declared(g5):
 def test_G5_a_given_initial_is_where_it_starts(g5):
     g5["i"] = fold_float[mod.collapse(initial=10)](wf["x"])
     g5.run_all()
-    assert g5.step("i").data["value"].tolist() == [16]
+    assert g5.step("i").data["i"].tolist() == [16]
 
 
 def test_G5_an_untyped_fold_starts_at_None_and_says_so_when_that_fails(g5):
@@ -297,12 +297,12 @@ def test_K18_a_call_past_its_timeout_fails_and_says_where(k18):
     assert time.perf_counter() - started < 0.35                       # didn't wait for the slow call
     note = k18.step("t").output.notes[1]
     assert note["where"] == "timeout" and "took longer than 0.05s" in note["error"]
-    assert k18.step("t").data["value"].tolist()[0::2] == [1, 3]
+    assert k18.step("t").data["t"].tolist()[0::2] == [1, 3]
 
 
 def test_G7_a_failure_says_which_layer_gave_up(k18):
     k18["r"] = risky[mod.map(), mod.try_except(), mod.retry(times=2)](wf["x"])
-    k18["rn"] = mod.rename(columns={"value": "n"})(wf["r"])
+    k18["rn"] = mod.rename(columns={"r": "n"})(wf["r"])
     k18["u"] = risky[mod.map()](wf["rn"])                              # reads the failed row
     k18.run_all()
     assert k18.step("r").output.notes[1]["where"] == "retry"

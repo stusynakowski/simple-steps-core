@@ -1025,6 +1025,13 @@ def _column_warnings(operation: Operation, workflow: "Workflow | None" = None,
                 f"{verb.kind} writes {written!r} over the {written!r} column "
                 f"{str(operation.input)!r} already has; name the output "
                 f"(name=…) to keep both, or say replace=True to silence this")
+    # D9: the output takes the step's name, unless the input has that column
+    apart = replace(operation, input=None)        # as it would be named, with no input
+    if step_id is not None and _step_name_taken(operation, workflow, step_id) \
+            and named_after_step(apart, None, step_id) is not apart:
+        notes.append(f"its column is named 'value', not {step_id!r}: {str(operation.input)!r} "
+                     f"already has a column {step_id!r}, and a step never replaces one unasked. "
+                     f"Name it with mod.name(…), or name the step otherwise")
     # Only predict while the input's plan is staged (its expression new or
     # unrun, PL); once that expression runs, `check` is exact.
     upstream = workflow._basis_of_input(operation)
@@ -1076,8 +1083,16 @@ def bind_by_type(operation: Operation, workflow: "Workflow | None",
     for :func:`check` to refuse, naming them (L50b) or suggesting ``mod.cast``
     (L51a). Decided only when the input's columns are known; a step whose
     input hasn't been planned yet is bound when it is."""
-    if workflow is None or operation.input is None or _is_auto(operation):
+    if workflow is None or operation.input is None:
         return operation
+    if _is_auto(operation):
+        if len(operation.shape_verbs) != 1:
+            return operation
+        # the binding doesn't hang on the verb: made on the one auto picks now
+        concrete, _, _ = _provisional(operation, workflow)
+        bound = bind_by_type(concrete, workflow, step_id)
+        extra = {k: v for k, v in bound.arguments.items() if k not in operation.arguments}
+        return replace(operation, arguments={**operation.arguments, **extra}) if extra else operation
     up = workflow.steps.get(str(operation.input))
     if up is None or not up.valid or (step_id in workflow.steps and list(workflow.steps).index(
             str(operation.input)) > list(workflow.steps).index(step_id)):
@@ -1132,11 +1147,51 @@ def _unbound_parameters(operation: Operation, verb: Any) -> list:
 
 
 def _fitting(parameter: Any, columns: list, types: dict) -> list:
-    """The columns whose known type fits *parameter*'s declared one."""
+    """The columns whose known type fits *parameter*'s declared one. An
+    untyped parameter takes any type: every column fits it, so it binds only
+    when there is one (W13)."""
     if parameter.annotation is inspect.Parameter.empty:
-        return []
-    return [c for c in columns if types.get(c) is not None
+        return list(columns)
+    fits = [c for c in columns if types.get(c) is not None
             and _declared_fits(types[c], parameter.annotation) is True]
+    if not fits and len(columns) == 1 and (types.get(columns[0]) is None or _declared_fits(
+            types[columns[0]], parameter.annotation) is None):
+        return list(columns)          # the only column, its type unknown: checked per cell (EX11)
+    return fits
+
+
+def named_after_step(operation: Operation, workflow: "Workflow | None",
+                     step_id: str | None) -> Operation:
+    """*operation*, its one output column named after its step (D9, core-asks
+    L23): ``k["temp_f"] = to_f[mod.map()](…)`` writes ``temp_f``, not
+    ``value``. Only where nothing else names it: no ``mod.name`` or naming
+    pattern, a verb that writes one column (not ``group``, whose key is
+    ``group``), not a record or a built-in reducer, which spread. Not when the
+    input already has a column of that name: a step never replaces a column
+    unasked (C4), so it keeps ``value``, and :func:`warn` says so."""
+    if step_id is None or operation.name_rule is not None or _is_auto(operation):
+        return operation
+    verb = operation.shape_verb
+    kind = verb.kind if verb is not None else None
+    if kind not in NAMED_VERBS or kind == "group" or DEFAULT_PAYLOAD.get(kind) != VALUE_COLUMN:
+        return operation
+    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool)
+    if record_return(kind, fn) is not None:
+        return operation
+    if kind == "collapse" and fn is not None and reducer_form(fn) == "per_column":
+        return operation
+    if kind == "expand" and _expands_into(operation, fn, workflow) == "mapping":
+        return operation                       # key and value: two columns (J-D4, W12)
+    if workflow is not None and workflow.default_name_rule(operation) is not None:
+        return operation
+    if _step_name_taken(operation, workflow, step_id):
+        return operation
+    return replace(operation, modifiers=(Modifier("name", {"to": step_id}), *operation.modifiers))
+
+
+def _step_name_taken(operation: Operation, workflow: "Workflow | None", step_id: str) -> bool:
+    """Is *step_id* already a column of the input, so the output can't take it (C4)?"""
+    return workflow is not None and step_id in workflow._known_columns(operation)
 
 
 #: The verbs that call their tool once per row, so a column given as an
@@ -1290,6 +1345,7 @@ def _paired_arguments(operation: Operation, workflow: "Workflow | None") -> dict
 #: How a warning's message says which kind it is.
 _WARNING_KINDS = (
     ("is written before", "modifier_order"),
+    ("its column is named 'value', not", "step_name_taken"),
     ("the column will be", "default_type"),
     ("isn't a named parameter", "unchecked_argument"),
     ("are positions", "rows_by_position"),
@@ -1385,12 +1441,13 @@ def _binding_hint(operation: Operation, missing: list, workflow: "Workflow") -> 
     columns = [c for c in variables(workflow._known_columns(operation)) if c not in params]
     for name in missing:
         p = params.get(name)
-        if p is None or p.annotation is inspect.Parameter.empty:
+        if p is None:
             continue
-        want = _type_name(p.annotation)
+        want = "any type" if p.annotation is inspect.Parameter.empty else _type_name(p.annotation)
         fits = _fitting(p, columns, types)
         if len(fits) > 1:
-            return (f". {len(fits)} columns are {want}, {', '.join(fits)}: bind one, "
+            what = "could be" if want == "any type" else f"are {want},"
+            return (f". {len(fits)} columns {what} {', '.join(fits)}: bind one, "
                     f"{name}=wf[{up!r}][cols[{fits[0]!r}]]")
         if not fits and columns:
             have = ", ".join(f"{c}: {_type_name(types[c])}" for c in columns if c in types)
@@ -1856,6 +1913,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         )
     if is_combine(operation):
         return _stage_combine(operation, workflow)
+    operation = named_after_step(operation, workflow, step_id)      # D9
     verb = operation.shape_verb
     kind = verb.kind if verb else None
     # 008 C1/C2: a setting that reads a step, or is a tool, has no value until

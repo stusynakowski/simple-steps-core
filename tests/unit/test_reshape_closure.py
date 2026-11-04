@@ -127,7 +127,7 @@ def test_L3_widening_a_packed_row_gives_back_the_row(k):
 def test_L4_a_block_through_a_list_of_dicts_comes_back(k):
     k["rec"] = mod.pack(columns=["name", "ward", "temp"])(wf["v"])
     k["packed"] = gather[mod.collapse()](wf["rec"])
-    k["rows"] = mod.expand(columns=["value"])(wf["packed"])
+    k["rows"] = mod.expand(columns=["rec"])(wf["packed"])               # rec's column (D9)
     k["back"] = mod.widen()(wf["rows"])
     k.run_all()
     same_rows(data(k, "back"), data(k, "v"))
@@ -192,7 +192,7 @@ def test_L6_a_group_is_unpacked_before_it_joins_on_lineage(k, group_first):
     k["j"] = join(*sides, on="#v")
     k.run_all()
     assert len(data(k, "j")) == 4
-    assert sorted(data(k, "j")["value"]) == [1, 3, 3, 3]               # Ben alone in B
+    assert sorted(data(k, "j")["n"]) == [1, 3, 3, 3]                   # Ben alone in B
 
 
 def test_A5_a_join_on_lineage_pairing_rows_of_different_origins_is_caught(k):
@@ -215,7 +215,7 @@ def test_L7_expand_then_collapse_by_its_parent_gives_one_row_per_parent(k):
     k["side"] = zip_(wf["v"], wf["back"])
     k.run_all()
     assert list(data(k, "back").index) == [0, 1, 2, 3]
-    assert data(k, "back").loc[2, "value"] == [3, 30]               # Ben
+    assert data(k, "back").loc[2, "e"] == [3, 30]                   # Ben: e's column
     assert state(k, "side") == "completed"
 
 
@@ -276,7 +276,7 @@ def test_L13_a_join_collapses_back_to_one_side(k):
 def test_L14_a_collapsed_cell_traces_to_its_group(k):
     k["c"] = op("count")[mod.collapse(by="ward")](wf["v"])
     k.run_all()
-    inputs = k.cell("c", 0, "value")["inputs"]                    # group A, row 0
+    inputs = k.cell("c", 0, "c")["inputs"]                        # group A, row 0
     assert {i["step"] for i in inputs} == {"v"}
     assert all(i["rows"] == [0, 1, 3] for i in inputs)
 
@@ -316,8 +316,8 @@ def test_L17_row_ids_are_never_parsed(k):
     k["n"] = named_rc[mod.source()]()
     k["e"] = two_rc[mod.expand()](wf["n"])
     k.run_all()
-    assert data(k, "e").loc["a.1", "value"] == "p1"                 # item 1 of row a
-    (parent,) = k.cell("e", 1, "value")["inputs"]               # item 1 of row a: row 1
+    assert data(k, "e").loc["a.1", "e"] == "p1"                     # item 1 of row a
+    (parent,) = k.cell("e", 1, "e")["inputs"]                   # item 1 of row a: row 1
     assert parent["row"] == 0                                     # a is n's row 0
 
 
@@ -455,13 +455,13 @@ def test_L25_expand_doesnt_normalise_a_bare_string(j):
     run(j)
     assert state(j, "e") == "failed"
     assert "as_list" in str(j.workflow.steps["e"].output.notes.get("1.0"))
-    assert "a" in data(j, "e")["value"].tolist()                    # the other rows ran
+    assert "a" in data(j, "e")["e"].tolist()                        # the other rows ran
     assert any("held None" in str(w) for w in j.workflow.steps["e"].warnings)
     j["l"] = op("as_list")[mod.map()](wf["m"])                       # said on purpose
     j["e2"] = identity[mod.expand()](wf["l"])
     j.run("l")
     j.run("e2")
-    assert data(j, "e2")["value"].tolist() == ["a", "c"]
+    assert data(j, "e2")["e2"].tolist() == ["a", "c"]
 
 
 def test_L26b_a_mapping_packs_back_with_gather_dict(j):
@@ -469,7 +469,7 @@ def test_L26b_a_mapping_packs_back_with_gather_dict(j):
     j["e"] = identity[mod.expand()](wf["s"])                         # key, value rows
     j["back"] = op("gather_dict")[mod.collapse(by="#s")](wf["e"])
     j.run_all()
-    assert data(j, "back")["value"].tolist() == [{"2026-01": 3, "2026-02": 4}]
+    assert data(j, "back")["back"].tolist() == [{"2026-01": 3, "2026-02": 4}]
 
 
 def test_L26_expanding_a_mapping_gives_key_value_rows(j):
@@ -505,7 +505,7 @@ def test_L28_positions_count_variables_only(e):
     e["first"] = wf["e"][cols[0]]
     e.run_all()
     assert "#v" in data(e, "e").columns
-    assert list(data(e, "first").columns) == ["#v", "value"]       # cols[0] is value; #v is kept
+    assert list(data(e, "first").columns) == ["#v", "e"]           # cols[0] is e's column; #v is kept
 
 
 def test_L29_tools_get_variables_only(e):
@@ -515,12 +515,12 @@ def test_L29_tools_get_variables_only(e):
     k2["keys"] = row_keys_rc[mod.map()](wf["e"])
     k2.run_all()
     assert "#v" in data(k2, "e").columns
-    assert all(not c.startswith("#") for keys in data(k2, "keys")["value"] for c in keys)
+    assert all(not c.startswith("#") for keys in data(k2, "keys")["keys"] for c in keys)
 
 
 def test_L30_zip_of_one_origin_keeps_one_hash_column(e):
-    e["a"] = mod.rename(columns={"value": "a"})(wf["e"])
-    e["b"] = mod.rename(columns={"value": "b"})(wf["e"])
+    e["a"] = mod.rename(columns={"e": "a"})(wf["e"])
+    e["b"] = mod.rename(columns={"e": "b"})(wf["e"])
     e["z"] = zip_(wf["a"], wf["b"])
     e.run_all()
     assert list(data(e, "z").columns).count("#v") == 1
@@ -682,7 +682,7 @@ def test_L42_a_parents_value_reaches_each_child_through_a_join_on_lineage(m):
     m["j"] = join(wf["e"], wf["v"], on="#v")
     m["c"] = scale_rc[mod.map()](wf["j"])
     m.run_all()
-    assert list(data(m, "c")["value"])[1] == 30 * 37.0                  # Ada's item 1 × Ada's temp
+    assert list(data(m, "c")["c"])[1] == 30 * 37.0                      # Ada's item 1 × Ada's temp
 
 
 def test_L43_a_scalar_argument_from_children_into_their_parent_is_refused(m):
@@ -755,11 +755,11 @@ def test_L46_a_tool_cant_write_an_id_column():
 def test_L47_naming_cant_forge_an_id_column(e):
     e["n"] = readings_rc[mod.map(), mod.name("#v")](wf["v"])
     assert state(e, "n") == "invalid"
-    e["r"] = mod.rename(columns={"value": "#x"})(wf["e"])
+    e["r"] = mod.rename(columns={"e": "#x"})(wf["e"])
     assert state(e, "r") == "invalid"                                  # refused when declared
     e["out"] = mod.rename(columns={"#v": "visit"})(wf["e"])               # copying out is allowed
     e.run_all()
-    assert list(data(e, "out").columns) == ["#v", "value", "visit"]    # lineage stays (CA-D)
+    assert list(data(e, "out").columns) == ["#v", "e", "visit"]        # lineage stays (CA-D)
     assert "mod.copy" in e.step("out").formula
 
 
@@ -767,8 +767,8 @@ def test_L48_header_and_name_tools_see_variables_only(e):
     e["h"] = wf["e"].header
     e["sel"] = mod.select(columns=lambda c: True)(wf["e"])
     e.run_all()
-    assert data(e, "h")["name"].tolist() == ["value"]
-    assert list(data(e, "sel").columns) == ["#v", "value"]                # #v carried, not chosen
+    assert data(e, "h")["name"].tolist() == ["e"]
+    assert list(data(e, "sel").columns) == ["#v", "e"]                    # #v carried, not chosen
 
 
 # ── grouping is a composition (owner, 2026-10-27) ────────────────────────────
@@ -787,11 +787,11 @@ def test_L49_a_reduction_is_a_map_over_packed_lists():
     k["mapped"] = mean_temp_rc[mod.map()](wf["packed"])
     k.run_all()
     assert data(k, "packed").loc["A", "temp"] == [37.0, 38.5, 39.1]
-    assert data(k, "direct")["value"].tolist() == data(k, "mapped")["value"].tolist()
+    assert data(k, "direct")["direct"].tolist() == data(k, "mapped")["mapped"].tolist()
     assert list(data(k, "direct").index) == list(data(k, "mapped").index) == ["A", "B"]
     assert data(k, "direct").loc["A", "#vt"] == data(k, "packed").loc["A", "#vt"] == [0, 1, 3]
-    assert list(data(k, "direct").columns) == ["#vt", "ward", "value"]   # collapse also keeps the key
-    assert list(data(k, "mapped").columns) == ["#vt", "value"]           # a map: only its results
+    assert list(data(k, "direct").columns) == ["#vt", "ward", "direct"]  # collapse also keeps the key
+    assert list(data(k, "mapped").columns) == ["#vt", "mapped"]          # a map: only its results
 
 
 @tool
@@ -842,4 +842,4 @@ def test_L51_an_empty_step_holds_a_place():
     k["x"] = pd.DataFrame({"value": [1.0, 2.0]})                     # given an expression
     assert k.workflow.steps["d"].problems == ()
     k.run_all()
-    assert data(k, "d")["value"].tolist() == [2.0, 4.0]
+    assert data(k, "d")["d"].tolist() == [2.0, 4.0]

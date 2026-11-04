@@ -55,7 +55,8 @@ def k(cat):
 
 
 def values(k, step):
-    return k.step(step).output.data["value"].tolist()
+    out = k.step(step).output                      # the column it wrote: its name (D9)
+    return out.data[out.meta["value_column"]].tolist()
 
 
 def test_a_kernel_needs_a_catalog():

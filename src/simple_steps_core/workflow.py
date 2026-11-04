@@ -672,6 +672,7 @@ class Workflow:
             return
         if new in self.steps:
             raise ValueError(f"step {new!r} already exists")
+        carriers = self._carrying_own_column(old)        # D9: its column is named old
         self.steps = {(new if sid == old else sid): st
                       for sid, st in self.steps.items()}
         self.steps[new].name = new
@@ -703,6 +704,89 @@ class Workflow:
             if changed:
                 st.operation = Operation(op.tool, tuple(new_mods), new_args,
                                          op.fn, new_input, bound_to=op.bound_to)
+        if carriers:
+            self._rename_own_column(new, old, {new if c == old else c for c in carriers})
+
+    def _carrying_own_column(self, step_id: str) -> set[str]:
+        """*step_id* and the steps after it that carry its column unchanged,
+        when that column is named after it (D9); empty when it isn't."""
+        st = self.steps[step_id]
+        out = st.output
+        if out.meta.get("staged") or out.meta.get("value_column") != step_id \
+                or step_id not in out.data.columns or st.operation.name_rule is not None:
+            return set()
+        carriers = {step_id}
+        for sid, other in self.steps.items():
+            op_ = other.operation
+            if sid in carriers or op_.input is None or str(op_.input) not in carriers:
+                continue
+            if step_id in predicted_columns(other.output) \
+                    and other.output.meta.get("value_column") != step_id:
+                carriers.add(sid)
+        return carriers
+
+    def _rename_own_column(self, step_id: str, old: str, carriers: set[str]) -> None:
+        """A step renamed from *old*: the column it named after itself takes its
+        new name, with no re-run (a copy, filed under its new key: a filed
+        result never changes), and every step that names that column, reading
+        it from *step_id* or a step that carries it, names it so too (D9,
+        core-asks L23). Steps that carry it hold it under *old* until they
+        re-run, so they show stale."""
+        st = self.steps[step_id]
+        out = st.output
+        copy = Output(out.data.rename(columns={old: step_id}),
+                      out.states.rename(columns={old: step_id}),
+                      {k: v for k, v in out.meta.items() if k not in ("run_key", "version")})
+        copy.meta["value_column"] = step_id
+        copy.meta["version"] = _data_version(copy.data)
+        st.output = copy
+        self._file(step_id)
+
+        def renamed(value: Any) -> Any:
+            if isinstance(value, str):
+                return step_id if value == old else value
+            if isinstance(value, list):
+                return [renamed(v) for v in value]
+            if isinstance(value, tuple):
+                return tuple(renamed(v) for v in value)
+            if isinstance(value, dict):
+                out_ = {renamed(k) if isinstance(k, str) else k: v for k, v in value.items()}
+                if "col" in out_:
+                    out_["col"] = renamed(out_["col"])
+                for key in ("names", "on", "and", "or", "not", "where", "test"):
+                    if key in out_ and not isinstance(out_[key], str):
+                        out_[key] = renamed(out_[key])
+                return out_
+            return value
+
+        for sid, other in self.steps.items():
+            if sid == step_id:
+                continue
+            op_ = other.operation
+            changed = False
+            modifiers = op_.modifiers
+            if op_.input is not None and str(op_.input) in carriers:
+                modifiers = tuple(Modifier(m.kind, {k: renamed(v) if k != "name" else v
+                                                    for k, v in m.settings.items()})
+                                  for m in op_.modifiers)
+                changed = modifiers != op_.modifiers
+            arguments = {}
+            for key, value in op_.arguments.items():
+                if isinstance(value, StepRef) and value.id in carriers \
+                        and (value.columns is not None or value.rows is not None):
+                    moved = replace(value, columns=renamed(value.columns), rows=renamed(value.rows))
+                    changed = changed or moved != value
+                    value = moved
+                arguments[key] = value
+            if changed:
+                other.operation = replace(op_, modifiers=modifiers, arguments=arguments)
+            if sid in carriers and not other.output.meta.get("staged"):
+                # it shows the column under its old name: what reads it is
+                # checked against what it will produce once it re-runs (PL)
+                other.output.meta["edited"] = True
+        self._mark_stale_dependents(step_id)
+        self._recheck_downstream(step_id)
+        self._restage_after(step_id)
 
     def _mark_stale_dependents(self, step_id: str) -> None:
         """Re-decide staleness after *step_id* changed (009 §5–§6).
@@ -1221,10 +1305,17 @@ class Workflow:
             gone = self.steps[ref.id].output.absent_cells()
             states[name] = _state_column(["absent" if (p, column.name) in gone else "known"
                                           for p in partners], data.index)
+            failed = set(self.steps[ref.id].output.ids_in("failed", "blocked"))
+            notes = self.steps[ref.id].output.notes
             for row, p in zip(data.index, partners):
                 if (p is None or p not in column.index) and row not in blocked:
                     why = f"{name}: {ref.id!r} has no row {_plain(row if p is None else p)!r}"
                     blocked[row] = (why, why)
+                elif p in failed and row not in blocked:
+                    # a failed partner blocks its row only, as a column does
+                    note = notes.get(p, {})
+                    blocked[row] = (f"argument {name!r} reads {ref.id}[{_plain(p)}], which failed",
+                                    note.get("cause") or f"{ref.id}[{_plain(p)}]: {note.get('error')}")
         return Output(data, states, {**source.meta, "blocked_rows": blocked})
 
     def _input_for(self, operation: Operation) -> Any | None:
@@ -2035,18 +2126,25 @@ class Workflow:
         if kind == "rename" and isinstance(settings.get("columns"), dict):
             back = {new: old for old, new in settings["columns"].items()}
             return {"kind": "rebuild", "formula": f"mod.rename(columns={back!r})({me})"}
-        if kind == "pack" and _named(op_) == VALUE_COLUMN:
+        if kind == "pack" and op_.name_rule is None:
             chosen = list(settings.get("columns") or variables(self._predicted_of(source)))
             return {"kind": "rebuild", "formula": f"mod.widen(columns={chosen!r})({me})"}
         if kind == "widen":
             names_ = variables(self._predicted_of(source))
-            spread = VALUE_COLUMN if VALUE_COLUMN in names_ else (names_[0] if len(names_) == 1 else None)
+            # the column a pack made: named after that pack (D9), or `value`
+            packed = (source if source in self.steps and self._kind(source) == "pack"
+                      and self.steps[source].operation.name_rule is None else VALUE_COLUMN)
+            spread = packed if packed in names_ else (names_[0] if len(names_) == 1 else None)
             fields = list(settings.get("columns") or [])
             if not fields and step_id in self.steps and not self.steps[step_id].output.meta.get("staged"):
                 fields = [c for c in variables(self.steps[step_id].output.data.columns) if c not in names_]
-            if spread == VALUE_COLUMN:
+            if spread == packed and fields:
+                # packed back under its own name, whatever the step that packs it is called
                 return {"kind": "rebuild",
-                        "formula": f"mod.pack(columns={fields!r})({me})" if fields else None}
+                        "formula": f"op(\"identity\")[mod.pack(columns={fields!r}), "
+                                   f"mod.name({spread!r})]({me})"}
+            if spread == packed:
+                return {"kind": "rebuild", "formula": None}
             return {"kind": "trace"}
         if kind == "collapse" and _base(op_.fn or BUILTIN_TOOLS.get(op_.tool)) is BUILTIN_TOOLS["gather"] \
                 and self._groups_by_step_of(op_) is None:
@@ -2308,14 +2406,16 @@ class Workflow:
             current = upstream
         return current, self.steps[current].problems[0]
 
-    def _failed_argument(self, operation: Operation) -> tuple[str, str] | None:
+    def _failed_argument(self, operation: Operation,
+                         paired: Any = ()) -> tuple[str, str] | None:
         """An argument that reads a step with a failed cell: (error, root cause).
 
         008 C10: an argument is passed whole, so one failed cell in it fails
-        every row that would receive it — without calling the tool.
+        every row that would receive it — without calling the tool. A column
+        paired row by row (*paired*) blocks only the rows its failed cells meet.
         """
         for name, value in operation.arguments.items():
-            if not isinstance(value, StepRef):
+            if not isinstance(value, StepRef) or name in paired:
                 continue
             step = self.steps.get(str(value))
             if step is None or step.output.meta.get("staged"):
@@ -2333,12 +2433,12 @@ class Workflow:
     def pending(self, step_id: str) -> list[str]:
         """The steps *step_id* reads that have not run yet, nearest first."""
         waiting: list[str] = []
-        for name in self.steps[step_id].operation.reads:
+        for name in dict.fromkeys(str(r) for r in self.steps[step_id].operation.reads):
             upstream = self.steps.get(name)
             if upstream is not None and upstream.output.meta.get("staged"):
                 waiting.extend(self.pending(name))
                 waiting.append(name)
-        return waiting
+        return list(dict.fromkeys(waiting))   # once each: an input and a column of it
 
     def upstream(self, step_id: str) -> list[str]:
         """Every step *step_id* depends on, directly or not, in workflow order."""
@@ -2705,7 +2805,7 @@ class Workflow:
             # 008 N: the verb is picked from the data the step really gets.
             resolved, kind, why = _resolve_auto(resolved, source)
             chosen = {"verb": kind, "reason": why, "provisional": False}
-        bad_argument = self._failed_argument(step.operation)
+        bad_argument = self._failed_argument(step.operation, paired)
         if bad_argument is not None and source is not None:
             # Every row is blocked: hand the verb an input that says so.
             source = Output(source.data, source.states,
@@ -2730,8 +2830,12 @@ class Workflow:
             # parameter has a default, which no column fills by name (L50c)
             resolved = replace(resolved, arguments={**resolved.arguments,
                                                     **{name: FROM_ROW for name in paired}})
+        unnamed = resolved
+        resolved = named_after_step(resolved, self, step_id)            # D9
         try:
             step.output = resolved.run(source, tools)
+            if resolved is not unnamed:
+                _mapping_keeps_value(step.output, step_id, source)
             if paired and unpaired is not None:
                 _unpair(step.output, unpaired, paired)
             step.output.data = _str_columns(step.output.data, step_id)
@@ -3124,6 +3228,7 @@ from .checks import (  # noqa: E402
     predicted_columns,
     stage,
     bind_by_type,
+    named_after_step,
     warn,
     keeps_ids,
     _tool_parameters,
@@ -3331,6 +3436,19 @@ def _apply_naming(operation: Operation, output: Output, step_id: str,
         output.data = output.data.rename(columns=rename)
         output.states = output.states.rename(columns=rename)
     output.meta["value_column"] = final[0] if len(final) == 1 else None
+
+
+def _mapping_keeps_value(output: Output, step_id: str, source: Output | None) -> None:
+    """An expand of mappings writes two columns, ``key`` and ``value`` (J-D4):
+    not one output, so the step's name doesn't replace ``value`` (D9, W12)."""
+    if output.meta.get("verb") != "expand" or output.meta.get("value_column") != step_id:
+        return
+    carried = set(source.data.columns) if source is not None else set()
+    if "key" not in output.data.columns or "key" in carried or VALUE_COLUMN in output.data.columns:
+        return
+    output.data = output.data.rename(columns={step_id: VALUE_COLUMN})
+    output.states = output.states.rename(columns={step_id: VALUE_COLUMN})
+    output.meta["value_column"] = VALUE_COLUMN
 
 
 def _named(operation: Operation) -> str:

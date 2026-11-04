@@ -52,10 +52,10 @@ def test_K1_an_unrun_source_plans_its_declared_columns(k):
 def test_K27_a_type_is_declared_else_unknown_then_observed_or_the_union(k):
     k["d"] = doubled[mod.map()](wf["x"])
     k["m"] = mixed[mod.map()](wf["x"])
-    assert k.step("d").plan["types"] == {"value": "int"}            # declared
-    assert k.step("m").plan["types"] == {"value": "unknown"}        # not until it runs
+    assert k.step("d").plan["types"] == {"d": "int"}                # declared
+    assert k.step("m").plan["types"] == {"m": "unknown"}            # not until it runs
     k.run_all()
-    assert k.step("m").plan["types"] == {"value": "int | str"}      # observed: a mix
+    assert k.step("m").plan["types"] == {"m": "int | str"}          # observed: a mix
 
 
 def test_K26_a_plan_says_its_size_and_a_view_is_a_page(k):

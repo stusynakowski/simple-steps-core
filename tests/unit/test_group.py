@@ -60,7 +60,7 @@ def test_collapse_follows_group_directly(k):
     k.run_all()
     assert k.step("per_band").data.to_dict("list") == {"#g": [[0, 2], [1, 3]],
                                                         "band": ["normal", "fever"],
-                                                        "value": [2, 2]}
+                                                        "per_band": [2, 2]}
 
 
 def test_the_plan_before_running_is_the_inputs_columns_plus_the_key(k):

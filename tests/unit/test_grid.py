@@ -746,8 +746,8 @@ def test_inference_works_when_the_whole_chain_is_declared_first(three):
         return value > 15
 
     @tool
-    def add_up(acc, value):
-        return (acc or 0) + value
+    def add_up(acc, scored):                # a fold takes its column by name (W14)
+        return (acc or 0) + scored
 
     wf = Workflow()
     wf["raw"] = three
@@ -1150,7 +1150,8 @@ def test_an_invalid_operation_is_a_single_cell(three):
 def test_a_missing_column_is_caught_at_declaration():
     """Possible only because the tool names the values it needs."""
     wf = Workflow()
-    wf["raw"] = pd.DataFrame({"count": [1, 2, 3]})      # not "n"
+    # not "n", and two columns an untyped n could take (W13: one would bind)
+    wf["raw"] = pd.DataFrame({"count": [1, 2, 3], "city": ["a", "b", "c"]})
     wf["scored"] = score[mod.map()](wf["raw"])
     step = wf.step("scored")
     assert not step.valid
@@ -1729,7 +1730,7 @@ def test_an_expand_to_nothing_keeps_its_columns_and_their_dtypes():
     out = wf.step("gone").output.data
     assert len(out) == 0
     # an expand step is its parents and its items, even when there are none
-    assert list(out.columns) == ["#raw", "value"]
+    assert list(out.columns) == ["#raw", "gone"]
 
 
 def test_a_downstream_step_of_an_empty_expand_still_validates_and_runs():

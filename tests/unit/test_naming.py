@@ -62,10 +62,11 @@ def test_mod_name_names_the_output_column(k, step, columns):
     assert list(k.step("s").data.columns) == columns
 
 
-def test_without_mod_name_the_default_stays(k):
+def test_without_mod_name_the_output_takes_the_steps_name(k):
+    # D9 (core-asks L23): not `value`
     k["s"] = to_f_n[mod.map()](wf["p"])
     k.run_all()
-    assert list(k.step("s").data.columns) == ["value"]
+    assert list(k.step("s").data.columns) == ["s"]
 
 
 def test_the_last_naming_modifier_wins_wherever_it_is_written(k):
@@ -119,4 +120,53 @@ def test_a_named_key_feeds_collapse(k):
     k["g"] = to_f_n[mod.group(), mod.name("band")](wf["p"])
     k["c"] = Operation(tool="count")[mod.collapse(by="band")](wf["g"])
     k.run_all()
-    assert list(k.step("c").data.columns) == ["#g", "band", "value"]
+    assert list(k.step("c").data.columns) == ["#g", "band", "c"]
+
+
+# ── D9: one output column takes its step's name ───────────────────────────
+def test_a_rename_renames_the_column_and_what_reads_it(k):
+    k["s"] = to_f_n[mod.map()](wf["p"])
+    k["top"] = mod.sort(by="s", ascending=False)(wf["s"])
+    k["only"] = mod.select(columns=["s"])(wf["top"])
+    k.run_all()
+    held = k.step("s").output.data["s"].tolist()
+    k.rename("s", "temp_f")
+    assert k.step("temp_f").state == "completed"                  # no re-run
+    assert k.step("temp_f").data["temp_f"].tolist() == held
+    assert k.step("top").formula == 'mod.sort(by="temp_f", ascending=False)(wf["temp_f"])'
+    assert k.step("only").formula == 'wf["top"][cols["temp_f"]]'
+    assert k.step("only").problems == ()                         # checked against top's plan
+    k.run_all()
+    assert list(k.step("only").data.columns) == ["temp_f"]
+
+
+def test_a_step_named_like_an_input_column_keeps_value_and_says_so():
+    k = Kernel(Catalog(tools=[to_f_n]))
+    k["p"] = pd.DataFrame({"temp": [37.0]})
+    k["temp"] = to_f_n[mod.map()](wf["p"])
+    k.run_all()
+    assert list(k.step("temp").data.columns) == ["value"]
+    assert [w.code for w in k.step("temp").warnings] == ["step_name_taken"]
+
+
+def test_an_expand_of_dicts_keeps_key_and_value():
+    from simple_steps_core.operation import op
+    identity = op("identity")
+    k = Kernel(Catalog(tools=[]))
+    k["s"] = pd.DataFrame({"scores": [{"a": 1, "b": 2}]})
+    k["e"] = identity[mod.expand()](wf["s"])
+    k.run_all()
+    assert [c for c in k.step("e").data.columns if not c.startswith("#")] == ["key", "value"]
+
+
+def test_map_after_map_runs_untyped():
+    @tool
+    def plus_n(value):
+        return value + 1
+    k = Kernel(Catalog(tools=[plus_n]))
+    k["p"] = pd.DataFrame({"n": [1, 2]})
+    k["a"] = plus_n[mod.map()](wf["p"])                # the only column, untyped (W13)
+    k["b"] = plus_n[mod.map()](wf["a"])
+    k.run_all()
+    assert k.step("b").data["b"].tolist() == [3, 4]
+    assert k.step("b").formula == 'plus_n[mod.map()](wf["a"], value=wf["a"][cols["a"]])'

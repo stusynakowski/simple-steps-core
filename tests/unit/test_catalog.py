@@ -215,15 +215,15 @@ def test_each_workflow_runs_its_own_catalogs_tool():
         w["p"] = patients_c[mod.source()]()
         w["s"] = handle[mod.map()](wf["p"])
         w.run_all()
-    assert wa.step("s").output.data["value"].tolist() == ["a", "a"]
-    assert wb.step("s").output.data["value"].tolist() == ["b", "b"]
+    assert wa.step("s").output.data["s"].tolist() == ["a", "a"]
+    assert wb.step("s").output.data["s"].tolist() == ["b", "b"]
     # Loaded from the same file, each runs the tool its own catalog has.
     text = wa.to_json()
     for catalog, expected in ((Catalog(tools=[patients_c, score_a]), "a"),
                               (Catalog(tools=[patients_c, score_b]), "b")):
         loaded = Workflow.from_json(text, catalog=catalog)
         loaded.run_all()
-        assert loaded.step("s").output.data["value"].tolist() == [expected] * 2
+        assert loaded.step("s").output.data["s"].tolist() == [expected] * 2
 
 
 # ── loading against a catalog ────────────────────────────────────────────
@@ -232,6 +232,6 @@ def test_a_loaded_workflow_is_checked_against_the_catalog(cat):
     text = w.to_json()
     loaded = Workflow.from_json(text, catalog=cat)
     loaded.run_all()
-    assert loaded.step("f").output.data["value"].tolist() == [97.88, 100.76]
+    assert loaded.step("f").output.data["f"].tolist() == [97.88, 100.76]
     smaller = Workflow.from_json(text, catalog=cat.without("to_f_c"))
     assert smaller.step("f").problems == ("'to_f_c' is not in this workflow's catalog",)

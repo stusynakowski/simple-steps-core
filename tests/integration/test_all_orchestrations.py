@@ -82,7 +82,7 @@ def test_group_labels_rows_and_keeps_their_columns(wf):
 
 
 def test_collapse_by_group_sums_per_city(wf):
-    per_city = wf.step("per_city").output.data.set_index("bucket")["value"]
+    per_city = wf.step("per_city").output.data.set_index("bucket")["per_city"]
     assert per_city.to_dict() == {"SF": 4, "NYC": 2, "LA": 2}
 
 
@@ -111,7 +111,7 @@ def test_widen_lifts_fields_into_columns(wf):
 # ── sweep: the cross product of parameters ──────────────────────────────
 def test_sweep_builds_one_row_per_combination(wf):
     sweep = wf.step("grid_search").output.data
-    assert list(sweep.columns) == ["model", "window", "value"]
+    assert list(sweep.columns) == ["model", "window", "grid_search"]
     assert len(sweep) == 4
 
 
@@ -251,7 +251,7 @@ def test_T1_3_T1_4_a_resource_is_not_a_column_and_declares_without_the_object():
     wf = pipeline.build_resources()          # nothing loaded, nothing run
     assert all(p == () for p in wf.validate().values())
     # a map step is only its results
-    assert predicted_columns(wf.step("summaries").output) == ["value"]
+    assert predicted_columns(wf.step("summaries").output) == ["summaries"]
 
 
 def test_T1_5_running_without_the_resource_is_a_clear_problem():

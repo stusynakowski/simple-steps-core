@@ -101,7 +101,7 @@ def test_a_formula_runs_like_the_line_it_writes():
     k["p"] = formula("patients_x[mod.source()]()")
     k["f"] = formula('= to_f_x[mod.map()](wf["p"])')           # the app's leading = is fine
     k.run_all()
-    assert k.step("f").data["value"].tolist() == [97.9, 100.8]
+    assert k.step("f").data["f"].tolist() == [97.9, 100.8]
 
 
 def test_a_plain_string_stays_a_string_value():

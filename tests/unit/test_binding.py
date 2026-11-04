@@ -49,14 +49,14 @@ def test_the_one_column_whose_type_fits_is_bound_and_written():
     k["x"] = double_b[mod.map()](wf["r"])
     assert k.step("x").formula == 'double_b[mod.map()](wf["r"], n=wf["r"][cols["count"]])'
     k.run_all()
-    assert k.step("x").data["value"].tolist() == [2, 4]
+    assert k.step("x").data["x"].tolist() == [2, 4]
 
 
 def test_an_int_column_fits_a_float():
     k = kernel()
     k["x"] = half_b[mod.map()](wf["r"])
     k.run_all()
-    assert k.step("x").data["value"].tolist() == [0.5, 1.0]
+    assert k.step("x").data["x"].tolist() == [0.5, 1.0]
 
 
 def test_two_columns_that_fit_are_named_with_the_binding_to_write():
@@ -82,8 +82,8 @@ def test_a_parameter_with_a_default_is_not_bound_by_name():
     k["kept"] = scale_b[mod.map()](wf["xf"])
     k["bound"] = scale_b[mod.map()](wf["xf"], factor=wf["xf"][cols["factor"]])
     k.run_all()
-    assert k.step("kept").data["value"].tolist() == [2, 4]       # factor's default
-    assert k.step("bound").data["value"].tolist() == [10, 20]    # bound on purpose
+    assert k.step("kept").data["kept"].tolist() == [2, 4]       # factor's default
+    assert k.step("bound").data["bound"].tolist() == [10, 20]    # bound on purpose
 
 
 def test_a_name_match_is_not_written():
@@ -101,4 +101,4 @@ def test_binding_waits_until_the_input_is_planned():
     k.run("s")
     assert k.step("x").formula == 'double_b[mod.map()](wf["s"], n=wf["s"][cols["d"]])'
     k.run_all()
-    assert k.step("x").data["value"].tolist() == [2, 4]
+    assert k.step("x").data["x"].tolist() == [2, 4]

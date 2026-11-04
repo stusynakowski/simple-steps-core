@@ -260,7 +260,7 @@ def test_a_column_argument_never_becomes_or_replaces_an_output_column():
     k["v"] = pd.DataFrame({"name": ["Ada", "Ben"], "temp": [37.0, 38.5]})
     k["f"] = to_f[mod.map()](wf["v"])
     k["added"] = hot[mod.filter()](wf["v"], limit=wf["v"][cols["temp"]])
-    k["covered"] = hot[mod.filter()](wf["v"], temp=wf["f"][cols["value"]])
+    k["covered"] = hot[mod.filter()](wf["v"], temp=wf["f"][cols["f"]])
     k.run_all()
     assert k.step("added").output.data.to_dict("list") == {"name": ["Ada", "Ben"], "temp": [37.0, 38.5]}
     assert values(k, "covered", "temp") == [37.0, 38.5]
@@ -300,7 +300,7 @@ def test_an_expand_with_no_tool_names_its_column_when_there_are_several():
     k["one"] = [1, 2]
     k["flat"] = mod.expand()(wf["one"])
     k.run_all()
-    assert values(k, "named", "a") == [1, 2, 3] and values(k, "flat", "value") == [1, 2]
+    assert values(k, "named", "a") == [1, 2, 3] and values(k, "flat", "flat") == [1, 2]
 
 
 def test_no_value_means_one_thing_in_every_verb():
@@ -321,7 +321,7 @@ def test_no_value_means_one_thing_in_every_verb():
     assert [w.message for w in k.step("e").warnings] == ["1 row held no list (None, or no value): it gave no rows"]
     assert k.step("w").state == "completed" and (1, "x") in k.step("w").output.absent_cells()
     assert [w.message for w in k.step("w").warnings] == ["1 row held no dict (None, or no value): its fields are absent"]
-    got = values(k, "f", "value")
+    got = values(k, "f", "f")
     assert got[0] == 1.0 and pd.isna(got[1]) and got[2] == 0.0      # Cy's gap: the default
 
 

@@ -144,9 +144,9 @@ def test_a_column_pairs_with_the_rows_that_share_its_ids(kw, tool_):
     kw["sj"] = tool_[mod.map()](wf["j"], w=wf["j"][cols["w"]])
     kw.run_all()
     # Ben (id 1) x 20, Cy (id 2) x 30, Ada (id 0) x 10, in the sorted order.
-    assert kw.step("s").data["value"].tolist() == [764.0, 1113.0, 366.0]
+    assert kw.step("s").data["s"].tolist() == [764.0, 1113.0, 366.0]
     assert list(kw.step("s").data.index) == [1, 2, 0]
-    assert kw.step("sj").data["value"].tolist() == [764.0, 1113.0, 366.0]
+    assert kw.step("sj").data["sj"].tolist() == [764.0, 1113.0, 366.0]
     kw["u"] = tool_[mod.map()](wf["warm"], w=wf["weights"][cols["w"]])
     assert [p.code for p in kw.step("u").problems] == ["unmatched_rows"]
     assert "match_ids=True" in kw.step("u").problems[0]
@@ -160,7 +160,7 @@ def test_a_list_parameter_gets_the_whole_column_as_one_cell(kw):
     kw["all"] = op("gather")[mod.collapse()](wf["weights"])
     kw["s2"] = sum_ws_r[mod.map()](wf["p"], ws=wf["all"])
     kw.run_all()
-    assert kw.step("s2").data["value"].tolist() == [60, 60, 60]
+    assert kw.step("s2").data["s2"].tolist() == [60, 60, 60]
 
 
 def test_a_column_that_leaves_a_row_without_a_value_is_refused(kw):
@@ -276,7 +276,7 @@ def test_a_group_is_picked_by_its_key(kc):
     kc["b"] = wf["per_ward"][1]
     kc.run("b")
     assert kc.step("b").formula == 'wf["per_ward"][rows[cols["ward"] == "B"]]'
-    assert kc.step("b").data.to_dict("list") == {"#p": [[1, 3]], "ward": ["B"], "value": [77.2]}
+    assert kc.step("b").data.to_dict("list") == {"#p": [[1, 3]], "ward": ["B"], "per_ward": [77.2]}
 
 
 def test_a_change_to_one_row_makes_only_its_group_stale(kc):

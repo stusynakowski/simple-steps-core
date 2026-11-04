@@ -158,7 +158,7 @@ def test_C13_an_output_never_silently_replaces_an_input_column(wf):
     assert "group's key 'n' would replace the 'n' column" in wf.step("clash").problems[0]
     wf.remove("clash")
     wf.run_all()
-    for sid, columns in (("m", ["n"]), ("e", ["#readings", "value"]), ("g", ["city", "n"])):
+    for sid, columns in (("m", ["n"]), ("e", ["#readings", "e"]), ("g", ["city", "n"])):
         assert wf.step(sid).problems == ()
         assert list(wf.step(sid).output.data.columns) == columns, sid
     assert list(wf.step("g").output.data["n"]) == [2, 4, 6, 4]           # the key
@@ -283,7 +283,8 @@ def failing():
     w["r"] = pd.DataFrame({"n": [1, 2, 3]})
     # try_except: let a's failures through, so they flow downstream as state
     # (without it, run_all stops at `a` — see the try_except tests below).
-    w["a"] = risky_008[mod.map(), mod.try_except()](w["r"])
+    # named `value`, which the tools below take (D9 would name it `a`)
+    w["a"] = risky_008[mod.map(), mod.try_except(), mod.name("value")](w["r"])
     return w
 
 
@@ -365,7 +366,7 @@ def test_C10_fixing_the_root_marks_what_it_blocked_stale(failing):
     failing.run_all()
     failing.run("a")                                   # same result: still fresh
     assert failing.step("b").state != "stale"
-    failing["a"] = risky_008[mod.map(), mod.try_except(default=0)](failing["r"])
+    failing["a"] = risky_008[mod.map(), mod.try_except(default=0), mod.name("value")](failing["r"])
     failing.run("a")                                   # the fix changes a's data
     assert failing.step("b").state == "stale"
     assert failing.step("b").output.values == [101, None, 301]   # old data kept
@@ -387,7 +388,7 @@ def test_C14_missing_is_none_and_nullability_is_checked():
     w.run_all()
     assert str(w.step("r").output.data["n"].dtype) == "Int64"
     assert w.step("o").output.values == [2, 1, 4]
-    assert str(w.step("o").output.data["value"].dtype) == "int64"
+    assert str(w.step("o").output.data["o"].dtype) == "int64"
     assert w.step("i").problems == (
         "r.n can be None, but inc_008() takes n: int; accept int | None, or "
         "filter the Nones first",)
@@ -484,7 +485,7 @@ def test_C2_a_tool_in_a_setting_runs_and_round_trips(wf):
     wf.run_all()
     assert list(wf.step("s").output.data["n"]) == [3, 2, 2, 1]
     assert wf.step("c").output.data.to_dict("list") == {
-        "#readings": [[0, 2], [1], [3]], "first_letter_008": ["S", "N", "L"], "value": [4, 2, 2]}
+        "#readings": [[0, 2], [1], [3]], "first_letter_008": ["S", "N", "L"], "c": [4, 2, 2]}
     assert json.loads(wf.to_json())["steps"][1]["operation"]["modifiers"][0]["settings"] == {
         "by": {"$tool": "neg_n_008"}}
     # The tools are defined here, not at the top of the module, so they are
@@ -657,7 +658,7 @@ def test_C5_declared_columns_and_types_are_checked_before_the_source_runs():
     assert "names 'cty'" in w.step("typo").problems[0]
     assert w.step("typed").problems == (
         "shout_008() declares city: int, but 'r' will have city as str",)
-    assert w.step("fine").plan["types"] == {"value": "unknown"}   # only its results; undeclared (K27)
+    assert w.step("fine").plan["types"] == {"fine": "unknown"}   # only its results; undeclared (K27)
 
 
 def test_C5_a_source_that_breaks_its_declared_columns_fails():
@@ -986,11 +987,11 @@ def r3():
 
 def test_009_expand_ids_derive_from_the_parent(r3):
     r3["items"] = fan_ids_009[mod.expand()](r3["r"])
-    r3["as_n"] = mod.rename(columns={"value": "n"})(r3["items"])
+    r3["as_n"] = mod.rename(columns={"items": "n"})(r3["items"])
     r3["again"] = fan_ids_009[mod.expand()](r3["as_n"])     # nested: 0.0 → 0.0.k
     r3.run_all()
     assert list(r3.step("items").output.data.index) == ["0.0", "1.0", "1.1"]
-    assert list(r3.step("items").output.data.columns) == ["#r", "value"]   # its parent, its results
+    assert list(r3.step("items").output.data.columns) == ["#r", "items"]   # its parent, its results
     assert list(r3.step("items").output.data["#r"]) == [0, 1, 1]
     assert list(r3.step("again").output.data.index)[:2] == ["0.0.0", "0.0.1"]
 
@@ -1006,8 +1007,8 @@ def test_009_each_item_meets_its_parent_row_in_a_join_on_lineage(r3):
     r3["with_parent"] = join(r3["items"], r3["r"], on="#r")    # row 2 expanded to nothing
     r3.run_all()
     out = r3.step("with_parent").output.data
-    assert {c: list(out[c]) for c in ("value", "city", "n")} == {
-        "value": [10, 20, 21], "city": ["SF", "NYC", "NYC"], "n": [1, 2, 2]}
+    assert {c: list(out[c]) for c in ("items", "city", "n")} == {
+        "items": [10, 20, 21], "city": ["SF", "NYC", "NYC"], "n": [1, 2, 2]}
 
 
 def test_009_after_a_sort_rows_pair_by_id_not_position(r3):
@@ -1020,8 +1021,8 @@ def test_009_after_a_sort_rows_pair_by_id_not_position(r3):
     r3.run_all()
     for s in ("zipped", "pairs"):
         out = r3.step(s).output.data
-        assert {c: list(out[c]) for c in ("city", "n", "value")} == {
-            "city": ["SF", "NYC", "LA"], "n": [1, 2, 0], "value": [-1, -2, 0]}
+        assert {c: list(out[c]) for c in ("city", "n", "neg")} == {
+            "city": ["SF", "NYC", "LA"], "n": [1, 2, 0], "neg": [-1, -2, 0]}
 
 
 def test_009_zip_never_drops_a_row(r3):
@@ -1088,7 +1089,7 @@ def chain():
     w = Workflow()
     w["r"] = pd.DataFrame({"n": [1, 2]})
     w["a"] = times10_009[mod.map()](w["r"])
-    w["b"] = op("identity")[mod.select(columns=["value"])](w["a"])
+    w["b"] = op("identity")[mod.select(columns=["a"])](w["a"])     # a's column: its name (D9)
     w.run_all()
     return w
 
@@ -1302,7 +1303,7 @@ def test_009_a_later_step_names_the_step_it_is_waiting_on(unrun):
     marker = unrun.preview("s")["markers"][0]
     assert marker["because"] == "its input 'r' doesn't know its row count yet"
     assert marker["resolve"][0] == "run 'r'"
-    assert unrun.preview("s")["columns"] == [{"name": "value", "type": "float", "#": 0}]
+    assert unrun.preview("s")["columns"] == [{"name": "s", "type": "float", "#": 0}]
 
 
 def test_009_some_columns_known_shows_a_more_columns_marker():
@@ -1319,7 +1320,7 @@ def test_009_planned_rows_are_pending_or_maybe(wf):
     wf["k"] = big_009[mod.filter()](wf["readings"])
     s, k = wf.preview("s"), wf.preview("k")
     assert [r["state"] for r in s["rows"]] == ["pending"] * 4
-    assert s["rows"][0]["cells"] == {"value": {"state": "pending", "type": "float"}}
+    assert s["rows"][0]["cells"] == {"s": {"state": "pending", "type": "float"}}
     assert [r["state"] for r in k["rows"]] == ["maybe"] * 4
     assert k["markers"][0]["text"] == "‹0–4 rows — filter keeps at most the 4 rows it reads›"
 
@@ -1333,21 +1334,21 @@ def test_009_a_run_step_shows_values_failures_and_staleness(unrun):
     assert unrun.step("r").state == "stale"
     # s read r's data, which hasn't changed: its cells stay known (not passed down)
     assert [r["state"] for r in unrun.preview("s")["rows"]] == ["known", "known"]
-    assert unrun.preview("s")["rows"][0]["cells"]["value"]["value"] == 1.5   # old value kept
+    assert unrun.preview("s")["rows"][0]["cells"]["s"]["value"] == 1.5   # old value kept
 
 
 def test_009_clicking_a_cell_says_what_is_there_or_expected(unrun):
-    before = unrun.cell("s", 1, "value")
+    before = unrun.cell("s", 1, "s")
     assert (before["state"], before["type"]) == ("unknown", "float")   # row 1, if it exists
     assert before["resolve"][0] == "run 'r'"
     unrun.run("r")
     unrun.run("s")
-    known = unrun.cell("s", 1, "value")
+    known = unrun.cell("s", 1, "s")
     assert (known["state"], known["value"]) == ("known", 3.0)
     # 010 C27: one entry per binding — the column read and the argument it fed
     assert known["inputs"] == [{"step": "r", "row": 1, "row": 1, "columns": ["n"], "argument": "n",
                                 "state": "known", "values": {"n": 2}, "more": 0}]
-    assert unrun.cell("s", 9, "value")["because"] == "row 9 of 's', which has 2 rows (0–1)"
+    assert unrun.cell("s", 9, "s")["because"] == "row 9 of 's', which has 2 rows (0–1)"
     assert unrun.cell("s", 0, "nope")["state"] == "missing"
 
 
@@ -1355,11 +1356,11 @@ def test_009_a_failed_and_a_blocked_cell(wf):
     w = Workflow()
     w["r"] = pd.DataFrame({"n": [1, -1]})
     w["s"] = score_009[mod.map(), mod.try_except()](w["r"])
-    w["t"] = op("identity")[mod.select(columns=["value"])](w["s"])
+    w["t"] = op("identity")[mod.select(columns=["s"])](w["s"])
     w.run_all()
-    failed = w.cell("s", 1, "value")
+    failed = w.cell("s", 1, "s")
     assert (failed["state"], failed["error"]) == ("failed", "ValueError: negative")
-    blocked = w.cell("t", 1, "value")
+    blocked = w.cell("t", 1, "s")
     assert blocked["state"] == "blocked" and blocked["cause"] == "s[1]: ValueError: negative"
 
 
@@ -1428,7 +1429,7 @@ def test_009_a_cell_shows_the_input_values_that_produced_it(failing):
 def test_009_an_expanded_item_points_to_its_parent_row(r3):
     r3["items"] = fan_ids_009[mod.expand()](r3["r"])
     r3.run_all()
-    cell = r3.cell("items", 2, "value")                                   # item 1 of r's row 1
+    cell = r3.cell("items", 2, "items")                                   # item 1 of r's row 1
     assert cell["lineage"] == {"#r": 1, "#r.idx": 1}
     assert cell["inputs"][0]["row"] == 1 and cell["inputs"][0]["values"] == {"n": 2}
 
@@ -1443,7 +1444,7 @@ def test_009_wide_input_rows_show_a_few_values_and_count_the_rest():
     w["s"] = width_010[mod.map()](w["r"])
     w["one"] = op("identity")[mod.select(columns=["c0"])](w["r"])
     w.run_all()
-    inputs = w.cell("s", 0, "value")["inputs"]
+    inputs = w.cell("s", 0, "s")["inputs"]
     assert len(inputs) == 9                       # one binding per column read
     copied = w.cell("one", 0, "c0")["inputs"]
     assert copied == [{"step": "r", "row": 0, "row": 0, "columns": ["c0"], "argument": None,
@@ -1465,14 +1466,14 @@ def test_009_a_stale_value_says_it_was_computed_with_the_old_arguments():
     assert w.arg_changes("s") == []
     w["s"] = weigh_009[mod.map()](w["r"], weight=2.0)          # edit the argument
     assert w.arg_changes("s") == [{"name": "weight", "was": "1.5", "now": "2.0"}]
-    cell = w.cell("s", 1, "value")
+    cell = w.cell("s", 1, "s")
     assert (cell["state"], cell["value"]) == ("stale", 3.0)     # 2 × 1.5, the old value
     assert cell["because"] == "stale output · computed with weight=1.5 (now 2.0)"
     assert cell["computed_with"] == {"weight": "1.5"}
     view = w.preview("s")
     assert view["computed_with"] == "values below were computed with weight=1.5 (now 2.0)"
     w.run("s")
-    assert w.arg_changes("s") == [] and w.cell("s", 1, "value")["value"] == 4.0
+    assert w.arg_changes("s") == [] and w.cell("s", 1, "s")["value"] == 4.0
 
 
 def test_009_an_added_argument_and_a_changed_orchestration_are_named():
@@ -1483,7 +1484,7 @@ def test_009_an_added_argument_and_a_changed_orchestration_are_named():
     w["s"] = weigh_009[mod.map()](w["r"], weight=3.0)
     assert w.arg_changes("s") == [{"name": "weight", "was": "1.0", "now": "3.0",
                                    "was_default": True}]
-    assert w.cell("s", 0, "value")["because"] == (
+    assert w.cell("s", 0, "s")["because"] == (
         "stale output · computed with weight=1.0, the default (now 3.0)")
     w.run("s")
     w["s"] = weigh_009[mod.map(), mod.retry(times=2)](w["r"], weight=3.0)
@@ -1497,7 +1498,7 @@ def test_009_a_stale_value_from_an_upstream_change_doesnt_claim_new_arguments():
     w["s"] = weigh_009[mod.map()](w["r"], weight=2.0)
     w.run_all()
     w["r"] = pd.DataFrame({"n": [5]})
-    cell = w.cell("s", 0, "value")
+    cell = w.cell("s", 0, "s")
     assert cell["because"] == "stale output (input r changed)" and "changed" not in cell
 
 
@@ -1549,10 +1550,10 @@ def test_C22_zip_columns_known_only_at_run_are_checked_then():
 def test_C23_collapse_by_a_missing_column_is_refused():
     w = Workflow()
     w["r"] = pd.DataFrame({"city": ["SF", "NYC"], "n": [1, 2]})
-    w["s"] = scale_008[mod.map()](w["r"])                   # only `value`
+    w["s"] = scale_008[mod.map()](w["r"])                   # only `s` (D9)
     w["c"] = add_total_010[mod.collapse(by="city", initial=0)](w["s"])
     assert w.step("c").problems == (
-        "collapse groups by 'city', which 's' does not have (it has value)",)
+        "collapse groups by 'city', which 's' does not have (it has s)",)
 
 
 def test_C23_the_run_time_guard_fails_the_step():
@@ -1567,7 +1568,7 @@ def test_C27_every_input_cell_is_named_with_its_argument():
     w["w"] = pd.DataFrame({"w": [1.5]})
     w["s"] = scale_008[mod.map()](w["r"], weight=w["w"][0][cols["w"]])
     w.run("s")
-    assert w.cell("s", 1, "value")["inputs"] == [
+    assert w.cell("s", 1, "s")["inputs"] == [
         {"step": "r", "row": 1, "row": 1, "columns": ["n"], "argument": "n", "state": "known",
          "values": {"n": 2}, "more": 0},
         {"step": "w", "row": 0, "row": 0, "columns": ["w"], "argument": "weight", "state": "known",
@@ -1587,16 +1588,16 @@ def test_C27_settings_resources_and_group_rows_are_named_too(wf):
     total = add_008[mod.collapse(initial=0)](wf["readings"])
     wf["t"] = total
     wf.run("t")
-    rows_ = wf.cell("t", 0, "value")["inputs"][0]
+    rows_ = wf.cell("t", 0, "t")["inputs"][0]
     assert rows_["argument"] == "n" and rows_["rows"] == [0, 1, 2, 3]
 
 
 def test_C24_input_states_are_cell_states(failing):
     failing["b"] = plus1_008[mod.map()](failing["a"])
     failing.run_all()
-    states = {i["state"] for r in (0, 1, 2) for i in failing.cell("b", r, "value")["inputs"]}
+    states = {i["state"] for r in (0, 1, 2) for i in failing.cell("b", r, "b")["inputs"]}
     assert states <= set(STATES) | {"stale", "pending", "missing", "unknown"}
-    assert failing.cell("b", 1, "value")["inputs"][0]["state"] == "failed"
+    assert failing.cell("b", 1, "b")["inputs"][0]["state"] == "failed"
 
 
 
@@ -1609,7 +1610,7 @@ def test_C21_whether_an_output_stops_a_run_is_public(failing, spent):
     w.run("x")
     out = w.step("x").output
     assert out.stops_run and out.uncaught == [1, 2, 3, 4, 5, 6]     # a breaker stop counts
-    w["y"] = op("identity")[mod.select(columns=["value"])](w["x"])
+    w["y"] = op("identity")[mod.select(columns=["x"])](w["x"])
     w.run("y")
     assert w.step("y").output.uncaught == []            # blocked, not its own failure
 
@@ -1619,7 +1620,7 @@ def rows3():
     w = Workflow()
     w["r"] = pd.DataFrame({"city": ["SF", "NYC", "LA"], "n": [1, 2, 3]})
     w["s"] = scale_008[mod.map()](w["r"])                   # reads n only
-    w["t"] = mod.select(columns=["value"])(w["s"])
+    w["t"] = mod.select(columns=["s"])(w["s"])               # s's column: its name (D9)
     w.run_all()
     return w
 
@@ -1631,7 +1632,7 @@ def test_C25_editing_one_input_row_makes_only_its_cells_stale(rows3):
     assert rows3.stale_rows("s") == [1] and rows3.stale_rows("t") == []
     assert rows3.step("t").state == "completed"
     assert [r["state"] for r in rows3.preview("s")["rows"]] == ["known", "stale", "known"]
-    assert rows3.cell("s", 0, "value")["state"] == "known"
+    assert rows3.cell("s", 0, "s")["state"] == "known"
     assert list(rows3.step("s").output.view()["state"]) == ["known", "stale", "known"]
     rows3.run("s")                                      # now s's row 1 has new data
     assert rows3.stale_rows("t") == [1]
@@ -1673,7 +1674,7 @@ def test_hash_is_the_row_number_and_lineage_says_where_from(wf):
     assert list(wf.step("s").output.data.index) == [1, 2, 3]
     assert [r["#"] for r in wf.preview("s")["rows"]] == [0, 1, 2]
     assert [r["lineage"]["#readings"] for r in wf.preview("s")["rows"]] == [1, 2, 3]
-    cell = wf.cell("s", 0, "value")                          # '#0' of s
+    cell = wf.cell("s", 0, "s")                              # '#0' of s
     assert cell["inputs"][0]["step"] == "k" and cell["inputs"][0]["row"] == 0
     assert wf.cell("k", 0, "n")["inputs"][0]["row"] == 1     # k's #0 is readings' #1
     assert str(wf.step("s").output).splitlines()[1].split()[0] == "#"

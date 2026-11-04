@@ -58,7 +58,7 @@
 | # | Capability | Expression | Should do | Status | Notes |
 |---|---|---|---|---|---|
 | V1 | `map` | `to_f[mod.map()](wf["v"])` | one value per row | ✓ | |
-| V1b | Output column name | same | column named `f`, after its step | ✗ | named `value`. Planned S4 (D9) |
+| V1b | Output column name | same | column named `f`, after its step | ✓ | S4 (D9), 2026-11-04; a rename renames it |
 | V2 | `filter` | `hot[mod.filter()](wf["v"])` | the rows the test approves, all their columns | ✓ | |
 | V2b | `filter`, no tool, several columns | `op("identity")[mod.filter()](wf["v"])` | refused, writing `wf["v"][cols["a"] == True]` | ✓ | fixed 2026-11-03 (C5): kept every row, a whole row being always true |
 | V3 | `expand` | `two[mod.expand()](wf["v"])` | one row per item; lineage `#v`, `#v.idx` | ✓ | |
@@ -114,13 +114,13 @@
 | A3 | A cell pick | `limit=wf["v"][0][cols["temp"]]` | one value for every row | ✓ | |
 | A4 | Aligned column | `limit=wf["srt"][cols["temp"]]` | row with row, by identity | ✓ | |
 | A4b | …a filter keeps its columns | same | `name`, `ward`, `temp` | ✓ | fixed 2026-11-03 (C3): added `limit` as a column |
-| A4c | …an argument named like an input column | `hot[mod.filter()](wf["v"], temp=wf["f"][cols["value"]])` | `v`'s own `temp` kept | ✓ | fixed 2026-11-03: **was a silent wrong answer**, the argument's values shown as `v`'s `temp` |
+| A4c | …an argument named like an input column | `hot[mod.filter()](wf["v"], temp=wf["f"][cols["f"]])` | `v`'s own `temp` kept | ✓ | fixed 2026-11-03: **was a silent wrong answer**, the argument's values shown as `v`'s `temp` |
 | A5 | Column from a subset | `limit=wf["h"][cols["temp"]]` | refused, writing the join | ✓ | |
 | A6 | Parent's column into its child | `to_f[mod.map()](wf["e"], temp=wf["v"][cols["temp"]])` | refused, writing the join | ✓ | D-child: keep the refusal |
 | A7 | Unknown argument | `to_f[mod.map()](wf["v"], nope=1)` | names what it accepts: `temp` | ✓ | fixed 2026-11-03: said "accepts (none)" (it dropped the first parameter) |
 | A8 | No matching column | `add_xy[mod.map()](wf["xy"])` | `invalid`, writing `a=wf[…][cols["x"]]` | ✓ | S3, 2026-11-04: two columns fit `a: int`, so it's `invalid`, writing `a=wf["xy"][cols["x"]]` |
 | A9 | Binding written out | `add_xy[…](wf["xy"], a=wf["xy"][cols["x"]], b=…)` | 3 | ✓ | |
-| A10 | `map` after `map` | `to_f[mod.map()](wf["f2"])` | runs | ✓ | S3, 2026-11-04: `temp` binds the one float column, written `temp=wf["f2"][cols["value"]]`; S4 (D9) will name it `f2` |
+| A10 | `map` after `map` | `to_f[mod.map()](wf["f2"])` | runs | ✓ | S3, 2026-11-04: `temp` binds the one float column, written `temp=wf["f2"][cols["f2"]]`: the column is named after its step (D9) |
 
 ## Combines
 
@@ -191,4 +191,4 @@
 - **A wrong answer:** P15 (a pick into a replaced source) is silent. S5, running one step on a stale input, is fixed: `run(x)` runs what's stale first.
 - **One way to give a step its input:** after the brackets, `tool[mod.x()](wf[…])` or `mod.sort(by=…)(wf[…])`. `mod.sort(over=wf[…], by=…)` is refused since 2026-11-03 (EX3). `op("identity")[mod.sort(…)]` builds the same operation as `mod.sort(…)`, so only the docs and the parser (S3) stop writing it.
 - **Inputs must be named steps:** a pick (P16) or an inline expression (C11) can't be an input yet.
-- **Output columns are called `value`,** so chaining verbs needs a `mod.name` or a written binding (V1b, A10).
+- ~~Output columns are called `value`~~: since 2026-11-04 an output takes its step's name (D9), and a map after a map binds it by type (S3).

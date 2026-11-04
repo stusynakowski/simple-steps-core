@@ -35,7 +35,7 @@ def test_moving_a_control_makes_exactly_its_readers_stale():
                              "side": "read stale 'sick'", "beds": "read stale 'sick'"}
     k.run_all()
     assert k.step("sick").data["name"].tolist() == ["Ben", "Cy"]
-    assert k.step("beds").data["value"].tolist() == ["B-B", "B-C"]
+    assert k.step("beds").data["beds"].tolist() == ["B-B", "B-C"]
 
 
 def test_a_saved_session_reloads_and_reruns_to_the_same_data():

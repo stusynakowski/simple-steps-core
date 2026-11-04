@@ -34,7 +34,7 @@ def test_a_step_made_invalid_keeps_showing_its_last_values():           # S8
     k = kernel()
     k["v"] = pd.DataFrame({"t": [36.0, 39.0]})
     assert k.step("f").state == "invalid"
-    assert k.step("f").data["value"].tolist() == [96.8, 102.2]
+    assert k.step("f").data["f"].tolist() == [96.8, 102.2]
 
 
 def test_the_column_put_back_is_completed_with_no_rerun():              # S9

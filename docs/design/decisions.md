@@ -181,6 +181,11 @@ failure needing a new decision were reverted and pinned in
 | W7 | A step's name refused (core-asks L47) | a `.` (it separates lineage parts, `#r.2`) and a leading `#` (core's row columns), when declared and when renamed, writing a name that works (`a_b`); other names are kept (D3, CA-E: keys needn't be identifiers) | S4 |
 | W10 | Which bindings are written into the expression | only those core decides by **type**: a parameter named for a column binds as before, unwritten, since the name already says it. Writing every binding would turn every expression into the long form | S3 |
 | W11 | A parameter with a default, and a column of its name (L50c: not bound by name) | not bound, except a default that only marks a cell absent (`first_present`'s `value`, whose default class says `binds_by_name`); bound when written, `factor=wf["xf"][cols["factor"]]`. The handover's colarg2 (Pc5) relied on the name: its lesson now binds | S3 |
+| W7b | A step named like a column of its input (`k["n"] = double(wf["r"])`, `r` has `n`) | its output keeps `value`, warning (`step_name_taken`): a step never replaces a column unasked (C4) | S4 |
+| W8 | What a rename rewrites, now a step's column is named after it | the step's own column (a copy filed under its new key: no re-run); every reference to that column in steps that read it, or read a step carrying it (`by=`, `columns=`, picks, bindings); steps carrying it show it under the old name, stale, until they re-run. A tool parameter that bound it by name can't be rewritten: that step is `invalid`, naming it | S4 |
+| W12 | An expand of dicts writes `key` and `value` | keeps both names: two columns, not one output (J-D4), so `gather_dict(key, value)` packs them back | S4 |
+| W13 | An untyped parameter, and binding by type | it fits any column, so it binds when its input has exactly one free column (an untyped `again(value)` after a map); with more, `invalid`, naming them. A lone column of unknown type (an empty result) binds too, checked per cell at run (EX11) | S3 |
+| W14 | A fold's parameters (`add(acc, value)` under `collapse`) | still bound by name only: binding one would pair a column row by row inside a collapse, which isn't built. After D9 a fold names the column it reads (`add(acc, scored)`) | S3 |
 | W9 | **Open, found by L40d**: a condition on a *derived* step's row numbers (`row["s1_r"] == 0`, where `s1_r` keeps the source's rows) isn't rewritten when the source's rows move; only the source's own numbers are. Undo is still free (the rewrite is undone with the source) | left open: rewriting it needs each step's row map (PL2, later L6) | D-picks |
 
 ## 1. How to answer
@@ -306,7 +311,7 @@ The heart: once these land, the list-of-dicts model is true.
 |---|---|---|---|---|
 | D20b | May `auto` pick `filter` (a tool returning `bool`)? **→ N2: no (decided)** | — | no: broadcasting decides how many calls, not which rows stay; `filter` is written | — |
 | D21 | Nothing added unseen (`breaker`) | **yes**: owner, 2026-11-04 | shown in the formula, or not added | N11 |
-| D9 | One key is named after its step, not `value` **→ CA-D2: yes** | (your "stepname is a variable") | yes; `mod.name` still wins | X-D5, N4 |
+| D9 | One key is named after its step, not `value` **→ CA-D2: yes** | (your "stepname is a variable") | yes; `mod.name` still wins | X-D5, N4. **Done 2026-11-04** (core-asks L23): a step's one output column takes its name, staged and run (`checks.named_after_step`); a rename renames it, with no re-run, and rewrites the references to it (W8); `mod.name` still wins; the input's own column of that name keeps `value`, warning (W7b) |
 | D11 | A literal is one value **→ core-asks: yes** | yes | yes | N5 |
 | D12 | A source's return: rows or one value? | **yes**: owner, 2026-11-04 | its declared type decides: `list[T]` is rows; `list` or no annotation is one value | X-D10 |
 

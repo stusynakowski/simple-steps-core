@@ -89,7 +89,7 @@ def main() -> None:
     k2 = Kernel.from_json(text, CATALOG)
     print("same spec:", k2.spec == k.spec, "| states:", sorted({s.state for s in k2.steps}))
     k2.run_all()
-    print("reloaded f:", k2.step("f").data["value"].tolist(),
+    print("reloaded f:", k2.step("f").data["f"].tolist(),
           "| extras kept:", k2.step("f").extras)
     print("same id:", k2.id == k.id, "| same run:", k2.run_id == k.run_id)
     k2["limit"] = 36.0

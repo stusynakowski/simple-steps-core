@@ -120,7 +120,7 @@ applied, and the parentheses apply it.
 **Want:** at most one verb per step (V9 ✓), and every setting does
 something.
 **Status:**
-- ✗ V1b: one output column is named `value`, not after its step. Planned S4 (D9). This is what breaks A10.
+- ✓ V1b, 2026-11-04 (D9): one output column takes its step's name.
 - ✗ **V8b, decided but not built:** a bare `hot(wf["v"])` (`-> bool`) is inferred as a `filter` and drops rows. D20b (2026-11-02) decided `auto` never filters.
 - ✓ **V10, fixed 2026-11-03:** `mod.map(axis="columns")` was accepted and ignored: the guard that raised `NotImplementedError` came after the branch that hands a step's data on, so it never ran. `axis` is removed (EX4); it's refused as an unknown setting.
 - ✓ V11, decided and done 2026-11-03: `map(where=, replace=)` is removed (EX4); a `filter`, then a `join`, says the same. `expand`'s `replace=`, which did nothing, went with it.
@@ -217,8 +217,7 @@ behaviour, so each needs your yes before it lands.
 | C11 | Must every input to a combine or tool be a named step? |
 | F7 | One way to write each thing? | **decided (EX3), and `over=` refused since 2026-11-03**; `op("identity")[mod.x(…)]` is the same operation as `mod.x(…)`, so it goes with the parser (S3) |
 
-**Known, already planned:** P11 and P16 (S3), V1b (S4), and V8b (D20b,
-decided).
+**Known, already planned:** P11 and P16 (S3), and V8b (D20b, decided).
 
 ## 4. How to use this page
 

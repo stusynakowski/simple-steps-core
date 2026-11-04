@@ -78,7 +78,7 @@ def test_a_step_run_on_a_stale_input_is_completed_and_says_so(k):
     assert k.needs_run() == {"f": "stale: input sick changed"}
     k.run("f")
     assert k.needs_run() == {}
-    assert k.step("f").data["value"].tolist() == [100.76, 98.78]
+    assert k.step("f").data["f"].tolist() == [100.76, 98.78]
 
 
 # ── on_change ────────────────────────────────────────────────────────────
@@ -175,12 +175,12 @@ def test_a_reader_whose_column_is_gone_is_a_problem_once_its_input_runs(k13):
     f = k13.step("f")
     assert f.state == "invalid"
     assert [(p.code, p.message) for p in f.problems] == [
-        ("missing_column", "to_f_i() needs 'temp_c', which 'sick' does not have (it has value). "
-                           "No column of 'sick' is float (value: str): convert one, "
-                           "mod.cast(value='float'), or bind one, temp_c=wf['sick'][cols['value']]")]
+        ("missing_column", "to_f_i() needs 'temp_c', which 'sick' does not have (it has sick). "
+                           "No column of 'sick' is float (sick: str): convert one, "
+                           "mod.cast(sick='float'), or bind one, temp_c=wf['sick'][cols['sick']]")]
     assert [p.code for p in k13.step("g").problems] == ["invalid_input"]
     assert k13.validate()["f"] == f.problems
-    assert f.data["value"].tolist() == [100.76]         # what it showed is kept
+    assert f.data["f"].tolist() == [100.76]             # what it showed is kept
 
 
 def test_fixing_the_input_clears_the_problem(k13):
@@ -207,7 +207,7 @@ def test_editing_an_input_warns_a_reader_at_once_that_it_will_break(k13):
     # and it read sick, which is stale now (SS7): run("f") runs sick first
     assert [(w.code, w.severity, w.step) for w in f.warnings] == [
         ("likely_missing_column", "warning", "f"), ("read_stale", "warning", "f")]
-    assert "expects 'temp_c' from 'sick', which is predicted to produce (value)" in f.warnings[0]
+    assert "expects 'temp_c' from 'sick', which is predicted to produce (sick)" in f.warnings[0]
     k13.run("sick")                                  # the warning becomes the problem
     assert [p.code for p in k13.step("f").problems] == ["missing_column"]
     assert k13.step("f").warnings == ()
@@ -222,18 +222,18 @@ def test_an_edit_that_keeps_the_column_warns_as_before_any_run(k13):
 
 # ── PL: a step is checked against its inputs' plans, never what they show ──
 def test_a_reader_is_checked_against_what_an_edited_input_will_produce(k13):
-    k13["sick"] = label_i[mod.map()](wf["p"])        # will give value, shows temp_c
-    k13["s"] = mod.sort(by="value")(wf["sick"])
+    k13["sick"] = label_i[mod.map()](wf["p"])        # will give sick, shows temp_c
+    k13["s"] = mod.sort(by="sick")(wf["sick"])
     assert k13.step("s").problems == () and k13.step("s").state == "staged"
     k13["t"] = mod.sort(by="temp_c")(wf["sick"])     # shown, but won't be produced
     assert [p.code for p in k13.step("t").problems] == ["missing_setting"]
-    assert "(it has value)" in k13.step("t").problems[0]
+    assert "(it has sick)" in k13.step("t").problems[0]
     k13.run("s")                                     # runs sick first (C9)
     assert k13.step("s").state == "completed"
 
 
 def test_a_reader_declared_before_the_edit_is_checked_again_against_the_plan(k13):
-    k13["s"] = mod.sort(by="value")(wf["sick"])      # sick has no value yet
+    k13["s"] = mod.sort(by="sick")(wf["sick"])       # sick's filter has no sick column yet
     assert [p.code for p in k13.step("s").problems] == ["missing_setting"]
     k13["sick"] = label_i[mod.map()](wf["p"])        # now it will
     assert k13.step("s").problems == ()

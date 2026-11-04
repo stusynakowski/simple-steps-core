@@ -497,3 +497,70 @@ which=0,
 other=0,
 )
 ```
+
+## 2026-11-04 · `test_L40d_undo_is_free` · at `c4d6c7e`
+
+- **Broke:** RecursionError: maximum recursion depth exceeded
+- **Status:** fixed (D9): a step re-declared to read itself was planned for its name before its problems were seen, planning itself forever; a step with problems is planned as invalid first. Pinned in L40d
+
+```
+test_L40d_undo_is_free(
+# The test always failed when commented parts were varied together.
+frame=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],  # or any other generated value
+changed=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],  # or any other generated value
+chain=[(0, 0, 0, 0),
+(5, 0, 0, 0),
+(0, 0, 0, 0),
+(0, 0, 0, 0),
+(0, 0, 0, 0),
+(0, 0, 0, 0)],
+which=0,
+other=2,
+)
+```
+
+## 2026-11-04 · `test_L40e_the_order_of_edits_doesnt_matter` · at `c4d6c7e`
+
+- **Broke:** see the test output
+- **Status:** found in the same run as the RecursionError above, during D9; passes since that fix, and at 500 examples
+
+```
+no example printed
+```
+
+## 2026-11-04 · `test_L40d_undo_is_free` · at `c4d6c7e`
+
+- **Broke:** RecursionError: maximum recursion depth exceeded
+- **Status:** fixed (D9): a step re-declared to read itself was planned for its name before its problems were seen, planning itself forever; a step with problems is planned as invalid first. Pinned in L40d
+
+```
+test_L40d_undo_is_free(
+frame=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],
+changed=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],
+chain=[(0, 0, 0, 0),
+(5, 0, 0, 0),
+(0, 0, 0, 0),
+(0, 0, 0, 0),
+(0, 0, 0, 0),
+(0, 0, 0, 0)],
+which=0,
+other=2,
+)
+```
+
+## 2026-11-04 · `test_L40e_the_order_of_edits_doesnt_matter` · at `c4d6c7e`
+
+- **Broke:** see the test output
+- **Status:** found in the same run as the RecursionError above, during D9; passes since that fix, and at 500 examples
+
+```
+no example printed
+```

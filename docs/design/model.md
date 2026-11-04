@@ -132,10 +132,10 @@ Run, for `v` = Ada, Ben, Cy:
 
 | Step | Row ids | Data columns | Lineage |
 |---|---|---|---|
-| `dbl[map](v)` | 0, 1, 2 | `value` | none: one-to-one |
+| `d = dbl[map](v)` | 0, 1, 2 | `d` | none: one-to-one |
 | `hot[filter](v)` | 1 | `name`, `ward`, `temp` | `#v`: 1 |
-| `two[expand](v)` | 0.0, 0.1, 1.0, … | `value` | `#v`: 0, 0, 1 · `#v.idx`: 0, 1, 0 |
-| `count[collapse(by="ward")](v)` | A, B | `ward`, `value` | `#v`: [0, 2], [1] |
+| `e = two[expand](v)` | 0.0, 0.1, 1.0, … | `e` | `#v`: 0, 0, 1 · `#v.idx`: 0, 1, 0 |
+| `n = count[collapse(by="ward")](v)` | A, B | `ward`, `n` | `#v`: [0, 2], [1] |
 | `sort(by="temp")(v)` | 2, 0, 1 | carried | `#v`: 2, 0, 1 |
 | `join(v, w, on="ward")` | 0, 1, 2 | both sides' | `#v`: 0, 1, 2 · `#w`: 0, 1, 0 |
 | `stack(v, w)` | 0…3 | the union | `#v`: 0, 1, 2, – · `#w`: –, –, –, 0… |
@@ -207,12 +207,12 @@ anything else maps). *Built.*
 | Verb | Calls the tool | Output rows | Data columns out |
 |---|---|---|---|
 | `source` | once, no input | what it returns | a DataFrame's, a record's fields, else `value` |
-| `map` | once per row | one per row | `value`, or a record's fields |
+| `map` | once per row | one per row | the step's name, or a record's fields |
 | `filter` | once per row | the rows it approves | the input's |
-| `expand` | once per row; returns a list | one per item | `value`, or each item's fields |
-| `collapse` | once per group (`by=`) | one per group | the key, and `value` or the fields |
+| `expand` | once per row; returns a list | one per item | the step's name, or each item's fields; a dict's `key`, `value` |
+| `collapse` | once per group (`by=`) | one per group | the key, and the step's name or the fields |
 | `group` | once per row; returns a key | one per row | the input's, plus the key |
-| `sweep` | once per combination of settings | one per combination | the settings, and `value` |
+| `sweep` | once per combination of settings | one per combination | the settings, and the step's name |
 | `table` | once, with the whole input | what it returns | what it returns |
 
 **Pickers and reshapes** call no tool: `select`, `drop`, `rename`, `copy`,
@@ -226,14 +226,17 @@ output): `retry`, `timeout`, `breaker`; `try_except` (a failure becomes a
 `expect` (what staging promises). A failed row's note says where it failed:
 `tool`, `timeout`, `retry`, `breaker`, `expect`, `upstream`. *Built.*
 
-**Naming:** one output column is `value` unless `mod.name` names it; a
+**Naming:** one output column takes its step's name (D9, built 2026-11-04: `k["temp_f"] = to_f[mod.map()](…)` writes `temp_f`, and a rename renames it), unless `mod.name` names it, or the input already has a column of that name (it keeps `value`, warning); a
 declared record spreads into one column per field. Data column names are
 unique, never start with `#`, and two that would collide are a problem.
-*Built.* **Planned (S4):** one output column named after its step; a dict's
-keys as columns; numeric names become `var<n>`; step names are identifiers,
-no `.`.
+*Built.* Step names with a `.` or a leading `#` are refused (built
+2026-11-04). **Planned (S4):** a dict's keys as columns (core-asks L22);
+numeric names become `var<n>`.
 
-**Arguments and binding:** a parameter binds to the input column of its name;
+**Arguments and binding:** a parameter binds to the input column of its name,
+else to the one column whose type fits, written into the expression (S3,
+built 2026-11-04; an untyped parameter fits any column, so it binds only the
+only one); a parameter with a default takes a column only when bound;
 an argument is a literal, a pick or a resource. A cell pick is one value for
 every row. A column pick pairs row by row only from an aligned step (§5);
 passed to a `list`, `Series` or `DataFrame` parameter it is the whole column.

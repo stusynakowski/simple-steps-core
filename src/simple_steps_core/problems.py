@@ -43,6 +43,7 @@ CODES: dict[str, str] = {
     "bad_selection": "a selection of rows or columns can't be made",
     "stale": "the step is stale: the reason, and that a run brings it up to date (SS7)",
     "read_stale": "the step read a step that is stale now: run(x) runs it first",
+    "step_name_taken": "a step's output keeps 'value': its input already has a column of the step's name (D9)",
     "row_gone": "a picked row of a source is gone since its data was replaced (D-picks)",
     # arguments and columns
     "bad_argument": "an argument isn't a literal or a reference",

@@ -66,14 +66,18 @@ him and the pick is rewritten to `wf["p"][2]`. Delete him and the step is
 re-checks everything after it straight away: a step that can't run is
 `invalid`, naming why. A step is checked against what its inputs' expressions
 will produce, never against the old values they still show: after
-`k["s"] = label[mod.map()](wf["p"])`, a `sort(by="value")` on `s` is fine
+`k["s"] = label[mod.map()](wf["p"])`, a `sort(by="s")` on `s` is fine
 before `s` runs. Steps that ran keep their values, marked `stale`, until you
 run them again. A step is stale only when its own inputs changed; a step
 reading a stale one says so (*read stale 's'*), and `run(x)` runs what `x` needs. Runs go in workflow order.
 
-**12. A tool's parameters take columns by name, then by type.**
+**12. A step's output is named after it.** `k["temp_f"] = to_f[mod.map()](wf["v"])`
+writes a column `temp_f`, and renaming the step renames it; `mod.name("x")`
+names it otherwise.
+
+**13. A tool's parameters take columns by name, then by type.**
 `double(n: int)` on a step with no `n` takes the one `int` column, and the
-step is saved saying so: `double[mod.map()](wf["d"], n=wf["d"][cols["value"]])`.
+step is saved saying so: `double[mod.map()](wf["d"], n=wf["d"][cols["d"]])`.
 Two that fit, or none, and the step is `invalid`, writing the binding or a
 `mod.cast`. An `int` fits a `float`. A parameter with a default takes a
 column only when you bind it.

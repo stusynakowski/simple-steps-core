@@ -197,7 +197,7 @@ def ch2():
     lesson("D7", "nothing can read an empty step", s.state, "invalid")
     s = put(k, "sw", label[mod.sweep(a=[1, 2], b=["x", "y"])]())
     lesson("D8", "sweep: one row per combination of settings",
-           data(s, "value"), ["1x", "1y", "2x", "2y"])
+           data(s, "sw"), ["1x", "1y", "2x", "2y"])
     k.define("lab", Lab, scale=2.0)
     s = put(k, "adj", res["lab"].adjust[mod.map()](wf["v"]))
     lesson("D9", "a resource: a live object built from settings, its tool used per row",
@@ -232,7 +232,7 @@ def ch3():
     lesson("P8", "rows[condition] names rows that must exist: none is a problem", s.state, "invalid")
     s = put(k, "kid", wf["e"][row["v"] == 1])
     lesson("P9", "a condition on lineage chooses the rows that came from row 1 of v",
-           list(s.data["value"]), [38.5, 39.5])
+           list(s.data["e"]), [38.5, 39.5])
     lesson("P9b", "…without a warning that it is positional", len(s.warnings), 0,
            "warns 'rows … are positions, and expand doesn't fix row order': a lineage "
            "condition isn't positional")
@@ -271,22 +271,22 @@ def ch4():
     chapter("4. Verbs: how a function is applied (fill-down, filter, pivot…)")
     k = base()
     lesson("V1", "map: once per row, one row out per row in",
-           data(put(k, "f", to_f[mod.map()](wf["v"])), "value"), [98.6, 101.3, 98.4])
+           data(put(k, "f", to_f[mod.map()](wf["v"])), "f"), [98.6, 101.3, 98.4])
     lesson("V1b", "map's one output column is named after its step",
-           list(k.step("f").data.columns), ["f"], "named 'value'. Planned S4 (D9)")
+           list(k.step("f").data.columns), ["f"], "was named 'value' until S4 (D9), 2026-11-04")
     lesson("V2", "filter: keeps the rows the test approves, with all their columns",
            data(put(k, "h", hot[mod.filter()](wf["v"])), "name"), ["Ben"])
     s = put(k, "e", two[mod.expand()](wf["v"]))
     lesson("V3", "expand: one row per item, lineage #v and #v.idx",
-           (list(s.data["value"]), list(s.data["#v"])),
+           (list(s.data["e"]), list(s.data["#v"])),
            ([37.0, 38.0, 38.5, 39.5, 36.9, 37.9], [0, 0, 1, 1, 2, 2]))
     s = put(k, "c", mean_t[mod.collapse(by="ward")](wf["v"]))
     lesson("V4", "collapse(by=): one row per group, the key kept, lineage lists the members",
-           (data(s, "ward"), data(s, "value"), data(s, "#v")),
+           (data(s, "ward"), data(s, "c"), data(s, "#v")),
            (["A", "B"], [36.95, 38.5], [[0, 2], [1]]))
     s = put(k, "acc", add[mod.collapse(initial=0.0)](wf["v"]))
     lesson("V5", "collapse with an accumulator (acc, x) and a starting value",
-           [round(x, 1) for x in data(s, "value")], [112.4])
+           [round(x, 1) for x in data(s, "acc")], [112.4])
     s = put(k, "g", first_letter[mod.group()](wf["v"]))
     lesson("V6", "group: adds a key column, rows unchanged",
            data(s, "group"), ["A", "B", "C"])
@@ -295,7 +295,7 @@ def ch4():
            len(s.data), 8)
     s = put(k, "auto", to_f(wf["v"]))
     lesson("V8", "no verb written: inferred from the types (here map)",
-           data(s, "value"), [98.6, 101.3, 98.4])
+           data(s, "auto"), [98.6, 101.3, 98.4])
     s = put(k, "auto_f", hot(wf["v"]))
     lesson("V8b", "no verb written, a -> bool tool: a map of bools, never a filter (D20b)",
            len(s.data), 3, "inferred as filter: a bare call drops rows. D20b decided 2026-11-02")
@@ -337,7 +337,7 @@ def ch5():
            list(put(k, "w", mod.widen(column="rec")(wf["p"])).data.columns), ["ward", "name", "temp"])
     k["lst"] = [1, 2, 3]
     lesson("R10", "expand with no tool: a list cell into rows",
-           data(put(k, "x", mod.expand()(wf["lst"])), "value"), [1, 2, 3])
+           data(put(k, "x", mod.expand()(wf["lst"])), "x"), [1, 2, 3])
     s = put(k, "mx", mod.expand()(wf["v"]))
     lesson("R10b", "expand with no tool on several columns is refused, asking which",
            (s.state, [p.code for p in s.problems]), ("invalid", ["missing_setting"]),
@@ -379,7 +379,7 @@ def ch6():
     chapter("6. Built-in tools: COUNT, SUM, the first and the last")
     k = base()
     by = mod.collapse(by="ward")
-    lesson("B1", "count", data(put(k, "n", op("count")[by](wf["v"])), "value"), [2, 1])
+    lesson("B1", "count", data(put(k, "n", op("count")[by](wf["v"])), "n"), [2, 1])
     k["t"] = mod.select(columns=["temp"])(wf["v"])
     lesson("B2", "total", [round(x, 1) for x in data(put(k, "s", op("total")[mod.collapse()](wf["t"])), "temp")], [112.4])
     lesson("B3", "gather: each group's values into lists",
@@ -398,7 +398,7 @@ def ch7():
     k["e"] = two[mod.expand()](wf["v"])
     k.run_all()
     lesson("A1", "a parameter binds to the input column of its name",
-           data(put(k, "f", to_f[mod.map()](wf["v"])), "value"), [98.6, 101.3, 98.4])
+           data(put(k, "f", to_f[mod.map()](wf["v"])), "f"), [98.6, 101.3, 98.4])
     lesson("A2", "an argument from another step's value (a control)",
            data(put(k, "a", hot[mod.filter()](wf["v"], limit=wf["lim"])), "name"), ["Ben"])
     lesson("A3", "a cell pick is one value for every row",
@@ -410,7 +410,7 @@ def ch7():
            "the argument 'limit' is added as a column")
     k["f"] = to_f[mod.map()](wf["v"])
     k.run("f")
-    s = put(k, "cv", hot[mod.filter()](wf["v"], temp=wf["f"][cols["value"]]))
+    s = put(k, "cv", hot[mod.filter()](wf["v"], temp=wf["f"][cols["f"]]))
     lesson("A4c", "…and an argument named like an input column doesn't replace it",
            data(s, "temp"), [37.0, 38.5, 36.9],
            "the filter's output showed the argument's values as v's temp: a silent wrong answer")
@@ -427,7 +427,7 @@ def ch7():
     lesson("A8", "no column of the parameter's name: invalid, naming the fix",
            "a=wf" in problems(s), True, "named the gap, not the fix, until S3's binding (2026-11-04)")
     s = put(k, "z2", add_xy[mod.map()](wf["xy"], a=wf["xy"][cols["x"]], b=wf["xy"][cols["y"]]))
-    lesson("A9", "binding written out", data(s, "value"), [3])
+    lesson("A9", "binding written out", data(s, "z2"), [3])
     k["f2"] = to_f[mod.map()](wf["v"])
     s = put(k, "chain", to_f[mod.map()](wf["f2"]))
     lesson("A10", "map after map reads the first map's output", s.state, "completed",
@@ -448,7 +448,7 @@ def ch8():
     k["n"] = pd.DataFrame({"score": [1, 2, 3]})
     k.run_all()
     lesson("C1", "zip_: each row beside its own map",
-           data(put(k, "z", zip_(wf["v"], wf["f"])), "value"), [98.6, 101.3, 98.4])
+           data(put(k, "z", zip_(wf["v"], wf["f"])), "f"), [98.6, 101.3, 98.4])
     lesson("C2", "zip_ pairs by identity, not position, after a sort",
            data(put(k, "z2", zip_(wf["v"], wf["fs"])), "tf"), [98.6, 101.3, 98.4])
     lesson("C3", "zip_ of a subset is refused, writing the join",
@@ -479,7 +479,7 @@ def ch9():
     k = base()
     s = put(k, "a", flaky[mod.map()](wf["v"]))
     lesson("W1", "a failing row fails its cell; the others run",
-           (s.state, data(s, "value")[0], data(s, "value")[2]), ("failed", 37.0, 36.9))
+           (s.state, data(s, "a")[0], data(s, "a")[2]), ("failed", 37.0, 36.9))
     k["after"] = to_f[mod.map()](wf["v"])
     try:
         k.run_all()
@@ -491,7 +491,7 @@ def ch9():
     lesson("W3", "try_except: the failure is a failed cell that doesn't stop run_all", s.state, "failed")
     s = put(k, "c", flaky[mod.map(), mod.try_except(default=-1.0)](wf["v"]))
     lesson("W4", "try_except(default=): the default, and a warning",
-           (data(s, "value"), len(s.warnings)), ([37.0, -1.0, 36.9], 1))
+           (data(s, "c"), len(s.warnings)), ([37.0, -1.0, 36.9], 1))
     s = put(k, "d", flaky[mod.map(), mod.breaker(after=1)](wf["v"]))
     lesson("W5", "breaker: after n failures, the rest are blocked", s.state, "failed")
     s = put(k, "e", to_f[mod.map(), mod.retry(times=2), mod.timeout(seconds=2)](wf["v"]))
@@ -541,7 +541,7 @@ def ch11():
            "was only in needs_run() and output metadata, until SS7")
     k.run("f")
     lesson("S5", "run('f') makes f current: runs h first",
-           (k.step("h").state, k.step("f").data["value"].tolist()), ("completed", [98.6, 101.3]),
+           (k.step("h").state, k.step("f").data["f"].tolist()), ("completed", [98.6, 101.3]),
            "h stays stale; f computed from h's old rows and shown completed, with a warning "
            "naming h. Decision SM")
     k.run_all()
@@ -591,7 +591,7 @@ def ch12():
     lesson("Y1", "loading runs nothing", sorted({s.state for s in k2.steps}), ["staged"])
     k2.run_all()
     lesson("Y2", "loaded and run: the same data, the same id",
-           (k2.step("f").data["value"].tolist(), k2.id == k.id), ([98.6, 101.3, 98.4], True))
+           (k2.step("f").data["f"].tolist(), k2.id == k.id), ([98.6, 101.3, 98.4], True))
     lesson("Y3", "extras survive and aren't hashed", k2.step("f").extras, {"simple_steps.ui": {"color": "red"}})
     from simple_steps_core import formula
     k3 = Kernel(CATALOG)

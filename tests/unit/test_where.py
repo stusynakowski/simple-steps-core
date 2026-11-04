@@ -57,7 +57,7 @@ def test_first_present_fills_a_gap_and_keeps_a_none(k):
     k["v"] = mod.rename(columns={"score": "value"})(wf["j"])     # value binds by name
     k["out"] = op("first_present")[mod.map()](wf["v"], default=0.0)
     k.run_all()
-    values = k.step("out").data["value"].tolist()
+    values = k.step("out").data["out"].tolist()
     assert values[0] == 1.0 and pd.isna(values[1]) and values[2] == 0.0
 
 
@@ -70,7 +70,7 @@ def test_a_single_cell_is_the_same_in_every_call(k, limit):
              "cell of a table": wf["c"][0][cols["limit"]]}[limit]
     k["h"] = above_w[mod.map()](wf["p"], limit=given)
     k.run_all()
-    assert k.step("h").data["value"].tolist() == [False, True, True]
+    assert k.step("h").data["h"].tolist() == [False, True, True]
 
 
 def test_a_one_row_column_is_a_list_not_a_cell(k):
