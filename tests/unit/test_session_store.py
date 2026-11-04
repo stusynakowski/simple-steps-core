@@ -60,3 +60,49 @@ def test_a_reader_of_a_stale_step_is_stale_even_when_its_key_matches():
     k["v"] = readings_ss[mod.source()]()
     assert k.step("v").state == "stale"
     assert k.step("f").state == "stale"
+
+
+def _empty_chain() -> Kernel:
+    """s1 sorts an empty source, so a pick of its row 0 is refused when s1
+    runs; s4 groups by that pick's rows. Found by the property test L40d."""
+    from simple_steps_core import op
+    k = Kernel(Catalog([]))
+    k["s0"] = pd.DataFrame({"k": pd.Series([], dtype=object)})
+    k["s1"] = mod.sort(by="k")(wf["s0"])
+    k["s2"] = wf["s1"][0]
+    k["s4"] = op("count")[mod.collapse(by="#s2")](wf["s0"])
+    try:
+        k.run_all()
+    except ValueError:
+        pass
+    return k
+
+
+def test_a_step_turned_invalid_by_a_run_makes_what_groups_by_it_invalid():
+    # s2 is refused only when s1 runs; s4 groups by s2, so it can't stand
+    k = _empty_chain()
+    assert k.step("s2").state == "invalid"
+    assert k.step("s4").state == "invalid"
+
+
+@tool
+def nothing_ss() -> pd.DataFrame:
+    return pd.DataFrame({"k": pd.Series([], dtype=object)})
+
+
+def test_a_pick_into_a_restored_result_is_checked_against_it():
+    # s0's expression edited and put back: s1's result comes back from the
+    # store, and s2's pick is checked against it again, as when s1 ran
+    k = Kernel(Catalog([nothing_ss]))
+    k["s0"] = nothing_ss[mod.source()]()
+    k["s1"] = mod.sort(by="k")(wf["s0"])
+    k["s2"] = wf["s1"][0]
+    try:
+        k.run_all()
+    except ValueError:
+        pass
+    assert k.step("s2").state == "invalid"
+    original = k.step("s0").operation
+    k["s0"] = mod.sort(by="k")(wf["s0"])                  # reads itself: invalid
+    k["s0"] = original
+    assert (k.step("s1").state, k.step("s2").state) == ("completed", "invalid")

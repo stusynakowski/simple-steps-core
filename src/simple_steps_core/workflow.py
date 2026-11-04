@@ -224,6 +224,10 @@ class Workflow:
             if existed:
                 self._mark_stale_dependents(step_id)
                 self._recheck_downstream(step_id)
+                # new data, as after a run: readers not yet run are planned
+                # again on it, so what they decide doesn't hang on the order
+                # of the edits before (L40e)
+                self._restage_after(step_id)
             if not existed or was_empty or self.steps[step_id].output.meta.get("empty"):
                 self._recheck_readers(step_id)    # an empty step written, or emptied (G17)
             return
@@ -562,6 +566,16 @@ class Workflow:
                 "resources": {r: self._resource_version(r, data=False)
                               for r in sorted(st.operation.resources)}}
 
+    def _run_reads(self, step_id: str) -> dict:
+        """The versions of all a run of *step_id* reads, now: its inputs,
+        references and resources, and the step a ``collapse(by="#s")``
+        groups by. A run stamps these; :meth:`run_key` is made of the same."""
+        read = self._read_stamps(self.steps[step_id].operation)
+        grouped = self._groups_by_step(step_id)
+        if grouped is not None and grouped[1] in self.steps:
+            read.setdefault(grouped[1], self.version(grouped[1]))   # collapse(by="#s") reads s
+        return read
+
     def run_key(self, step_id: str, read: dict | None = None) -> str | None:
         """The key a result of *step_id* is filed under (ST2): this step, with
         this tool code and these resources, on exactly this data. Its name,
@@ -574,7 +588,7 @@ class Workflow:
             parts = self._own_parts(st)
         except Exception:
             return None
-        read = self._read_stamps(st.operation) if read is None else read
+        read = self._run_reads(step_id) if read is None else read
         if any(v is None for v in read.values()):
             return None
         if st.literal is not NO_LITERAL:
@@ -725,9 +739,24 @@ class Workflow:
             key = self.run_key(sid)
             found = self.store.get(key) if key is not None else None
             if found is None:
+                # no result for its key now, but earlier ones: it shows the
+                # newest, stale, never a blank plan (SM), whatever the order
+                # of the edits that led here. An emptied step stays empty.
+                kept = self.results(sid)
+                if kept and st.output.meta.get("staged") and not st.output.meta.get("empty"):
+                    st.output = kept[0]
+                    if (kept[0].meta.get("ran_with") or {}).get("formula") \
+                            != _ran_with(st.operation)["formula"]:
+                        kept[0].meta["edited"] = True          # "updated args"
+                    self._restage_after(sid)    # readers checked against what it shows
                 continue
+            restored = found is not st.output
             st.output = found
             found.meta.pop("edited", None)
+            if restored:
+                # its readers were re-checked against what it showed before:
+                # check them again against the result it holds now
+                self._restage_after(sid)
 
     def _refresh_staleness(self) -> None:
         """Set every run step's ``stale``, and a short ``stale_reason``, from its stamps.
@@ -2213,10 +2242,7 @@ class Workflow:
             tools = self.catalog.functions
         step = self.steps[step_id]
         self._ask_data_versions(step.operation, resources)
-        read = self._read_stamps(step.operation) if step_id in self.steps else {}
-        grouped = self._groups_by_step(step_id)
-        if grouped is not None and grouped[1] in self.steps:
-            read.setdefault(grouped[1], self.version(grouped[1]))   # collapse(by="#s") reads s
+        read = self._run_reads(step_id) if step_id in self.steps else {}
         # Inputs that are stale as this runs pass through as they are; this
         # output is then up to date with them, and says it read them stale.
         read_stale = {name: self.steps[name].output.meta.get("stale_reason")
@@ -2527,13 +2553,26 @@ class Workflow:
         until nothing changes rather than assuming declaration order is
         topological.
         """
-        changed = {step_id}
+        changed, waves = {step_id}, 0
+        place = {name: n for n, name in enumerate(self.steps)}
         while changed:
+            waves += 1
+            if waves > len(self.steps) + 1:
+                # forward only, so each wave reaches later steps than the last:
+                # more waves than steps means a loop, a bug, said, not a hang
+                raise RuntimeError(f"re-checking after {step_id!r} doesn't settle: "
+                                   f"{', '.join(sorted(changed))} keep changing")
             wave: set[str] = set()
             for other in self.steps.values():
                 if other.name in changed:
                     continue
-                if not any(name in changed for name in other.operation.reads):
+                # everything it depends on: inputs, references, and the step a
+                # collapse(by="#s") groups by (a by-step turned invalid at run).
+                # Earlier steps only: a step reads only earlier steps, and one
+                # that names a later step (a problem on it) mustn't be re-checked
+                # by it, or the two re-check each other forever.
+                if not any(name in changed and place.get(name, -1) < place[other.name]
+                           for name in self._depends_on(other.name)):
                     continue
                 if not other.output.meta.get("staged"):
                     # G13: a step that has run keeps its output (shown, stale
@@ -2551,14 +2590,17 @@ class Workflow:
                 # valid now.
                 before = (other.output.meta.get("expected"), other.problems,
                           predicted_columns(other.output),
-                          columns_unknown(other.output))
+                          columns_unknown(other.output),
+                          (other.output.meta.get("plan") or {}).get("types"))
                 other.operation = self._resolve_picks(other.operation)   # S5-D3
                 other.problems = check(other.operation, self, other.name)
                 other.output = stage(other.operation, self, other.problems, other.name)
                 other.warnings = warn(other.operation, self, other.name)
                 after = (other.output.meta.get("expected"), other.problems,
                          predicted_columns(other.output),
-                         columns_unknown(other.output))
+                         columns_unknown(other.output),
+                         (other.output.meta.get("plan") or {}).get("types"))
+                # planned types too: a reader's type check depends on them
                 if after != before:
                     wave.add(other.name)
             changed = wave

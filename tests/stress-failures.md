@@ -64,12 +64,153 @@ chain=[(42, 0, 0, 0),
 ## 2026-11-03 · `test_L40_reshaping_is_closed` · at `1a9f58e`
 
 - **Broke:** TypeError: Workflow._first_param() takes 1 positional argument but 2 were given
-- **Status:** open
+- **Status:** my own mistake while removing `where=` (a `@staticmethod` cut with `_where_tests`), fixed before `aa84967` was committed; no core bug
 
 ```
 test_L40_reshaping_is_closed(
 frame=   k     n  tags rec
 0  A  <NA>  None  {},
 chain=[(428, 0, 0, 0)],
+)
+```
+
+## 2026-11-03 · the ST8 laws, `test_L40d`–`test_L40f` · at `9113e89` · rewritten
+
+The entries the conftest logged for these runs were lost (I reset this file
+to fix an unrelated edit) and are rewritten here from the test output, one
+per distinct failure. The four real bugs are pinned as examples on their
+tests.
+
+- **`test_L40d`, a pick turned invalid at run.** `s2 = wf["s1"][0]` on an
+  empty source is refused when `s1` runs; `s4 = count[collapse(by="#s2")]`
+  stayed `completed`, and was `invalid` only after an undo. Re-checks after
+  a run followed only direct inputs. **Status:** fixed with ST8 (they
+  follow `_depends_on`), example pinned:
+  `chain=[(0, 0, 0, 0), (600, 1, 0, 0), (997, 0, 0, 0), (860, 0, 0, 552)]`, empty frames.
+- **`test_L40d`, a pick re-checked against a blank plan.** After an undo,
+  `s2`'s pick was re-checked before `s1`'s stored result came back, so it
+  showed `staged`, not `invalid`. **Status:** fixed with ST8 (a restored
+  result has its readers re-checked), example pinned:
+  `chain=[(0, 0, 0, 0), (600, 1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)]`, `which=0, other=1`, empty frames.
+- **`test_L40d` at STRESS=1, planned types not compared.** A filter's type
+  check on a collapse's planned types waited for an unrelated undo: the
+  re-check after a run compared columns and row counts, not types.
+  **Status:** fixed with ST8, example pinned:
+  `chain=[(413, 0, 0, 0), (367, 1, 0, 0), (1, 3, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (73, 0, 0, 0)]`,
+  a two-row frame, `changed` empty.
+- **`test_L40e` at STRESS=1, stale or staged by order.** A step given a new
+  expression showed its last result, stale, when the source changed first,
+  and a blank plan when it changed second. **Status:** fixed with ST8 (no
+  result for its key but earlier ones: the newest, stale), example pinned:
+  `chain=[(0, 0, 0, 0), (257, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)]`, `which=1, other=142`.
+- **The laws' own mistakes, fixed in the laws, no core change:** `test_L40d`
+  compared the result object of a step that never held one
+  (`chain=[(600, 0, 0, 0)]`); `test_L40f` ran an empty step
+  (`chain=[(832, 0, 0, 0), (0, 0, 0, 0)]`) and saved its fresh kernel after
+  the source became a DataFrame, which isn't saved; `test_L40e` copied a
+  value step's expression, which is only "a source".
+- **`test_L40_reshaping_is_closed` at `1a9f58e`:** `TypeError:
+  Workflow._first_param() takes 1 positional argument but 2 were given`, my
+  own mistake while removing `where=` (a `@staticmethod` cut with
+  `_where_tests`), fixed before `aa84967` was committed. **Status:** no core bug.
+
+## 2026-11-04 · `test_L40d_undo_is_free` · at `9113e89` · STRESS=1
+
+- **Broke:** AssertionError: ('expression put back', 's5', 's5', 'completed', 'stale')
+- **Status:** fixed with ST8: a run stamped the step a `collapse(by="#s")` groups by, but `run_key()` left it out, so the key a result was filed under was never found again; both are made of `_run_reads` now; example pinned
+
+```
+test_L40d_undo_is_free(
+# The test always failed when commented parts were varied together.
+frame=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],  # or any other generated value
+changed=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],  # or any other generated value
+chain=[(0, 0, 0, 0),
+(0, 0, 0, 0),
+(0, 0, 0, 0),
+(0, 0, 0, 0),
+(419, 0, 0, 1),
+(0, 0, 0, 0)],
+which=600,
+other=0,
+)
+```
+
+## 2026-11-04 · `test_L40e_the_order_of_edits_doesnt_matter` · at `9113e89` · STRESS=1
+
+- **Broke:** RuntimeError: re-checking after 's1' doesn't settle: s3_r keep changing
+- **Status:** fixed with ST8: re-checks after a run went both ways, so a step naming a later step (given another step's expression) and that later step re-checked each other forever; the run hung for 8 hours. They go forwards only now, and more rounds than steps raises, naming them, instead of hanging; example pinned
+
+```
+test_L40e_the_order_of_edits_doesnt_matter(
+# The test always failed when commented parts were varied together.
+frame=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],  # or any other generated value
+changed=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],  # or any other generated value
+chain=[(0, 0, 0, 0), (0, 0, 0, 0), (186, 1, 0, 0), (0, 0, 0, 0)],
+which=94,
+other=495,
+)
+```
+
+## 2026-11-04 · `test_L40e_the_order_of_edits_doesnt_matter` · at `9113e89`
+
+- **Broke:** RuntimeError: re-checking after 's1' doesn't settle: s3_r keep changing
+- **Status:** fixed with ST8: re-checks after a run went both ways, so a step naming a later step (given another step's expression) and that later step re-checked each other forever; the run hung for 8 hours. They go forwards only now, and more rounds than steps raises, naming them, instead of hanging; example pinned
+
+```
+test_L40e_the_order_of_edits_doesnt_matter(
+frame=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],
+changed=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],
+chain=[(0, 0, 0, 0), (0, 0, 0, 0), (186, 1, 0, 0), (0, 0, 0, 0)],
+which=94,
+other=495,
+)
+```
+
+## 2026-11-04 · `test_L40e_the_order_of_edits_doesnt_matter` · at `9113e89` · STRESS=1
+
+- **Broke:** AssertionError: ('order', 's2_p', 's2', 'invalid', 'staged')
+- **Status:** fixed with ST8: assigning a value re-checked readers only where their problems changed, so a reader not yet run kept an old plan (columns unknown) and what read it wasn't re-decided; a value assigned now re-plans readers, as a run does (`_restage_after`); example pinned
+
+```
+test_L40e_the_order_of_edits_doesnt_matter(
+frame=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],
+changed=   k     n  tags rec
+0  A  <NA>  None  {}
+1  A  <NA>    []  {},
+chain=[(2, 0, 0, 0), (556, 1, 0, 0), (212, 0, 0, 0), (0, 0, 0, 0)],
+which=452,
+other=166,
+)
+```
+
+## 2026-11-04 · `test_L40e_the_order_of_edits_doesnt_matter` · at `9113e89` · STRESS=1
+
+- **Broke:** AssertionError: ('order', 's1', 's3', 'invalid', 'staged')
+- **Status:** fixed with ST8: a step showing its newest earlier result (a new expression not run) didn't have its readers re-checked against what it shows, so one order checked them against it and the other against a blank plan; it does now, as a restored result does; example pinned
+
+```
+test_L40e_the_order_of_edits_doesnt_matter(
+frame=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],
+changed=   k     n  tags rec
+0  A  <NA>  None  {},
+chain=[(5, 0, 0, 0), (0, 0, 0, 0), (0, 1, 0, 0), (208, 0, 0, 0)],
+which=1,
+other=254,
 )
 ```
