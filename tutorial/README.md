@@ -3,7 +3,7 @@
 > A walkthrough of what the library is for, what it refuses to do, and why,
 > one part at a time. Every claim is a lesson in [tutorial.py](tutorial.py),
 > run against the code: `.venv/bin/python tutorial/tutorial.py`. Written
-> 2026-11-03: 114 lessons, **96 ✓ · 15 ✗ · 3 ?**. What the app
+> 2026-11-03: 114 lessons, **98 ✓ · 13 ✗ · 3 ?**. What the app
 > asked for is checked by [handover.py](handover.py) (§5), and everything at
 > once by `scripts/sweep.py` (§6). The rules in full are in
 > [docs/design/model.md](../docs/design/model.md).
@@ -123,7 +123,7 @@ something.
 **Status:**
 - ✗ V1b: one output column is named `value`, not after its step. Planned S4 (D9). This is what breaks A10.
 - ✗ **V8b, decided but not built:** a bare `hot(wf["v"])` (`-> bool`) is inferred as a `filter` and drops rows. D20b (2026-11-02) decided `auto` never filters.
-- ✗ **V10, new:** `mod.map(axis="columns")` is accepted and ignored. The code it calls raises `NotImplementedError`, but the step runs by rows. Remove `axis` from `map`, `filter`, `widen`, `group` and `expand`?
+- ✓ **V10, fixed 2026-11-03:** `mod.map(axis="columns")` was accepted and ignored: the guard that raised `NotImplementedError` came after the branch that hands a step's data on, so it never ran. `axis` is removed (EX4); it's refused as an unknown setting.
 - ? V11: `map(where=, replace=)` takes a tool that returns `bool`. It overlaps `filter` followed by `join`. Keep it?
 
 ### 2.5 Reshapes with no tool (R)
@@ -148,7 +148,7 @@ column pick pairs row by row, and only from an aligned step (principle 4).
 When binding is unclear, the step is `invalid` and names the fix.
 **Status:** ✓ A1–A6, A9.
 - ✓ **A4b, fixed 2026-11-03:** a `filter` given a column argument (`limit=wf["srt"][cols["temp"]]`) added `limit` to its output columns. Fixing it found worse (A4c): an argument named like an input column *replaced* it, so `filter(v, temp=<fahrenheit>)` showed fahrenheit as `v`'s `temp`, silently. A verb now hands on only its input's own columns (C3).
-- ✗ **A7, new:** the unknown-argument message says `to_f()` "accepts (none)"; it accepts `temp`.
+- ✓ **A7, fixed 2026-11-03:** the unknown-argument message said `to_f()` "accepts (none)": it left out the first parameter, which only a `collapse` tool's accumulator should be. It lists `temp` now.
 - ✗ A8: a missing binding names the gap, not the fix. Planned S3 (CA-A).
 - ✗ A10: `map` after `map` fails, because the first map's column is `value`. S4 naming and S3 binding fix it together. **This is the most common friction for a new user.**
 
@@ -208,10 +208,10 @@ behaviour, so each needs your yes before it lands.
 | | Finding | Proposed |
 |---|---|---|
 | P9b | a lineage condition warns that it is positional | drop the warning for `row[…]` conditions |
-| V10 | `axis="columns"` is accepted and ignored | remove the setting |
+| V10 | `axis="columns"` is accepted and ignored | **fixed 2026-11-03**: removed |
 | R11 | `mod.widen(<step>)` is accepted and fails with `None` | **fixed 2026-11-03** |
 | A4b | a filter's column argument becomes an output column | **fixed 2026-11-03**, with A4c |
-| A7 | "accepts (none)" | list the tool's parameters |
+| A7 | "accepts (none)" | **fixed 2026-11-03** |
 
 **Open choices**
 
@@ -279,7 +279,7 @@ core-asks probe (`--stress` adds the property test at 2,000 examples). Run
 | Suite | Result |
 |---|---|
 | tests | 783 passed, 1 skipped, 27 xfailed |
-| tutorial.py | 114 lessons: 96 ✓ · 15 ✗ · 3 ? |
+| tutorial.py | 114 lessons: 98 ✓ · 13 ✗ · 3 ? |
 | handover.py | 59 checks: 51 ✓ · 6 ✗ · 2 ? |
 | both examples | run |
 | core_asks.py | 36 of 39 done |

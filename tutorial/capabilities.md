@@ -2,7 +2,7 @@
 
 > Every capability the tutorial checks, with its expression, what it should
 > do, and its status. Run 2026-11-03 at `2bd150e` by
-> `.venv/bin/python tutorial/tutorial.py`: **96 ✓ · 15 ✗ · 3 ?** (114 lessons; R10b, R11, R13–R15, A4b and A4c since 2026-11-03's first run).
+> `.venv/bin/python tutorial/tutorial.py`: **98 ✓ · 13 ✗ · 3 ?** (114 lessons; R10b, R11, R13–R15, A4b, A4c, A7 and V10 since 2026-11-03's first run).
 > ✓ does what we want · ✗ doesn't yet · ? not decided. The reasoning is in
 > [README.md](README.md).
 >
@@ -68,7 +68,7 @@
 | V8 | Inferred verb | `to_f(wf["v"])` | `map` | ✓ | |
 | V8b | Inferred verb, `-> bool` | `hot(wf["v"])` | a map of bools: never drops rows | ✗ | **inferred as `filter`, so rows drop.** D20b decided otherwise, not built |
 | V9 | One verb per step | `to_f[mod.map(), mod.filter()](…)` | `invalid` | ✓ | |
-| V10 | A setting that does nothing | `to_f[mod.map(axis="columns")](…)` | refused | ✗ | **new:** accepted and ignored |
+| V10 | A setting that does nothing | `to_f[mod.map(axis="columns")](…)` | refused | ✓ | fixed 2026-11-03 (EX4): `axis` removed; was accepted and ignored |
 | V11 | `map(where=)` | `to_f[mod.map(where=cols["temp"] > 37)](…)` | — | ? | takes a tool, not a condition. Keep it? It overlaps `filter` + `join` |
 
 ## Reshapes (no tool)
@@ -114,7 +114,7 @@
 | A4c | …an argument named like an input column | `hot[mod.filter()](wf["v"], temp=wf["f"][cols["value"]])` | `v`'s own `temp` kept | ✓ | fixed 2026-11-03: **was a silent wrong answer**, the argument's values shown as `v`'s `temp` |
 | A5 | Column from a subset | `limit=wf["h"][cols["temp"]]` | refused, writing the join | ✓ | |
 | A6 | Parent's column into its child | `to_f[mod.map()](wf["e"], temp=wf["v"][cols["temp"]])` | refused, writing the join | ✓ | D-child: keep the refusal |
-| A7 | Unknown argument | `to_f[mod.map()](wf["v"], nope=1)` | names what it accepts: `temp` | ✗ | **new:** says "accepts (none)" |
+| A7 | Unknown argument | `to_f[mod.map()](wf["v"], nope=1)` | names what it accepts: `temp` | ✓ | fixed 2026-11-03: said "accepts (none)" (it dropped the first parameter) |
 | A8 | No matching column | `add_xy[mod.map()](wf["xy"])` | `invalid`, writing `a=wf[…][cols["x"]]` | ✗ | names the gap, not the fix. Planned S3 |
 | A9 | Binding written out | `add_xy[…](wf["xy"], a=wf["xy"][cols["x"]], b=…)` | 3 | ✓ | |
 | A10 | `map` after `map` | `to_f[mod.map()](wf["f2"])` | runs | ✗ | **most common friction:** the column is `value`, not `temp`. S3 + S4 |

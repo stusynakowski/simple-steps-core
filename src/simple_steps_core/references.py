@@ -332,8 +332,8 @@ class _RowsIndexer:
             return Rows({"where": key.tree, "named": True})
         return Rows(_row_part(key, strings=True))
 
-    def __call__(self, value: Any, *, axis: str = "rows") -> pd.DataFrame:
-        return _rows_frame(value, axis=axis)
+    def __call__(self, value: Any) -> pd.DataFrame:
+        return _rows_frame(value)
 
     def __repr__(self) -> str:
         return "rows"

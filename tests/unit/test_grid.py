@@ -935,9 +935,12 @@ def test_filter_lists_the_rows_it_excluded(three):
     assert len(out.data) == 2 and out.meta["excluded"] == [0]
 
 
-def test_column_axis_is_guarded_not_half_built():
-    with pytest.raises(NotImplementedError, match="axis='columns'"):
-        rows(pd.DataFrame({"a": [1]}), axis="columns")
+def test_there_is_no_column_axis_setting(three):
+    # EX4 (owner, 2026-11-03): axis= was accepted and ignored; it's refused now.
+    wf = Workflow()
+    wf["raw"] = three
+    wf["t"] = score[mod.map(axis="columns")](wf["raw"])
+    assert "map takes no parameter 'axis'" in wf.step("t").problems[0]
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -2054,7 +2057,7 @@ def test_an_unknown_modifier_parameter_is_caught_at_declaration(three):
     wf["raw"] = three
     wf["t"] = score[mod.map(nmae="s")](wf["raw"])
     assert "map takes no parameter 'nmae'" in wf.step("t").problems[0]
-    assert "it accepts axis, name, replace, retries" in wf.step("t").problems[0]
+    assert "it accepts name, replace, retries" in wf.step("t").problems[0]
 
 
 def test_a_required_setting_is_caught_at_declaration(three):

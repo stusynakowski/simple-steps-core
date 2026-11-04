@@ -27,7 +27,7 @@ KEY_COLUMN = "key"
 # ─────────────────────────────────────────────────────────────────────────
 # Input coercion — "what is a row?"
 # ─────────────────────────────────────────────────────────────────────────
-def _rows_frame(value: Any, *, axis: str = "rows") -> pd.DataFrame:
+def _rows_frame(value: Any) -> pd.DataFrame:
     """Coerce a step input into a frame of rows.
 
     **Only a DataFrame carries its own row/column structure.** A ``Series``
@@ -43,18 +43,6 @@ def _rows_frame(value: Any, *, axis: str = "rows") -> pd.DataFrame:
     if isinstance(value, Output):
         return value.data
     if isinstance(value, pd.DataFrame):
-        if axis == "columns":
-            # Transposing is the easy half and the wrong half. A column verb's
-            # unit of work is a column, so its ledger is indexed by column name
-            # while `data` is indexed by row — different index *spaces*, which
-            # makes Output.view()'s join produce NaN rather than an error. That
-            # needs an answer in §5 (and a column should arrive as a list, not
-            # a dict keyed by the old index) before it can be switched on.
-            raise NotImplementedError(
-                "axis='columns' is not implemented yet: column verbs need a "
-                "ledger indexed by column, which docs/shape-algebra.md §5 does "
-                "not yet cover. Use axis='rows'."
-            )
         return value
     if isinstance(value, pd.Series):
         return value.to_frame(name=VALUE_COLUMN)
@@ -176,7 +164,7 @@ def _call(fn: Callable, arg: dict, retries: int) -> tuple[Any, dict]:
 # The verbs
 # ─────────────────────────────────────────────────────────────────────────
 def map_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
-         retries: int = 0, axis: str = "rows", replace: bool = False,
+         retries: int = 0, replace: bool = False,
          where: Callable | None = None) -> Output:
     """``map`` — n rows in, n rows out: **only** *fn*'s result, one column.
 
@@ -191,7 +179,7 @@ def map_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
     its row (``where: where``); one that doesn't return a ``bool`` too, since
     core doesn't read truthiness into it.
     """
-    frame = rows(source, axis=axis)
+    frame = rows(source)
     blocked = _upstream_failures(source)
     test = _row_key(where) if where is not None else None
     values, records, skipped = [], [], []
@@ -246,8 +234,7 @@ def _plain_id(i: Any) -> Any:
     return i.item() if hasattr(i, "item") else i
 
 
-def filter_(source: Any, fn: Callable, *, retries: int = 0,
-            axis: str = "rows") -> Output:
+def filter_(source: Any, fn: Callable, *, retries: int = 0) -> Output:
     """``filter`` — keep the rows where *fn* is truthy. Columns unchanged.
 
     Nothing is hidden: a row whose predicate **raised** stays, marked
@@ -255,7 +242,7 @@ def filter_(source: Any, fn: Callable, *, retries: int = 0,
     visible downstream. Rows the predicate rejected are listed by id in
     ``meta["excluded"]``.
     """
-    frame = rows(source, axis=axis)
+    frame = rows(source)
     blocked = _upstream_failures(source)
     keep, records = [], []
     for index, row in _units(frame, _absent_of(source)):
@@ -282,7 +269,7 @@ def filter_(source: Any, fn: Callable, *, retries: int = 0,
 
 
 def group_(source: Any, fn: Callable, *, name: str = "group",
-           retries: int = 0, axis: str = "rows", replace: bool = False) -> Output:
+           retries: int = 0, replace: bool = False) -> Output:
     """``group`` — label each row with a key. n rows in, n rows out.
 
     The output is the input's rows and columns, on their row ids, plus the key
@@ -290,7 +277,7 @@ def group_(source: Any, fn: Callable, *, name: str = "group",
     *replace*, the key takes the place of the input column of that name.
     Grouping itself is :func:`collapse_` with ``by=name``.
     """
-    frame = rows(source, axis=axis)
+    frame = rows(source)
     blocked = _upstream_failures(source)
     keys, records = [], []
     for index, row in _units(frame, _absent_of(source)):
@@ -459,7 +446,7 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
 
 
 def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
-            retries: int = 0, axis: str = "rows", replace: bool = False,
+            retries: int = 0, replace: bool = False,
             columns: Sequence[str] | None = None, keep: bool = True) -> Output:
     """``unnest`` — each unit yields an iterable; results are concatenated.
 
@@ -478,7 +465,7 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
     if columns is not None:
         _no_tool("expand", fn)
         return _unpack(source, list(columns), restore, keep=keep)
-    frame = rows(source, axis=axis)
+    frame = rows(source)
     names_ = variables(frame.columns)
     if is_identity(fn) and VALUE_COLUMN not in names_ and len(names_) > 1 \
             and "column" not in _literals(fn):
@@ -970,7 +957,7 @@ def _widen_cell(cell: Any, wanted: Sequence[str], explicit: bool) -> tuple[dict,
 
 def widen_(source: Any, fn: Callable = identity, *, column: str | None = None,
            columns: Sequence[str] | None = None, retries: int = 0,
-           axis: str = "rows", replace: bool = False) -> Output:
+           replace: bool = False) -> Output:
     """``unnest_wider`` — one cell's fields become columns. n rows in, n rows out.
 
     The column-axis counterpart of :func:`expand_`, and the pair completes the
@@ -999,7 +986,7 @@ def widen_(source: Any, fn: Callable = identity, *, column: str | None = None,
     **per-unit failure** — inspectable and re-drivable like any other.
     """
     _no_tool("widen", fn)
-    frame = rows(source, axis=axis)
+    frame = rows(source)
     blocked = _upstream_failures(source)
     spread = _spread_column(frame, column, source)
 

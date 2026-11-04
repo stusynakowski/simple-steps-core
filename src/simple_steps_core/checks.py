@@ -904,11 +904,14 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
         if parameters and not any(
             p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()
         ):
+            # every parameter takes an argument, but a fold's accumulator (A7)
+            accepts = list(parameters)[1:] if verb is not None and verb.kind == "collapse" \
+                else list(parameters)
             for name in operation.arguments:
                 if name not in parameters:
                     problems.append(
                         f"{operation.tool}() takes no argument {name!r}; "
-                        f"it accepts {', '.join(list(parameters)[1:]) or '(none)'}"
+                        f"it accepts {', '.join(accepts) or '(none)'}"
                     )
     coded(problems, "unknown_argument")
 
