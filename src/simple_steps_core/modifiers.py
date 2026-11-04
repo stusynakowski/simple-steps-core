@@ -628,6 +628,11 @@ class _Mods:
                 # mod.widen("info"): the column it spreads (B1, D31).
                 if len(given) != 1 or "column" in params:
                     raise TypeError("mod.widen() takes one column name: mod.widen(\"info\")")
+                if not isinstance(given[0], str):
+                    # mod.widen(wf["s"]) took the step for a column name (R11)
+                    raise TypeError(f"mod.widen() takes a column name, not "
+                                    f"{type(given[0]).__name__}: to widen a step, pass it "
+                                    f"after the modifier: mod.widen()(wf[\"…\"])")
                 params["column"], given = given[0], ()
             if given:
                 # mod.name("temp_f"): the one modifier that takes its value first.

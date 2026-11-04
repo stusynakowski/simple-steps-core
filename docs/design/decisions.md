@@ -74,7 +74,7 @@ With them, every error is either `invalid` at once, writing the fix, or one
 
 | | Condition | Fixes | Owner, 2026-11-03 |
 |---|---|---|---|
-| C1 | Anything that can be checked when a step is written is checked then; a run fails only on data, cell by cell | `widen` which column and the `key` collision, both failing at run with no message; R11; V10 | **yes** |
+| C1 | Anything that can be checked when a step is written is checked then; a run fails only on data, cell by cell | `widen` which column and the `key` collision, both failing at run with the reason only on a cell; R11; V10 | **yes**. First piece done 2026-11-03: `widen` (which column, a missing `column=`, a step for a column name) and the `key` collision are problems when written |
 | C2 | A return type is declared or unknown, never guessed (EX11) | lets C1 work; safe inference; exact plans | **yes** |
 | C3 | A step's columns are its input's, plus or minus what its verb says, and nothing else. Shown in full; stored as **ST** below, so carrying a column costs no memory | A4b; the melt a bare `expand()` makes on several columns | **yes, with ST** |
 | C4 | A step never replaces a column by accident: a name that exists already is refused unless replacing is written (`mod.rename` first, or `replace=True`) | `widen` silently overwriting `name` with a field of that name | **yes** |

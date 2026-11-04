@@ -217,6 +217,34 @@ def test_E24_B2_expand_of_a_dict_column_keeps_the_others():
     assert list(k.step("only").output.data.columns) == ["#p", "key", "info"]
 
 
+def test_widen_and_expand_mistakes_are_problems_when_written():
+    # C1: when the input's columns and types are known, these are invalid at
+    # once, the fix written; they used to fail at run, the reason on a cell.
+    k = Kernel(Catalog([]))
+    k["two"] = pd.DataFrame({"a": [{"x": 1}], "b": [{"y": 2}], "n": [1]})
+    k["keyed"] = pd.DataFrame({"info": [{"age": 30}], "key": ["K"]})
+    k["w"] = mod.widen()(wf["two"])
+    k["z"] = mod.widen(column="zz")(wf["two"])
+    k["e"] = mod.expand(columns=["info"])(wf["keyed"])
+    assert [(p.code, "mod.widen('a')" in p.message) for p in k.step("w").problems] \
+        == [("missing_setting", True)]
+    assert [p.code for p in k.step("z").problems] == ["missing_column"]
+    assert [p.code for p in k.step("e").problems] == ["column_clash"]
+    with pytest.raises(TypeError, match=r"takes a column name, not StepRef"):
+        mod.widen(wf["two"])                     # the step taken for a column name (R11)
+
+
+def test_widen_of_a_source_not_run_yet_is_checked_when_it_runs():
+    @tool
+    def records() -> pd.DataFrame:
+        return pd.DataFrame({"a": [{"x": 1}], "b": [{"y": 2}]})
+    k = Kernel(Catalog([records]))
+    k["r"] = records[mod.source()]()
+    k["w"] = mod.widen()(wf["r"])
+    assert k.step("w").problems == ()            # its columns aren't known yet
+    assert refused(k, "w", lambda: mod.widen()(wf["r"]), "widen which column")
+
+
 @pytest.mark.xfail(strict=True, reason="S7 (D33): melt and pivot")
 def test_E25_melt_then_pivot_gives_back_the_table():
     k = Kernel(Catalog([]))

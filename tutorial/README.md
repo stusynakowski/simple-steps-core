@@ -3,7 +3,7 @@
 > A walkthrough of what the library is for, what it refuses to do, and why,
 > one part at a time. Every claim is a lesson in [tutorial.py](tutorial.py),
 > run against the code: `.venv/bin/python tutorial/tutorial.py`. Written
-> 2026-11-03 at `2bd150e`: 109 lessons, **89 ✓ · 17 ✗ · 3 ?**. What the app
+> 2026-11-03: 111 lessons, **92 ✓ · 16 ✗ · 3 ?**. What the app
 > asked for is checked by [handover.py](handover.py) (§5), and everything at
 > once by `scripts/sweep.py` (§6). The rules in full are in
 > [docs/design/model.md](../docs/design/model.md).
@@ -134,7 +134,7 @@ lists core packed). Written `mod.sort(by="temp")(wf["v"])`.
 **Want:** each one moves the data one level along one axis, and pack and
 unpack round-trip without loss (R8–R9).
 **Status:** ✓ R1–R10, R12.
-- ✗ **R11, new:** `mod.widen(wf["i"])`, with the step put where a setting belongs, is accepted and the step fails with `None`. The other reshapes refuse with "takes settings by keyword".
+- ✓ **R11, fixed 2026-11-03:** `mod.widen(wf["i"])`, with the step put where a setting belongs, was accepted and failed with `None`; it's refused now. So are `widen` with two dict columns (R13) and an `expand` of dicts into a step with a `key` column (R14), when the step is written (C1).
 
 ### 2.6 Built-in tools (B)
 
@@ -209,7 +209,7 @@ behaviour, so each needs your yes before it lands.
 |---|---|---|
 | P9b | a lineage condition warns that it is positional | drop the warning for `row[…]` conditions |
 | V10 | `axis="columns"` is accepted and ignored | remove the setting |
-| R11 | `mod.widen(<step>)` is accepted and fails with `None` | refuse it, as the other reshapes do |
+| R11 | `mod.widen(<step>)` is accepted and fails with `None` | **fixed 2026-11-03** |
 | A4b | a filter's column argument becomes an output column | the filter keeps only its input's columns |
 | A7 | "accepts (none)" | list the tool's parameters |
 
@@ -279,7 +279,7 @@ core-asks probe (`--stress` adds the property test at 2,000 examples). Run
 | Suite | Result |
 |---|---|
 | tests | 783 passed, 1 skipped, 27 xfailed |
-| tutorial.py | 109 lessons: 89 ✓ · 17 ✗ · 3 ? |
+| tutorial.py | 111 lessons: 92 ✓ · 16 ✗ · 3 ? |
 | handover.py | 59 checks: 51 ✓ · 6 ✗ · 2 ? |
 | both examples | run |
 | core_asks.py | 36 of 39 done |

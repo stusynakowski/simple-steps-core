@@ -632,6 +632,35 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                         f"give initial=, as a value or a reference")
     coded(problems, "missing_setting")
 
+    # 6b'''. widen and expand(columns=), checked when the input's columns are
+    #        known (C1, decisions.md §0); unknown types are left to the run.
+    if verb is not None and verb.kind in ("widen", "expand") and workflow is not None \
+            and operation.input is not None and not workflow._columns_open(operation):
+        available = variables(workflow._known_columns(operation))
+        types = workflow._column_types(operation)
+        sid = str(operation.input)
+        if verb.kind == "widen" and available:
+            column = verb.settings.get("column")
+            if column is not None and column not in available:
+                problems.append(Problem(
+                    f"widen names {column!r}, which {sid!r} does not have "
+                    f"(it has {', '.join(map(str, available))})", "missing_column"))
+            elif column is None and len(available) > 1:
+                holding = [c for c in available if _is_mapping_type(types.get(c))]
+                if len(holding) > 1 or (not holding and all(c in types for c in available)):
+                    which = (f"{', '.join(map(str, holding))} hold dicts" if holding
+                             else "none holds dicts")
+                    problems.append(Problem(
+                        f"widen which column? {sid!r} has {', '.join(map(str, available))}; "
+                        f"{which}: name one, mod.widen({(holding or available)[0]!r})",
+                        "missing_setting"))
+        named_ = list(verb.settings.get("columns") or [])
+        if verb.kind == "expand" and named_ and "key" in available and "key" not in named_ \
+                and _unpacks(operation, named_, workflow) == "mapping":
+            problems.append(Problem(
+                f"expand of a dict writes its keys to 'key', which {sid!r} already has: "
+                f"rename it first, mod.rename(columns={{'key': …}})", "column_clash"))
+
     # 6b''. collapse(by="#s") groups by an earlier step's rows (R-D5): each row
     #       must trace to one row of s, through `#` columns.
     grouped = workflow._groups_by_step_of(operation) if workflow is not None else None
@@ -1477,6 +1506,12 @@ def _selected_index(verb: Any, operation: "Operation", workflow: "Workflow | Non
     except SelectionError:
         return [], None                 # a selection that can't be made is a problem elsewhere
     return chosen, len(chosen)
+
+
+def _is_mapping_type(hint: Any) -> bool:
+    """Is a column typed as dicts (declared, or seen when its step ran)?"""
+    origin = typing.get_origin(hint) or hint
+    return isinstance(origin, type) and issubclass(origin, collections.abc.Mapping)
 
 
 def _unpacks(operation: "Operation", columns: list, workflow: "Workflow") -> str | None:

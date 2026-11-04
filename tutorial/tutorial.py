@@ -333,10 +333,21 @@ def ch5():
            data(put(k, "x", mod.expand()(wf["lst"])), "value"), [1, 2, 3])
     k["i"] = info[mod.map()](wf["v"])
     k.run_all()
-    s = put(k, "wb", mod.widen(wf["i"]))
+    s = put(k, "wb", Later(lambda: mod.widen(wf["i"])))
     lesson("R11", "a step passed where a setting belongs is refused: mod.widen(wf['i'])",
            type(s).__name__, "TypeError",
            "accepted; the step fails with None. Other reshapes refuse 'takes settings by keyword'")
+    k["dd"] = pd.DataFrame({"p": [{"a": 1}], "q": [{"b": 2}]})
+    k["kd"] = pd.DataFrame({"p": [{"a": 1}], "key": ["K"]})
+    k.run_all()
+    s = put(k, "w2", mod.widen()(wf["dd"]))
+    lesson("R13", "widen with two dict columns is invalid when written, naming them",
+           (s.state, [p.code for p in s.problems]), ("invalid", ["missing_setting"]),
+           "failed at run, the message only on the cell (C1)")
+    s = put(k, "kx", mod.expand(columns=["p"])(wf["kd"]))
+    lesson("R14", "expanding dicts into a step that has a 'key' column is invalid when written",
+           (s.state, [p.code for p in s.problems]), ("invalid", ["column_clash"]),
+           "failed at run, the message only on the cell (C1)")
     s = put(k, "pn", mod.pack(columns=["name"], name="rec")(wf["v"]))
     lesson("R12", "a retired setting is refused, naming the replacement", s.state, "invalid")
 
