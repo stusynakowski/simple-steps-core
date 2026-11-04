@@ -348,6 +348,12 @@ def ch5():
     lesson("R14", "expanding dicts into a step that has a 'key' column is invalid when written",
            (s.state, [p.code for p in s.problems]), ("invalid", ["column_clash"]),
            "failed at run, the message only on the cell (C1)")
+    k["nd"] = pd.DataFrame({"name": ["Ada"], "c": [{"name": "X", "a": 1}]})
+    k.run("nd")
+    s = put(k, "w3", mod.widen(column="c")(wf["nd"]))
+    lesson("R15", "a widen field never replaces a column the input has, unless replace=True",
+           (s.state, data(put(k, "w4", mod.widen(column="c", replace=True)(wf["nd"])), "name")),
+           ("failed", ["X"]), "the field won silently: name Ada became X (C4)")
     s = put(k, "pn", mod.pack(columns=["name"], name="rec")(wf["v"]))
     lesson("R12", "a retired setting is refused, naming the replacement", s.state, "invalid")
 

@@ -654,6 +654,18 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                         f"widen which column? {sid!r} has {', '.join(map(str, available))}; "
                         f"{which}: name one, mod.widen({(holding or available)[0]!r})",
                         "missing_setting"))
+                column = holding[0] if len(holding) == 1 else None
+            elif column is None:
+                column = available[0]
+            # C4: a field never replaces a column the input carries, unless said
+            fields = list(verb.settings.get("columns") or workflow._declared_fields(operation) or [])
+            clash = [f for f in fields if f in available and f != column]
+            if column is not None and clash and not verb.settings.get("replace"):
+                problems.append(Problem(
+                    f"widen's field{'s' if len(clash) > 1 else ''} {', '.join(map(repr, clash))} "
+                    f"would replace the column{'s' if len(clash) > 1 else ''} of that name in {sid!r}: "
+                    f"rename {'them' if len(clash) > 1 else 'it'} first, or say replace=True",
+                    "column_clash"))
         named_ = list(verb.settings.get("columns") or [])
         if verb.kind == "expand" and named_ and "key" in available and "key" not in named_ \
                 and _unpacks(operation, named_, workflow) == "mapping":

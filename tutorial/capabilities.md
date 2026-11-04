@@ -2,7 +2,7 @@
 
 > Every capability the tutorial checks, with its expression, what it should
 > do, and its status. Run 2026-11-03 at `2bd150e` by
-> `.venv/bin/python tutorial/tutorial.py`: **94 ✓ · 15 ✗ · 3 ?** (112 lessons; R11, R13, R14, A4b and A4c since 2026-11-03's first run).
+> `.venv/bin/python tutorial/tutorial.py`: **95 ✓ · 15 ✗ · 3 ?** (113 lessons; R11, R13–R15, A4b and A4c since 2026-11-03's first run).
 > ✓ does what we want · ✗ doesn't yet · ? not decided. The reasoning is in
 > [README.md](README.md).
 >
@@ -89,6 +89,7 @@
 | R12 | A retired setting | `mod.pack(columns=[…], name="rec")` | refused, naming `mod.name` | ✓ | |
 | R13 | widen, two dict columns | `mod.widen()(wf["dd"])` | `invalid` when written, naming them | ✓ | fixed 2026-11-03 (C1): failed at run, the reason on a cell |
 | R14 | expand of dicts into a step with `key` | `mod.expand(columns=["p"])(wf["kd"])` | `invalid` when written | ✓ | fixed 2026-11-03 (C1) |
+| R15 | A widen field named like a carried column | `mod.widen(column="c")(wf["nd"])`; `replace=True` | refused; with `replace=True`, the field replaces it | ✓ | fixed 2026-11-03 (C4): the field won silently, `name` Ada became X |
 
 ## Built-in tools
 

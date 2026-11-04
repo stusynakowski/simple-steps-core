@@ -946,7 +946,7 @@ def _widen_cell(cell: Any, wanted: Sequence[str], explicit: bool) -> tuple[dict,
 
 def widen_(source: Any, fn: Callable = identity, *, column: str | None = None,
            columns: Sequence[str] | None = None, retries: int = 0,
-           axis: str = "rows") -> Output:
+           axis: str = "rows", replace: bool = False) -> Output:
     """``unnest_wider`` — one cell's fields become columns. n rows in, n rows out.
 
     The column-axis counterpart of :func:`expand_`, and the pair completes the
@@ -1010,9 +1010,16 @@ def widen_(source: Any, fn: Callable = identity, *, column: str | None = None,
             record["status"] = "failed"
             record["error"] = error
 
+    # C4: a field never replaces a carried column, unless replace=True says so.
+    clash = [c for c in wanted if c != spread and c in frame.columns]
+    if clash and not replace:
+        raise ValueError(
+            f"widen's field{'s' if len(clash) > 1 else ''} {', '.join(map(repr, clash))} "
+            f"would replace the input's column{'s' if len(clash) > 1 else ''} of that "
+            f"name: rename {'them' if len(clash) > 1 else 'it'} first, or say replace=True")
+
     # Carried columns first, then the fields — the order `map` uses, and the
-    # order a reader sees. A field that shadows a carried column wins, because
-    # naming it is what the step was asked to do.
+    # order a reader sees. With replace=True, a field takes its column's place.
     data = frame.copy()
     if spread not in wanted:
         data = data.drop(columns=[spread])   # its fields are the columns now (G10)
