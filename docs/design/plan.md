@@ -59,7 +59,7 @@ change is confirmed before it lands.
 | **S4** | **Naming** | one output named after its step; a dict's keys as columns; `var<n>`; ints stay ints; step names identifiers; sources and literals (D12) | M3 (L20–L24, L46, L47) | medium | D12 decided 2026-11-04: ready |
 | **S3** | **Grammar and binding** | strings choose columns; pickers before the verb; a pick as an input; **binding at staging, saved explicitly** (CA-A); `mod.cast`; verbs inferred and written (`auto` resolved, D20); nothing unseen (D21) | M4, M5 (L25–L39, L48–L51) | **large** | N2, N3, D8 (no), D18, D19, D21, EX5 decided (2026-11-04): ready |
 | **S11** | **Live editing** (**recommended next**) | the session model (SM, [model.md §8.1](model.md#81-the-proposed-session-model-sm)): a result store filed by run key (K22, from step D), stored as **ST** (row maps, columns and media filed once by content hash), every state derived from it, never flagged; `needs_run()` and `running` (SS5, SS6); stale reasons among the warnings, delete anyway (SS7); picks into a source follow their rows when its data changes (D-picks); readers re-checked at once ✓ (`baec929`); renames rewrite what core wrote ✓ | M6 (L41–L43, L52) | medium | needs SM, SS5–SS7, D-picks ([decisions.md §0](decisions.md#0-needed-from-you-now)) |
-| **G** | **The app moves** | [app-migration.md](app-migration.md), onto the new syntax; core's to-dos T6, T9–T13 | — | medium (in the app) | needs D50, D52, D53 |
+| **G** | **The app moves** | [app-migration.md](app-migration.md), onto the new syntax; core's to-dos T6, T9–T13 | — | medium (in the app) | D50, D52, D53 decided 2026-11-04 |
 | **D** | **Sessions** | outputs kept by version (K22), progress and `cancel()` (K23, K14), re-run failed or stale rows (K15, D42), stages (R9), autorun | — | medium–large | needs D-D1, D-D2, D42 |
 | **E** | **Storage** | the output store (C32, K16); media handles (R7) | — | medium | needs E-D1 |
 | **F** | **The workflow as a table** | step blocks side by side, rows lined up (G18) | — | medium | nothing new |
@@ -86,6 +86,21 @@ the order is the table's.
 
 **The cheaper path is gone** (N1): deferring S5 past G would mean the app
 migrating twice.
+
+### After the app moves: later, by decision (owner, 2026-11-04)
+
+Wanted, not before the move. Each lands as its own piece, confirmed first;
+none changes what an existing expression means.
+
+| | What | From |
+|---|---|---|
+| L1 | **Sharing settings for tools and resources**: a kernel or catalog setting that allows or prevents passing a resource to free tools, and sharing tools between resources (today both are allowed, D50) | D50 |
+| L2 | **One join for several tables**, `join(a, b, c, on=[…])`, as one step | WR4 |
+| L3 | **A join that drops rows warns**, with the count | WR5 |
+| L4 | **Better tracing**: `k.trace(step, rows, to=ancestor)` gives the pick of the rows behind them | PK3 |
+| L5 | **Steps grouped into stages** | R9 (step D) |
+| L6 | **Lazy row execution**: each verb's row map in its plan (PL2), stale rows that follow the row maps (PL3), and a partial re-run of only the stale rows, an outside-world tool kept until asked to refresh (PL4) | PL2–PL4, K15, D42 |
+| L7 | **Refusing on an exact plan**: a tool parameter missing from a plan whose columns are exact is a problem at once, not a *likely missing* warning | PL |
 
 ## 3. The changes, in detail (S0–S5)
 

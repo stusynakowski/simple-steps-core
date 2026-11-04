@@ -259,8 +259,8 @@ Additive, each a small pass in the app (cleanup-map.md stage C rows):
 | | Decision | Recommended |
 |---|---|---|
 | G-D1 | move the app now, before steps D–F | **superseded 2026-11-02 by N1**: after S0–S11, before D–F |
-| G-D2 | older saved workspaces (K17) | refuse with core's message, as the app's own rule says; a converter only if a named user has files to keep |
-| G-D3 | the app's stage A, B, D deletions before the move | yes: less to port, and none of them needs the new core |
+| G-D2 | older saved workspaces (K17) | **yes**, owner 2026-11-04 (D52): refuse with core's message; no saved workspaces to keep, so no converter; the examples are updated |
+| G-D3 | the app's stage A, B, D deletions before the move | **yes**, owner 2026-11-04 (D53): less to port, and none of them needs the new core |
 
 ## 7. To do in core
 
@@ -283,7 +283,7 @@ one piece, confirmed before it lands; ✓ when done.
 | | Decision | Recommended |
 |---|---|---|
 | C-D2 | the seed recommendation | a tool with a `seed` parameter its step doesn't give warns |
-| R-D1 | a resource whose type has bound tools: also passable to a free tool as an argument, or only through its bound tools? | both allowed (today's behaviour), unless you mean to refuse |
+| R-D1 | a resource whose type has bound tools: also passable to a free tool as an argument, or only through its bound tools? | **both**, owner 2026-11-04 (D50); a setting to allow or prevent it later (plan.md L1) |
 | G-D1–3 | §6 | as recommended there |
 
 ### Leftovers from step A

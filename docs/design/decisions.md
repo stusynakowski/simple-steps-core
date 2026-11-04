@@ -97,9 +97,9 @@ knows `#v`; a join takes two inputs.
 | WR1 | One function answers how two steps' rows relate (same rows, subset, child, group, unrelated; the nearest shared ancestor; the join that meets them), used by every refusal, plan and view; it replaces the five helpers (observations F4, H2) | five partial helpers; a child and its parent described as "some would have no partner" | **yes** (with WR2) |
 | WR2 | A refusal carries its fix as an operation, `Problem.fix`; `k.fix(name)` puts it in the step's place (a button in the app). Never applied unasked | the fix is in the message text only | **yes** |
 | WR3 | `join(a, b)` with no `on=`, on related steps, joins on the nearest shared ancestor's lineage and writes `on="#v"` into the expression (EX6); unrelated steps still need `on=`. `zip_` becomes join's same-rows case | refused: "join needs on=" | **yes** |
-| WR4 | One join for several tables, `join(a, b, c, on=[…])`, as one step | two steps; `join()` takes two inputs | open: not chosen |
-| WR5 | A join that drops rows warns with the count | not checked | open: not chosen |
-| PK3 | `k.trace(step, rows, to=ancestor)`: the pick of the rows behind them | `k.cell` shows one cell's inputs; no pick | open: not chosen |
+| WR4 | One join for several tables, `join(a, b, c, on=[…])`, as one step | two steps; `join()` takes two inputs | later: owner, 2026-11-04 (plan.md L2) |
+| WR5 | A join that drops rows warns with the count | not checked | later: owner, 2026-11-04 (plan.md L3) |
+| PK3 | `k.trace(step, rows, to=ancestor)`: the pick of the rows behind them | `k.cell` shows one cell's inputs; no pick | later: owner, 2026-11-04 (plan.md L4) |
 
 **Storage** (opened 2026-11-03). Measured by allocation (`tracemalloc`) on a
 200,000×10 source (16 MB), `sort` → `filter` → `rename` → `select` → `map`:
@@ -294,9 +294,9 @@ The heart: once these land, the list-of-dicts model is true.
 | | Decision | You said | Recommended | Was |
 |---|---|---|---|---|
 | D51 | **Order against the app's migration:** this cleanup's §7 phases 1–4 before the app moves, so its formulas change once **→ N1: yes, including S5 (decided)** | — | yes | X-D9, G-D1 |
-| D52 | Older saved workspaces | — | refused with core's message | G-D2 |
-| D53 | The app's own cleanups before it moves | — | yes | G-D3 |
-| D50 | A resource with bound tools may also be passed to a free tool | — | yes, both | R-D1 |
+| D52 | Older saved workspaces | **yes**: owner, 2026-11-04: refused now; there are no saved workspaces to keep, and the examples are updated to the new syntax | refused with core's message | G-D2 |
+| D53 | The app's own cleanups before it moves | **yes**: owner, 2026-11-04: delete them (stages A, B, D, in the app repo) | yes | G-D3 |
+| D50 | A resource with bound tools may also be passed to a free tool | **yes**, both: owner, 2026-11-04; a setting to allow or prevent it later (plan.md L1) | yes, both | R-D1 |
 
 ### S5. Row numbers
 
