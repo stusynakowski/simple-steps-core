@@ -44,13 +44,13 @@ def main() -> int:
         suites.insert(1, ("property test ×2000", ["-m", "pytest", "-p", "no:warnings",
                                                   "tests/unit/test_reshape_properties.py"]))
     with tempfile.TemporaryDirectory() as tmp:
-        env = {**os.environ, "COVERAGE_FILE": str(Path(tmp) / ".coverage"), "STRESS": "1"}
-        if "--stress" not in sys.argv:
-            env.pop("STRESS")
+        env = {**os.environ, "COVERAGE_FILE": str(Path(tmp) / ".coverage")}
+        env.pop("STRESS", None)             # only the property-test suite runs at 2,000
         print(f"{'suite':22} {'exit':>4}  result")
         failed = 0
         for name, args in suites:
-            run = subprocess.run([PY, "-m", "coverage", "run", "-p", *args], cwd=ROOT, env=env,
+            run = subprocess.run([PY, "-m", "coverage", "run", "-p", *args], cwd=ROOT,
+                                 env={**env, "STRESS": "1"} if name.startswith("property") else env,
                                  capture_output=True, text=True)
             failed += run.returncode != 0
             print(f"{name:22} {run.returncode:>4}  {last_line(run.stdout) or last_line(run.stderr)}")

@@ -22,9 +22,9 @@ what the workflow is now.
 |---|---|---|---|
 | **SM** | **The session model** ([model.md §8.1](model.md#81-the-proposed-session-model-sm)): the session keeps only the workflow and a store of results filed by **run key** (spec id + the data versions read). An edit changes the workflow and re-checks at once; a run adds the missing keys, `run(x)` making `x` current. Every state is derived: `completed` when the store holds its key now; `stale` when it holds an earlier one, saying what differs; `invalid` when it has problems now, still showing its last result. Replaces SS1–SS4 below (proposed earlier the same day); reverses **D40**'s *read stale* mark; brings K22 (several results per step) into S11 | flags: an expression put back stays `stale`; a reader made `invalid` loses its values; a run on a stale input says `completed` (with a warning naming the input); an `invalid` step carries a stale reason | **yes** |
 | ~~SS1–SS4~~ | computed states; keep an `invalid` step's values; a run on a stale input is `stale`; no stale reason on `invalid` | — | → **SM** |
-| SS5 | `needs_run()` leaves out empty steps, and failed steps whose spec and inputs haven't changed (relates to **D37**, an `empty` state) | lists an empty step as `staged`; leaves out a failed step | yes, both |
-| SS6 | Core has no `running` state; it stays the app's | none in core | yes |
-| SS7 | A stale step's reason is among its warnings, where the app reads it (core-asks L42); delete-anyway, `k.remove(name, force=True)` (L43d, **CA-6**) | the reason is in output metadata only; no delete-anyway | yes, both |
+| SS5 | `needs_run()` leaves out empty steps, and failed steps whose spec and inputs haven't changed (relates to **D37**, an `empty` state) | lists an empty step as `staged`; leaves out a failed step | **yes**: owner, 2026-11-03 |
+| SS6 | Core has no `running` state; it stays the app's | none in core | **yes**: owner, 2026-11-03 |
+| SS7 | A stale step's reason is among its warnings, where the app reads it (core-asks L42); delete-anyway, `k.remove(name, force=True)` (L43d, **CA-6**) | the reason is in output metadata only; no delete-anyway | **yes**: owner, 2026-11-03 |
 
 **Rows when a source's data changes** (model.md §10).
 
@@ -37,9 +37,9 @@ disagree; the code follows the core asks.
 
 | | Decision | Reshaping rules (2026-10-27) | Core asks / code now | Recommended |
 |---|---|---|---|---|
-| D-child | A column argument from a parent into its child: each item takes its parent's value | allowed | refused, writing `join(…, on="#v")` (**CA-C**) | keep the code: one rule, a join |
-| D-subset | A column argument from a step missing some rows | blocks those rows, runs the rest | refused, writing the join | keep the code |
-| D-cell | A lineage cell shows the ancestor's row number as of the run, or now | — | now (S5-D4); core-asks model.md M3 says "as of the run" | now, and correct M3 |
+| D-child | A column argument from a parent into its child: each item takes its parent's value | allowed | refused, writing `join(…, on="#v")` (**CA-C**) | keep the code: one rule, a join. **yes**: owner, 2026-11-03 |
+| D-subset | A column argument from a step missing some rows | blocks those rows, runs the rest | refused, writing the join | keep the code. **yes**: owner, 2026-11-03 |
+| D-cell | A lineage cell shows the ancestor's row number as of the run, or now | — | now (S5-D4); core-asks model.md M3 says "as of the run" | now, and correct M3. **yes**: owner, 2026-11-03 |
 
 **Expressions: simple and robust** (opened 2026-11-03 from the tutorial,
 [tutorial/](../../tutorial/); lesson ids P…, V…, R…, A…, C… are in
@@ -55,15 +55,16 @@ are removals; EX5–EX6 are S3's binding work.
 |---|---|---|---|
 | **EX1** | **Every setting is checked, or refused.** Each modifier's settings come from one typed schema (`MODIFIERS`); an unknown setting, a setting that changes nothing, or a positional argument is refused when the step is declared, and the refusal writes the right form | `mod.map(axis="columns")` accepted and ignored (V10); `mod.widen(wf["i"])` accepted, the step fails with `None` (R11); an unknown argument says the tool "accepts (none)" (A7) | **yes** |
 | **EX2** | **A verb owns its output columns.** A `filter` returns exactly its input's columns, a `map` exactly its named output; the plan lists them, and a test checks run against plan for every verb | a `filter` given a column argument adds it as a column (A4b) | **yes** |
-| EX3 | **One grammar**: `tool[modifiers](input, arguments)`, `mod.reshape(settings)(input)`, `join`/`zip_`/`stack(…)`, `wf["s"][rows][cols]`. Retire `mod.x(over=…)` and `op("identity")[mod.reshape(…)]` | all three spellings of a reshape work (F7); `examples/all_orchestrations` uses `over=` | yes; the examples and tests rewritten in the same piece |
-| EX4 | **Remove what doesn't earn its place**: `axis` everywhere; `retries=` on verbs (`mod.retry` does it); `map(where=, replace=)` (overlaps `filter` + `join`, V11). Build verbs from a few primitives where possible (pack, unpack, choose, reorder, match), as grouping already is (H3) | all present | yes for `axis` and `retries=`; `where=`/`replace=` yours to choose |
-| EX5 | **An input is a step or a pick, never a computation.** A pick may be a tool's input (D6, P16); an inline tool call or combine may not (C11), so every grid shown is a named step with a state | a pick as input refused (P16); an inline operation as a combine's input is `invalid` (C11) | yes; carries out **D6** |
+| EX3 | **One grammar**: `tool[modifiers](input, arguments)`, `mod.reshape(settings)(input)`, `join`/`zip_`/`stack(…)`, `wf["s"][rows][cols]`. Retire `mod.x(over=…)` and `op("identity")[mod.reshape(…)]` | all three spellings of a reshape work (F7); `examples/all_orchestrations` uses `over=` | **yes**: owner, 2026-11-03; the old spellings removed, the examples and tests rewritten in the same piece |
+| EX4 | **Remove what doesn't earn its place**: `axis` everywhere; `retries=` on verbs (`mod.retry` does it); `map(where=, replace=)` (overlaps `filter` + `join`, V11). Build verbs from a few primitives where possible (pack, unpack, choose, reorder, match), as grouping already is (H3) | all present | **yes**: owner, 2026-11-03: `axis`, `retries=` on verbs and `map(where=, replace=)` all removed |
+| EX5 | **An input is a step or a pick, never a computation.** A pick may be a tool's input (D6, P16); an inline tool call or combine may not (C11), so every grid shown is a named step with a state | a pick as input refused (P16); an inline operation as a combine's input is `invalid` (C11) | open: not chosen on 2026-11-03 (picks as inputs are already yes under **D6** / core-asks L34; refusing an inline computation is what's open) |
 | EX6 | **Inference is written into the expression at staging**, never decided again at run: the verb (`to_f(wf["v"])` saved as `to_f[mod.map()](…)`), the binding (`temp=wf["v"][cols["temp"]]`), the output name (after the step, **D9**). If core can't decide, the step is `invalid`, listing the candidates. `auto` chooses only verbs that can't change the row count | done for picks (P14); verb and binding inferred again at each run; `auto` chooses `filter` (V8b, against **D20b**) | yes; this is S3's binding (CA-A) and S4's naming, with **D20b** and **D21** |
-| EX7 | **One printed form that round-trips**: `parse(print(x)) == x` for every expression; the saved form is the printed form. A property test generates expressions and checks it (beside L40) | expressions print; no round-trip test | yes, with S3 |
-| EX8 | **The tutorial is the contract.** `tutorial/tutorial.py` runs in the test suite; a decision that lands changes its lesson's `want` in the same commit | run by hand | yes |
-| EX9 | Assigning a bare Python function as a value is refused, pointing to `@tool` and the catalog (D11) | stored as a value, `completed` | yes |
+| EX7 | **One printed form that round-trips**: `parse(print(x)) == x` for every expression; the saved form is the printed form. A property test generates expressions and checks it (beside L40) | expressions print; no round-trip test | **yes**: owner, 2026-11-03, with S3 |
+| EX8 | **The tutorial is the contract.** `tutorial/tutorial.py` runs in the test suite; a decision that lands changes its lesson's `want` in the same commit | run by hand | **yes**: owner, 2026-11-03: both tutorials run in the test suite |
+| EX9 | Assigning a bare Python function as a value is refused, pointing to `@tool` and the catalog (D11) | stored as a value, `completed` | **yes**: owner, 2026-11-03 |
 | **EX10** | **`widen` applies only to a column of dicts** (owner, 2026-11-03: **decided**). Tuple and list cells no longer widen to `c0, c1, …`: a tool returns a dict for fields, `expand` unpacks a list. When the column's type is known and isn't a dict, the step is `invalid` at once; when it's unknown, a cell that isn't a dict fails, the other rows run; a `None` cell gives `absent` fields (with C6, one meaning of no value) | tuples and lists widen by position to `c0, c1, …`; a `None` cell fails | **decided**; lands as its own piece, with `examples/all_orchestrations` (`split`) and its tests |
 | EX11 | **A return type is declared or unknown, never guessed.** No annotation, `Any` or `object` is *unknown*: the tool runs, its plan says the type is unknown and why (*"declare the return type"*), `auto` may only infer `map` for it, and checks that need the type (EX10) happen per cell at run. A declared type (`-> float`, `-> dict`, `-> list[str]`, a record class) gets every check at declaration | unannotated tools run; `auto` infers `map` for them; the plan states the type `unknown` before a run and the observed type after (K27, checked 2026-11-03 by tutorial/handover.py); per-cell checks at run and the plan's *"declare the return type"* are what's left | yes |
+| EX12 | A lineage condition (`wf["e"][row["v"] == 1]`) gets no warning that its rows are positions: it isn't positional (P9b) | warns *"rows … are positions, and expand doesn't fix row order"* | **yes**: owner, 2026-11-03 |
 
 **Conditions that make every expression easier** (opened 2026-11-03).
 Ten rules core enforces, each removing a group of the tutorial's findings.
@@ -82,6 +83,22 @@ With them, every error is either `invalid` at once, writing the fix, or one
 | C8 | What core infers is written into the saved expression; only verbs that can't drop rows are inferred (EX6) | V8b; bindings decided again each run; `value` | **yes** |
 | C9 | `run(x)` makes `x` current; a result computed from stale inputs is never `completed` (**SM**) | S5 | **yes** |
 | C10 | One way to write each thing (EX3) | three spellings of a reshape | **yes** |
+
+**Wiring rows between steps** (proposed 2026-11-03, from the tutorial):
+what's asked of a user is to know how two steps' rows relate before writing
+the expression that meets them; core already knows. Run 2026-11-03: a
+refusal's fix is only text (a `Problem` has code, step, argument, row,
+severity); `join(wf["v"], wf["h"])` with no `on=` is refused though core
+knows `#v`; a join takes two inputs.
+
+| | Decision | Today | Owner, 2026-11-03 |
+|---|---|---|---|
+| WR1 | One function answers how two steps' rows relate (same rows, subset, child, group, unrelated; the nearest shared ancestor; the join that meets them), used by every refusal, plan and view; it replaces the five helpers (observations F4, H2) | five partial helpers; a child and its parent described as "some would have no partner" | **yes** (with WR2) |
+| WR2 | A refusal carries its fix as an operation, `Problem.fix`; `k.fix(name)` puts it in the step's place (a button in the app). Never applied unasked | the fix is in the message text only | **yes** |
+| WR3 | `join(a, b)` with no `on=`, on related steps, joins on the nearest shared ancestor's lineage and writes `on="#v"` into the expression (EX6); unrelated steps still need `on=`. `zip_` becomes join's same-rows case | refused: "join needs on=" | **yes** |
+| WR4 | One join for several tables, `join(a, b, c, on=[…])`, as one step | two steps; `join()` takes two inputs | open: not chosen |
+| WR5 | A join that drops rows warns with the count | not checked | open: not chosen |
+| PK3 | `k.trace(step, rows, to=ancestor)`: the pick of the rows behind them | `k.cell` shows one cell's inputs; no pick | open: not chosen |
 
 **Storage** (opened 2026-11-03). Measured by allocation (`tracemalloc`) on a
 200,000×10 source (16 MB), `sort` → `filter` → `rename` → `select` → `map`:
