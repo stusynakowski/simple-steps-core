@@ -187,7 +187,7 @@ def test_a_plain_decorator_is_refused():
 
 def test_step_refs_never_survive_into_the_export():
     """A ref is kept in memory (it knows its workflow) and flattened for JSON."""
-    stored = score[mod.map(over=StepRef("videos"))]
+    stored = score[mod.map()](StepRef("videos"))
     assert isinstance(stored.input, StepRef)
     assert stored.to_dict()["input"] == {"$ref": "videos"}
     assert stored.to_dict()["modifiers"][0]["settings"] == {}
@@ -274,7 +274,7 @@ def wide():
 def test_select_keeps_and_reorders(wide):
     wf = Workflow()
     wf["raw"] = wide
-    wf["narrow"] = op("identity")[mod.select(columns=["celsius", "city"], over=wf["raw"])]
+    wf["narrow"] = op("identity")[mod.select(columns=["celsius", "city"])](wf["raw"])
     wf.run_all()
     assert list(wf.step("narrow").output.data.columns) == ["celsius", "city"]
 
@@ -282,7 +282,7 @@ def test_select_keeps_and_reorders(wide):
 def test_drop_is_its_own_verb(wide):
     wf = Workflow()
     wf["raw"] = wide
-    wf["less"] = op("identity")[mod.drop(columns=["note"], over=wf["raw"])]
+    wf["less"] = op("identity")[mod.drop(columns=["note"])](wf["raw"])
     wf.run_all()
     assert list(wf.step("less").output.data.columns) == ["city", "celsius"]
 
@@ -290,7 +290,7 @@ def test_drop_is_its_own_verb(wide):
 def test_drop_keeps_the_remaining_order(wide):
     wf = Workflow()
     wf["raw"] = wide
-    wf["less"] = op("identity")[mod.drop(columns=["celsius"], over=wf["raw"])]
+    wf["less"] = op("identity")[mod.drop(columns=["celsius"])](wf["raw"])
     wf.run_all()
     assert list(wf.step("less").output.data.columns) == ["city", "note"]
 
@@ -298,7 +298,7 @@ def test_drop_keeps_the_remaining_order(wide):
 def test_dropping_a_column_that_is_not_there_is_a_typo_not_a_no_op(wide):
     wf = Workflow()
     wf["raw"] = wide
-    wf["typo"] = op("identity")[mod.drop(columns=["nte"], over=wf["raw"])]
+    wf["typo"] = op("identity")[mod.drop(columns=["nte"])](wf["raw"])
     assert not wf.step("typo").valid
     assert "drop names 'nte'" in wf.step("typo").problems[0]
     with pytest.raises(KeyError, match="drop names 'nte'"):
@@ -316,8 +316,8 @@ def test_select_and_drop_share_the_columns_they_keep():
     raw = pd.DataFrame({f"c{i}": [float(i), float(i + 1)] for i in range(4)})
     wf = Workflow()
     wf["raw"] = raw
-    wf["some"] = op("identity")[mod.select(columns=["c2", "c0"], over=wf["raw"])]
-    wf["less"] = op("identity")[mod.drop(columns=["c1"], over=wf["raw"])]
+    wf["some"] = op("identity")[mod.select(columns=["c2", "c0"])](wf["raw"])
+    wf["less"] = op("identity")[mod.drop(columns=["c1"])](wf["raw"])
     wf.run_all()
 
     def address(frame, column):
@@ -339,8 +339,8 @@ def test_select_predicts_its_columns_exactly_including_order(wide):
     """The one verb that knows its output columns without seeing the data."""
     wf = Workflow()
     wf["raw"] = wide
-    wf["narrow"] = op("identity")[mod.select(columns=["celsius", "city"], over=wf["raw"])]
-    wf["less"] = op("identity")[mod.drop(columns=["note"], over=wf["raw"])]
+    wf["narrow"] = op("identity")[mod.select(columns=["celsius", "city"])](wf["raw"])
+    wf["less"] = op("identity")[mod.drop(columns=["note"])](wf["raw"])
     staged = {sid: wf.step(sid).output.meta["columns"] for sid in ("narrow", "less")}
     wf.run_all()
     for sid, predicted in staged.items():
@@ -350,7 +350,7 @@ def test_select_predicts_its_columns_exactly_including_order(wide):
 def test_select_keeps_every_row(wide):
     wf = Workflow()
     wf["raw"] = wide
-    wf["narrow"] = op("identity")[mod.select(columns=["city"], over=wf["raw"])]
+    wf["narrow"] = op("identity")[mod.select(columns=["city"])](wf["raw"])
     wf.run_all()
     assert len(wf.step("narrow").output.data) == 2
     assert wf.step("narrow").output.meta["value_column"] is None
@@ -364,7 +364,7 @@ def test_select_applies_no_tool(wide):
 def test_select_cannot_keep_a_column_the_input_lacks(wide):
     wf = Workflow()
     wf["raw"] = wide
-    wf["bad"] = op("identity")[mod.select(columns=["nope"], over=wf["raw"])]
+    wf["bad"] = op("identity")[mod.select(columns=["nope"])](wf["raw"])
     assert not wf.step("bad").valid
     assert "select names 'nope'" in wf.step("bad").problems[0]
 
@@ -378,7 +378,7 @@ def test_is_identity_sees_through_the_adapter():
 def test_select_is_a_shape_verb_so_it_cannot_share_a_step(wide):
     wf = Workflow()
     wf["raw"] = wide
-    wf["both"] = op("identity")[mod.select(columns=["city"], over=wf["raw"]), mod.map()]
+    wf["both"] = op("identity")[mod.select(columns=["city"]), mod.map()](wf["raw"])
     assert "at most one is allowed" in wf.step("both").problems[0]
 
 
@@ -579,7 +579,7 @@ def test_a_user_tool_cannot_shadow_a_builtin():
 def test_a_bare_shape_verb_is_a_complete_step():
     wf = Workflow()
     wf["xs"] = pd.DataFrame({"n": [1, 2, 3, 4]})
-    wf["all"] = mod.collapse(over=wf["xs"])
+    wf["all"] = mod.collapse()(wf["xs"])
     assert wf.step("all").operation.tool == "gather"
     wf.run_all()
     assert wf.step("all").output.item() == [1, 2, 3, 4]
@@ -589,8 +589,8 @@ def test_collapse_defaults_to_gather_and_expand_to_identity():
     """The two are exact inverses once each has the tool that discards nothing."""
     wf = Workflow()
     wf["xs"] = pd.DataFrame({"n": [1, 2, 3, 4]})
-    wf["one"] = mod.collapse(over=wf["xs"])
-    wf["back"] = mod.expand(over=wf["one"])
+    wf["one"] = mod.collapse()(wf["xs"])
+    wf["back"] = mod.expand()(wf["one"])
     wf.run_all()
     assert wf.step("one").output.item() == [1, 2, 3, 4]
     assert wf.step("back").output.values == [1, 2, 3, 4]
@@ -603,7 +603,7 @@ def test_collapse_defaults_to_gather_and_expand_to_identity():
 def test_the_builtin_reducers(tool_id, expected):
     wf = Workflow()
     wf["xs"] = pd.DataFrame({"n": [1, 2, 3, 4]})
-    wf["out"] = op(tool_id)[mod.collapse(over=wf["xs"])]
+    wf["out"] = op(tool_id)[mod.collapse()](wf["xs"])
     wf.run_all()
     assert wf.step("out").output.item() == expected
 
@@ -612,7 +612,7 @@ def test_reducers_work_on_any_payload_column():
     """They resolve the payload like identity, not by demanding a 'value' column."""
     wf = Workflow()
     wf["xs"] = pd.DataFrame({"celsius": [1, 2, 3]})
-    wf["sum"] = op("total")[mod.collapse(over=wf["xs"])]
+    wf["sum"] = op("total")[mod.collapse()](wf["xs"])
     wf.run_all()
     assert wf.step("sum").output.item() == 6
 
@@ -627,7 +627,7 @@ def test_a_bare_modifier_no_longer_becomes_a_source_step():
     """It used to build a source step whose payload was the Modifier object."""
     wf = Workflow()
     wf["xs"] = pd.DataFrame({"n": [1, 2]})
-    wf["flat"] = mod.expand(over=wf["xs"])
+    wf["flat"] = mod.expand()(wf["xs"])
     assert wf.step("flat").operation.shape_verb.kind == "expand"
     assert wf.step("flat").operation.tool == "identity"
 
@@ -664,7 +664,7 @@ def test_calling_with_a_reference_wires_instead_of_running(three):
     wf["raw"] = three
     wired = score[mod.map()](wf["raw"])
     assert isinstance(wired, Operation)
-    assert wired == score[mod.map(over=wf["raw"])], "same stored data either way"
+    assert wired == score[mod.map()](wf["raw"]), "same stored data either way"
 
 
 def test_run_still_means_run_and_refuses_a_reference(three):
@@ -683,7 +683,7 @@ def test_a_bare_tool_call_on_a_reference_is_the_whole_step(three):
     wf = Workflow()
     wf["raw"] = three
     wf["scored"] = score(wf["raw"])
-    assert wf.step("scored").operation == score[mod.auto(over=wf["raw"])]   # 009: implicit auto
+    assert wf.step("scored").operation == score[mod.auto()](wf["raw"])   # 009: implicit auto
     wf.run_all()
     assert wf.step("scored").output.values == [10, 20, 30]
 
@@ -764,8 +764,8 @@ def test_staged_prediction_matches_what_actually_appears(three):
     wf["raw"] = three
     wf["scored"] = score(wf["raw"])
     wf["kept"] = keep[mod.filter()](wf["scored"])
-    wf["narrow"] = op("identity")[mod.select(columns=["value", "n"], over=wf["kept"])]
-    wf["thin"] = op("identity")[mod.drop(columns=["n"], over=wf["kept"])]
+    wf["narrow"] = op("identity")[mod.select(columns=["value", "n"])](wf["kept"])
+    wf["thin"] = op("identity")[mod.drop(columns=["n"])](wf["kept"])
     wf["sum"] = sum_up[mod.collapse()](wf["kept"])
     predicted = {sid: predicted_columns(st.output) for sid, st in wf.steps.items()}
     wf.run_all()
@@ -987,7 +987,7 @@ def test_running_a_source_step_is_a_no_op(three):
 def test_declaring_stages_both_halves(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["scored"] = score[mod.map(over=wf["raw"])]
+    wf["scored"] = score[mod.map()](wf["raw"])
     step = wf.step("scored")
     assert isinstance(step.output, Output)
     assert step.state == "staged"
@@ -996,7 +996,7 @@ def test_declaring_stages_both_halves(three):
 def test_cardinality_propagates_before_anything_runs(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["scored"] = score[mod.map(over=wf["raw"])]
+    wf["scored"] = score[mod.map()](wf["raw"])
     assert wf.step("scored").output.meta["expected"] == 3
     assert set(wf.step("scored").output.row_states) == {"pending"}
 
@@ -1004,14 +1004,14 @@ def test_cardinality_propagates_before_anything_runs(three):
 def test_declaring_never_computes(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["scored"] = score[mod.map(over=wf["raw"])]
+    wf["scored"] = score[mod.map()](wf["raw"])
     assert wf.step("scored").output.values == [None, None, None]
 
 
 def test_running_populates_and_is_manual(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["scored"] = score[mod.map(over=wf["raw"])]
+    wf["scored"] = score[mod.map()](wf["raw"])
     wf.run("raw")
     assert wf.step("scored").state == "staged", "running raw must not compute scored"
     wf.run("scored")
@@ -1026,8 +1026,8 @@ def test_running_against_a_staged_upstream_is_refused(three):
 
     wf = Workflow()
     wf["raw"] = three
-    wf["b"] = score[mod.map(over=wf["raw"])]
-    wf["c"] = again[mod.map(over=wf["b"])]
+    wf["b"] = score[mod.map()](wf["raw"])
+    wf["c"] = again[mod.map()](wf["b"])
     with pytest.raises(ValueError, match="which has not run"):
         wf.run("c")
 
@@ -1039,8 +1039,8 @@ def test_pending_lists_what_must_run_first(three):
 
     wf = Workflow()
     wf["raw"] = three
-    wf["b"] = score[mod.map(over=wf["raw"])]
-    wf["c"] = again[mod.map(over=wf["b"])]
+    wf["b"] = score[mod.map()](wf["raw"])
+    wf["c"] = again[mod.map()](wf["b"])
     assert wf.pending("c") == ["b"], "raw already holds its data"
     assert wf.pending("b") == []
 
@@ -1052,8 +1052,8 @@ def test_run_all_orders_the_chain(three):
 
     wf = Workflow()
     wf["raw"] = three
-    wf["b"] = score[mod.map(over=wf["raw"])]
-    wf["c"] = again[mod.map(over=wf["b"])]
+    wf["b"] = score[mod.map()](wf["raw"])
+    wf["c"] = again[mod.map()](wf["b"])
     wf.run_all()
     assert wf.step("c").output.values == [11, 21, 31]
     assert all(s.state == "completed" for s in wf.steps.values())
@@ -1062,8 +1062,8 @@ def test_run_all_orders_the_chain(three):
 def test_run_all_skips_invalid_steps_without_failing(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["good"] = score[mod.map(over=wf["raw"])]
-    wf["bad"] = score.bind(nope=1)[mod.map(over=wf["raw"])]
+    wf["good"] = score[mod.map()](wf["raw"])
+    wf["bad"] = score.bind(nope=1)[mod.map()](wf["raw"])
     wf.run_all()
     assert wf.step("good").state == "completed"
     assert wf.step("bad").state == "invalid"
@@ -1076,8 +1076,8 @@ def test_cardinality_propagates_transitively(three):
 
     wf = Workflow()
     wf["a"] = pd.DataFrame({"n": [1, 2, 3, 4]})
-    wf["b"] = score[mod.map(over=wf["a"])]
-    wf["c"] = again[mod.map(over=wf["b"])]
+    wf["b"] = score[mod.map()](wf["a"])
+    wf["c"] = again[mod.map()](wf["b"])
     assert wf.step("c").output.meta["expected"] == 4
     wf.run_all()
     assert wf.step("c").output.values == [11, 21, 31, 41]
@@ -1086,10 +1086,10 @@ def test_cardinality_propagates_transitively(three):
 @pytest.mark.parametrize(
     "operation_for, rule, described",
     [
-        (lambda ref: score[mod.map(over=ref)], "same", "map score · 3 cells"),
-        (lambda ref: keep[mod.filter(over=ref)], "at_most", "filter keep · at most 3 cells"),
-        (lambda ref: sum_up[mod.collapse(over=ref)], "one", "collapse sum_up · 1 cell"),
-        (lambda ref: burst[mod.expand(over=ref)], "unknown",
+        (lambda ref: score[mod.map()](ref), "same", "map score · 3 cells"),
+        (lambda ref: keep[mod.filter()](ref), "at_most", "filter keep · at most 3 cells"),
+        (lambda ref: sum_up[mod.collapse()](ref), "one", "collapse sum_up · 1 cell"),
+        (lambda ref: burst[mod.expand()](ref), "unknown",
          "expand burst · unknown count from 3 rows"),
     ],
 )
@@ -1104,7 +1104,7 @@ def test_staged_claims_are_honest_per_verb(three, operation_for, rule, described
 def test_describe_reports_facts_once_a_step_has_run(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["kept"] = keep[mod.filter(over=wf["raw"])]
+    wf["kept"] = keep[mod.filter()](wf["raw"])
     assert wf.step("kept").describe() == "filter keep · at most 3 cells"
     wf.run_all()
     assert wf.step("kept").describe() == "filter keep · 2 cells"
@@ -1116,7 +1116,7 @@ def test_describe_reports_facts_once_a_step_has_run(three):
 def test_a_mistyped_argument_is_caught_at_declaration(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["oops"] = score.bind(wieght=2)[mod.map(over=wf["raw"])]
+    wf["oops"] = score.bind(wieght=2)[mod.map()](wf["raw"])
     step = wf.step("oops")
     assert not step.valid and step.state == "invalid"
     assert "takes no argument 'wieght'" in step.problems[0]
@@ -1125,7 +1125,7 @@ def test_a_mistyped_argument_is_caught_at_declaration(three):
 def test_an_invalid_operation_is_a_single_cell(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["oops"] = score.bind(nope=1)[mod.map(over=wf["raw"])]
+    wf["oops"] = score.bind(nope=1)[mod.map()](wf["raw"])
     assert len(wf.step("oops").output.data) == 1
     assert wf.step("oops").output.form == "scalar"
 
@@ -1134,7 +1134,7 @@ def test_a_missing_column_is_caught_at_declaration():
     """Possible only because the tool names the values it needs."""
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"count": [1, 2, 3]})      # not "n"
-    wf["scored"] = score[mod.map(over=wf["raw"])]
+    wf["scored"] = score[mod.map()](wf["raw"])
     step = wf.step("scored")
     assert not step.valid
     assert "needs 'n'" in step.problems[0] and "count" in step.problems[0]
@@ -1143,14 +1143,14 @@ def test_a_missing_column_is_caught_at_declaration():
 def test_a_bound_literal_satisfies_a_required_value():
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"count": [1, 2, 3]})
-    wf["scored"] = score.bind(n=5)[mod.map(over=wf["raw"])]
+    wf["scored"] = score.bind(n=5)[mod.map()](wf["raw"])
     assert wf.step("scored").valid
 
 
 def test_an_optional_parameter_is_not_required(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["scored"] = score[mod.map(over=wf["raw"])]   # `weight` has a default
+    wf["scored"] = score[mod.map()](wf["raw"])   # `weight` has a default
     assert wf.step("scored").valid
 
 
@@ -1161,14 +1161,14 @@ def test_a_whole_row_tool_is_never_flagged():
 
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"whatever": [1]})
-    wf["n"] = anything[mod.map(over=wf["raw"])]
+    wf["n"] = anything[mod.map()](wf["raw"])
     assert wf.step("n").valid
 
 
 def test_collapse_does_not_require_its_accumulator_from_the_row(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["sum"] = sum_up[mod.collapse(over=wf["raw"])]   # sum_up(acc, n)
+    wf["sum"] = sum_up[mod.collapse()](wf["raw"])   # sum_up(acc, n)
     assert wf.step("sum").valid
     wf.run_all()
     assert wf.step("sum").output.item() == 6
@@ -1182,8 +1182,8 @@ def test_a_staged_upstream_is_not_column_checked(three):
 
     wf = Workflow()
     wf["raw"] = three
-    wf["b"] = score[mod.map(over=wf["raw"])]
-    wf["c"] = again[mod.map(over=wf["b"])]            # b has not run yet
+    wf["b"] = score[mod.map()](wf["raw"])
+    wf["c"] = again[mod.map()](wf["b"])            # b has not run yet
     assert wf.step("c").valid
     wf.run_all()
     assert wf.step("c").output.values == [11, 21, 31]
@@ -1193,7 +1193,7 @@ def test_two_shape_verbs_in_one_step_are_refused(three):
     """§11: an intermediate grid has no cell address, so it cannot be re-driven."""
     wf = Workflow()
     wf["raw"] = three
-    wf["both"] = score[mod.map(over=wf["raw"]), mod.filter()]
+    wf["both"] = score[mod.map(), mod.filter()](wf["raw"])
     assert not wf.step("both").valid
     assert "at most one is allowed" in wf.step("both").problems[0]
 
@@ -1201,45 +1201,45 @@ def test_two_shape_verbs_in_one_step_are_refused(three):
 def test_one_shape_verb_with_execution_modifiers_is_fine(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["ok"] = score[mod.map(over=wf["raw"]), mod.retry(times=2), mod.timeout(seconds=5)]
+    wf["ok"] = score[mod.map(), mod.retry(times=2), mod.timeout(seconds=5)](wf["raw"])
     assert wf.step("ok").valid
 
 
 def test_a_dangling_reference_is_caught():
     wf = Workflow()
-    wf["dangling"] = score[mod.map(over=unbound_wf["nope"])]
+    wf["dangling"] = score[mod.map()](unbound_wf["nope"])
     assert "not an earlier step" in wf.step("dangling").problems[0]
 
 
 def test_reading_an_invalid_step_is_caught(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["bad"] = score.bind(nope=1)[mod.map(over=wf["raw"])]
-    wf["downstream"] = score[mod.map(over=wf["bad"])]
+    wf["bad"] = score.bind(nope=1)[mod.map()](wf["raw"])
+    wf["downstream"] = score[mod.map()](wf["bad"])
     assert "which is invalid" in wf.step("downstream").problems[0]
 
 
 def test_self_reference_is_caught(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["loop"] = score[mod.map(over=wf["raw"])]
-    wf["loop"] = score[mod.map(over=unbound_wf["loop"])]
+    wf["loop"] = score[mod.map()](wf["raw"])
+    wf["loop"] = score[mod.map()](unbound_wf["loop"])
     assert "input is itself" in wf.step("loop").problems[0]
 
 
 def test_a_cycle_is_caught(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["a"] = score[mod.map(over=wf["raw"])]
-    wf["b"] = score[mod.map(over=wf["a"])]
-    wf["a"] = score[mod.map(over=unbound_wf["b"])]
+    wf["a"] = score[mod.map()](wf["raw"])
+    wf["b"] = score[mod.map()](wf["a"])
+    wf["a"] = score[mod.map()](unbound_wf["b"])
     assert "circular" in wf.step("a").problems[0]
 
 
 def test_bad_steps_stay_in_the_workflow_but_cannot_run(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["oops"] = score.bind(nope=1)[mod.map(over=wf["raw"])]
+    wf["oops"] = score.bind(nope=1)[mod.map()](wf["raw"])
     assert "oops" in wf.steps
     with pytest.raises(ValueError, match="is invalid and cannot run"):
         wf.run("oops")
@@ -1257,7 +1257,7 @@ def test_any_bare_value_becomes_a_source_step():
 def test_a_list_source_expands_into_rows():
     wf = Workflow()
     wf["xs"] = [1, 2, 3]                       # one cell holding the list
-    wf["rows"] = mod.expand(over=wf["xs"])     # the explicit reshape
+    wf["rows"] = mod.expand()(wf["xs"])     # the explicit reshape
     wf.run_all()
     assert wf.step("rows").output.values == [1, 2, 3]
 
@@ -1266,7 +1266,7 @@ def test_a_dict_source_is_one_cell_widen_spreads_it():
     wf = Workflow()
     wf["d"] = {"a": 1, "b": 2}                 # one cell holding the dict
     assert len(wf.step("d").output.data) == 1
-    wf["wide"] = mod.widen(over=wf["d"], columns=["a", "b"])
+    wf["wide"] = mod.widen(columns=["a", "b"])(wf["d"])
     wf.run_all()
     assert wf.step("wide").output.data["a"].iloc[0] == 1
     assert wf.step("wide").output.data["b"].iloc[0] == 2
@@ -1279,7 +1279,7 @@ def test_a_dict_source_is_one_cell_widen_spreads_it():
 def ran(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["scored"] = score[mod.map(over=wf["raw"])]
+    wf["scored"] = score[mod.map()](wf["raw"])
     wf.run_all()
     return wf
 
@@ -1329,7 +1329,7 @@ def test_staging_is_a_pure_function_of_the_steps(three):
     """The round-trip invariant: re-declaring from an export re-derives staging."""
     wf = Workflow()
     wf["raw"] = three
-    wf["scored"] = score[mod.map(over=wf["raw"])]
+    wf["scored"] = score[mod.map()](wf["raw"])
     blob = wf.to_session_dict()
     back = Workflow.from_dict(blob, {"score": score.fn})
     for sid in wf.steps:
@@ -1352,7 +1352,7 @@ def test_loading_runs_the_same_checks_as_declaring():
 def test_an_unexportable_payload_says_so(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["objects"] = score[mod.map(over=wf["raw"])]
+    wf["objects"] = score[mod.map()](wf["raw"])
     wf.run_all()
     wf.step("objects").output = Output(
         data=pd.DataFrame({"value": [object()]}),
@@ -1423,7 +1423,7 @@ def test_a_bound_literal_is_checked_against_its_annotation():
 
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"n": [1, 2]})
-    wf["bad"] = scaled.bind(factor="three")[mod.map(over=wf["raw"])]
+    wf["bad"] = scaled.bind(factor="three")[mod.map()](wf["raw"])
     assert "declares factor: int" in wf.step("bad").problems[0]
     assert "'three'" in wf.step("bad").problems[0]
 
@@ -1435,7 +1435,7 @@ def test_an_upstream_dtype_is_checked_against_its_annotation():
 
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"city": ["SF", "NYC"]})
-    wf["bad"] = needs_number[mod.map(over=wf["raw"])]
+    wf["bad"] = needs_number[mod.map()](wf["raw"])
     problem = wf.step("bad").problems[0]
     assert "declares city: float" in problem
     assert "'raw' has city as str" in problem
@@ -1449,7 +1449,7 @@ def test_an_int_column_satisfies_a_float_parameter():
 
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"n": [1, 2]})
-    wf["ok"] = halve[mod.map(over=wf["raw"])]
+    wf["ok"] = halve[mod.map()](wf["raw"])
     assert wf.step("ok").problems == ()
     wf.run("ok")
     assert wf.step("ok").output.values == [0.5, 1.0]
@@ -1462,7 +1462,7 @@ def test_an_undecidable_annotation_is_not_a_problem():
 
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [object(), object()]})
-    wf["ok"] = anything[mod.map(over=wf["raw"])]
+    wf["ok"] = anything[mod.map()](wf["raw"])
     assert wf.step("ok").problems == ()
 
 
@@ -1479,13 +1479,13 @@ def test_dtype_checking_uses_declared_types_before_the_upstream_runs():
 
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"celsius": [1.0, 2.0]})
-    wf["f"] = to_f[mod.map(over=wf["raw"]), mod.name("fahrenheit")]
-    wf["bad"] = needs_text[mod.map(over=wf["f"])]
+    wf["f"] = to_f[mod.map(), mod.name("fahrenheit")](wf["raw"])
+    wf["bad"] = needs_text[mod.map()](wf["f"])
     assert wf.step("bad").problems == (
         "needs_text() declares fahrenheit: str, but 'f' will have fahrenheit as float",)
 
     wf.run("f")
-    wf["bad"] = needs_text[mod.map(over=wf["f"])]
+    wf["bad"] = needs_text[mod.map()](wf["f"])
     assert "declares fahrenheit: str" in wf.step("bad").problems[0]
 
 
@@ -1497,7 +1497,7 @@ def test_a_string_column_satisfies_a_string_parameter():
 
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"city": ["SF", "NYC"]})
-    wf["ok"] = shout[mod.map(over=wf["raw"])]
+    wf["ok"] = shout[mod.map()](wf["raw"])
     assert wf.step("ok").problems == ()
     wf.run("ok")
     assert wf.step("ok").output.values == ["SF".upper(), "NYC".upper()]
@@ -1510,7 +1510,7 @@ def test_a_list_column_satisfies_a_list_parameter():
 
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"xs": [[1, 2], [3]]})
-    wf["ok"] = size[mod.map(over=wf["raw"])]
+    wf["ok"] = size[mod.map()](wf["raw"])
     assert wf.step("ok").problems == ()
     wf.run("ok")
     assert wf.step("ok").output.values == [2, 1]
@@ -1524,7 +1524,7 @@ def test_a_collapse_accumulator_is_not_type_checked_against_a_column():
 
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"n": [1, 2, 3]})
-    wf["sum"] = add_up[mod.collapse(over=wf["raw"])]
+    wf["sum"] = add_up[mod.collapse()](wf["raw"])
     assert wf.step("sum").problems == ()
     wf.run("sum")
     assert wf.step("sum").output.item() == 6
@@ -1546,14 +1546,14 @@ def test_a_ref_carries_the_workflow_it_was_read_from(two_workflows):
     """No side channel: the ref itself is what stays in params."""
     a, _ = two_workflows
     assert a["raw"].workflow is a
-    assert score[mod.map(over=a["raw"])].input.workflow is a
+    assert score[mod.map()](a["raw"]).input.workflow is a
 
 
 def test_provenance_is_not_part_of_the_data(two_workflows):
     """Naming a step two ways must not change equality or the export."""
     a, _ = two_workflows
-    from_ref = score[mod.map(over=a["raw"])]
-    from_str = score[mod.map(over=unbound_wf["raw"])]
+    from_ref = score[mod.map()](a["raw"])
+    from_str = score[mod.map()](unbound_wf["raw"])
     assert from_ref == from_str
     assert from_ref.to_dict() == from_str.to_dict()
     assert str(from_str.input) == "raw"
@@ -1576,13 +1576,13 @@ def test_a_borrowed_ref_cannot_run(two_workflows):
 
 def test_the_over_form_is_refused_the_same_way(two_workflows):
     a, b = two_workflows
-    b["x"] = score[mod.map(over=a["raw"])]
+    b["x"] = score[mod.map()](a["raw"])
     assert "reads a different Workflow" in b.step("x").problems[0]
 
 
 def test_a_borrowed_bare_shape_verb_is_refused(two_workflows):
     a, b = two_workflows
-    b["flat"] = mod.collapse(over=a["raw"])
+    b["flat"] = mod.collapse()(a["raw"])
     assert "reads a different Workflow" in b.step("flat").problems[0]
 
 
@@ -1598,7 +1598,7 @@ def test_provenance_is_diagnosed_before_a_dangling_reference(two_workflows):
 def test_an_unbound_ref_means_whatever_is_here(two_workflows):
     """unbound_wf (008 C6): no origin, so no provenance to violate."""
     a, b = two_workflows
-    b["x"] = score[mod.map(over=unbound_wf["raw"])]
+    b["x"] = score[mod.map()](unbound_wf["raw"])
     assert b.step("x").problems == ()
     b.run("x")
     assert b.step("x").output.values == [1000, 2000], "ran on b's own raw"
@@ -1606,7 +1606,7 @@ def test_an_unbound_ref_means_whatever_is_here(two_workflows):
 
 def test_an_operation_with_an_unbound_ref_is_reusable(two_workflows):
     a, b = two_workflows
-    template = score[mod.map(over=unbound_wf["raw"])]
+    template = score[mod.map()](unbound_wf["raw"])
     a["x"] = template
     b["x"] = template
     assert a.step("x").problems == () and b.step("x").problems == ()
@@ -1674,8 +1674,8 @@ def test_an_export_without_dtypes_still_decodes():
 def test_a_repr_does_not_depend_on_how_a_step_was_named(two_workflows):
     """A ref lives in params, so a repr must flatten it like __eq__ does."""
     a, _ = two_workflows
-    assert repr(score[mod.map()](a["raw"])) == repr(score[mod.map(over=unbound_wf["raw"])])
-    assert "over='raw'" in repr(score[mod.map(over=a["raw"])])
+    assert repr(score[mod.map()](a["raw"])) == repr(score[mod.map()](unbound_wf["raw"]))
+    assert "over='raw'" in repr(score[mod.map()](a["raw"]))
 
 
 def test_a_problem_message_names_the_step_not_the_ref(two_workflows):
@@ -1776,7 +1776,7 @@ def records():
 def test_widen_lifts_fields_into_columns(records):
     wf = Workflow()
     wf["raw"] = records
-    wf["wide"] = mod.widen(columns=["city", "temp"], over=wf["raw"])
+    wf["wide"] = mod.widen(columns=["city", "temp"])(wf["raw"])
     wf.run_all()
 
     out = wf.step("wide").output.data
@@ -1791,7 +1791,7 @@ def test_widen_predicts_its_columns_exactly(records):
     """The reason columns= is required: staging has to know them."""
     wf = Workflow()
     wf["raw"] = records
-    wf["wide"] = mod.widen(columns=["city", "temp"], over=wf["raw"])
+    wf["wide"] = mod.widen(columns=["city", "temp"])(wf["raw"])
     predicted = predicted_columns(wf.step("wide").output)
     wf.run_all()
     assert predicted == list(wf.step("wide").output.data.columns)
@@ -1805,7 +1805,7 @@ def test_a_downstream_tool_binds_to_a_widened_field(records):
 
     wf = Workflow()
     wf["raw"] = records
-    wf["wide"] = mod.widen(columns=["city", "temp"], over=wf["raw"])
+    wf["wide"] = mod.widen(columns=["city", "temp"])(wf["raw"])
     wf.run("wide")
     wf["f"] = to_f[mod.map(), mod.name("fahrenheit")](wf["wide"])
     assert wf.step("f").problems == ()
@@ -1819,8 +1819,8 @@ def test_widen_without_columns_takes_the_union_of_the_keys():
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [{"a": 1}, {"b": 2, "a": 3}]})
     wf["none"] = pd.DataFrame({"value": pd.Series([], dtype=object)})
-    wf["wide"] = mod.widen(over=wf["raw"])
-    wf["empty"] = mod.widen(over=wf["none"])
+    wf["wide"] = mod.widen()(wf["raw"])
+    wf["empty"] = mod.widen()(wf["none"])
     wf.run_all()
     out = wf.step("wide").output
     assert list(out.data.columns) == ["a", "b"]
@@ -1831,7 +1831,7 @@ def test_widen_without_columns_takes_the_union_of_the_keys():
 def test_widen_applies_no_tool(records):
     wf = Workflow()
     wf["raw"] = records
-    wf["bad"] = score[mod.widen(columns=["city"], over=wf["raw"])]
+    wf["bad"] = score[mod.widen(columns=["city"])](wf["raw"])
     assert "widen applies no tool" in wf.step("bad").problems[0]
 
 
@@ -1839,14 +1839,14 @@ def test_widen_does_not_check_its_columns_against_the_upstream(records):
     """Its columns are the record's fields — they are not upstream by design."""
     wf = Workflow()
     wf["raw"] = records
-    wf["wide"] = mod.widen(columns=["city", "temp"], over=wf["raw"])
+    wf["wide"] = mod.widen(columns=["city", "temp"])(wf["raw"])
     assert wf.step("wide").problems == ()
 
 
 def test_a_non_mapping_cell_is_a_per_unit_failure():
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [{"a": 1}, 42]})
-    wf["wide"] = mod.widen(columns=["a"], over=wf["raw"])
+    wf["wide"] = mod.widen(columns=["a"])(wf["raw"])
     wf.run("wide")          # the failing step itself; run_all would stop here
     out = wf.step("wide").output
     assert _row_states(out) == ["known", "failed"]
@@ -1859,7 +1859,7 @@ def test_a_missing_field_is_absent_not_a_failure():
     (reshaping.md §9.1, J-D2). The column keeps its type."""
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [{"a": 1, "b": 2}, {"a": 3}]})
-    wf["wide"] = mod.widen(columns=["a", "b"], over=wf["raw"])
+    wf["wide"] = mod.widen(columns=["a", "b"])(wf["raw"])
     wf.run("wide")
     out = wf.step("wide").output
     assert wf.step("wide").state == "completed"
@@ -1871,7 +1871,7 @@ def test_a_missing_field_is_absent_not_a_failure():
 def test_widen_round_trips(records):
     wf = Workflow()
     wf["raw"] = records
-    wf["wide"] = mod.widen(columns=["city", "temp"], over=wf["raw"])
+    wf["wide"] = mod.widen(columns=["city", "temp"])(wf["raw"])
     wf.run_all()
     back = Workflow.from_json(wf.to_session_json(), TOOLS)
     assert all(p == () for p in back.validate().values())
@@ -1885,8 +1885,8 @@ def test_widen_round_trips(records):
 def test_widen_is_one_shape_verb_like_the_rest(records):
     wf = Workflow()
     wf["raw"] = records
-    wf["both"] = op("identity")[mod.widen(columns=["city"], over=wf["raw"]),
-                                mod.map()]
+    wf["both"] = op("identity")[mod.widen(columns=["city"]),
+                                mod.map()](wf["raw"])
     assert "at most one is allowed" in wf.step("both").problems[0]
 
 
@@ -1894,7 +1894,7 @@ def test_widen_a_tuple_cell_auto_names_c0_c1():
     """A column of tuples widens instead of failing — positional names."""
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [(10, 1), (20, 4)]})
-    wf["wide"] = mod.widen(over=wf["raw"])          # no columns=
+    wf["wide"] = mod.widen()(wf["raw"])          # no columns=
     wf.run_all()
     out = wf.step("wide").output
     assert list(out.data.columns) == ["c0", "c1"]
@@ -1905,7 +1905,7 @@ def test_widen_a_tuple_cell_auto_names_c0_c1():
 def test_widen_a_tuple_with_explicit_columns_matches_by_position():
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [(10, 1), (20, 4)]})
-    wf["wide"] = mod.widen(columns=["a", "b"], over=wf["raw"])
+    wf["wide"] = mod.widen(columns=["a", "b"])(wf["raw"])
     wf.run_all()
     out = wf.step("wide").output.data
     assert list(out["a"]) == [10, 20] and list(out["b"]) == [1, 4]
@@ -1914,7 +1914,7 @@ def test_widen_a_tuple_with_explicit_columns_matches_by_position():
 def test_widen_ragged_tuples_auto_pad_with_none():
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [(1, 2, 3), (9,)]})
-    wf["wide"] = mod.widen(over=wf["raw"])          # width = 3
+    wf["wide"] = mod.widen()(wf["raw"])          # width = 3
     wf.run_all()
     out = wf.step("wide").output
     assert list(out.data.columns) == ["c0", "c1", "c2"]
@@ -1926,7 +1926,7 @@ def test_widen_ragged_tuples_auto_pad_with_none():
 def test_widen_explicit_columns_too_many_for_a_short_tuple_is_a_failure():
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [(10, 1), (20,)]})
-    wf["wide"] = mod.widen(columns=["a", "b"], over=wf["raw"])
+    wf["wide"] = mod.widen(columns=["a", "b"])(wf["raw"])
     wf.run("wide")          # the failing step itself; run_all would stop here
     out = wf.step("wide").output
     assert _row_states(out) == ["known", "failed"]
@@ -2066,10 +2066,10 @@ def test_a_required_setting_is_caught_at_declaration(three):
     crash — so `run()` refuses it and an editor shows it mid-keystroke."""
     wf = Workflow()
     wf["raw"] = three
-    wf["s"] = mod.select(over=wf["raw"])            # no columns=
-    wf["d"] = mod.drop(over=wf["raw"])              # no columns=
-    wf["o"] = mod.sort(over=wf["raw"])              # no by=
-    wf["r"] = mod.rename(over=wf["raw"])            # no columns=
+    wf["s"] = mod.select()(wf["raw"])            # no columns=
+    wf["d"] = mod.drop()(wf["raw"])              # no columns=
+    wf["o"] = mod.sort()(wf["raw"])              # no by=
+    wf["r"] = mod.rename()(wf["raw"])            # no columns=
     assert "select needs columns=" in wf.step("s").problems[0]
     assert "drop needs columns=" in wf.step("d").problems[0]
     assert "sort needs by=" in wf.step("o").problems[0]
@@ -2084,7 +2084,7 @@ def test_widen_still_allows_no_columns(three):
     auto-names, so `columns=` is optional there."""
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [(10, 1), (20, 4)]})
-    wf["w"] = mod.widen(over=wf["raw"])             # no columns= — still fine
+    wf["w"] = mod.widen()(wf["raw"])             # no columns= — still fine
     assert wf.step("w").problems == ()
 
 
@@ -2103,7 +2103,7 @@ def test_a_column_expectation_is_a_warning_before_the_upstream_runs():
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"city": ["SF"], "n": [1]})
     wf.run("raw")
-    wf["narrow"] = mod.select(columns=["n"], over=wf["raw"])   # staged, drops city
+    wf["narrow"] = mod.select(columns=["n"])(wf["raw"])   # staged, drops city
 
     # 🟠 predicted absent — a warning, not a problem, so it does not block
     wf["up"] = needs_city[mod.map()](wf["narrow"])
@@ -2147,14 +2147,14 @@ def test_a_swept_parameter_cannot_shadow_the_verbs_own(three):
 def test_a_bool_does_not_satisfy_an_int_parameter(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["s"] = mod.slice(stop=True, over=wf["raw"])
+    wf["s"] = mod.slice(stop=True)(wf["raw"])
     assert "stop= must be int, got bool" in wf.step("s").problems[0]
 
 
 def test_a_bool_parameter_accepts_a_bool(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["s"] = mod.sort(by="n", ascending=False, over=wf["raw"])
+    wf["s"] = mod.sort(by="n", ascending=False)(wf["raw"])
     assert wf.step("s").problems == ()
 
 
@@ -2170,7 +2170,7 @@ def test_collapse_by_stages_as_one_per_group_not_one_cell(three):
     wf["raw"] = three
     wf["g"] = hemi[mod.group(), mod.name("h")](wf["raw"])          # the rows, plus their key
     wf.run_all()
-    wf["c"] = sum_up[mod.collapse(by="h", over=wf["g"])]
+    wf["c"] = sum_up[mod.collapse(by="h")](wf["g"])
     assert "one cell per group" in wf.step("c").describe()
     wf.run("c")
     assert wf.step("c").describe().endswith("2 cells")
@@ -2204,7 +2204,7 @@ def test_a_labelled_index_is_the_row_ids_and_kept_as_a_column(three):
     one is kept as a column too; ids survive a map and a save and load."""
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"n": [1, 2]}, index=pd.Index(["p", "q"], name="code"))
-    wf["s"] = score[mod.map(over=wf["raw"])]
+    wf["s"] = score[mod.map()](wf["raw"])
     wf.run_all()
     assert wf.step("raw").output.data.to_dict("list") == {"code": ["p", "q"], "n": [1, 2]}
     assert list(wf.step("s").output.data.index) == ["p", "q"]
@@ -2219,7 +2219,7 @@ def test_a_labelled_index_is_the_row_ids_and_kept_as_a_column(three):
 def test_a_workflow_can_be_indexed_by_position(three):
     wf = Workflow()
     wf["raw"] = three
-    wf["scored"] = score[mod.map(over=wf["raw"])]
+    wf["scored"] = score[mod.map()](wf["raw"])
     assert wf[0] == wf["raw"]
     assert wf[-1] == wf["scored"]
 
@@ -2261,9 +2261,9 @@ def table():
 def test_slice_takes_rows_by_position(table):
     wf = Workflow()
     wf["raw"] = table
-    wf["first2"] = mod.slice(stop=2, over=wf["raw"])
-    wf["mid"] = mod.slice(start=1, stop=3, over=wf["raw"])
-    wf["picked"] = mod.slice(at=[0, 3], over=wf["raw"])
+    wf["first2"] = mod.slice(stop=2)(wf["raw"])
+    wf["mid"] = mod.slice(start=1, stop=3)(wf["raw"])
+    wf["picked"] = mod.slice(at=[0, 3])(wf["raw"])
     wf.run_all()
     assert list(wf.step("first2").output.data.index) == [0, 1]
     assert list(wf.step("mid").output.data.index) == [1, 2]
@@ -2274,9 +2274,9 @@ def test_slice_takes_rows_by_position(table):
 def test_slice_promises_at_most_and_applies_no_tool(table):
     wf = Workflow()
     wf["raw"] = table
-    wf["s"] = mod.slice(stop=2, over=wf["raw"])
+    wf["s"] = mod.slice(stop=2)(wf["raw"])
     assert "at most 4 cells" in wf.step("s").describe()
-    wf["bad"] = score[mod.slice(stop=2, over=wf["raw"])]
+    wf["bad"] = score[mod.slice(stop=2)](wf["raw"])
     assert "slice applies no tool" in wf.step("bad").problems[0]
 
 
@@ -2293,7 +2293,7 @@ def test_slice_refuses_a_position_past_the_end(table):
 def test_rename_changes_names_and_keeps_order(table):
     wf = Workflow()
     wf["raw"] = table
-    wf["r"] = mod.rename(columns={"n": "count"}, over=wf["raw"])
+    wf["r"] = mod.rename(columns={"n": "count"})(wf["raw"])
     assert predicted_columns(wf.step("r").output) == ["city", "count"]
     wf.run_all()
     out = wf.step("r").output.data
@@ -2305,7 +2305,7 @@ def test_rename_changes_names_and_keeps_order(table):
 def test_rename_refuses_an_absent_column(table):
     wf = Workflow()
     wf["raw"] = table
-    wf["r"] = mod.rename(columns={"nope": "x"}, over=wf["raw"])
+    wf["r"] = mod.rename(columns={"nope": "x"})(wf["raw"])
     assert "which the input does not have" in wf.step("r").problems[0]
 
 
@@ -2317,8 +2317,8 @@ def test_rename_refuses_to_overwrite_an_existing_column(table):
 def test_sort_reorders_rows_and_the_index_travels(table):
     wf = Workflow()
     wf["raw"] = table
-    wf["asc"] = mod.sort(by="n", over=wf["raw"])
-    wf["desc"] = mod.sort(by=["n"], ascending=False, over=wf["raw"])
+    wf["asc"] = mod.sort(by="n")(wf["raw"])
+    wf["desc"] = mod.sort(by=["n"], ascending=False)(wf["raw"])
     wf.run_all()
     assert list(wf.step("asc").output.data["n"]) == [1, 1, 2, 3]
     assert list(wf.step("desc").output.data["n"]) == [3, 2, 1, 1]
@@ -2333,14 +2333,14 @@ def test_sort_accepts_one_column_or_several(table):
 def test_sort_refuses_an_absent_column(table):
     wf = Workflow()
     wf["raw"] = table
-    wf["s"] = mod.sort(by="nope", over=wf["raw"])
+    wf["s"] = mod.sort(by="nope")(wf["raw"])
     assert "which the input does not have" in wf.step("s").problems[0]
 
 
 def test_distinct_keeps_the_first_of_each_group(table):
     wf = Workflow()
     wf["raw"] = table
-    wf["u"] = mod.distinct(columns=["city"], over=wf["raw"])
+    wf["u"] = mod.distinct(columns=["city"])(wf["raw"])
     wf.run_all()
     out = wf.step("u").output.data
     assert list(out["city"]) == ["Oslo", "Cairo", "Lima"]
@@ -2362,10 +2362,10 @@ def test_the_new_verbs_are_in_every_derived_table():
 def test_the_new_verbs_round_trip(table):
     wf = Workflow()
     wf["raw"] = table
-    wf["s"] = mod.slice(stop=2, over=wf["raw"])
-    wf["r"] = mod.rename(columns={"n": "count"}, over=wf["s"])
-    wf["o"] = mod.sort(by="count", over=wf["r"])
-    wf["d"] = mod.distinct(columns=["city"], over=wf["o"])
+    wf["s"] = mod.slice(stop=2)(wf["raw"])
+    wf["r"] = mod.rename(columns={"n": "count"})(wf["s"])
+    wf["o"] = mod.sort(by="count")(wf["r"])
+    wf["d"] = mod.distinct(columns=["city"])(wf["o"])
     wf.run_all()
     back = Workflow.from_json(wf.to_session_json(), TOOLS)
     assert all(p == () for p in back.validate().values())

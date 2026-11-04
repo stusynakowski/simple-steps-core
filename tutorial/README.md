@@ -220,7 +220,7 @@ behaviour, so each needs your yes before it lands.
 | D11 | Refuse a bare Python function assigned as a value? |
 | V11 | Keep `map(where=, replace=)`? | **removed 2026-11-03** (EX4) |
 | C11 | Must every input to a combine or tool be a named step? |
-| F7 | One way to write each thing? Today a reshape has three spellings: `mod.sort(by=…)(wf[…])`, `op("identity")[mod.sort(by=…)](wf[…])`, and `examples/all_orchestrations`' `mod.sort(over=wf[…], by=…)` |
+| F7 | One way to write each thing? | **decided (EX3), and `over=` refused since 2026-11-03**; `op("identity")[mod.x(…)]` is the same operation as `mod.x(…)`, so it goes with the parser (S3) |
 
 **Known, already planned:** P15 (D-picks), S4–S9 (SM, SS7), P11, P16 and A8
 (S3), V1b and A10 (S4), and V8b (D20b, decided).

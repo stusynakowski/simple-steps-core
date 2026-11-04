@@ -541,7 +541,7 @@ def _apply_selection(frame: pd.DataFrame, row_sel: Any, col_sel: Any,
 class StepRef:
     """A handle to a step, usable wherever a reference string was.
 
-    ``over=videos`` instead of ``over="videos"``. It serializes to its id, so
+    ``wf["videos"]`` instead of ``"videos"``. It serializes to its id, so
     the stored Operation is unchanged — this only removes the chance to
     mistype it.
     """

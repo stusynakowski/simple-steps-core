@@ -87,8 +87,8 @@ def test_K1_an_unrun_source_defers_column_checks_then_checks_them():
     # slice carries its input's columns, so it inherits "not known yet".
     # (A map step is only its results, so its columns are always known.)
     w["head"] = mod.slice(stop=4)(w["readings"])
-    w["picked"] = mod.select(over=w["head"], columns=["city", "n"])
-    w["typo"] = mod.select(over=w["head"], columns=["cty"])
+    w["picked"] = mod.select(columns=["city", "n"])(w["head"])
+    w["typo"] = mod.select(columns=["cty"])(w["head"])
     assert w.step("picked").problems == () and w.step("typo").problems == ()
     assert columns_unknown(w.step("head").output)
     w.run_all()
@@ -100,7 +100,7 @@ def test_K1_an_unrun_source_defers_column_checks_then_checks_them():
 
 def test_K1_a_literal_source_has_known_columns(wf):
     assert not columns_unknown(wf.step("readings").output)
-    wf["typo"] = mod.select(over=wf["readings"], columns=["cty"])
+    wf["typo"] = mod.select(columns=["cty"])(wf["readings"])
     assert "names 'cty'" in wf.step("typo").problems[0]
 
 
@@ -118,14 +118,15 @@ def test_K3_an_operation_used_as_an_input_is_refused(wf):
     with pytest.raises(TypeError, match="can't be an input yet"):
         scale_008[mod.map()](inner)
     with pytest.raises(TypeError, match="can't be an input yet"):
-        scale_008[mod.map(over=inner)]
+        scale_008[mod.map()](inner)
     with pytest.raises(TypeError, match="can't be an input yet"):
         scale_008(inner)
 
 
-def test_K4_over_given_twice_is_refused(wf):
+def test_K4_over_is_refused_one_way_to_give_the_input(wf):
+    # EX3 (owner, 2026-11-03): over= is retired, so it can't be given twice.
     wf["other"] = pd.DataFrame({"n": [5]})
-    with pytest.raises(TypeError, match="Give the input once"):
+    with pytest.raises(TypeError, match="over= is retired: give the input after the brackets"):
         scale_008[mod.map(over=wf["readings"])](wf["other"])
 
 
@@ -215,7 +216,7 @@ def test_C6_grid_wf_is_a_reference_not_a_workflow():
 
 
 def test_K5_a_string_over_is_refused_in_python():
-    with pytest.raises(TypeError, match=r"pass wf\['readings'\]"):
+    with pytest.raises(TypeError, match="over= is retired"):
         mod.map(over="readings")
     # JSON keeps string ids
     op_ = Operation.from_dict({"tool": "scale_008", "input": "readings",

@@ -557,8 +557,8 @@ class Modifier:
     ``params`` are **literals only** — how to orchestrate, never what data. A
     reference to another step is not a modifier setting: the data input lives in
     :attr:`Operation.input` and a value reference lives in
-    :attr:`Operation.arguments`. ``over=`` is accepted as authoring sugar but is
-    hoisted out of the modifier into the input slot, so it never lands here.
+    :attr:`Operation.arguments`. The input is given after the brackets;
+    ``over=`` is refused (EX3).
     """
 
     kind: str
@@ -581,7 +581,7 @@ class Modifier:
     def __eq__(self, other: Any) -> bool:
         """Equal when they name the same step — however it was named.
 
-        ``mod.map(over=wf["raw"])`` and ``mod.map(over="raw")`` are the same
+        A setting holding ``wf["raw"]`` and one holding ``"raw"`` are the same
         modifier, so equality compares the flattened params. Hand-written
         because the dataclass default would call a `StepRef` different from its
         own id and break every round-trip comparison.
@@ -611,8 +611,8 @@ class Modifier:
 class _Mods:
     """Modifier constructors, for the vertical :func:`stack` form.
 
-    ``mod.map(over=videos)`` just builds a :class:`Modifier`; nothing is
-    applied until :func:`stack` assembles them.
+    ``mod.map()`` just builds a :class:`Modifier`; nothing is applied until
+    it decorates a tool and the step is given its input.
     """
 
     def __getattr__(self, kind: str):
@@ -659,13 +659,15 @@ class _Mods:
                 return Modifier("copy", params)
             if isinstance(params.get("rows"), Condition):
                 params["rows"] = {"where": params["rows"].tree}     # S5c: saved as data
-            if isinstance(params.get("over"), str):
-                # 008 K5: in Python a string is data everywhere else
-                # (`scale[mod.map()]("readings")`), so it must not be a
-                # reference here. JSON keeps string ids: from_dict reads them.
+            if "over" in params:
+                # EX3 (owner, 2026-11-03): one way to give a step its input,
+                # after the brackets. A saved file never held over=.
+                if isinstance(params["over"], (list, tuple)):
+                    raise TypeError("one step reads one input; to combine steps use "
+                                    "join, stack or zip_ (over= got a list)")
                 raise TypeError(
-                    f"over= takes a step reference, not a string: pass "
-                    f"wf[{params['over']!r}] (grid.wf, or your Workflow)")
+                    f"over= is retired: give the input after the brackets, "
+                    f"tool[mod.{kind}(…)](wf[\"…\"]) or mod.{kind}(…)(wf[\"…\"])")
             return Modifier(kind, params)
         make.__name__ = kind
         return make

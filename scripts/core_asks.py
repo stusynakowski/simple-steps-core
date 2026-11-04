@@ -139,7 +139,7 @@ def k1_unrun_source_columns():
     wf["readings"] = to_rows.bind(data=DATA)[mod.source()]
     wf["score"] = scale[mod.map(), mod.name("score")](wf["readings"])
     wf["scored"] = zip_(wf["readings"], wf["score"])
-    wf["picked"] = mod.select(over=wf["scored"], columns=["city", "score"])
+    wf["picked"] = mod.select(columns=["city", "score"])(wf["scored"])
     declared = wf.step("picked").state
     wf.run_all()
     got = wf.step("picked").output.data.to_dict("list")
@@ -257,7 +257,7 @@ def k12_whole_table_verb():
     verbs = set(modifier_catalog())
     candidates = verbs & {"table", "apply", "frame", "whole", "pipe"}
     wf = _wf()
-    wf["x"] = piv[mod.collapse(over=wf["readings"])]
+    wf["x"] = piv[mod.collapse()](wf["readings"])
     if wf.step("x").problems:                    # (core) refused when declared, with a hint
         err = wf.step("x").problems[0]
     else:

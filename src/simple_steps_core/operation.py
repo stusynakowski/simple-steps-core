@@ -34,7 +34,7 @@ _NESTED_OPERATION = ("an operation can't be an input yet; make it its own step "
 class Operation:
     """One tool plus an ordered stack of modifiers — **data, not closures**.
 
-    Built by decorating: ``score[mod.map(over="step1"), mod.retry(times=2)]``
+    Built by decorating: ``score[mod.map(), mod.retry(times=2)](wf["step1"])``
     is ``map(retry(score))`` — retry runs per item. The list reads outermost
     first, like stacked ``@`` lines; :attr:`modifiers` stores it innermost
     first (§1.1), and :attr:`layers` gives it back in written order.
@@ -108,7 +108,7 @@ class Operation:
                          bound_to=self.bound_to)
 
     def __getitem__(self, modifiers: Any) -> "Operation":
-        """``score[mod.map(over=videos), mod.retry(times=2)]`` — decorate.
+        """``score[mod.map(), mod.retry(times=2)]`` — decorate.
 
         Reads top-to-bottom like stacked ``@`` lines (outermost first) and is
         applied bottom-up, so the **last** layer listed sits closest to the
@@ -124,7 +124,7 @@ class Operation:
         for modifier in reversed(modifiers):          # bottom-up, like decorators
             if not isinstance(modifier, Modifier):
                 raise TypeError(
-                    "a bracket layer must be a Modifier — mod.map(over=...), "
+                    "a bracket layer must be a Modifier — mod.map(), "
                     f"mod.retry(times=...); got {type(modifier).__name__}. "
                     "Modifiers are data; a plain decorator would not serialize."
                 )
@@ -332,11 +332,10 @@ class Operation:
         * given a **StepRef**, there is nothing to run yet, so it *wires*:
           returns a new Operation that records what this step reads.
 
-        Wiring writes ``over`` into the stack, so the stored data is exactly
-        what the long form produces. These are the same Operation::
+        Wiring writes the input into the stack, so the stored data is exactly
+        what was written::
 
             score[mod.map()](wf["raw"])
-            score[mod.map(over=wf["raw"])]
 
         With no shape verb, wiring infers one (:func:`infer_verb`) and stores
         it concretely — so ``wf["scored"] = score(wf["raw"])`` is the whole

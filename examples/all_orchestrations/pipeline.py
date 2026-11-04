@@ -122,7 +122,7 @@ def build() -> Workflow:
     """Declare (but do not run) the comprehensive workflow.
 
     Each assignment is one step. Reading top to bottom is the whole grammar:
-    a tool, a shape verb in brackets, the step it reads via ``over=``.
+    a tool, a shape verb in brackets, then the step it reads in parentheses.
     """
     wf = Workflow()
 
@@ -133,43 +133,43 @@ def build() -> Workflow:
     # ── map — n rows in, n rows out, and ONLY the tool's result ─────────
     # A map step is its results: `score` holds one column. Each row keeps its
     # input row's id, so `zip_` puts the readings and their scores side by side.
-    wf["score"] = scale[mod.map(over=wf["readings"]), mod.name("score")]
+    wf["score"] = scale[mod.map(), mod.name("score")](wf["readings"])
     wf["scored"] = zip_(wf["readings"], wf["score"])    # city, n, score
 
     # ── the row-axis reshapers (no tool runs) ───────────────────────────
-    wf["kept"] = is_big[mod.filter(over=wf["scored"])]          # filter: rows
-    wf["head2"] = mod.slice(over=wf["scored"], stop=2)          # slice: first 2
-    wf["ranked"] = mod.sort(over=wf["scored"], by="score", ascending=False)
-    wf["unique_city"] = mod.distinct(over=wf["scored"], columns=["city"])
+    wf["kept"] = is_big[mod.filter()](wf["scored"])          # filter: rows
+    wf["head2"] = mod.slice(stop=2)(wf["scored"])          # slice: first 2
+    wf["ranked"] = mod.sort(by="score", ascending=False)(wf["scored"])
+    wf["unique_city"] = mod.distinct(columns=["city"])(wf["scored"])
 
     # ── the column-axis reshapers (no tool runs) ────────────────────────
-    wf["picked"] = mod.select(over=wf["scored"], columns=["city", "score"])
-    wf["dropped"] = mod.drop(over=wf["scored"], columns=["score"])
-    wf["renamed"] = mod.rename(over=wf["scored"], columns={"n": "count"})
+    wf["picked"] = mod.select(columns=["city", "score"])(wf["scored"])
+    wf["dropped"] = mod.drop(columns=["score"])(wf["scored"])
+    wf["renamed"] = mod.rename(columns={"n": "count"})(wf["scored"])
 
     # ── group -> collapse: the stratified-summary chain ─────────────────
     # group labels each row with its key and keeps the row's columns
-    wf["bucketed"] = label_city[mod.group(over=wf["scored"]), mod.name("bucket")]  # city, n, score, bucket
-    wf["per_city"] = add_n[mod.collapse(by="bucket", over=wf["bucketed"], initial=0)]
+    wf["bucketed"] = label_city[mod.group(), mod.name("bucket")](wf["scored"])  # city, n, score, bucket
+    wf["per_city"] = add_n[mod.collapse(by="bucket", initial=0)](wf["bucketed"])
 
     # ── collapse to one row — a builtin reducer and a registry reducer ──
-    wf["n_rows"] = op("count")[mod.collapse(over=wf["readings"])]
-    wf["sum_n"] = add_n[mod.collapse(over=wf["readings"], initial=0)]
+    wf["n_rows"] = op("count")[mod.collapse()](wf["readings"])
+    wf["sum_n"] = add_n[mod.collapse(initial=0)](wf["readings"])
 
     # ── expand (unnest longer) and the expand -> widen chain ────────────
-    wf["bursts"] = fan_out[mod.expand(over=wf["readings"]), mod.name("item")]
-    wf["coords"] = make_coords[mod.expand(over=wf["readings"]), mod.name("value")]
-    wf["spread"] = mod.widen(over=wf["coords"], columns=["axis", "val"])
+    wf["bursts"] = fan_out[mod.expand(), mod.name("item")](wf["readings"])
+    wf["coords"] = make_coords[mod.expand(), mod.name("value")](wf["readings"])
+    wf["spread"] = mod.widen(columns=["axis", "val"])(wf["coords"])
 
     # ── widen (unnest wider) straight off a column of records ───────────
-    wf["wide"] = mod.widen(over=wf["records"], columns=["city", "temp"])
+    wf["wide"] = mod.widen(columns=["city", "temp"])(wf["records"])
 
     # ── sweep — a grid from the cross product of parameters (no input) ──
     wf["grid_search"] = grid_cell[mod.sweep(model=["a", "b"], window=[7, 30])]
 
     # ── execution modifiers — shape-preserving, order is semantics ──────
-    wf["robust"] = scale[mod.map(over=wf["readings"]), mod.name("score"),
-                         mod.retry(times=2), mod.timeout(seconds=5)]
+    wf["robust"] = scale[mod.map(), mod.name("score"),
+                         mod.retry(times=2), mod.timeout(seconds=5)](wf["readings"])
 
     # ── auto — pass a reference, no verb; the orchestration is chosen ───
     # Saved as mod.auto() and decided from the data at each run; row-wise
@@ -184,22 +184,22 @@ def build() -> Workflow:
     wf["a_list"] = [1, 2, 3, 4]                     # list   → one cell
     wf["a_dict"] = {"x": 10, "y": 20}              # dict   → one cell
     wf["a_scalar"] = 7                              # scalar → one cell
-    wf["from_list"] = mod.expand(over=wf["a_list"])            # list cell → rows
-    wf["from_dict"] = mod.widen(over=wf["a_dict"], columns=["x", "y"])  # dict → cols
+    wf["from_list"] = mod.expand()(wf["a_list"])            # list cell → rows
+    wf["from_dict"] = mod.widen(columns=["x", "y"])(wf["a_dict"])  # dict → cols
 
     # ── a column of tuples widens positionally (auto c0, c1) ──
-    wf["pairs"] = make_pair[mod.map(over=wf["readings"]), mod.name("value")]
-    wf["split"] = mod.widen(over=wf["pairs"])       # no columns= → c0, c1
+    wf["pairs"] = make_pair[mod.map(), mod.name("value")](wf["readings"])
+    wf["split"] = mod.widen()(wf["pairs"])       # no columns= → c0, c1
 
     # ── builtin reducers over a single-column grid ──
-    wf["ns"] = mod.select(over=wf["readings"], columns=["n"])
-    wf["gathered"] = op("gather")[mod.collapse(over=wf["ns"])]   # [1, 2, 3, 2]
-    wf["total_n"] = op("total")[mod.collapse(over=wf["ns"])]     # 8
-    wf["first_n"] = op("first")[mod.collapse(over=wf["ns"])]     # 1
-    wf["last_n"] = op("last")[mod.collapse(over=wf["ns"])]       # 2
+    wf["ns"] = mod.select(columns=["n"])(wf["readings"])
+    wf["gathered"] = op("gather")[mod.collapse()](wf["ns"])   # [1, 2, 3, 2]
+    wf["total_n"] = op("total")[mod.collapse()](wf["ns"])     # 8
+    wf["first_n"] = op("first")[mod.collapse()](wf["ns"])     # 1
+    wf["last_n"] = op("last")[mod.collapse()](wf["ns"])       # 2
 
     # ── chained fan-out: map over a map step ──
-    wf["again"] = scale[mod.map(over=wf["scored"]), mod.name("again")]
+    wf["again"] = scale[mod.map(), mod.name("again")](wf["scored"])
 
     # ── combine verbs — read more than one grid (operation constructors) ──
     # These are not modifiers: a combine is a function of its grids, so it is
@@ -209,7 +209,7 @@ def build() -> Workflow:
     wf["more"] = pd.DataFrame({"city": ["BOS", "SEA"], "n": [5, 6]})
     wf["enriched"] = join(wf["readings"], wf["city_info"], on="city", how="left")
     wf["all_readings"] = stack(wf["readings"], wf["more"])       # 4 + 2 = 6 rows
-    wf["scores_only"] = mod.select(over=wf["scored"], columns=["score"])
+    wf["scores_only"] = mod.select(columns=["score"])(wf["scored"])
     wf["zipped"] = zip_(wf["ns"], wf["scores_only"])            # n + score, by position
 
     return wf
@@ -236,8 +236,8 @@ def failure() -> Workflow:
     """
     wf = Workflow()
     wf["readings"] = readings()
-    wf["out"] = risky[mod.map(over=wf["readings"]), mod.name("out"),
-                      mod.try_except(on=[ValueError]), mod.retry(times=1)]
+    wf["out"] = risky[mod.map(), mod.name("out"),
+                      mod.try_except(on=[ValueError]), mod.retry(times=1)](wf["readings"])
     return wf.run_all()
 
 
@@ -250,9 +250,9 @@ def validation() -> Workflow:
     """
     wf = Workflow()
     wf["readings"] = readings()
-    wf["scored"] = scale[mod.map(over=wf["readings"]), mod.name("score")]   # valid, staged
-    wf["bad_arg"] = scale.bind(nope=1)[mod.map(over=wf["readings"])]   # unknown param
-    wf["dangling"] = scale[mod.map(over=unbound_wf["nowhere"])]          # missing upstream
+    wf["scored"] = scale[mod.map(), mod.name("score")](wf["readings"])   # valid, staged
+    wf["bad_arg"] = scale.bind(nope=1)[mod.map()](wf["readings"])   # unknown param
+    wf["dangling"] = scale[mod.map()](unbound_wf["nowhere"])          # missing upstream
     return wf
 
 
@@ -375,7 +375,7 @@ def build_resources() -> Workflow:
 
     wf["readings"] = readings()
     wf["notes"] = notes()
-    wf["keys"] = mod.rename(over=wf["readings"], columns={"city": "key"})
+    wf["keys"] = mod.rename(columns={"city": "key"})(wf["readings"])
 
     # ── unbound tools: a resource is an argument, chosen per step ────────
     wf["regions"] = enrich[mod.map()](wf["readings"], db=res["db"])

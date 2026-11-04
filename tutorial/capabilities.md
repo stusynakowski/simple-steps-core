@@ -185,6 +185,6 @@
 ## Watch out for
 
 - **Wrong answers:** P15 (a pick into a replaced source) is silent. S5 (running one step on a stale input) is `completed` with a warning naming the stale input.
-- **Three spellings for one reshape:** `mod.sort(by=…)(wf[…])`, `op("identity")[mod.sort(by=…)](wf[…])` and `mod.sort(over=wf[…], by=…)` all work. Pick one (F7).
+- **One way to give a step its input:** after the brackets, `tool[mod.x()](wf[…])` or `mod.sort(by=…)(wf[…])`. `mod.sort(over=wf[…], by=…)` is refused since 2026-11-03 (EX3). `op("identity")[mod.sort(…)]` builds the same operation as `mod.sort(…)`, so only the docs and the parser (S3) stop writing it.
 - **Inputs must be named steps:** a pick (P16) or an inline expression (C11) can't be an input yet.
 - **Output columns are called `value`,** so chaining verbs needs a `mod.name` or a written binding (V1b, A10).

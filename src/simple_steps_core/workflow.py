@@ -22,7 +22,7 @@ import pandas as pd
 class Workflow:
     """Ordered Steps. Assign an Operation, get a Step that is already staged.
 
-    ``wf["scored"] = score[mod.map(over=wf["videos"])]`` — declaring stages;
+    ``wf["scored"] = score[mod.map()](wf["videos"])`` — declaring stages;
     ``wf.run("scored")`` is what actually computes.
     """
 
@@ -172,7 +172,7 @@ class Workflow:
                 mod.select(**selection)](replace(operation, rows=None, columns=None))
         if isinstance(operation, Modifier):
             # A bare shape verb is a complete step: it applies the tool that
-            # discards nothing, so `wf["flat"] = mod.expand(over=ref)` needs no
+            # discards nothing, so `wf["flat"] = mod.expand()(ref)` needs no
             # tool of its own. Execution modifiers are refused — a pass-through
             # that retries is inert, and silently accepting it would hide a
             # half-written step.
@@ -416,7 +416,7 @@ class Workflow:
         del self.steps[step_id]
 
     def rename(self, old: str, new: str) -> None:
-        """Rename a step, rewriting every ``over=`` that pointed at it.
+        """Rename a step, rewriting every reference that pointed at it.
 
         Outputs are kept — a rename is not a recompute — and insertion order is
         preserved so positions do not shift.

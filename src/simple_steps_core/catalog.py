@@ -514,7 +514,7 @@ class Tool:
     has outside this system, and the only calling rule in it::
 
         transcribe({"path": "a.mp4"})              # a plain call, undecorated
-        transcribe[mod.map(over=videos)](videos)   # decorated, then run
+        transcribe[mod.map()](videos)   # decorated, then run
 
     Decorating a tool never touches the function, so the same tool is bare in
     one step and mapped in another.
@@ -549,7 +549,7 @@ class Tool:
         ``score(3)`` runs the plain function. ``score(wf["raw"])`` has no data
         to run on, so it builds the step instead, inferring how to iterate::
 
-            wf["scored"] = score(wf["raw"])      # -> map(over='raw') ∘ score
+            wf["scored"] = score(wf["raw"])      # -> map() ∘ score, reading 'raw'
 
         The two cannot be confused: a :class:`StepRef` is never data.
         """
@@ -572,7 +572,7 @@ class Tool:
     def bind(self, **literals) -> Operation:
         """Fix some arguments now, leaving the rest to arrive with each row.
 
-        ``score.bind(threshold=5)[mod.map(over=rows)]`` — the literals become
+        ``score.bind(threshold=5)[mod.map()](rows)`` — the literals become
         the Operation's ``arguments`` and are applied innermost, inside every
         modifier, so a retry re-runs the same call and a map passes them to
         every item. A value may be a :class:`StepRef`: a *value reference*
@@ -584,7 +584,7 @@ class Tool:
         return Operation(tool=self.id, fn=self.fn)
 
     def __getitem__(self, modifiers: Any) -> Operation:
-        """``transcribe[mod.map(over=videos), mod.retry(times=2)]`` — decorate.
+        """``transcribe[mod.map(), mod.retry(times=2)]`` — decorate.
 
         Returns an :class:`Operation` (data), never a wrapped function. Bound
         literals survive it: ``transcribe.bind(model="large")[mod.map(...)]``.
