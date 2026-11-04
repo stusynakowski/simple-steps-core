@@ -2041,6 +2041,20 @@ class Workflow:
                 waiting.append(name)
         return waiting
 
+    def not_current(self, step_id: str) -> list[str]:
+        """The steps *step_id* depends on, directly or not, that aren't
+        current: never run, or stale. In workflow order, so running them in
+        turn makes *step_id*'s inputs current (C9)."""
+        seen: set[str] = set()
+        frontier = [step_id]
+        while frontier:
+            for name in self._depends_on(frontier.pop()):
+                if name in self.steps and name not in seen:
+                    seen.add(name)
+                    frontier.append(name)
+        return [name for name in self.steps
+                if name in seen and self.steps[name].state in ("staged", "stale")]
+
     def _resolve_arguments(self, operation: Operation,
                            resources: Mapping[str, Any] | None = None) -> Operation:
         """Replace each reference argument with its value, and each resource with its object.

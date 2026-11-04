@@ -287,7 +287,7 @@ parameter without a default, then the one column whose type fits, else
 |---|---|---|
 | F1 | an expression put back to exactly what last ran stays `stale` | SM: **fixed 2026-11-03**, its result is still in the store |
 | F2 | a reader made `invalid` by an upstream change loses its values, and is `staged` when the upstream is restored | SM: **fixed 2026-11-03**, it shows its newest result, and is `completed` when restored |
-| F3 | running one step on a `stale` input gives `completed`, with a warning naming the input and the version read (K29) | SM |
+| F3 | running one step on a `stale` input gives `completed`, with a warning naming the input and the version read (K29) | C9: **fixed 2026-11-03**, `run(x)` runs what's stale first; `run(x, fresh=False)` reads it as it is, on purpose |
 | F4 | an `invalid` step can still carry a stale reason | SM |
 | F5 | `needs_run()` lists an empty step | SS5 |
 | F6 | a failed step isn't listed by `needs_run()` | SS5 |

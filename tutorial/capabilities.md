@@ -2,7 +2,7 @@
 
 > Every capability the tutorial checks, with its expression, what it should
 > do, and its status. Run 2026-11-03 at `2bd150e` by
-> `.venv/bin/python tutorial/tutorial.py`: **106 ✓ · 10 ✗ · 2 ?** (118 lessons; S7–S9, R10b, R11, R13–R16, A4b, A4c, A7, V2b, V9b, V10, V11 and Y5 since 2026-11-03's first run).
+> `.venv/bin/python tutorial/tutorial.py`: **107 ✓ · 9 ✗ · 2 ?** (118 lessons; S5, S7–S9, R10b, R11, R13–R16, A4b, A4c, A7, V2b, V9b, V10, V11 and Y5 since 2026-11-03's first run).
 > ✓ does what we want · ✗ doesn't yet · ? not decided. The reasoning is in
 > [README.md](README.md).
 >
@@ -166,7 +166,7 @@
 | S2 | The same value again | `k["lim"] = 38.0` twice | nothing goes `stale` | ✓ | |
 | S3 | A change | `k["lim"] = 37.0` | readers `stale`, keeping their values | ✓ | |
 | S4 | Why it's stale | `k.step("h").warnings` | the reason, among the warnings | ✗ | only in `needs_run()` and metadata. SS7 |
-| S5 | Run one step | `k.run("f")`, `h` stale | runs `h` first | ✗ | `f` computed from old rows and shown `completed`; a warning names `h` and its version. SM |
+| S5 | Run one step | `k.run("f")`, `h` stale | runs `h` first | ✓ | fixed 2026-11-03 (C9): `run(x)` makes `x` current; `k.run("f", fresh=False)` runs it on what `h` shows, on purpose |
 | S6 | A value put back | 37 → 38 → 37 | `completed`, no re-run | ✓ | |
 | S7 | An expression put back | change `f`, then restore it | `completed`, no re-run | ✓ | fixed 2026-11-03 (SM): its result is still in the store |
 | S8 | Column removed upstream | drop `temp` from `w` | `invalid`, keeping its last values | ✓ | fixed 2026-11-03 (SM): it shows its newest result |
@@ -188,7 +188,7 @@
 
 ## Watch out for
 
-- **Wrong answers:** P15 (a pick into a replaced source) is silent. S5 (running one step on a stale input) is `completed` with a warning naming the stale input.
+- **A wrong answer:** P15 (a pick into a replaced source) is silent. S5, running one step on a stale input, is fixed: `run(x)` runs what's stale first.
 - **One way to give a step its input:** after the brackets, `tool[mod.x()](wf[…])` or `mod.sort(by=…)(wf[…])`. `mod.sort(over=wf[…], by=…)` is refused since 2026-11-03 (EX3). `op("identity")[mod.sort(…)]` builds the same operation as `mod.sort(…)`, so only the docs and the parser (S3) stop writing it.
 - **Inputs must be named steps:** a pick (P16) or an inline expression (C11) can't be an input yet.
 - **Output columns are called `value`,** so chaining verbs needs a `mod.name` or a written binding (V1b, A10).

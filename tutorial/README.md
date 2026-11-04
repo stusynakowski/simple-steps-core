@@ -3,7 +3,7 @@
 > A walkthrough of what the library is for, what it refuses to do, and why,
 > one part at a time. Every claim is a lesson in [tutorial.py](tutorial.py),
 > run against the code: `.venv/bin/python tutorial/tutorial.py`. Written
-> 2026-11-03: 118 lessons, **106 ✓ · 10 ✗ · 2 ?**. What the app
+> 2026-11-03: 118 lessons, **107 ✓ · 9 ✗ · 2 ?**. What the app
 > asked for is checked by [handover.py](handover.py) (§5), and everything at
 > once by `scripts/sweep.py` (§6). The rules in full are in
 > [docs/design/model.md](../docs/design/model.md).
@@ -183,7 +183,7 @@ values stay, marked `stale`, until a run replaces them. `run(x)` makes `x`
 current. Putting something back exactly as it was is free.
 **Status:** ✓ S1–S3, S6, S10–S13. Every ✗ here has one cause: states are kept
 as flags, not derived (decision **SM**).
-- ✗ **S5:** `run("f")` computes `f` from `h`'s outdated rows and shows `completed`, while `h` stays `stale`. A warning on `f` names `h` and the version it read, so unlike P15 it isn't silent, but the state is wrong.
+- ✓ **S5, fixed 2026-11-03 (C9):** `run("f")` makes `f` current, running the stale `h` first. To compute on what `h` shows, on purpose, `run("f", fresh=False)`, and `f` says it read `h` stale.
 - ✓ S7, S8, S9, fixed 2026-11-03 by the result store (SM, ST5): an expression put back is `completed` again with no re-run; a step made `invalid` upstream keeps showing its last values; when the column comes back, it's `completed` again.
 - ✗ S4: the stale reason isn't among the step's warnings (SS7).
 
@@ -234,19 +234,18 @@ there is §2.*n* here. When a decision lands, change the lesson's `want` in
 [`core-handover/`](../core-handover/) is what the app asked of core on
 2026-10-26. [handover.py](handover.py) runs all of it against today's core:
 `.venv/bin/python tutorial/handover.py`. Run 2026-11-03: **59 checks,
-52 ✓ · 5 ✗ · 2 ?**.
+53 ✓ · 4 ✗ · 2 ?**.
 
 | Part | What | Result |
 |---|---|---|
 | A | the acceptance session (`plan.md`, "What should work"), line by line, on `Kernel` and `Catalog` | 15 of 15 ✓ (A3b since `formula(text)`, EX13) |
-| B | the requests K19–K29, R7–R9, and the "Fix in core" table (K1–K18 are `scripts/core_asks.py`'s: 36 of 39 done) | 24 ✓ · 5 ✗ · 1 ? |
+| B | the requests K19–K29, R7–R9, and the "Fix in core" table (K1–K18 are `scripts/core_asks.py`'s: 36 of 39 done) | 25 ✓ · 4 ✗ · 1 ? (K22 since the result store) |
 | C | the six probes in `core-handover/probes/`, ported | 13 ✓ · 1 ? |
 
 **Not done (✗):**
 
 | | Ask | Where it stands |
 |---|---|---|
-| K22 | earlier outputs kept while something reads them | one output per step; decision ST, built with SM (S11) |
 | K23 | progress modifiers and `cancel()` | not built (plan step D) |
 | K28b | each output stores, per cell, the cells it came from | worked out on request by `k.cell`; ST's row map is the stored part |
 | R7 | media handles | not built: ST's third piece |
@@ -276,8 +275,8 @@ core-asks probe (`--stress` adds the property test at 2,000 examples). Run
 | Suite | Result |
 |---|---|
 | tests | 783 passed, 1 skipped, 27 xfailed |
-| tutorial.py | 118 lessons: 106 ✓ · 10 ✗ · 2 ? |
-| handover.py | 59 checks: 52 ✓ · 5 ✗ · 2 ? |
+| tutorial.py | 118 lessons: 107 ✓ · 9 ✗ · 2 ? |
+| handover.py | 59 checks: 53 ✓ · 4 ✗ · 2 ? |
 | both examples | run |
 | core_asks.py | 36 of 39 done |
 | core-asks probe | 66 pass, 19 fail, 0 skip (L29c since `formula`) |

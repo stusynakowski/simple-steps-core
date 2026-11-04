@@ -337,16 +337,21 @@ class Kernel:
         return self.workflow.check(name, operation)
 
     @_notifies("run")
-    def run(self, step: str | int) -> Step:
-        """Run one step on what its inputs show now.
+    def run(self, step: str | int, *, fresh: bool = True) -> Step:
+        """Make one step current (C9): first every step it depends on that
+        has never run or is stale, in workflow order, then the step itself.
 
-        Inputs that have never run run first, since they have nothing to show.
-        An input that is stale passes through as it is.
+        ``fresh=False`` runs it on what its inputs show now, on purpose:
+        inputs that have never run still run first, since they have nothing
+        to show; a stale input passes through as it is, and the step says it
+        read it stale.
         """
         name = self._name(step)
         self._ask_data_versions()
-        for upstream in dict.fromkeys(self.workflow.pending(name)):
-            self.workflow.run(upstream, resources=self.resources)
+        upstream = (self.workflow.not_current(name) if fresh
+                    else dict.fromkeys(self.workflow.pending(name)))
+        for before in upstream:
+            self.workflow.run(before, resources=self.resources)
         return self.workflow.run(name, resources=self.resources)
 
     @_notifies("run_all")

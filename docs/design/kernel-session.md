@@ -140,9 +140,10 @@ k.needs_run()
 # {'sick': 'stale: limit changed', 'f': 'stale: sick is stale',
 #  'side': 'stale: sick is stale', 'beds': 'stale: sick is stale'}
 
-k.run("f")                              # sick is stale: it passes through as shown
+k.run("f")                              # makes f current: sick, stale, runs first
 k.needs_run()
-# {'sick': 'stale: limit changed', 'f': "read stale 'sick'", ...}
+# {'side': 'stale: input sick changed', 'beds': 'stale: input sick changed'}
+# k.run("f", fresh=False) would run f on what sick shows, and say it read it stale
 
 k.run_all()                             # everything up to date
 k.step("sick").data["name"].tolist()    # ['Ben', 'Cy']

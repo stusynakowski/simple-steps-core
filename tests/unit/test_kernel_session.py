@@ -70,7 +70,7 @@ def test_needs_run_lists_what_isnt_up_to_date_in_run_order(k):
 def test_a_step_run_on_a_stale_input_is_completed_and_says_so(k):
     k.run_all()
     k["sick"] = feverish_i[mod.filter()](wf["p"], limit=37)
-    k.run("f")
+    k.run("f", fresh=False)                         # on purpose: on what sick shows
     assert k.step("f").state == "completed"
     assert k.needs_run() == {"sick": "stale: updated args", "f": "read stale 'sick'"}
     assert "completed · read stale 'sick'" in repr(k)
@@ -194,7 +194,7 @@ def test_fixing_the_input_clears_the_problem(k13):
 def test_until_the_input_reruns_its_reader_may_still_run_on_what_it_shows(k13):
     k13["sick"] = label_i[mod.map()](wf["p"])        # re-declared, not run
     assert k13.step("f").problems == ()
-    k13.run("f")                                     # sick's old output passes through
+    k13.run("f", fresh=False)                        # sick's old output passes through
     assert k13.needs_run()["f"] == "read stale 'sick'"
 
 

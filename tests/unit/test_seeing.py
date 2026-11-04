@@ -75,6 +75,6 @@ def test_K29_reading_a_stale_step_warns_naming_it_and_its_version(k):
     version = k.step("d").output.version
     k["x"] = pd.DataFrame({"n": [5]})                               # d is stale now
     k["e"] = doubled_value[mod.map()](wf["d"])
-    k.run("e")
+    k.run("e", fresh=False)                                         # on purpose
     warning = " ".join(str(w) for w in k.step("e").warnings)
     assert "read 'd' while it's stale" in warning and version in warning

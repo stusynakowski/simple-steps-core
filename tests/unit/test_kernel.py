@@ -75,11 +75,21 @@ def test_run_runs_inputs_that_never_ran_first(k):
     assert values(k, "f") == [100.76]
 
 
-def test_a_stale_input_passes_through_as_it_is(k):
+def test_run_makes_a_step_current_running_what_it_reads_first(k):
+    # C9 (owner, 2026-11-03): sick is stale, so run("f") runs sick, then f
     k.run_all()
     k["sick"] = feverish_k[mod.filter()](wf["p"], limit=37)
     assert k.step("sick").state == "stale"
     k.run("f")
+    assert (k.step("sick").state, k.step("f").state) == ("completed", "completed")
+    assert values(k, "f") == [100.76, 98.78]
+
+
+def test_a_stale_input_passes_through_when_asked(k):
+    k.run_all()
+    k["sick"] = feverish_k[mod.filter()](wf["p"], limit=37)
+    assert k.step("sick").state == "stale"
+    k.run("f", fresh=False)
     # f is computed from what sick shows: its old output, one row.
     assert values(k, "f") == [100.76]
     assert k.step("sick").state == "stale"

@@ -76,7 +76,7 @@ def main() -> None:
     print("\n── 4. change it ──")
     k["limit"] = 37.0                                         # move the control
     print("needs_run:", k.needs_run())
-    k.run("f")                                                # sick is stale: it passes through
+    k.run("f")                                                # makes f current: sick runs first
     print("after run('f'):", k.needs_run())
     k.run_all()
     print("after run_all:", k.needs_run(), "| sick:", k.step("sick").data["name"].tolist())

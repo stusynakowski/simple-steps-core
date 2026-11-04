@@ -198,8 +198,19 @@ def part_b():
            (True, {"simple_steps.ui": {"color": "red"}}))
 
     # K22 — earlier outputs kept while something reads them
-    lesson("K22", "a stale reader still shows the version it read; versions kept by data version",
-           False, True, "one output per step; decision ST (agreed 2026-11-03), built with SM, plan S11")
+    kk = Kernel(CAT)
+    kk["p"] = patients[mod.source()]()
+    kk["lim"] = 38.0
+    kk["s"] = feverish[mod.filter()](wf["p"], limit=wf["lim"])
+    kk.run_all()
+    before = kk.step("s").output
+    kk["lim"] = 37.0
+    shown = kk.step("s").output is before                 # stale, still showing what it read
+    kk.run("s")
+    kept = kk.workflow.results("s")
+    lesson("K22", "a stale reader still shows the version it read; earlier results kept",
+           (shown, len(kept), kept[1] is before), (True, 2, True),
+           open_=False)
 
     # K23 — progress and cancel
     lesson("K23", "progress modifiers report each cell to a callback; cancel()",
@@ -286,7 +297,7 @@ def part_b():
     lesson("K29a", "a rename rewrites the references, and readers stay completed",
            (k.step("m").formula, k.step("m").state), ('to_f[mod.map()](wf["ill"])', "completed"))
     k["ill"] = feverish[mod.filter()](wf["p"], limit=37)
-    k.run("m")
+    k.run("m", fresh=False)                 # on purpose: run(m) alone would run ill first (C9)
     lesson("K29b", "a step that read old data warns, naming the step and version",
            len(k.step("m").warnings) > 0, True, "kept in output meta (read_stale), not a warning. SS7, SM")
 
