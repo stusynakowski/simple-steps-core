@@ -127,10 +127,12 @@ core `Kernel`. The rest it reads from core:
 
 ### 3.4 Formulas
 
-The parser stays in the app (`operation_formula.py`) and builds
-`Operation.from_spec(spec, catalog)`; core prints with `step.formula`.
-`formula_parser.py`'s canonical half goes; the UI's `/api/parse_formula`
-keeps its response shape.
+Core reads formula text: `formula(text)` gives the step the text writes,
+checked against the kernel's catalog when it's assigned (decisions.md EX13,
+built 2026-11-03), and core prints with `step.formula`. The app's
+`operation_formula.py` goes, with `formula_parser.py`'s canonical half; the
+UI's `/api/parse_formula` calls `formula` and keeps its response shape. A
+plain string assigned to a step stays a string value.
 
 ### 3.5 Saving and loading
 

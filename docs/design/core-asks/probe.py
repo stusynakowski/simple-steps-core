@@ -588,7 +588,14 @@ def _():
 
 @test("M4", "TEST-L29c", "a condition with a function call is refused, never run")
 def _():
-    raise Skip("formula-level: Python evaluates the call before core sees it; needs core's formula parser")
+    # formula-level: Python would run the call before core sees it; core's
+    # formula parser (EX13) reads the text without running it.
+    from simple_steps_core import FormulaError, formula
+    try:
+        formula('wf["r"][cols["n"] > len("ab")]')
+    except FormulaError:
+        return
+    raise Fail("a function call in a condition was accepted")
 
 
 @test("M4", "TEST-L30a", "row['r'] picks the items of r row 3")

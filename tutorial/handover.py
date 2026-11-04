@@ -75,10 +75,11 @@ def part_a():
     lesson("A3a", "a plain string stays a string value (EX13)", data(k.step("g"), "value"),
            ["to_f[mod.map()](wf['p'])"])
     del k["g"]
-    import simple_steps_core
+    from simple_steps_core import formula
+    k["g"] = formula("to_f[mod.map()](wf['p'])")
     lesson("A3b", "formula(text) parses against the catalog (EX13)",
-           hasattr(simple_steps_core, "formula"), True,
-           "no parser in core yet: the app's operation_formula.py, ported (plan S3)")
+           (k.step("g").formula, k.step("g").state), ('to_f[mod.map()](wf["p"])', "staged"))
+    del k["g"]
     lesson("A4", "validate(): {step: problems}, none here", {n: p for n, p in k.validate().items() if p}, {})
     k.run_all()
     text = repr(k)

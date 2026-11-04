@@ -3,7 +3,7 @@
 > A walkthrough of what the library is for, what it refuses to do, and why,
 > one part at a time. Every claim is a lesson in [tutorial.py](tutorial.py),
 > run against the code: `.venv/bin/python tutorial/tutorial.py`. Written
-> 2026-11-03: 117 lessons, **102 ✓ · 13 ✗ · 2 ?**. What the app
+> 2026-11-03: 118 lessons, **103 ✓ · 13 ✗ · 2 ?**. What the app
 > asked for is checked by [handover.py](handover.py) (§5), and everything at
 > once by `scripts/sweep.py` (§6). The rules in full are in
 > [docs/design/model.md](../docs/design/model.md).
@@ -236,11 +236,11 @@ there is §2.*n* here. When a decision lands, change the lesson's `want` in
 [`core-handover/`](../core-handover/) is what the app asked of core on
 2026-10-26. [handover.py](handover.py) runs all of it against today's core:
 `.venv/bin/python tutorial/handover.py`. Run 2026-11-03: **59 checks,
-51 ✓ · 6 ✗ · 2 ?**.
+52 ✓ · 5 ✗ · 2 ?**.
 
 | Part | What | Result |
 |---|---|---|
-| A | the acceptance session (`plan.md`, "What should work"), line by line, on `Kernel` and `Catalog` | 14 of 15 ✓ |
+| A | the acceptance session (`plan.md`, "What should work"), line by line, on `Kernel` and `Catalog` | 15 of 15 ✓ (A3b since `formula(text)`, EX13) |
 | B | the requests K19–K29, R7–R9, and the "Fix in core" table (K1–K18 are `scripts/core_asks.py`'s: 36 of 39 done) | 24 ✓ · 5 ✗ · 1 ? |
 | C | the six probes in `core-handover/probes/`, ported | 13 ✓ · 1 ? |
 
@@ -248,7 +248,6 @@ there is §2.*n* here. When a decision lands, change the lesson's `want` in
 
 | | Ask | Where it stands |
 |---|---|---|
-| A3b | formula text parsed against the catalog | decided (EX13): a plain string stays a string value (A3a ✓), and `formula(text)` parses. No parser in core yet; the app's `operation_formula.py`, which never runs the text, is still to port (S3) |
 | K22 | earlier outputs kept while something reads them | one output per step; decision ST, built with SM (S11) |
 | K23 | progress modifiers and `cancel()` | not built (plan step D) |
 | K28b | each output stores, per cell, the cells it came from | worked out on request by `k.cell`; ST's row map is the stored part |
@@ -279,11 +278,11 @@ core-asks probe (`--stress` adds the property test at 2,000 examples). Run
 | Suite | Result |
 |---|---|
 | tests | 783 passed, 1 skipped, 27 xfailed |
-| tutorial.py | 117 lessons: 102 ✓ · 13 ✗ · 2 ? |
-| handover.py | 59 checks: 51 ✓ · 6 ✗ · 2 ? |
+| tutorial.py | 118 lessons: 103 ✓ · 13 ✗ · 2 ? |
+| handover.py | 59 checks: 52 ✓ · 5 ✗ · 2 ? |
 | both examples | run |
 | core_asks.py | 36 of 39 done |
-| core-asks probe | 65 pass, 19 fail, 1 skip |
+| core-asks probe | 66 pass, 19 fail, 0 skip (L29c since `formula`) |
 
 Together they run **92% of core** (6,509 of 7,047 lines). The least run:
 `references.py` and `values.py` (86%), `run.py` (87%), `verbs.py` (88%).

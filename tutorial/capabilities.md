@@ -2,7 +2,7 @@
 
 > Every capability the tutorial checks, with its expression, what it should
 > do, and its status. Run 2026-11-03 at `2bd150e` by
-> `.venv/bin/python tutorial/tutorial.py`: **102 ✓ · 13 ✗ · 2 ?** (117 lessons; R10b, R11, R13–R16, A4b, A4c, A7, V2b, V9b, V10 and V11 since 2026-11-03's first run).
+> `.venv/bin/python tutorial/tutorial.py`: **103 ✓ · 13 ✗ · 2 ?** (118 lessons; R10b, R11, R13–R16, A4b, A4c, A7, V2b, V9b, V10, V11 and Y5 since 2026-11-03's first run).
 > ✓ does what we want · ✗ doesn't yet · ? not decided. The reasoning is in
 > [README.md](README.md).
 >
@@ -183,6 +183,7 @@
 | Y1 | Load | `Kernel.from_json(text, CATALOG)` | runs nothing; all `staged` | ✓ | |
 | Y2 | Same result | load, then `run_all()` | same data, same id | ✓ | |
 | Y3 | Extras | `step.extras["simple_steps.ui"]` | survive; never hashed | ✓ | |
+| Y5 | Formula text, read | `formula(step.formula)` for every step | the same step (its operation; extras are the app's, kept on the step) | ✓ | new 2026-11-03 (EX13): never runs the text |
 | Y4 | Where a cell came from | `k.cell("f", 1)` | its inputs: `temp` 38.5 | ✓ | |
 
 ## Watch out for

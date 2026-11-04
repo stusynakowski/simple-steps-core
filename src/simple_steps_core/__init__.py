@@ -27,7 +27,7 @@ except PackageNotFoundError:          # running from a source tree, not installe
 #: file, for names they use only inside functions; that works when they load
 #: in this order (docs/design/cleanup-plan.md §3). Plain imports replace this
 #: module by module in phase 4.
-_LOAD_ORDER = ('problems', 'specs', 'system_tools', 'output', 'verbs', 'modifiers', 'checks', 'catalog', 'combines', 'errors', 'operation', 'references', 'run', 'step', 'values', 'workflow', 'kernel')
+_LOAD_ORDER = ('problems', 'specs', 'system_tools', 'output', 'verbs', 'modifiers', 'checks', 'catalog', 'combines', 'errors', 'operation', 'references', 'run', 'step', 'values', 'workflow', 'kernel', 'formula')
 
 for _module in _LOAD_ORDER:
     _importlib.import_module(f"{__name__}.{_module}")
@@ -37,6 +37,7 @@ from .catalog import Catalog, Tool, bound_tool, resource, tool  # noqa: E402
 from .combines import join, stack, zip_  # noqa: E402
 from .kernel import Kernel  # noqa: E402
 from .errors import PayloadError, ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402
+from .formula import FormulaError, formula  # noqa: E402
 from .modifiers import mod  # noqa: E402
 from .operation import Operation, op  # noqa: E402
 from .output import Output  # noqa: E402
@@ -48,7 +49,7 @@ from .values import Secret  # noqa: E402
 
 __all__ = [
     "Catalog", "Kernel", "Tool", "tool", "resource", "bound_tool", "Secret",
-    "mod", "wf", "res", "rows", "cols", "row", "join", "stack", "zip_",
+    "mod", "wf", "res", "rows", "cols", "row", "join", "stack", "zip_", "formula", "FormulaError",
     "Operation", "op", "Step", "StepStatus", "Output", "Problem",
     "StepFailed", "SelectionError", "ResourceNotLoaded", "PayloadError",
     "ResourceSpec", "StepSpec", "WorkflowSpec", "CatalogSpec", "KernelSpec", "Naming",

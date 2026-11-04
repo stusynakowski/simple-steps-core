@@ -592,6 +592,13 @@ def ch12():
     lesson("Y2", "loaded and run: the same data, the same id",
            (k2.step("f").data["value"].tolist(), k2.id == k.id), ([98.6, 101.3, 98.4], True))
     lesson("Y3", "extras survive and aren't hashed", k2.step("f").extras, {"simple_steps.ui": {"color": "red"}})
+    from simple_steps_core import formula
+    k3 = Kernel(CATALOG)
+    for s in k.steps:
+        k3[s.name] = formula(s.formula)
+    lesson("Y5", "formula(text) reads each step's formula back as the same step (EX13)",
+           [s.spec.operation for s in k3.steps], [s.spec.operation for s in k.steps],
+           "a formula carries no extras: they're the app's, kept on the step")
     cell = k.cell("f", 1)
     lesson("Y4", "a cell says what it was computed from", cell["inputs"][0]["values"], {"temp": 38.5})
 
