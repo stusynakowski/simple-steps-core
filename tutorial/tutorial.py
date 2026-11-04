@@ -305,8 +305,8 @@ def ch4():
     lesson("V10", "a setting that does nothing is refused (map axis='columns')",
            s.state, "invalid", "accepted and ignored: runs by rows. Remove the setting?")
     s = put(k, "wh", to_f[mod.map(where=cols["temp"] > 37)](wf["v"]))
-    lesson("V11", "map(where=…) takes a tool, not a condition", s.state, "invalid",
-           "keep map(where=, replace=)? It overlaps filter + join", open_=True)
+    lesson("V11", "map takes no where=: a filter, then a join, says it (EX4)",
+           [p.code for p in s.problems][:1], ["unknown_setting"])
 
 
 # ── 5. reshapes: no tool ─────────────────────────────────────────────────

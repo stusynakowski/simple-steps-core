@@ -142,8 +142,8 @@ _NOT_PRESENT = _NotPresent()
 
 
 def first_present(value=_NOT_PRESENT, default=None):
-    """*value*, or *default* where it is ``absent`` (a row ``map(where=…)``
-    skipped, a gap from ``stack`` or ``join``): the "else" of a condition.
+    """*value*, or *default* where it is ``absent`` (a key a record lacked, a
+    gap from ``stack`` or ``join``).
     A ``None`` value is present: it is kept."""
     return default if value is _NOT_PRESENT else value
 

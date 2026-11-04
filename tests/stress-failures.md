@@ -60,3 +60,16 @@ chain=[(42, 0, 0, 0),
 (44, 2, 0, 2)],
 )
 ```
+
+## 2026-11-03 · `test_L40_reshaping_is_closed` · at `1a9f58e`
+
+- **Broke:** TypeError: Workflow._first_param() takes 1 positional argument but 2 were given
+- **Status:** open
+
+```
+test_L40_reshaping_is_closed(
+frame=   k     n  tags rec
+0  A  <NA>  None  {},
+chain=[(428, 0, 0, 0)],
+)
+```

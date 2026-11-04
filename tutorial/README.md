@@ -3,7 +3,7 @@
 > A walkthrough of what the library is for, what it refuses to do, and why,
 > one part at a time. Every claim is a lesson in [tutorial.py](tutorial.py),
 > run against the code: `.venv/bin/python tutorial/tutorial.py`. Written
-> 2026-11-03: 114 lessons, **98 ✓ · 13 ✗ · 3 ?**. What the app
+> 2026-11-03: 114 lessons, **99 ✓ · 13 ✗ · 2 ?**. What the app
 > asked for is checked by [handover.py](handover.py) (§5), and everything at
 > once by `scripts/sweep.py` (§6). The rules in full are in
 > [docs/design/model.md](../docs/design/model.md).
@@ -124,7 +124,7 @@ something.
 - ✗ V1b: one output column is named `value`, not after its step. Planned S4 (D9). This is what breaks A10.
 - ✗ **V8b, decided but not built:** a bare `hot(wf["v"])` (`-> bool`) is inferred as a `filter` and drops rows. D20b (2026-11-02) decided `auto` never filters.
 - ✓ **V10, fixed 2026-11-03:** `mod.map(axis="columns")` was accepted and ignored: the guard that raised `NotImplementedError` came after the branch that hands a step's data on, so it never ran. `axis` is removed (EX4); it's refused as an unknown setting.
-- ? V11: `map(where=, replace=)` takes a tool that returns `bool`. It overlaps `filter` followed by `join`. Keep it?
+- ✓ V11, decided and done 2026-11-03: `map(where=, replace=)` is removed (EX4); a `filter`, then a `join`, says the same. `expand`'s `replace=`, which did nothing, went with it.
 
 ### 2.5 Reshapes with no tool (R)
 
@@ -218,7 +218,7 @@ behaviour, so each needs your yes before it lands.
 | | Question |
 |---|---|
 | D11 | Refuse a bare Python function assigned as a value? |
-| V11 | Keep `map(where=, replace=)`, or leave that to `filter` and `join`? |
+| V11 | Keep `map(where=, replace=)`? | **removed 2026-11-03** (EX4) |
 | C11 | Must every input to a combine or tool be a named step? |
 | F7 | One way to write each thing? Today a reshape has three spellings: `mod.sort(by=…)(wf[…])`, `op("identity")[mod.sort(by=…)](wf[…])`, and `examples/all_orchestrations`' `mod.sort(over=wf[…], by=…)` |
 
@@ -279,7 +279,7 @@ core-asks probe (`--stress` adds the property test at 2,000 examples). Run
 | Suite | Result |
 |---|---|
 | tests | 783 passed, 1 skipped, 27 xfailed |
-| tutorial.py | 114 lessons: 98 ✓ · 13 ✗ · 3 ? |
+| tutorial.py | 114 lessons: 99 ✓ · 13 ✗ · 2 ? |
 | handover.py | 59 checks: 51 ✓ · 6 ✗ · 2 ? |
 | both examples | run |
 | core_asks.py | 36 of 39 done |

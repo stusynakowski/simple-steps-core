@@ -1,13 +1,12 @@
-"""Applying a tool on a condition, `map(where=…)`, and its "else",
-`first_present` (docs/design/syntax-review.md); and a single cell
-broadcasting like a literal (§3.1 rule 4)."""
+"""Filling an absent cell, `first_present`; `map(where=…)`, removed; and a
+single cell broadcasting like a literal (§3.1 rule 4)."""
 
 from __future__ import annotations
 
 import pandas as pd
 import pytest
 
-from simple_steps_core import Catalog, Kernel, cols, mod, op, tool, wf
+from simple_steps_core import Catalog, Kernel, cols, join, mod, op, tool, wf
 
 
 @tool
@@ -21,23 +20,13 @@ def config_w() -> pd.DataFrame:
 
 
 @tool
-def is_hot_w(temp: float) -> bool:
-    return temp > 38
-
-
-@tool
-def label_w(temp: float) -> str:
-    return "hot" if temp > 38 else "ok"
-
-
-@tool
-def nothing_w(temp: float) -> float | None:
-    return None
-
-
-@tool
 def to_f_w(temp: float) -> float:
     return round(temp * 1.8 + 32, 2)
+
+
+@tool
+def is_hot_w(temp: float) -> bool:
+    return temp > 38
 
 
 @tool
@@ -45,15 +34,7 @@ def above_w(temp: float, limit: float) -> bool:
     return temp > limit
 
 
-@tool
-def shaky_w(temp: float) -> bool:
-    if temp > 39:
-        raise ValueError("too hot to test")
-    return temp > 38
-
-
-CAT = Catalog(tools=[patients_w, config_w, is_hot_w, label_w, nothing_w, to_f_w,
-                     above_w, shaky_w])
+CAT = Catalog(tools=[patients_w, config_w, to_f_w, is_hot_w, above_w])
 
 
 @pytest.fixture
@@ -63,74 +44,21 @@ def k():
     return k
 
 
-def test_where_runs_the_tool_only_where_the_test_holds(k):
+def test_map_takes_no_where(k):
+    # EX4 (owner, 2026-11-03): a filter, then a join, says the same thing.
     k["f"] = to_f_w[mod.map(where=is_hot_w)](wf["p"])
-    k.run_all()
-    out = k.step("f").output
-    assert k.step("f").data["value"].tolist()[1:] == [100.76, 102.38]
-    assert out.absent_cells() == {(0, "value")}            # Ann: not run, so absent
-    assert list(k.step("f").data.index) == [0, 1, 2]       # every row kept, aligned with p
+    assert "map takes no parameter 'where'" in str(k.step("f").problems[0])
 
 
-def test_the_skipped_rows_are_absent_not_none(k):
-    k["f"] = to_f_w[mod.map(where=is_hot_w)](wf["p"])
-    k.run_all()
-    cells = [r["cells"]["value"]["state"] for r in k.view("f")["rows"]]
-    assert cells == ["absent", "known", "known"]
-
-
-def test_else_fills_only_the_skipped_rows(k):
-    k["f"] = to_f_w[mod.map(where=is_hot_w)](wf["p"])
-    k["out"] = op("first_present")[mod.map()](wf["f"], default=wf["p"][cols["temp"]])
-    k.run_all()
-    assert k.step("out").data["value"].tolist() == [36.6, 100.76, 102.38]
-
-
-def test_else_keeps_a_none_the_tool_returned(k):
-    k["n"] = nothing_w[mod.map(where=is_hot_w)](wf["p"])
-    k["out"] = op("first_present")[mod.map()](wf["n"], default=wf["p"][cols["temp"]])
+def test_first_present_fills_a_gap_and_keeps_a_none(k):
+    # A left join leaves Cy's score absent; Ben's None is a value, kept.
+    k["s"] = pd.DataFrame({"name": ["Ann", "Ben"], "score": [1.0, None]})
+    k["j"] = join(wf["p"], wf["s"], on="name", how="left")
+    k["v"] = mod.rename(columns={"score": "value"})(wf["j"])     # value binds by name
+    k["out"] = op("first_present")[mod.map()](wf["v"], default=0.0)
     k.run_all()
     values = k.step("out").data["value"].tolist()
-    assert values[0] == 36.6                               # absent: filled
-    assert all(pd.isna(v) for v in values[1:])             # None: a value, kept
-
-
-def test_where_saves_reloads_and_prints_as_written(k):
-    k["f"] = to_f_w[mod.map(where=is_hot_w)](wf["p"])
-    assert k.step("f").formula == 'to_f_w[mod.map(where=is_hot_w)](wf["p"])'
-    loaded = Kernel.from_json(k.to_json(), CAT)
-    assert loaded.spec == k.spec and loaded.step("f").formula == k.step("f").formula
-
-
-def test_where_takes_only_a_test(k):
-    k["a"] = to_f_w[mod.map(where=label_w)](wf["p"])
-    assert "returning bool" in str(k.step("a").problems[0])
-    k["b"] = to_f_w[mod.map(where=38)](wf["p"])
-    assert "takes a tool that returns bool" in str(k.step("b").problems[0])
-
-
-def test_a_test_that_raises_fails_its_row_and_says_where(k):
-    """Like any failure nothing catches, it stops the run; the note says the
-    test failed (`where: where`), not the tool. The other rows ran."""
-    from simple_steps_core import StepFailed
-    k["f"] = to_f_w[mod.map(where=shaky_w)](wf["p"])
-    with pytest.raises(StepFailed, match="where: ValueError: too hot to test"):
-        k.run_all()
-    notes = k.step("f").output.notes
-    assert notes[2]["where"] == "where"
-    assert k.step("f").data["value"].tolist()[1] == 100.76
-
-
-def test_a_change_to_a_column_the_test_reads_makes_the_step_stale():
-    k = Kernel(CAT)
-    k["raw"] = [{"name": "Ann", "temp": 36.6}, {"name": "Ben", "temp": 38.2}]
-    k["e"] = mod.expand()(wf["raw"])
-    k["p"] = mod.widen()(wf["e"])
-    k["f"] = to_f_w[mod.map(where=is_hot_w)](wf["p"])
-    k.run_all()
-    k["raw"] = [{"name": "Ann", "temp": 38.6}, {"name": "Ben", "temp": 38.2}]
-    k.run("e"), k.run("p")
-    assert k.workflow.stale_rows("f") == ["0.0"]           # Ann now passes the test
+    assert values[0] == 1.0 and pd.isna(values[1]) and values[2] == 0.0
 
 
 # ── a single cell broadcasts like a literal ─────────────────────────────

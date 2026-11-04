@@ -1773,30 +1773,7 @@ class Workflow:
             return [c for c in columns if c not in op_.arguments]      # the whole row
         bound = [p.name for p in parameters
                  if p.name in columns and p.name not in op_.arguments]
-        # A `where=` test reads its columns too: a change there changes which
-        # rows run.
-        for test in self._where_tests(op_):
-            try:
-                names = list(_signature(test).parameters)
-            except (TypeError, ValueError):
-                continue
-            bound += [n for n in names if n in columns and n not in bound]
         return bound
-
-    def _where_tests(self, op_: Operation) -> list:
-        """The functions of the step's ``map(where=…)`` tests."""
-        out = []
-        for m in op_.modifiers:
-            test = m.settings.get("where") if m.kind == "map" else None
-            if test is None:
-                continue
-            if isinstance(test, ToolRef):
-                test = (self.catalog.functions.get(test.id) if self.catalog is not None
-                        else BUILTIN_TOOLS.get(test.id))
-            test = getattr(test, "fn", test)
-            if test is not None:
-                out.append(test)
-        return out
 
     @staticmethod
     def _first_param(op_: Operation) -> str | None:
