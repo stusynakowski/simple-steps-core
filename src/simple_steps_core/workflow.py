@@ -2442,13 +2442,17 @@ class Workflow:
         return None
 
     # ── running ──────────────────────────────────────────────────────────
-    def pending(self, step_id: str) -> list[str]:
+    def pending(self, step_id: str, _seen: set[str] | None = None) -> list[str]:
         """The steps *step_id* reads that have not run yet, nearest first."""
+        seen = {step_id} if _seen is None else _seen
         waiting: list[str] = []
         for name in dict.fromkeys(str(r) for r in self.steps[step_id].operation.reads):
             upstream = self.steps.get(name)
+            if name in seen:
+                continue                      # a step reading itself, or a cycle: invalid
+            seen.add(name)
             if upstream is not None and upstream.output.meta.get("staged"):
-                waiting.extend(self.pending(name))
+                waiting.extend(self.pending(name, seen))
                 waiting.append(name)
         return list(dict.fromkeys(waiting))   # once each: an input and a column of it
 
@@ -2915,7 +2919,9 @@ class Workflow:
         a failed row the steps after it are blocked on.
         """
         done: set[str] = set()
-        remaining = [sid for sid, st in self.steps.items() if st.valid]
+        # every step, each asked when it is reached: one invalid now may be
+        # valid once a step before it runs (a check against its new rows)
+        remaining = list(self.steps)
         while remaining:
             due = set(remaining) - done
             ready = [sid for sid in remaining
@@ -2924,8 +2930,13 @@ class Workflow:
                      # time, including collapse(by="#s")'s s: a reader never
                      # runs on an output about to change
                      and not any(d in due for d in self._depends_on(sid))]
-            if not ready:                    # only reachable if a cycle slipped through
-                raise ValueError(
+            if not ready:
+                stuck = [sid for sid in remaining if not self.steps[sid].valid]
+                if stuck:                    # left reporting their problems, not run
+                    done.update(stuck)
+                    remaining = [sid for sid in remaining if sid not in done]
+                    continue
+                raise ValueError(            # only reachable if a cycle slipped through
                     f"cannot order {remaining!r}: something reads a step that never runs"
                 )
             for step_id in ready:

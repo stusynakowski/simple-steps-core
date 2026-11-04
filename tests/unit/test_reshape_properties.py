@@ -369,6 +369,12 @@ def test_L40b_a_saved_workflow_runs_the_same(frame, chain):
 @pytest.mark.no_invariants
 @SETTINGS
 @given(grids(), grids(), chains())
+# a step invalid when run_all started (its input still showing old rows)
+# was never run once that input re-ran (found at STRESS=2000)
+@example(frame=pd.DataFrame({"k": ["A"], "n": pd.array([pd.NA], dtype="Int64"), "tags": [None], "rec": [{}]}),
+         changed=pd.DataFrame({"k": ["A"], "n": pd.array([pd.NA], dtype="Int64"), "tags": [None], "rec": [{}]},
+                              index=["a"]),
+         chain=[(0, 0, 0, 0), (698, 1, 0, 0), (0, 32, 0, 0)])
 # a pick that had no rows yet, and a collapse grouped by it: after the edit the
 # pick stayed invalid and the collapse ran anyway (found at STRESS=1)
 @example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
@@ -502,6 +508,12 @@ def test_L40d_undo_is_free(frame, changed, chain, which, other):
 # and a blank plan in the other (found by ST8 at STRESS=1)
 @example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]), changed=pd.DataFrame({"k": ["A"], "n": [pd.NA], "tags": [None], "rec": [{}]}),
          chain=[(0, 0, 0, 0), (257, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)], which=1, other=142)
+# a step re-declared to read itself, asked by run_all once it asks every
+# step, sent pending() round itself forever (found at STRESS=1)
+@example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
+         changed=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
+         chain=[(262, 0, 0, 0), (0, 1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 220, 0, 0)],
+         which=3, other=7)
 # a binding core wrote named the workflow it was written in, so the same
 # expression in another kernel read "a different Workflow" (found by S3)
 @example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),

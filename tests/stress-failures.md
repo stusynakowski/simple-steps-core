@@ -603,3 +603,61 @@ which=16,
 other=48,
 )
 ```
+
+## 2026-11-04 · `test_L40e_the_order_of_edits_doesnt_matter` · at `6b23bf4`
+
+- **Broke:** ValueError: cannot order ['s3_p', 's3_r', 's3']: something reads a step that never runs
+- **Status:** fixed: an intermediate state of the run_all change, which kept invalid steps waiting forever; steps still invalid when nothing else can run are now left reporting their problems
+
+```
+no example printed
+```
+
+## 2026-11-04 · `test_L40e_the_order_of_edits_doesnt_matter` · at `6b23bf4`
+
+- **Broke:** ValueError: cannot order ['s3_p', 's3_r', 's3']: something reads a step that never runs
+- **Status:** fixed: an intermediate state of the run_all change, which kept invalid steps waiting forever; steps still invalid when nothing else can run are now left reporting their problems
+
+```
+no example printed
+```
+
+## 2026-11-04 · `test_L40c_an_edit_then_a_rerun_matches_a_fresh_run` · at `004eb32` · STRESS=2000
+
+- **Broke:** AssertionError: ('edited', 's3', 'lineage'), and s3's `rec` differed (found by the final 2,000-example run, in a clean copy of HEAD)
+- **Status:** fixed: `run_all` chose its steps from those valid when it started, so a step invalid then (its input still showing its old rows) never ran after that input re-ran; now each step is asked when it's reached, and steps still invalid when nothing else can run are left reporting their problems. Pinned in L40c
+
+```
+test_L40c_an_edit_then_a_rerun_matches_a_fresh_run(
+frame=   k     n  tags rec
+0  A  <NA>  None  {},
+changed=   k     n  tags rec
+a  A  <NA>  None  {},
+chain=[(0, 0, 0, 0), (698, 1, 0, 0), (0, 32, 0, 0)],
+)
+```
+
+## 2026-11-04 · `test_L40e_the_order_of_edits_doesnt_matter` · at `6b23bf4` · STRESS=1
+
+- **Broke:** RecursionError: maximum recursion depth exceeded
+- **Status:** fixed: run_all now asks every step, and pending() went round a step that reads itself forever; it skips a step it has visited. Pinned in L40e
+
+```
+test_L40e_the_order_of_edits_doesnt_matter(
+# The test always failed when commented parts were varied together.
+frame=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],  # or any other generated value
+changed=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],  # or any other generated value
+chain=[(262, 0, 0, 0),
+(0, 1, 0, 0),
+(0, 0, 0, 0),
+(0, 0, 0, 0),
+(0, 0, 0, 0),
+(0, 220, 0, 0)],
+which=3,
+other=7,
+)
+```
