@@ -595,9 +595,10 @@ def _bind_positional(operation: "Operation", source: Any, values: tuple,
     workflow = getattr(source, "workflow", None)
     step = workflow.steps.get(source.id) if workflow is not None and isinstance(source, StepRef) else None
     if step is not None:
-        columns = set(predicted_columns(step.output))
+        basis = workflow.basis(source.id)
+        columns = set(predicted_columns(basis))
         free_for_values = [p for p in free if p.name not in columns]
-        if columns_unknown(step.output) and free_for_values == free and free:
+        if columns_unknown(basis) and free_for_values == free and free:
             free_for_values = free[1:]
     else:
         free_for_values = free[1:]

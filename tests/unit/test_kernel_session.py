@@ -203,13 +203,69 @@ def test_editing_an_input_warns_a_reader_at_once_that_it_will_break(k13):
     f = k13.step("f")
     assert f.problems == ()                          # it can still run on what sick shows
     assert [(w.code, w.severity, w.step) for w in f.warnings] == [
-        ("column_will_be_missing", "warning", "f")]
-    assert "needs 'temp_c' from 'sick', which its edited formula won't produce" in f.warnings[0]
+        ("likely_missing_column", "warning", "f")]
+    assert "expects 'temp_c' from 'sick', which is predicted to produce (value)" in f.warnings[0]
     k13.run("sick")                                  # the warning becomes the problem
     assert [p.code for p in k13.step("f").problems] == ["missing_column"]
     assert k13.step("f").warnings == ()
 
 
-def test_an_edit_that_keeps_the_column_warns_nothing(k13):
+def test_an_edit_that_keeps_the_column_warns_as_before_any_run(k13):
+    # PL: an edited input is planned again, so its reader is told what a
+    # reader of a step that never ran is told (005 C), nothing more
     k13["sick"] = feverish_i[mod.filter()](wf["p"], limit=37)
-    assert [w.code for w in k13.step("f").warnings] == []
+    assert [w.code for w in k13.step("f").warnings] == ["unconfirmed_column"]
+
+
+# ── PL: a step is checked against its inputs' plans, never what they show ──
+def test_a_reader_is_checked_against_what_an_edited_input_will_produce(k13):
+    k13["sick"] = label_i[mod.map()](wf["p"])        # will give value, shows temp_c
+    k13["s"] = mod.sort(by="value")(wf["sick"])
+    assert k13.step("s").problems == () and k13.step("s").state == "staged"
+    k13["t"] = mod.sort(by="temp_c")(wf["sick"])     # shown, but won't be produced
+    assert [p.code for p in k13.step("t").problems] == ["missing_setting"]
+    assert "(it has value)" in k13.step("t").problems[0]
+    k13.run("s")                                     # runs sick first (C9)
+    assert k13.step("s").state == "completed"
+
+
+def test_a_reader_declared_before_the_edit_is_checked_again_against_the_plan(k13):
+    k13["s"] = mod.sort(by="value")(wf["sick"])      # sick has no value yet
+    assert [p.code for p in k13.step("s").problems] == ["missing_setting"]
+    k13["sick"] = label_i[mod.map()](wf["p"])        # now it will
+    assert k13.step("s").problems == ()
+    k13["sick"] = feverish_i[mod.filter()](wf["p"])  # put back: shows its result
+    assert [p.code for p in k13.step("s").problems] == ["missing_setting"]
+
+
+def test_an_edit_plans_its_readers_again_in_either_order(k13):
+    # s's problems don't change, its plan does: u, after it, must see that
+    def states(edit_first):
+        k = Kernel(Catalog(tools=[patients_i, to_f_i, feverish_i, label_i]))
+        k["p"] = patients_i[mod.source()]()
+        k["sick"] = feverish_i[mod.filter()](wf["p"])
+        k.run_all()
+        edit = lambda: k.__setitem__("sick", mod.select(columns=["name"])(wf["p"]))
+        edit_first and edit()
+        k["s"] = mod.sort(by="name")(wf["sick"])
+        k["u"] = mod.select(columns=["temp_c"])(wf["s"])
+        edit_first or edit()
+        return [(k.step(n).state, [p.code for p in k.step(n).problems]) for n in ("s", "u")]
+    assert states(True) == states(False) == [("staged", []), ("invalid", ["missing_setting"])]
+
+
+def test_a_chain_of_edited_steps_is_planned_once_each():
+    # each plan reads its input's plan: made again on every ask, a chain of
+    # n edited steps took 4^n (40 steps: forever); made once, it is linear
+    import time
+    k = Kernel(Catalog(tools=[]))
+    k["p"] = pd.DataFrame({"a": [3, 1, 2], "b": [1, 2, 3]})
+    for i in range(30):
+        k[f"s{i}"] = mod.sort(by="a")(wf["p" if i == 0 else f"s{i - 1}"])
+    k.run_all()
+    start = time.perf_counter()
+    for i in range(30):
+        k[f"s{i}"] = mod.sort(by="b")(wf["p" if i == 0 else f"s{i - 1}"])
+    k["r"] = mod.sort(by="a")(wf["s29"])
+    assert time.perf_counter() - start < 10
+    assert k.step("r").state == "staged"

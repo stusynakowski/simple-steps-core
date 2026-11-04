@@ -431,7 +431,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             keys = [on] if isinstance(on, str) else list(on or [])
             keys = [key for key in keys if not is_id_column(key)]     # lineage: checked at run (S5e)
             for g in operation.grids:
-                if str(g) not in workflow.steps or columns_unknown(workflow.steps[str(g)].output):
+                if str(g) not in workflow.steps or columns_unknown(workflow.basis(str(g))):
                     continue
                 have = workflow._predicted_of(str(g))
                 lacking = [key for key in keys if key not in have]
@@ -443,7 +443,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             for g in operation.grids:
                 picked = g.columns.get("names") if isinstance(getattr(g, "columns", None), dict) else None
                 if picked is None and workflow is not None and str(g) in workflow.steps \
-                        and not columns_unknown(workflow.steps[str(g)].output):
+                        and not columns_unknown(workflow.basis(str(g))):
                     picked = workflow._predicted_of(str(g))
                 said = f"stack reads {_src(g)}"
                 if picked and not variables(picked) and not any(x.startswith(said) for x in problems
@@ -815,11 +815,11 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             # 008 C7: a selection's shape is known from how it is written; a
             # whole step's only once it holds data.
             kind = _selection_kind(value)
-            step = workflow.steps.get(value.id)
-            if kind is None and (step is None or step.output.meta.get("staged")):
+            basis = workflow.basis(value.id)
+            if kind is None and (basis is None or basis.meta.get("staged")):
                 continue
             if kind is None:
-                kind = _shape_kind(step.output.data)
+                kind = _shape_kind(basis.data)
             problem = _shape_problem(kind, annotations[name], name, value.id)
             if problem:
                 problems.append(problem)
@@ -847,13 +847,14 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             step = workflow.steps.get(ref.id)
             if step is None or not step.valid:
                 continue                      # reported as a reference problem
-            if step.output.meta.get("staged"):
-                if columns_unknown(step.output) or ref.columns is None:
+            basis = workflow.basis(ref.id)
+            if basis.meta.get("staged"):
+                if columns_unknown(basis) or ref.columns is None:
                     continue
-                frame = pd.DataFrame(columns=predicted_columns(step.output))
+                frame = pd.DataFrame(columns=predicted_columns(basis))
                 row_sel = None                # row count not known yet
             else:
-                frame, row_sel = step.output.data, workflow._with_lineage(ref.rows, ref.id)
+                frame, row_sel = basis.data, workflow._with_lineage(ref.rows, ref.id)
             try:
                 _apply_selection(frame, row_sel, ref.columns, ref.id)
             except SelectionError as exc:
@@ -1016,25 +1017,10 @@ def _column_warnings(operation: Operation, workflow: "Workflow | None" = None,
                 f"{verb.kind} writes {written!r} over the {written!r} column "
                 f"{str(operation.input)!r} already has; name the output "
                 f"(name=…) to keep both, or say replace=True to silence this")
-    upstream = workflow.steps.get(str(operation.input))
-    # G13: an input that was edited but hasn't re-run still shows its old
-    # output, which this step may run on; say now if its new formula won't
-    # give a column this step needs. Only when the new columns are known.
-    if upstream is not None and upstream.output.meta.get("edited"):
-        planned = (upstream.output.meta.get("next_plan") or {}).get("columns") or {}
-        if planned.get("certainty") in ("exact", "stated") and not planned.get("more"):
-            names = list(planned.get("names") or [])
-            needed = _required_columns(operation, verb)
-            gone = [r for r in needed if r not in set(names) | set(operation.arguments)]
-            if gone:
-                up_ = str(operation.input)
-                notes.append(
-                    f"needs {', '.join(map(repr, gone))} from {up_!r}, which its "
-                    f"edited formula won't produce (it will give "
-                    f"{', '.join(names) or 'no columns'}); this fails once "
-                    f"{up_!r} re-runs")
-    # Only predict while the upstream is staged; once it runs, `check` is exact.
-    if upstream is None or not upstream.output.meta.get("staged"):
+    # Only predict while the input's plan is staged (its expression new or
+    # unrun, PL); once that expression runs, `check` is exact.
+    upstream = workflow._basis_of_input(operation)
+    if upstream is None or not upstream.meta.get("staged"):
         return _warnings(notes, step_id)
     fn = operation.fn \
         or BUILTIN_TOOLS.get(operation.tool)
@@ -1049,7 +1035,7 @@ def _column_warnings(operation: Operation, workflow: "Workflow | None" = None,
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
         return _warnings(notes, step_id)                       # takes the whole row; nothing to expect
     parameters = _tool_parameters(verb.kind, fn, parameters)   # not an accumulator or grid
-    predicted = set(rows(upstream.output).columns) | set(operation.arguments)
+    predicted = set(rows(upstream).columns) | set(operation.arguments)
     required = [p.name for p in parameters
                 if p.default is inspect.Parameter.empty
                 and p.kind is not inspect.Parameter.VAR_POSITIONAL]
@@ -1220,32 +1206,10 @@ def _paired_arguments(operation: Operation, workflow: "Workflow | None") -> dict
             and name in annotations and _wants(annotations[name]) != "frame"}
 
 
-def _required_columns(operation: Operation, verb: Any) -> list[str]:
-    """The columns a row-wise step's tool needs from its input: parameters with
-    no default and no bound argument. Empty when it can't tell."""
-    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool)
-    if isinstance(fn, Tool):
-        fn = fn.fn
-    if fn is None:
-        return []
-    try:
-        parameters = list(inspect.signature(fn).parameters.values())
-    except (TypeError, ValueError):
-        return []
-    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
-        return []
-    parameters = _tool_parameters(verb.kind, fn, parameters)
-    return [p.name for p in parameters
-            if p.default is inspect.Parameter.empty
-            and p.kind is not inspect.Parameter.VAR_POSITIONAL
-            and p.name not in operation.arguments]
-
-
 #: How a warning's message says which kind it is.
 _WARNING_KINDS = (
     ("is written before", "modifier_order"),
     ("the column will be", "default_type"),
-    ("edited formula won't produce", "column_will_be_missing"),
     ("isn't a named parameter", "unchecked_argument"),
     ("are positions", "rows_by_position"),
     ("column of", "argument_overrides_column"),
@@ -1284,7 +1248,7 @@ def _missing_columns(operation: Operation, fn: Callable,
     if verb is None or verb.kind in ("source", "sweep"):
         return []                       # nothing upstream, or rows it generates
 
-    upstream = workflow._input_for(operation)
+    upstream = workflow._checked_input(operation)
     if upstream is None:
         return []
 
@@ -1379,7 +1343,7 @@ def _type_mismatches(operation: Operation, fn: Callable,
         return problems
     if verb.kind == "collapse" and reducer_form(fn) == "group":
         return problems + _group_function_types(operation, fn, verb.settings.get("by"))
-    upstream = workflow._input_for(operation)
+    upstream = workflow._checked_input(operation)
     if upstream is None:
         # 008 C5: before the input runs, check against the types it declares
         # (a source's schema, mod.expect, or a tool's return annotation).
@@ -1808,7 +1772,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         rule = "per_group"
     by_step = workflow._groups_by_step_of(operation) if workflow is not None else None
     if by_step is not None and by_step[1] in workflow.steps:
-        s_out = workflow.steps[by_step[1]].output       # one row per row of s (J-D5)
+        s_out = workflow.basis(by_step[1])              # one row per row of s (J-D5)
         if not s_out.meta.get("staged") or s_out.meta.get("expected") is not None:
             rule = "groups_of"
     elif kind == "sweep":
@@ -1828,7 +1792,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     elif rule == "selected":
         index, expected = _selected_index(verb, operation, workflow, known)
     elif rule == "groups_of":
-        s_out = workflow.steps[by_step[1]].output
+        s_out = workflow.basis(by_step[1])
         index = list(s_out.data.index)
         expected = len(index) if not s_out.meta.get("staged") else s_out.meta.get("expected")
     elif rule == "same" and known is not None:

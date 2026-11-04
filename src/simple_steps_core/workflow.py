@@ -46,6 +46,9 @@ class Workflow:
         self.store: dict[str, Output] = {}
         #: Each step's keys in the store, oldest first; the last is its newest.
         self.kept: dict[str, list[str]] = {}
+        #: The plan of each step with a new, unrun expression (PL), with what
+        #: it was made from; made again when any of that is another object.
+        self._plans: dict[str, tuple] = {}
 
     # ── resources ────────────────────────────────────────────────────────
     def define(self, name: str, type_: type, /, **settings: Any) -> ResRef:
@@ -265,6 +268,9 @@ class Workflow:
         if existed:
             self._mark_stale_dependents(step_id)
             self._recheck_downstream(step_id)
+            # its readers are checked against its new plan (PL), and a reader
+            # not yet run is planned again on it, whatever the order of edits
+            self._restage_after(step_id)
             # What reads this step may need what its new formula won't give.
             for sid, st in self.steps.items():
                 if step_id in st.operation.reads:
@@ -893,35 +899,58 @@ class Workflow:
         return {k for k, h in zip(now.index, now.to_numpy()) if by_str[str(k)] != h}
 
     # ── what a step reads ────────────────────────────────────────────────
+    def basis(self, step_id: str) -> Output | None:
+        """What a reader of *step_id* is checked against: its plan (PL).
+
+        A step whose expression ran shows that result, and the result is its
+        plan made exact. A step with a new expression not yet run shows its
+        last result, for display only: readers are checked against what the
+        new expression will produce, so a state never hangs on the order of
+        the edits (L40e). None when there is no such step."""
+        step = self.steps.get(step_id)
+        if step is None or not step.output.meta.get("edited"):
+            return None if step is None else step.output
+        # Made once: planning a step asks for its inputs' plans many times,
+        # and a chain of edited steps would plan each again for every ask.
+        place = list(self.steps).index(step_id)
+        made_from = (step.operation, step.problems, self.catalog,
+                     *self.resources.values(),
+                     *(self.basis(d) for d in self._depends_on(step_id)
+                       if d in self.steps and list(self.steps).index(d) < place))
+        kept = self._plans.get(step_id)
+        if kept is not None and len(kept[0]) == len(made_from) \
+                and all(a is b for a, b in zip(kept[0], made_from)):
+            return kept[1]
+        plan = stage(step.operation, self, step.problems, step_id)
+        self._plans[step_id] = (made_from, plan)
+        return plan
+
+    def _basis_of_input(self, operation: Operation) -> Output | None:
+        return None if operation.input is None else self.basis(str(operation.input))
+
     def _known_columns(self, operation: Operation) -> list[str]:
         """The columns this operation's input will have, in order, as far as known."""
-        if operation.input is None:
-            return []
-        step = self.steps.get(str(operation.input))
-        return [] if step is None else predicted_columns(step.output)
+        basis = self._basis_of_input(operation)
+        return [] if basis is None else predicted_columns(basis)
 
     def _columns_open(self, operation: Operation) -> bool:
         """Might this operation's input have columns not predicted yet? (008 K1)"""
-        if operation.input is None:
-            return False
-        step = self.steps.get(str(operation.input))
-        return step is not None and columns_unknown(step.output)
+        basis = self._basis_of_input(operation)
+        return basis is not None and columns_unknown(basis)
 
     def _predicted_of(self, step_id: str) -> list:
         """The columns a step is known to have (or will have), [] when it doesn't exist."""
         step = self.steps.get(step_id)
-        return [] if step is None or not step.valid else predicted_columns(step.output)
+        return [] if step is None or not step.valid else predicted_columns(self.basis(step_id))
 
     def _column_types(self, operation: Operation) -> dict:
         """Column → Python type of this operation's input, as far as known."""
-        if operation.input is None:
+        basis = self._basis_of_input(operation)
+        if basis is None:
             return {}
-        step = self.steps.get(str(operation.input))
-        if step is None:
-            return {}
-        if not step.output.meta.get("staged"):
-            return {c: _dtype_type(step.output.data[c]) for c in step.output.data.columns}
-        return dict(step.output.meta.get("column_types") or {})
+        if not basis.meta.get("staged"):
+            return {c: _dtype_type(basis.data[c]) for c in basis.data.columns}
+        return dict(basis.meta.get("column_types") or {})
 
     def _known_index(self, operation: Operation) -> Sequence[Any] | None:
         """The input's index, when known — enough to stage, short of running.
@@ -935,8 +964,9 @@ class Workflow:
         step = self.steps.get(str(operation.input))
         if step is None or not step.valid:
             return None
-        index = step.output.data.index
-        return index if len(index) or not step.output.meta.get("staged") else None
+        basis = self.basis(step.name)
+        index = basis.data.index
+        return index if len(index) or not basis.meta.get("staged") else None
 
     def _with_paired_columns(self, source: Output, paired: dict) -> Output:
         """*source* with each paired argument as a column, row by row by id
@@ -976,12 +1006,20 @@ class Workflow:
         step.output.meta["name"] = step.name
         return step.output
 
+    def _checked_input(self, operation: Operation) -> Output | None:
+        """The input's result a check reads: its plan made exact, once it has
+        run its expression; None while that is only planned (PL)."""
+        basis = self._basis_of_input(operation)
+        if basis is None or basis.meta.get("staged"):
+            return None
+        return self._input_for(operation)
+
     def _value_if_known(self, ref: StepRef) -> Any:
         """The value a reference will resolve to, if its step holds data now."""
-        step = self.steps.get(ref.id)
-        if step is None or step.output.meta.get("staged"):
+        basis = self.basis(ref.id)
+        if basis is None or basis.meta.get("staged"):
             return _UNKNOWN
-        return _ref_value(step.output.data, None, ref.id)
+        return _ref_value(basis.data, None, ref.id)
 
     # ── what the UI draws: a step's grid, known unknowns included (009 §4) ──
     def preview(self, step_id: str, rows: tuple[int, int] | None = None) -> dict:

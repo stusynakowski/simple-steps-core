@@ -60,8 +60,11 @@ your data and never matches rows by position.
 
 **10. An edit is checked at once; a run is on request.** Editing a step
 re-checks everything after it straight away: a step that can't run is
-`invalid`, naming why. Steps that ran keep their values, marked `stale`,
-until you run them again. Runs go in workflow order.
+`invalid`, naming why. A step is checked against what its inputs' expressions
+will produce, never against the old values they still show: after
+`k["s"] = label[mod.map()](wf["p"])`, a `sort(by="value")` on `s` is fine
+before `s` runs. Steps that ran keep their values, marked `stale`, until you
+run them again. Runs go in workflow order.
 
 *Grouping* is a new index plus a map: `mean_temp[collapse(by="ward")]` packs
 each ward's rows into lists, then calls `mean_temp(temp: list[float])` once

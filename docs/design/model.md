@@ -315,7 +315,9 @@ the workflow, plus a store of results, and every state read off the two.
 
 - **Edit** (assign, rename, move, delete, insert) changes the workflow. Core
   re-checks every step after it at once and runs no tools. No stored result
-  changes.
+  changes. A step is checked against its inputs' plans (PL): an input with a
+  new, unrun expression is checked as what that expression will produce, not
+  as the last result it shows.
 - **Run** computes the run keys missing from the store, in dependency order,
   and adds them. `run(x)` means *make `x` current*: it first runs whatever
   `x` needs that isn't. Computing on outdated inputs on purpose is an

@@ -348,11 +348,12 @@ def _stage_combine(operation: Operation, workflow: "Workflow | None") -> Output:
     for st in steps:
         if st is None:
             schemas.append([]); counts.append(None); continue
-        schemas.append(predicted_columns(st.output))
-        counts.append(st.output.meta.get("expected")
-                      if st.output.meta.get("staged") else len(st.output.data))
+        basis = workflow.basis(st.name)                 # its plan (PL)
+        schemas.append(predicted_columns(basis))
+        counts.append(basis.meta.get("expected")
+                      if basis.meta.get("staged") else len(basis.data))
     columns = _combine_columns(operation, schemas)
-    columns_open = any(st is None or columns_unknown(st.output) for st in steps)
+    columns_open = any(st is None or columns_unknown(workflow.basis(st.name)) for st in steps)
     on = operation.arguments.get("on") if operation.tool == "join" else None
     if isinstance(on, str) and is_id_column(on):
         columns_open = True           # shared columns merge when their values agree (S5e)
