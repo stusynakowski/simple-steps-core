@@ -837,7 +837,10 @@ class Workflow:
                 or list(data.index)
             data[name] = [column[p] if p is not None and p in column.index else None
                           for p in partners]
-            states[name] = _state_column(["known"] * len(data), data.index)
+            # an absent cell stays absent, so the tool gets its default (C6)
+            gone = self.steps[ref.id].output.absent_cells()
+            states[name] = _state_column(["absent" if (p, column.name) in gone else "known"
+                                          for p in partners], data.index)
             for row, p in zip(data.index, partners):
                 if (p is None or p not in column.index) and row not in blocked:
                     why = f"{name}: {ref.id!r} has no row {_plain(row if p is None else p)!r}"

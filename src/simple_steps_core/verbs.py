@@ -547,6 +547,7 @@ def _unpack(source: Any, columns: list[str], restore: str | None, keep: bool = T
         raise ValueError(f"expand of a dict writes its keys to {KEY_COLUMN!r}, which the input "
                          f"already has: rename it first")
     out_rows, records, ids = [], [], []
+    none_rows = 0
     for index, row in _units(frame):
         if index in blocked:
             records.append({**_blocked(*blocked[index]), "unit": index})
@@ -555,7 +556,8 @@ def _unpack(source: Any, columns: list[str], restore: str | None, keep: bool = T
             continue
         lists = {c: (frame.at[index, c] if is_id_column(c) else row.get(c)) for c in columns}
         if all(v is None for v in lists.values()):
-            continue                         # no list: no rows (J-D3)
+            none_rows += 1                   # no list: no rows, said (J-D3, C6)
+            continue
         keys = None
         if dicts:
             # a dict unpacks by key: every column's dict must have the same keys
@@ -602,9 +604,11 @@ def _unpack(source: Any, columns: list[str], restore: str | None, keep: bool = T
         data[c] = _typed([r.get(c) for r in out_rows], data.index)
     data.insert(0, _id_column_for(source), pd.Series(
         [r.get("unit") for r in records], index=data.index, dtype=object))
+    warnings_ = ([f"{none_rows} row{'s' if none_rows != 1 else ''} held no list (None, or no "
+                  f"value): {'they' if none_rows != 1 else 'it'} gave no rows"] if none_rows else [])
     return Output(data=data, records=records, index=data.index,
                   meta={"verb": "expand", "form": "column", "value_column": None,
-                        "n_in": len(frame)})
+                        "n_in": len(frame), "warnings": warnings_})
 
 
 def _id_column_for(source: Any) -> str:
@@ -885,6 +889,9 @@ def _widen_cell(cell: Any, wanted: Sequence[str], explicit: bool) -> tuple[dict,
     auto-named ragged row just gets ``None``, since its own width defined the
     columns.
     """
+    if _is_missing(cell) or cell is ABSENT:
+        # No dict at all: every field absent, never a failure (C6).
+        return {c: ABSENT for c in wanted}, None
     if isinstance(cell, Mapping):
         # A key the record lacks is absent, never a failure (J-D2).
         return {c: (cell[c] if c in cell else ABSENT) for c in wanted}, None
@@ -985,9 +992,14 @@ def widen_(source: Any, fn: Callable = identity, *, column: str | None = None,
         values = [row[column] for row in lifted]
         absent[column] = [i for i, v in zip(frame.index, values) if v is ABSENT]
         data[column] = _typed([None if v is ABSENT else v for v in values], frame.index)
+    empty = sum(1 for cell, record in zip(cells, records)
+                if record["status"] == "completed" and (_is_missing(cell) or cell is ABSENT))
     out = Output(data=data, records=records, index=frame.index,
                  meta={"verb": "widen", "form": "column", "value_column": None,
-                       "n_in": len(frame), "columns": list(data.columns)})
+                       "n_in": len(frame), "columns": list(data.columns),
+                       "warnings": [f"{empty} row{'s' if empty != 1 else ''} held no dict (None, "
+                                    f"or no value): {'their' if empty != 1 else 'its'} fields are "
+                                    f"absent"] if empty else []})
     out.mark_absent(absent)
     return out
 
@@ -1276,6 +1288,7 @@ def _source_failure(error: str, caught: Any) -> Output:
 # to each other (see grid.py).
 from .system_tools import LEFT_OUT, empty_value, is_identity, reducer_form, rows_parameters  # noqa: E402
 from .errors import SelectionError  # noqa: E402
+from .output import _is_missing  # noqa: E402
 from .modifiers import _d_apply  # noqa: E402
 from .output import (  # noqa: E402
     Output,

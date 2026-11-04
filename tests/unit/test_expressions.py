@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from simple_steps_core import Catalog, Kernel, cols, mod, stack, tool, wf
+from simple_steps_core import Catalog, Kernel, cols, join, mod, stack, tool, wf
 from simple_steps_core.operation import op
 
 
@@ -301,6 +301,28 @@ def test_an_expand_with_no_tool_names_its_column_when_there_are_several():
     k["flat"] = mod.expand()(wf["one"])
     k.run_all()
     assert values(k, "named", "a") == [1, 2, 3] and values(k, "flat", "value") == [1, 2]
+
+
+def test_no_value_means_one_thing_in_every_verb():
+    # C6: None, or an absent cell, where a list or a dict belongs gives no rows
+    # or absent fields, and one warning with the count; never a failed row. A
+    # column argument keeps absent, so the tool gets its default.
+    k = Kernel(Catalog([]))
+    k["lists"] = pd.DataFrame({"name": ["Ann", "Ben"], "a": [[1, 2], None]})
+    k["dicts"] = pd.DataFrame({"name": ["Ann", "Ben"], "c": [{"x": 1}, None]})
+    k["e"] = mod.expand(columns=["a"])(wf["lists"])
+    k["w"] = mod.widen(column="c")(wf["dicts"])
+    k["p"] = pd.DataFrame({"name": ["Ann", "Ben", "Cy"]})
+    k["s"] = pd.DataFrame({"name": ["Ann", "Ben"], "score": [1.0, None]})
+    k["j"] = join(wf["p"], wf["s"], on="name", how="left")
+    k["f"] = op("first_present")[mod.map()](wf["j"], value=wf["j"][cols["score"]], default=0.0)
+    k.run_all()
+    assert values(k, "e", "a") == [1, 2]
+    assert [w.message for w in k.step("e").warnings] == ["1 row held no list (None, or no value): it gave no rows"]
+    assert k.step("w").state == "completed" and (1, "x") in k.step("w").output.absent_cells()
+    assert [w.message for w in k.step("w").warnings] == ["1 row held no dict (None, or no value): its fields are absent"]
+    got = values(k, "f", "value")
+    assert got[0] == 1.0 and pd.isna(got[1]) and got[2] == 0.0      # Cy's gap: the default
 
 
 @pytest.mark.xfail(strict=True, reason="S7 (D33): melt and pivot")

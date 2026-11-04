@@ -358,6 +358,11 @@ def ch5():
     lesson("R15", "a widen field never replaces a column the input has, unless replace=True",
            (s.state, data(put(k, "w4", mod.widen(column="c", replace=True)(wf["nd"])), "name")),
            ("failed", ["X"]), "the field won silently: name Ada became X (C4)")
+    k["nn"] = pd.DataFrame({"name": ["Ada", "Ben"], "c": [{"x": 1}, None]})
+    k.run("nn")
+    s = put(k, "w5", mod.widen(column="c")(wf["nn"]))
+    lesson("R16", "widen of a None cell: its fields absent, and a warning, never a failed row",
+           (s.state, len(s.warnings)), ("completed", 1), "the row failed (C6)")
     s = put(k, "pn", mod.pack(columns=["name"], name="rec")(wf["v"]))
     lesson("R12", "a retired setting is refused, naming the replacement", s.state, "invalid")
 
