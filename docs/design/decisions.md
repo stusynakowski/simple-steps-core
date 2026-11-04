@@ -30,7 +30,7 @@ what the workflow is now.
 
 | | Decision | Today | Recommended |
 |---|---|---|---|
-| D-picks | A saved pick into a source's rows: when the source's data is replaced, core hashes its rows, gives rows it has seen their ids back, and **rewrites the pick's row number** in the expression when its row moves; a pick whose row's hash is gone (deleted, or a value edited) is `invalid`, naming it | the pick follows the position: a row inserted at the top makes it pick another row, silently | yes; a declared key column later, for value edits |
+| D-picks | A saved pick into a source's rows: when the source's data is replaced, core hashes its rows, gives rows it has seen their ids back, and **rewrites the pick's row number** in the expression when its row moves; a pick whose row's hash is gone (deleted, or a value edited) is `invalid`, naming it | the pick follows the position: a row inserted at the top makes it pick another row, silently | yes; a declared key column later, for value edits. **yes**: owner, 2026-11-04 |
 
 **How rows pair** (model.md §5). The older reshaping rules and the core asks
 disagree; the code follows the core asks.
@@ -57,7 +57,7 @@ are removals; EX5–EX6 are S3's binding work.
 | **EX2** | **A verb owns its output columns.** A `filter` returns exactly its input's columns, a `map` exactly its named output; the plan lists them, and a test checks run against plan for every verb | a `filter` given a column argument adds it as a column (A4b) | **yes** |
 | EX3 | **One grammar**: `tool[modifiers](input, arguments)`, `mod.reshape(settings)(input)`, `join`/`zip_`/`stack(…)`, `wf["s"][rows][cols]`. Retire `mod.x(over=…)` and `op("identity")[mod.reshape(…)]` | all three spellings of a reshape work (F7); `examples/all_orchestrations` uses `over=` | **yes**: owner, 2026-11-03; the old spellings removed, the examples and tests rewritten in the same piece. `over=` done 2026-11-03: refused, 181 call sites rewritten; `op("identity")[mod.x(…)]` builds the same operation as `mod.x(…)`, so it goes with the parser (S3) |
 | EX4 | **Remove what doesn't earn its place**: `axis` everywhere; `retries=` on verbs (`mod.retry` does it); `map(where=, replace=)` (overlaps `filter` + `join`, V11). Build verbs from a few primitives where possible (pack, unpack, choose, reorder, match), as grouping already is (H3) | all present | **yes**: owner, 2026-11-03: `axis`, `retries=` on verbs and `map(where=, replace=)` all removed. All three done 2026-11-03 (with `expand`'s `replace=`, which did nothing) |
-| EX5 | **An input is a step or a pick, never a computation.** A pick may be a tool's input (D6, P16); an inline tool call or combine may not (C11), so every grid shown is a named step with a state | a pick as input refused (P16); an inline operation as a combine's input is `invalid` (C11) | open: not chosen on 2026-11-03 (picks as inputs are already yes under **D6** / core-asks L34; refusing an inline computation is what's open) |
+| EX5 | **An input is a step or a pick, never a computation.** A pick may be a tool's input (D6, P16); an inline tool call or combine may not (C11), so every grid shown is a named step with a state | a pick as input refused (P16); an inline operation as a combine's input is `invalid` (C11) | **yes**: owner, 2026-11-04: an input is a step or a pick; an inline tool call or combine is refused, writing it as its own step (picks as inputs were already yes under **D6** / core-asks L34) |
 | EX6 | **Inference is written into the expression at staging**, never decided again at run: the verb (`to_f(wf["v"])` saved as `to_f[mod.map()](…)`), the binding (`temp=wf["v"][cols["temp"]]`), the output name (after the step, **D9**). If core can't decide, the step is `invalid`, listing the candidates. `auto` chooses only verbs that can't change the row count | done for picks (P14); verb and binding inferred again at each run; `auto` chooses `filter` (V8b, against **D20b**) | yes; this is S3's binding (CA-A) and S4's naming, with **D20b** and **D21** |
 | EX7 | **One printed form that round-trips**: `parse(print(x)) == x` for every expression; the saved form is the printed form. A property test generates expressions and checks it (beside L40) | expressions print; no round-trip test | **yes**: owner, 2026-11-03, with S3 |
 | EX8 | **The tutorial is the contract.** `tutorial/tutorial.py` runs in the test suite; a decision that lands changes its lesson's `want` in the same commit | run by hand | **yes**: owner, 2026-11-03: both tutorials run in the test suite |
@@ -270,24 +270,24 @@ The heart: once these land, the list-of-dicts model is true.
 | D5 | `wf[…]` takes step names only (`wf[0]` goes) **→ core-asks rule 3: yes** | — | yes | Q10 |
 | D6 | A key or row selection can be a step's input **→ core-asks L34: yes** | (implied) | yes | X4 |
 | D7 | `cols[…]` / `rows[…]` stay? **→ core-asks: kept as the explicit spellings of any selector** | — | only for ranges of keys (`cols["a":"c"]`); otherwise plain brackets | X-D6, Q9 |
-| D8 | `.header` → `.keys` | — | yes | X-D7 |
+| D8 | `.header` → `.keys` | open: not chosen on 2026-11-04 | yes | X-D7 |
 | D10 | `[i]` / `["k"]` never reach inside a cell | — | yes: `expand` / `widen` do | Q8 |
 | D13 | §3's table: by type, a list to a value parameter iterates **→ CA-D1, CA-A: superseded** | yes ("a mapping is implied") | yes | N6 |
 | D14 | Never choose a key when there is more than one **→ CA-A: yes** | yes | yes | N7 |
 | D15 | Binding by key name **→ CA-A: superseded (by name is step 2, written out)** | only when explicitly defined | opt-in: `tool[mod.map(by_name=True)](wf["p"])`, refused when a name is missing | X-D2, Q2 |
 | D16 | Keys, row numbers and `#` never reach a tool unless asked **→ core-asks rule 15: yes** | yes | yes | N8 |
-| D18 | A reference to a step whose shape is unknown until it runs | — | a warning when declared; decided when it runs; re-checked after | Q6 |
-| D19 | `collapse(by="ward")` on a list of values: where is `ward`? | — | from that list's own step, for `by=` only | Q7 |
+| D18 | A reference to a step whose shape is unknown until it runs | **yes**: owner, 2026-11-04 | a warning when declared; decided when it runs; re-checked after | Q6 |
+| D19 | `collapse(by="ward")` on a list of values: where is `ward`? | **yes**: owner, 2026-11-04 | from that list's own step, for `by=` only | Q7 |
 
 ### S4. Broadcasting and naming
 
 | | Decision | You said | Recommended | Was |
 |---|---|---|---|---|
 | D20b | May `auto` pick `filter` (a tool returning `bool`)? **→ N2: no (decided)** | — | no: broadcasting decides how many calls, not which rows stay; `filter` is written | — |
-| D21 | Nothing added unseen (`breaker`) | — | shown in the formula, or not added | N11 |
+| D21 | Nothing added unseen (`breaker`) | **yes**: owner, 2026-11-04 | shown in the formula, or not added | N11 |
 | D9 | One key is named after its step, not `value` **→ CA-D2: yes** | (your "stepname is a variable") | yes; `mod.name` still wins | X-D5, N4 |
 | D11 | A literal is one value **→ core-asks: yes** | yes | yes | N5 |
-| D12 | A source's return: rows or one value? | — | its declared type decides: `list[T]` is rows; `list` or no annotation is one value | X-D10 |
+| D12 | A source's return: rows or one value? | **yes**: owner, 2026-11-04 | its declared type decides: `list[T]` is rows; `list` or no annotation is one value | X-D10 |
 
 ### G. The app moves
 
