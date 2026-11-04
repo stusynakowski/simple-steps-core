@@ -75,7 +75,7 @@ reading a stale one says so (*read stale 's'*), and `run(x)` runs what `x` needs
 
 **12. A step's output is named after it.** `k["temp_f"] = to_f[mod.map()](wf["v"])`
 writes a column `temp_f`, and renaming the step renames it; `mod.name("x")`
-names it otherwise.
+names it otherwise. A tool that returns a `dict` gives one column per key.
 
 **13. A tool's parameters take columns by name, then by type.**
 `double(n: int)` on a step with no `n` takes the one `int` column, and the

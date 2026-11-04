@@ -170,3 +170,28 @@ def test_map_after_map_runs_untyped():
     k.run_all()
     assert k.step("b").data["b"].tolist() == [3, 4]
     assert k.step("b").formula == 'plus_n[mod.map()](wf["a"], value=wf["a"][cols["a"]])'
+
+
+# ── S4: a dict's keys as columns (core-asks L22) ──────────────────────────
+@tool
+def pair_n(n: int) -> dict:
+    return {"a": n, "b": n + 1} if n != 2 else {"a": n}
+
+
+def test_a_dict_result_gives_one_column_per_key():
+    k = Kernel(Catalog(tools=[pair_n]))
+    k["r"] = pd.DataFrame({"n": [1, 2, 3]})
+    k["x"] = pair_n[mod.map()](wf["r"])
+    plan = k.step("x").plan["columns"]
+    assert plan["certainty"] == "unknown" and "its keys are its columns" in plan["because"]
+    k.run_all()
+    assert k.step("x").data.to_dict("list") == {"a": [1, 2, 3], "b": [2, None, 4]}
+    assert k.step("x").output.absent_cells() == {(1, "b")}   # row 1's dict had no b (C6)
+
+
+def test_one_name_keeps_the_dict_in_one_cell():
+    k = Kernel(Catalog(tools=[pair_n]))
+    k["r"] = pd.DataFrame({"n": [1]})
+    k["x"] = pair_n[mod.map(), mod.name("d")](wf["r"])
+    k.run_all()
+    assert k.step("x").data.to_dict("list") == {"d": [{"a": 1, "b": 2}]}

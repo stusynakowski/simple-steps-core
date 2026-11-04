@@ -66,14 +66,18 @@ def _rows_plan(kind, rule, expected, n_in, expect, label, upstream=None) -> dict
     return {"certainty": "unknown", "because": because, "resolve": resolve}
 
 
-def _columns_plan(kind, names, columns_open, expect, label, upstream) -> dict:
+def _columns_plan(kind, names, columns_open, expect, label, upstream, spread=False) -> dict:
     """The column axis of a plan: exact, stated, bounded (these + more) or unknown."""
     if expect.get("columns") is not None:
         return {"certainty": "stated", "names": list(names),
                 "more": bool(expect.get("more_columns"))}
     if not columns_open:
         return {"certainty": "exact", "names": list(names)}
-    if kind in ("source", "table"):
+    if spread:
+        because = f"{label} returns a dict: its keys are its columns, known by running (L22)"
+        resolve = [f"run {label}", "declare the return as a record (a TypedDict or dataclass)",
+                   "or keep the dict in one cell: mod.name(…)"]
+    elif kind in ("source", "table"):
         because = f"{label} returns a DataFrame with no declared columns"
         resolve = [f"run {label}",
                    "annotate the return: -> Annotated[pd.DataFrame, YourTypedDict]",
@@ -1160,6 +1164,22 @@ def _fitting(parameter: Any, columns: list, types: dict) -> list:
     return fits
 
 
+def spreads_dict(operation: Operation) -> bool:
+    """Does this step spread a dict its tool returns into one column per key
+    (S4, core-asks L22)? A map whose tool declares ``-> dict`` (or a mapping
+    type), with no ``mod.name``: one name keeps the dict in one cell, as it
+    does a record. The keys are only known by running."""
+    verb = operation.shape_verb
+    if verb is None or verb.kind != "map" or operation.naming is not None:
+        return False
+    hint = _return_hint(operation.fn or BUILTIN_TOOLS.get(operation.tool))
+    if typing.get_origin(hint) is typing.Annotated:
+        hint = typing.get_args(hint)[0]
+    origin = typing.get_origin(hint) or hint
+    return origin in (dict, collections.abc.Mapping) or (
+        isinstance(origin, type) and issubclass(origin, dict) and not _record_fields(origin))
+
+
 def named_after_step(operation: Operation, workflow: "Workflow | None",
                      step_id: str | None) -> Operation:
     """*operation*, its one output column named after its step (D9, core-asks
@@ -1182,6 +1202,8 @@ def named_after_step(operation: Operation, workflow: "Workflow | None",
         return operation
     if kind == "expand" and _expands_into(operation, fn, workflow) == "mapping":
         return operation                       # key and value: two columns (J-D4, W12)
+    if spreads_dict(operation):
+        return operation                       # its keys are its columns (L22)
     if workflow is not None and workflow.default_name_rule(operation) is not None:
         return operation
     if _step_name_taken(operation, workflow, step_id):
@@ -2041,6 +2063,9 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
                                            if workflow is not None else None)) \
         if operation.naming is None else None
     written: list = []
+    spread = spreads_dict(operation)
+    if spread:
+        payload = None                         # one column per key, known by running (L22)
     if declared_record is not None:
         # a declared record: one column per field, in declared order (G8)
         written = list(_record_fields(declared_record[0]))
@@ -2058,7 +2083,9 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     # 008 K1: are these all the columns, or only the ones known so far? A
     # source computed by a tool cannot know its columns before it runs, and a
     # verb that carries its input's columns through inherits that.
-    if unsettled and kind in ("select", "drop", "rename", "widen"):
+    if spread:
+        columns_open = True             # a dict's keys: known by running (L22)
+    elif unsettled and kind in ("select", "drop", "rename", "widen"):
         columns_open = True
     elif kind == "select" and not isinstance(verb.settings.get("columns"), (list, tuple)):
         # a range or position selection over columns not known yet
@@ -2140,7 +2167,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
     plan = {
         "rows": _rows_plan(kind, rule, expected if "rows" not in expect else None,
                            n_in, expect, label, upstream_name),
-        "columns": _columns_plan(kind, ordered, columns_open, expect, label, upstream_name),
+        "columns": _columns_plan(kind, ordered, columns_open, expect, label, upstream_name, spread),
         # declared, else unknown until it runs (K27)
         "types": {c: _type_label(types.get(c)) if types.get(c) is not None else "unknown"
                   for c in ordered},

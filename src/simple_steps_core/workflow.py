@@ -2840,6 +2840,7 @@ class Workflow:
                 _unpair(step.output, unpaired, paired)
             step.output.data = _str_columns(step.output.data, step_id)
             _spread_record(resolved, step.output)
+            _spread_dict(resolved, step.output)
             _apply_naming(resolved, step.output, step_id, self.default_name_rule(resolved))
             _carry_id_columns(resolved, source, step.output)
             found = step.output.meta.pop("warnings", None) or []
@@ -3229,6 +3230,7 @@ from .checks import (  # noqa: E402
     stage,
     bind_by_type,
     named_after_step,
+    spreads_dict,
     warn,
     keeps_ids,
     _tool_parameters,
@@ -3436,6 +3438,41 @@ def _apply_naming(operation: Operation, output: Output, step_id: str,
         output.data = output.data.rename(columns=rename)
         output.states = output.states.rename(columns=rename)
     output.meta["value_column"] = final[0] if len(final) == 1 else None
+
+
+def _spread_dict(operation: Operation, output: Output) -> None:
+    """A map whose tool declares ``-> dict`` spreads each row's dict into one
+    column per key, in the order keys first appear (S4, core-asks L22). A key a
+    row's dict lacks is ``absent`` there (C6); a row that failed or was blocked
+    keeps its state in every column."""
+    if not spreads_dict(operation):
+        return
+    column = output.meta.get("value_column")
+    if column is None or column not in output.data.columns:
+        return
+    data, states = output.data, output.states
+    cells = [data.at[i, column] if str(states.at[i, column]) == "known" else None for i in data.index]
+    keys = list(dict.fromkeys(str(k) for c in cells if isinstance(c, Mapping) for k in c))
+    if not keys:
+        return
+    at = list(data.columns).index(column)
+    new, new_states = data.iloc[:, :at].copy(), states.iloc[:, :at].copy()
+    for key in keys:
+        values, marks = [], []
+        for i, cell in zip(data.index, cells):
+            state = str(states.at[i, column])
+            if isinstance(cell, Mapping) and key in {str(k) for k in cell}:
+                values.append(next(v for k, v in cell.items() if str(k) == key))
+                marks.append(state)
+            else:
+                values.append(None)
+                marks.append(state if state != "known" else "absent")
+        new[key] = _typed(values, data.index)
+        new_states[key] = _state_column(marks, data.index)
+    for c in data.columns[at + 1:]:
+        new[c], new_states[c] = data[c], states[c]
+    output.data, output.states = new, new_states
+    output.meta["value_column"] = keys[0] if len(keys) == 1 else None
 
 
 def _mapping_keeps_value(output: Output, step_id: str, source: Output | None) -> None:

@@ -230,7 +230,9 @@ output): `retry`, `timeout`, `breaker`; `try_except` (a failure becomes a
 declared record spreads into one column per field. Data column names are
 unique, never start with `#`, and two that would collide are a problem.
 *Built.* Step names with a `.` or a leading `#` are refused (built
-2026-11-04). **Planned (S4):** a dict's keys as columns (core-asks L22);
+2026-11-04). A map whose tool declares `-> dict` gives one column per key
+(L22, built 2026-11-04): keys are known by running, a key a row lacks is
+`absent`, and `mod.name` keeps the dict in one cell. **Planned (S4):**
 numeric names become `var<n>`.
 
 **Arguments and binding:** a parameter binds to the input column of its name,
