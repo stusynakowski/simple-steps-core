@@ -241,7 +241,7 @@ which=5,
 ## 2026-11-04 · `test_L40c_an_edit_then_a_rerun_matches_a_fresh_run` · at `af0348e`
 
 - **Broke:** AssertionError: edited: s1 mod.sort(by="k")(wf["s0"]).index are different
-- **Status:** open
+- **Status:** fixed in `3e01a8e` (D-picks): a source keeps its row ids across an edit, by design; the law compares what is shown (values, lineage as row numbers), not ids (decisions W5)
 
 ```
 test_L40c_an_edit_then_a_rerun_matches_a_fresh_run(
@@ -256,7 +256,7 @@ chain=[(0, 0, 0, 0)],
 ## 2026-11-04 · `test_L40f_run_makes_a_step_current` · at `af0348e`
 
 - **Broke:** AssertionError: run(s0) <DataFrame 1×4>.index are different
-- **Status:** open
+- **Status:** fixed in `3e01a8e` (D-picks): a source keeps its row ids across an edit, by design; the law compares what is shown (values, lineage as row numbers), not ids (decisions W5)
 
 ```
 test_L40f_run_makes_a_step_current(
@@ -273,7 +273,7 @@ which=0,  # or any other generated value
 ## 2026-11-04 · `test_L40c_an_edit_then_a_rerun_matches_a_fresh_run` · at `af0348e`
 
 - **Broke:** AssertionError: edited: s1 mod.sort(by="k")(wf["s0"]).index are different
-- **Status:** open
+- **Status:** fixed in `3e01a8e` (D-picks): a source keeps its row ids across an edit, by design; the law compares what is shown (values, lineage as row numbers), not ids (decisions W5)
 
 ```
 test_L40c_an_edit_then_a_rerun_matches_a_fresh_run(
@@ -289,7 +289,7 @@ chain=[(0, 0, 0, 0)],
 ## 2026-11-04 · `test_L40d_undo_is_free` · at `af0348e`
 
 - **Broke:** AssertionError: ('source put back', 's1', 'completed', 'invalid')
-- **Status:** open
+- **Status:** fixed in `3e01a8e` (D-picks): a source remembers every row it has seen, so a row given back gets its id back and a gone pick follows it again (W4)
 
 ```
 test_L40d_undo_is_free(
@@ -308,7 +308,7 @@ other=0,  # or any other generated value
 ## 2026-11-04 · `test_L40f_run_makes_a_step_current` · at `af0348e`
 
 - **Broke:** AssertionError: run(s0) <DataFrame 2×4>.index are different
-- **Status:** open
+- **Status:** fixed in `3e01a8e` (D-picks): a source keeps its row ids across an edit, by design; the law compares what is shown (values, lineage as row numbers), not ids (decisions W5)
 
 ```
 test_L40f_run_makes_a_step_current(
@@ -326,7 +326,7 @@ which=0,  # or any other generated value
 ## 2026-11-04 · `test_L40d_undo_is_free` · at `af0348e`
 
 - **Broke:** AssertionError: ('source put back', 's1', 'completed', 'invalid')
-- **Status:** open
+- **Status:** fixed in `3e01a8e` (D-picks): a source remembers every row it has seen, so a row given back gets its id back and a gone pick follows it again (W4)
 
 ```
 test_L40d_undo_is_free(
@@ -344,7 +344,7 @@ other=0,
 ## 2026-11-04 · `test_L40f_run_makes_a_step_current` · at `af0348e`
 
 - **Broke:** AssertionError: run(s0) <DataFrame 2×4>.index are different
-- **Status:** open
+- **Status:** fixed in `3e01a8e` (D-picks): a source keeps its row ids across an edit, by design; the law compares what is shown (values, lineage as row numbers), not ids (decisions W5)
 
 ```
 test_L40f_run_makes_a_step_current(
@@ -361,7 +361,7 @@ which=0,
 ## 2026-11-04 · `test_L40e_the_order_of_edits_doesnt_matter` · at `af0348e`
 
 - **Broke:** AssertionError: ('order', 's1_p', 's1_p', 'stale', 'invalid')
-- **Status:** open
+- **Status:** fixed in `3e01a8e` (D-picks): a pick written before a data change follows its row, after it is read on the new data; the two orders hold different workflows, which the law doesn't compare (W5)
 
 ```
 test_L40e_the_order_of_edits_doesnt_matter(
@@ -383,7 +383,7 @@ other=47,
 ## 2026-11-04 · `test_L40c_an_edit_then_a_rerun_matches_a_fresh_run` · at `af0348e`
 
 - **Broke:** AssertionError: edited: s1 mod.distinct(columns=["k"])(wf["s0"]).iloc[:, 0] (column name="#s0") are different
-- **Status:** open
+- **Status:** fixed in `3e01a8e` (D-picks): `#` columns hold ids; the law compares them as lineage, row numbers (W5)
 
 ```
 test_L40c_an_edit_then_a_rerun_matches_a_fresh_run(
