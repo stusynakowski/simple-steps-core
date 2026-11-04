@@ -534,8 +534,9 @@ def ch11():
     k["lim"] = 38.0
     lesson("S2", "the same value again: nothing goes stale", k.step("f").state, "completed")
     k["lim"] = 37.0
-    lesson("S3", "a change: readers keep their values, marked stale",
-           (k.step("h").state, k.step("f").state), ("stale", "stale"))
+    lesson("S3", "a change: its readers are stale; theirs read stale, not passed down",
+           (k.step("h").state, k.step("f").state, k.needs_run().get("f")),
+           ("stale", "completed", "read stale 'h'"))
     lesson("S4", "the stale reason is among the step's warnings", len(k.step("h").warnings) > 0, True,
            "only in needs_run() and output metadata. SS7")
     k.run("f")

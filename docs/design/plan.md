@@ -101,6 +101,7 @@ none changes what an existing expression means.
 | L5 | **Steps grouped into stages** | R9 (step D) |
 | L6 | **Lazy row execution**: each verb's row map in its plan (PL2), stale rows that follow the row maps (PL3), and a partial re-run of only the stale rows, an outside-world tool kept until asked to refresh (PL4) | PL2–PL4, K15, D42 |
 | L7 | **Refusing on an exact plan**: a tool parameter missing from a plan whose columns are exact is a problem at once, not a *likely missing* warning | PL |
+| L8 | **Which steps need a re-run, in the app's toolbar**: a map of the steps that are stale or read a stale input, so the user re-runs them in one click (core gives it: `needs_run()`) | ST5 |
 
 ## 3. The changes, in detail (S0–S5)
 

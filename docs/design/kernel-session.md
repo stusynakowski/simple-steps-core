@@ -137,8 +137,9 @@ Status reacts at once; computing waits until you ask
 ```python
 k["limit"] = 37.0                       # move the control
 k.needs_run()
-# {'sick': 'stale: limit changed', 'f': 'stale: sick is stale',
-#  'side': 'stale: sick is stale', 'beds': 'stale: sick is stale'}
+# {'sick': 'stale: limit changed', 'f': "read stale 'sick'",
+#  'side': "read stale 'sick'", 'beds': "read stale 'sick'"}
+# only sick is stale: its readers say which input they read stale
 
 k.run("f")                              # makes f current: sick, stale, runs first
 k.needs_run()

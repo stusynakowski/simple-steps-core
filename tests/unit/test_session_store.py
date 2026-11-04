@@ -50,16 +50,20 @@ def readings_ss() -> pd.DataFrame:
     return pd.DataFrame({"temp": [36.0, 39.0]})
 
 
-def test_a_reader_of_a_stale_step_is_stale_even_when_its_key_matches():
-    # v, given a new expression not run yet, keeps its last data, marked stale:
-    # f's key still matches, but f is current only when v is
+def test_a_reader_of_a_stale_step_stays_completed_and_names_it():
+    # v, given a new expression not run yet, keeps its last data, marked stale.
+    # f read that data: it stays completed, saying it read v stale; staleness
+    # isn't passed down the chain (owner, 2026-11-04)
     k = Kernel(Catalog([to_f_ss, readings_ss]))
     k["v"] = pd.DataFrame({"temp": [36.0, 39.0]})
     k["f"] = to_f_ss[mod.map()](wf["v"])
     k.run_all()
     k["v"] = readings_ss[mod.source()]()
     assert k.step("v").state == "stale"
-    assert k.step("f").state == "stale"
+    assert k.step("f").state == "completed"
+    assert k.needs_run()["f"] == "read stale 'v'"
+    k.run("f")                                      # runs v first (C9)
+    assert k.step("v").state == k.step("f").state == "completed"
 
 
 def _empty_chain() -> Kernel:

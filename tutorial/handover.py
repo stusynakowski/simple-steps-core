@@ -93,9 +93,9 @@ def part_a():
            (cell["value"], cell["type"], cell["inputs"][0]["values"]),
            (100.76, "float", {"temp_c": 38.2}))
     k["sick"] = feverish[mod.filter()](wf["p"], limit=37)
-    lesson("A9", "an edit: p completed, sick and f stale",
-           {n: k.step(n).state for n in ("p", "sick", "f")},
-           {"p": "completed", "sick": "stale", "f": "stale"})
+    lesson("A9", "an edit: sick stale; f read it stale (not passed down)",
+           ({n: k.step(n).state for n in ("p", "sick", "f")}, k.needs_run().get("f")),
+           ({"p": "completed", "sick": "stale", "f": "completed"}, "read stale 'sick'"))
     k["x"] = os_remove[mod.map()](wf["p"])
     lesson("A10", "a function not in the catalog is a problem and never runs",
            k.step("x").state, "invalid")

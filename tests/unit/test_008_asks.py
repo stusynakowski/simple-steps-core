@@ -1115,7 +1115,7 @@ def test_009_an_identical_rerun_leaves_readers_fresh(chain):
 def test_009_changed_data_makes_readers_stale_and_keeps_their_data(chain):
     chain["r"] = pd.DataFrame({"n": [5, 6]})
     assert chain.step("a").state == "stale"
-    assert chain.step("b").state == "stale"            # stale through a
+    assert chain.step("b").state == "completed"        # a's data hasn't changed (not passed down)
     assert chain.step("a").output.values == [10, 20]    # old data still readable
     chain["r"] = pd.DataFrame({"n": [1, 2]})            # back to what a read
     assert chain.step("a").state == "completed"
@@ -1329,8 +1329,10 @@ def test_009_a_run_step_shows_values_failures_and_staleness(unrun):
     unrun.run_all()
     drawn = unrun.preview("s")["rows"]
     assert [r["state"] for r in drawn] == ["known", "known"]          # load gives n = 1, 2
-    unrun["r"] = load_typed_008[mod.source()](path="y")             # re-declared: s is stale
-    assert [r["state"] for r in unrun.preview("s")["rows"]] == ["stale", "stale"]
+    unrun["r"] = load_typed_008[mod.source()](path="y")             # re-declared: r is stale
+    assert unrun.step("r").state == "stale"
+    # s read r's data, which hasn't changed: its cells stay known (not passed down)
+    assert [r["state"] for r in unrun.preview("s")["rows"]] == ["known", "known"]
     assert unrun.preview("s")["rows"][0]["cells"]["value"]["value"] == 1.5   # old value kept
 
 
@@ -1625,10 +1627,14 @@ def rows3():
 def test_C25_editing_one_input_row_makes_only_its_cells_stale(rows3):
     rows3["r"] = pd.DataFrame({"city": ["SF", "NYC", "LA"], "n": [1, 20, 3]})
     assert rows3.step("s").state == "stale"
-    assert rows3.stale_rows("s") == [1] and rows3.stale_rows("t") == [1]    # flows on
+    # t read s's data, which hasn't changed yet: it isn't stale (not passed down)
+    assert rows3.stale_rows("s") == [1] and rows3.stale_rows("t") == []
+    assert rows3.step("t").state == "completed"
     assert [r["state"] for r in rows3.preview("s")["rows"]] == ["known", "stale", "known"]
     assert rows3.cell("s", 0, "value")["state"] == "known"
     assert list(rows3.step("s").output.view()["state"]) == ["known", "stale", "known"]
+    rows3.run("s")                                      # now s's row 1 has new data
+    assert rows3.stale_rows("t") == [1]
 
 
 def test_C25_an_unread_column_changing_leaves_it_fresh(rows3):

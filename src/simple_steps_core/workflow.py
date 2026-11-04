@@ -820,21 +820,9 @@ class Workflow:
                     found = found or (f"input {name} changed" if name in inputs
                                       else f"{name} changed")
                     everything = True
-                elif name in self.steps and reason(name) \
-                        and name not in (output.meta.get("read_stale") or {}):
-                    found = found or f"{name} is stale"
-                    upstream_rows = partial.get(name)
-                    if tracked and upstream_rows is not None \
-                            and output.meta.get("groups") is not None:
-                        grouped = self._groups_of(output, set(upstream_rows), name)
-                        if grouped is None:
-                            everything = True
-                        else:
-                            rows_ |= grouped
-                    elif tracked and upstream_rows is not None:
-                        rows_ |= upstream_rows      # row-aligned: the same rows
-                    else:
-                        everything = True
+                # An input that is stale itself, its data unchanged, doesn't
+                # make this step stale (owner, 2026-11-04): staleness isn't
+                # passed down the chain. needs_run() names it, "read stale".
             memo[sid] = found
             if found and not everything:
                 ids = set(output.data.index)
@@ -2108,10 +2096,8 @@ class Workflow:
                 waiting.append(name)
         return waiting
 
-    def not_current(self, step_id: str) -> list[str]:
-        """The steps *step_id* depends on, directly or not, that aren't
-        current: never run, or stale. In workflow order, so running them in
-        turn makes *step_id*'s inputs current (C9)."""
+    def upstream(self, step_id: str) -> list[str]:
+        """Every step *step_id* depends on, directly or not, in workflow order."""
         seen: set[str] = set()
         frontier = [step_id]
         while frontier:
@@ -2119,8 +2105,15 @@ class Workflow:
                 if name in self.steps and name not in seen:
                     seen.add(name)
                     frontier.append(name)
-        return [name for name in self.steps
-                if name in seen and self.steps[name].state in ("staged", "stale")]
+        return [name for name in self.steps if name in seen]
+
+    def not_current(self, step_id: str) -> list[str]:
+        """The steps *step_id* depends on, directly or not, that aren't
+        current now: never run, or stale. In workflow order. Staleness isn't
+        passed down the chain, so a step can turn stale once a step before it
+        re-runs: :meth:`Kernel.run` asks each in turn (C9)."""
+        return [name for name in self.upstream(step_id)
+                if self.steps[name].state in ("staged", "stale")]
 
     def _resolve_arguments(self, operation: Operation,
                            resources: Mapping[str, Any] | None = None) -> Operation:

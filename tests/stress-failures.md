@@ -214,3 +214,24 @@ which=1,
 other=254,
 )
 ```
+
+## 2026-11-04 · `test_L40f_run_makes_a_step_current` · at `fdb0c53`
+
+- **Broke:** AssertionError: ('s3', 's3_p', 'stale')
+- **Status:** open
+
+```
+test_L40f_run_makes_a_step_current(
+frame=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],
+changed=   k     n  tags rec
+0  A  <NA>  None  {},
+chain=[(115, 0, 0, 0),
+(0, 0, 0, 0),
+(997, 1, 0, 0),
+(0, 0, 0, 0),
+(0, 0, 0, 0)],
+which=5,
+)
+```

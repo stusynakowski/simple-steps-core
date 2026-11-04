@@ -272,8 +272,13 @@ parameter without a default, then the one column whose type fits, else
   too, naming it (`baec929`). Nothing runs on its own.
 - **Old values stay until a run replaces them**, marked `stale`.
 - **Runs go in workflow order**, after everything a step depends on.
-- **The reason is kept**: "updated args", "input p changed", "h is stale",
-  "tool changed".
+- **The reason is kept**: "updated args", "input p changed", "tool changed".
+- **Staleness isn't passed down the chain** (owner, 2026-11-04): a step is
+  stale only when its own arguments changed: an input's data, a resource, its
+  tool, its expression. A step whose input is stale, that input's data still
+  what it read, stays `completed`, and `needs_run()` names the input:
+  *read stale 's'*. `run(x)` still makes `x` current, asking each step it
+  depends on in turn.
 - **Re-assigning identical data changes nothing**: equal data, equal data
   version, nothing goes stale.
 - A rename rewrites every reference core wrote; a move that puts a reader

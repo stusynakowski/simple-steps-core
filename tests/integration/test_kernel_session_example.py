@@ -30,8 +30,9 @@ def test_moving_a_control_makes_exactly_its_readers_stale():
     k = ex.build()
     k.run_all()
     k["limit"] = 37.0
-    assert k.needs_run() == {"sick": "stale: limit changed", "f": "stale: sick is stale",
-                             "side": "stale: sick is stale", "beds": "stale: sick is stale"}
+    # only sick is stale; its readers say they read it stale (not passed down)
+    assert k.needs_run() == {"sick": "stale: limit changed", "f": "read stale 'sick'",
+                             "side": "read stale 'sick'", "beds": "read stale 'sick'"}
     k.run_all()
     assert k.step("sick").data["name"].tolist() == ["Ben", "Cy"]
     assert k.step("beds").data["value"].tolist() == ["B-B", "B-C"]

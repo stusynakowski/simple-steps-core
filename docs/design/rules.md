@@ -64,7 +64,8 @@ re-checks everything after it straight away: a step that can't run is
 will produce, never against the old values they still show: after
 `k["s"] = label[mod.map()](wf["p"])`, a `sort(by="value")` on `s` is fine
 before `s` runs. Steps that ran keep their values, marked `stale`, until you
-run them again. Runs go in workflow order.
+run them again. A step is stale only when its own inputs changed; a step
+reading a stale one says so (*read stale 's'*), and `run(x)` runs what `x` needs. Runs go in workflow order.
 
 *Grouping* is a new index plus a map: `mean_temp[collapse(by="ward")]` packs
 each ward's rows into lists, then calls `mean_temp(temp: list[float])` once

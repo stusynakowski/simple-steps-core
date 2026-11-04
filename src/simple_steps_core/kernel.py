@@ -348,10 +348,15 @@ class Kernel:
         """
         name = self._name(step)
         self._ask_data_versions()
-        upstream = (self.workflow.not_current(name) if fresh
-                    else dict.fromkeys(self.workflow.pending(name)))
-        for before in upstream:
-            self.workflow.run(before, resources=self.resources)
+        if fresh:
+            # each asked when reached: a step turns stale only once a step
+            # it reads re-runs with new data (staleness isn't passed down)
+            for before in self.workflow.upstream(name):
+                if self.workflow.steps[before].state in ("staged", "stale"):
+                    self.workflow.run(before, resources=self.resources)
+        else:
+            for before in dict.fromkeys(self.workflow.pending(name)):
+                self.workflow.run(before, resources=self.resources)
         return self.workflow.run(name, resources=self.resources)
 
     @_notifies("run_all")

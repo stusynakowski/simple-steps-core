@@ -64,7 +64,7 @@ def test_needs_run_lists_what_isnt_up_to_date_in_run_order(k):
     k.run_all()
     assert k.needs_run() == {}
     k["sick"] = feverish_i[mod.filter()](wf["p"], limit=37)
-    assert k.needs_run() == {"sick": "stale: updated args", "f": "stale: sick is stale"}
+    assert k.needs_run() == {"sick": "stale: updated args", "f": "read stale 'sick'"}
 
 
 def test_a_step_run_on_a_stale_input_is_completed_and_says_so(k):
