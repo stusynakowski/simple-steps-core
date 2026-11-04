@@ -175,7 +175,9 @@ def test_a_reader_whose_column_is_gone_is_a_problem_once_its_input_runs(k13):
     f = k13.step("f")
     assert f.state == "invalid"
     assert [(p.code, p.message) for p in f.problems] == [
-        ("missing_column", "to_f_i() needs 'temp_c', which 'sick' does not have (it has value)")]
+        ("missing_column", "to_f_i() needs 'temp_c', which 'sick' does not have (it has value). "
+                           "No column of 'sick' is float (value: str): convert one, "
+                           "mod.cast(value='float'), or bind one, temp_c=wf['sick'][cols['value']]")]
     assert [p.code for p in k13.step("g").problems] == ["invalid_input"]
     assert k13.validate()["f"] == f.problems
     assert f.data["value"].tolist() == [100.76]         # what it showed is kept

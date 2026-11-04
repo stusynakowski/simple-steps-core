@@ -134,6 +134,10 @@ def as_list(**row: Any) -> list:
 
 
 class _NotPresent:
+    #: A parameter defaulting to it takes the column of its name, as one with
+    #: no default does: the default only says the cell was absent (L50c).
+    binds_by_name = True
+
     def __repr__(self) -> str:
         return "<not present>"
 

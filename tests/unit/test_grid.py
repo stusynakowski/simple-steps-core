@@ -1702,8 +1702,9 @@ def test_a_problem_message_names_the_step_not_the_ref(two_workflows):
         return nope
 
     a, _ = two_workflows
-    a["x"] = needs_absent[mod.map()](a["raw"])
-    assert "which 'raw' does not have" in a.step("x").problems[0]
+    from simple_steps_core import cols
+    a["x"] = needs_absent[mod.map()](a["raw"], nope=a["raw"][cols["missing"]])
+    assert "'raw'" in a.step("x").problems[0] and "a[" not in a.step("x").problems[0]
 
 
 # ─────────────────────────────────────────────────────────────────────────

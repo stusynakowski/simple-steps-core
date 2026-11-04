@@ -425,13 +425,13 @@ def ch7():
     k["xy"] = pd.DataFrame({"x": [1], "y": [2]})
     s = put(k, "z", add_xy[mod.map()](wf["xy"]))
     lesson("A8", "no column of the parameter's name: invalid, naming the fix",
-           "a=wf" in problems(s), True, "names the gap, not the fix. Planned S3 (CA-A)")
+           "a=wf" in problems(s), True, "named the gap, not the fix, until S3's binding (2026-11-04)")
     s = put(k, "z2", add_xy[mod.map()](wf["xy"], a=wf["xy"][cols["x"]], b=wf["xy"][cols["y"]]))
     lesson("A9", "binding written out", data(s, "value"), [3])
     k["f2"] = to_f[mod.map()](wf["v"])
     s = put(k, "chain", to_f[mod.map()](wf["f2"]))
     lesson("A10", "map after map reads the first map's output", s.state, "completed",
-           "invalid: the first map's column is 'value', not 'temp'. Fixed by S4 naming + S3 binding")
+           "was invalid ('value', not 'temp') until S3 bound the one float column (2026-11-04)")
 
 
 # ── 8. combines ──────────────────────────────────────────────────────────

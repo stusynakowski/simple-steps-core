@@ -148,8 +148,7 @@ When binding is unclear, the step is `invalid` and names the fix.
 **Status:** ✓ A1–A6, A9.
 - ✓ **A4b, fixed 2026-11-03:** a `filter` given a column argument (`limit=wf["srt"][cols["temp"]]`) added `limit` to its output columns. Fixing it found worse (A4c): an argument named like an input column *replaced* it, so `filter(v, temp=<fahrenheit>)` showed fahrenheit as `v`'s `temp`, silently. A verb now hands on only its input's own columns (C3).
 - ✓ **A7, fixed 2026-11-03:** the unknown-argument message said `to_f()` "accepts (none)": it left out the first parameter, which only a `collapse` tool's accumulator should be. It lists `temp` now.
-- ✗ A8: a missing binding names the gap, not the fix. Planned S3 (CA-A).
-- ✗ A10: `map` after `map` fails, because the first map's column is `value`. S4 naming and S3 binding fix it together. **This is the most common friction for a new user.**
+- ✓ A8, A10, fixed 2026-11-04 by S3's binding (CA-A): a parameter no column is named for binds the one column whose type fits, written into the expression; two that fit, or none, make the step `invalid`, writing the binding or a `mod.cast`. `map` after `map`, the most common friction, runs.
 
 ### 2.8 Combines (C)
 
@@ -218,8 +217,8 @@ behaviour, so each needs your yes before it lands.
 | C11 | Must every input to a combine or tool be a named step? |
 | F7 | One way to write each thing? | **decided (EX3), and `over=` refused since 2026-11-03**; `op("identity")[mod.x(…)]` is the same operation as `mod.x(…)`, so it goes with the parser (S3) |
 
-**Known, already planned:** P11, P16 and A8
-(S3), V1b and A10 (S4), and V8b (D20b, decided).
+**Known, already planned:** P11 and P16 (S3), V1b (S4), and V8b (D20b,
+decided).
 
 ## 4. How to use this page
 

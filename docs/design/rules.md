@@ -71,6 +71,13 @@ before `s` runs. Steps that ran keep their values, marked `stale`, until you
 run them again. A step is stale only when its own inputs changed; a step
 reading a stale one says so (*read stale 's'*), and `run(x)` runs what `x` needs. Runs go in workflow order.
 
+**12. A tool's parameters take columns by name, then by type.**
+`double(n: int)` on a step with no `n` takes the one `int` column, and the
+step is saved saying so: `double[mod.map()](wf["d"], n=wf["d"][cols["value"]])`.
+Two that fit, or none, and the step is `invalid`, writing the binding or a
+`mod.cast`. An `int` fits a `float`. A parameter with a default takes a
+column only when you bind it.
+
 *Grouping* is a new index plus a map: `mean_temp[collapse(by="ward")]` packs
 each ward's rows into lists, then calls `mean_temp(temp: list[float])` once
 per ward, keeping `ward` as a column.

@@ -438,6 +438,7 @@ class Workflow:
         if self.catalog is not None:
             operation = self.catalog.admit(operation)
         operation = self._resolve_picks(operation)       # S5d: row numbers saved as lineage
+        operation = bind_by_type(operation, self, step_id)   # S3: the binding, written
         self._gone.pop(step_id, None)                    # a new pick (D-picks)
         problems = check(operation, self, step_id)
         previous = self.steps.get(step_id)
@@ -490,7 +491,7 @@ class Workflow:
         operation = _attach_bound(operation, self.resources)
         if self.catalog is not None:
             operation = self.catalog.admit(operation)
-        return check(operation, self, step_id)
+        return check(bind_by_type(operation, self, step_id), self, step_id)
 
     def move(self, step_id: str, index: int) -> None:
         """Move step *step_id* to position *index* (a position in the new
@@ -2724,6 +2725,11 @@ class Workflow:
             keys = self.trace(str(step.operation.input), list(source.data.index), s) or []
             source = Output(source.data, source.states, {**source.meta, "group": {
                 "by": by, "keys": keys, "all": list(self.steps[s].output.data.index)}})
+        if paired:
+            # bound to a column on purpose: the tool gets it even where the
+            # parameter has a default, which no column fills by name (L50c)
+            resolved = replace(resolved, arguments={**resolved.arguments,
+                                                    **{name: FROM_ROW for name in paired}})
         try:
             step.output = resolved.run(source, tools)
             if paired and unpaired is not None:
@@ -2870,6 +2876,7 @@ class Workflow:
                           columns_unknown(other.output),
                           (other.output.meta.get("plan") or {}).get("types"))
                 other.operation = self._resolve_picks(other.operation)   # S5-D3
+                other.operation = bind_by_type(other.operation, self, other.name)   # S3, its input planned
                 other.problems = check(other.operation, self, other.name)
                 other.output = stage(other.operation, self, other.problems, other.name)
                 other.warnings = warn(other.operation, self, other.name)
@@ -3116,6 +3123,7 @@ from .checks import (  # noqa: E402
     columns_unknown,
     predicted_columns,
     stage,
+    bind_by_type,
     warn,
     keeps_ids,
     _tool_parameters,
@@ -3125,6 +3133,7 @@ from .errors import PayloadError, PlanBroken as _PlanBroken, ResourceNotLoaded, 
 from .problems import Problem  # noqa: E402
 from .values import _record_fields, named_columns, record_return, source_record, source_rows  # noqa: E402
 from .modifiers import (  # noqa: E402
+    FROM_ROW,
     MODIFIERS,
     NAMED_VERBS,
     Modifier,

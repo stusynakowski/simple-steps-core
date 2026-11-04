@@ -118,9 +118,9 @@
 | A5 | Column from a subset | `limit=wf["h"][cols["temp"]]` | refused, writing the join | ✓ | |
 | A6 | Parent's column into its child | `to_f[mod.map()](wf["e"], temp=wf["v"][cols["temp"]])` | refused, writing the join | ✓ | D-child: keep the refusal |
 | A7 | Unknown argument | `to_f[mod.map()](wf["v"], nope=1)` | names what it accepts: `temp` | ✓ | fixed 2026-11-03: said "accepts (none)" (it dropped the first parameter) |
-| A8 | No matching column | `add_xy[mod.map()](wf["xy"])` | `invalid`, writing `a=wf[…][cols["x"]]` | ✗ | names the gap, not the fix. Planned S3 |
+| A8 | No matching column | `add_xy[mod.map()](wf["xy"])` | `invalid`, writing `a=wf[…][cols["x"]]` | ✓ | S3, 2026-11-04: two columns fit `a: int`, so it's `invalid`, writing `a=wf["xy"][cols["x"]]` |
 | A9 | Binding written out | `add_xy[…](wf["xy"], a=wf["xy"][cols["x"]], b=…)` | 3 | ✓ | |
-| A10 | `map` after `map` | `to_f[mod.map()](wf["f2"])` | runs | ✗ | **most common friction:** the column is `value`, not `temp`. S3 + S4 |
+| A10 | `map` after `map` | `to_f[mod.map()](wf["f2"])` | runs | ✓ | S3, 2026-11-04: `temp` binds the one float column, written `temp=wf["f2"][cols["value"]]`; S4 (D9) will name it `f2` |
 
 ## Combines
 

@@ -379,7 +379,9 @@ def part_c():
            "the handover's route ran by position; CA-11 refuses it: join on a key, or match_ids=True",
            open_=True)
     s = put(k, "z2", zip_(wf["r"], wf["w"], match_ids=True))
-    k["s4"] = scale[mod.map()](wf["z2"])
+    # weight has a default, so z2's weight column is bound, not taken by name
+    # (core-asks L50c, 2026-11-04): the handover's route relied on the name
+    k["s4"] = scale[mod.map()](wf["z2"], weight=wf["z2"][cols["weight"]])
     k.run("s4")
     lesson("Pc5", "colarg2: vouched with match_ids, then a map", data(k.step("s4"), "value"), [30, 20, 60])
     # probe_refs2.py

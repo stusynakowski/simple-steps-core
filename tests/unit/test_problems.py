@@ -74,7 +74,8 @@ def test_steps_report_problems_with_codes_and_their_step(k):
     k["two"] = scale_p[mod.map(), mod.filter()](wf["r"])
     k["arg"] = scale_p[mod.map()](wf["r"], wieght=2)
     k["set"] = scale_p[mod.map(), mod.retry()](wf["r"])
-    k["col"] = needs_name_p[mod.map()](wf["r"])
+    k["nums"] = pd.DataFrame({"n": [1, 2]})       # no str column: name can't be bound (S3)
+    k["col"] = needs_name_p[mod.map()](wf["nums"])
     found = {name: (first(k, name).code, first(k, name).step)
              for name in ("x", "m", "two", "arg", "set", "col")}
     assert found == {

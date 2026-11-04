@@ -5,6 +5,7 @@ Moved from grid.py unchanged (phase 2 of docs/design/cleanup-plan.md).
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 from typing import Callable
 import inspect
@@ -1065,6 +1066,79 @@ def _column_warnings(operation: Operation, workflow: "Workflow | None" = None,
 
 
 
+def bind_by_type(operation: Operation, workflow: "Workflow | None",
+                 step_id: str | None = None) -> Operation:
+    """*operation* with each required parameter that no column of its input
+    is named for bound to the one column whose type fits it, written into
+    the expression (S3, CA-A, core-asks L50a): ``double[mod.map()](wf["d"])``
+    is saved as ``double[mod.map()](wf["d"], n=wf["d"][cols["value"]])``. An
+    int column fits a float (lossless, L51c). Two that fit, or none, are left
+    for :func:`check` to refuse, naming them (L50b) or suggesting ``mod.cast``
+    (L51a). Decided only when the input's columns are known; a step whose
+    input hasn't been planned yet is bound when it is."""
+    if workflow is None or operation.input is None or _is_auto(operation):
+        return operation
+    up = workflow.steps.get(str(operation.input))
+    if up is None or not up.valid or (step_id in workflow.steps and list(workflow.steps).index(
+            str(operation.input)) > list(workflow.steps).index(step_id)):
+        return operation                       # its input is a problem: said as one, not bound
+    verb = operation.shape_verb
+    if verb is None or verb.kind not in _ROW_BY_ROW or workflow._columns_open(operation):
+        return operation
+    required = _unbound_parameters(operation, verb)
+    if not required:
+        return operation
+    columns = variables(workflow._known_columns(operation))
+    types = workflow._column_types(operation)
+    named = {p.name for p in _all_parameters(operation, verb)}
+    taken = {c for v in operation.arguments.values() if isinstance(v, StepRef)
+             and v.id == str(operation.input) and isinstance(v.columns, dict)
+             for c in (v.columns.get("names") or [])}
+    free = [c for c in columns if c not in named and c not in taken]
+    bound = {}
+    for p in required:
+        if p.name in columns:
+            continue                                  # by its name
+        fits = _fitting(p, free, types)
+        if len(fits) == 1:
+            bound[p.name] = StepRef(str(operation.input), workflow, columns={"names": [fits[0]]})
+            free.remove(fits[0])
+    if not bound:
+        return operation
+    return replace(operation, arguments={**operation.arguments, **bound})
+
+
+def _all_parameters(operation: Operation, verb: Any) -> list:
+    """The tool's parameters a row can feed, or [] when it takes the whole row."""
+    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool)
+    if isinstance(fn, Tool):
+        fn = fn.fn
+    if fn is None:
+        return []
+    try:
+        parameters = list(_signature(fn).parameters.values())     # annotations resolved
+    except (TypeError, ValueError):
+        return []
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
+        return []
+    return [p for p in _tool_parameters(verb.kind, fn, parameters)
+            if p.kind is not inspect.Parameter.VAR_POSITIONAL]
+
+
+def _unbound_parameters(operation: Operation, verb: Any) -> list:
+    """Parameters with no default that no argument gives."""
+    return [p for p in _all_parameters(operation, verb)
+            if p.default is inspect.Parameter.empty and p.name not in operation.arguments]
+
+
+def _fitting(parameter: Any, columns: list, types: dict) -> list:
+    """The columns whose known type fits *parameter*'s declared one."""
+    if parameter.annotation is inspect.Parameter.empty:
+        return []
+    return [c for c in columns if types.get(c) is not None
+            and _declared_fits(types[c], parameter.annotation) is True]
+
+
 #: The verbs that call their tool once per row, so a column given as an
 #: argument can be paired with the input row by row (K19).
 _ROW_BY_ROW = frozenset({"map", "filter", "expand", "group"})
@@ -1291,11 +1365,38 @@ def _missing_columns(operation: Operation, fn: Callable,
             hint = (f". {name!r} is a resource ({kind.__name__}), not a column: "
                     f"bind it with {name}=res[\"<name>\"]")
             break
+    if not hint and operation.input is not None:
+        hint = _binding_hint(operation, missing, workflow)
     return [
         f"{operation.tool}() needs {', '.join(repr(m) for m in missing)}, "
         f"which {str(operation.input) if operation.input is not None else 'the input'!r} does not have "
         f"(it has {', '.join(sorted(variables(available))) or 'no columns'}){hint}"
     ]
+
+
+def _binding_hint(operation: Operation, missing: list, workflow: "Workflow") -> str:
+    """What to write when a parameter can't be bound by name or by type (S3):
+    the columns that fit it, when more than one does (L50b), or a cast, when
+    none does (L51a)."""
+    verb = operation.shape_verb
+    params = {p.name: p for p in _all_parameters(operation, verb)} if verb is not None else {}
+    up = str(operation.input)
+    types = workflow._column_types(operation)
+    columns = [c for c in variables(workflow._known_columns(operation)) if c not in params]
+    for name in missing:
+        p = params.get(name)
+        if p is None or p.annotation is inspect.Parameter.empty:
+            continue
+        want = _type_name(p.annotation)
+        fits = _fitting(p, columns, types)
+        if len(fits) > 1:
+            return (f". {len(fits)} columns are {want}, {', '.join(fits)}: bind one, "
+                    f"{name}=wf[{up!r}][cols[{fits[0]!r}]]")
+        if not fits and columns:
+            have = ", ".join(f"{c}: {_type_name(types[c])}" for c in columns if c in types)
+            return (f". No column of {up!r} is {want}{f' ({have})' if have else ''}: convert one, "
+                    f"mod.cast({columns[0]}={want!r}), or bind one, {name}=wf[{up!r}][cols[{columns[0]!r}]]")
+    return ""
 
 
 def _type_mismatches(operation: Operation, fn: Callable,

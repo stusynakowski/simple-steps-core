@@ -140,7 +140,8 @@ def test_a_column_pairs_with_the_rows_that_share_its_ids(kw, tool_):
     kw["s"] = tool_[mod.map()](wf["warm"], w=wf["wts"][cols["w"]])
     assert kw.step("s").problems == ()
     kw["j"] = join(wf["warm"], wf["wts"], on="#p")
-    kw["sj"] = tool_[mod.map()](wf["j"])
+    # w has a default, so the join's w column is bound, not taken by name (L50c)
+    kw["sj"] = tool_[mod.map()](wf["j"], w=wf["j"][cols["w"]])
     kw.run_all()
     # Ben (id 1) x 20, Cy (id 2) x 30, Ada (id 0) x 10, in the sorted order.
     assert kw.step("s").data["value"].tolist() == [764.0, 1113.0, 366.0]

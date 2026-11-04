@@ -199,6 +199,17 @@ def _d_timeout(fn: Callable, *, seconds: float) -> Callable:
     return run
 
 
+class _FromRow:
+    """An argument bound to a column of the input: the tool gets the row's
+    cell, as a parameter named for a column does (K19, S3)."""
+
+    def __repr__(self) -> str:
+        return "FROM_ROW"
+
+
+FROM_ROW = _FromRow()
+
+
 def _d_apply(fn: Callable, **literals) -> Callable:
     """Innermost decoration: hand the tool the columns it actually asked for.
 
@@ -218,7 +229,9 @@ def _d_apply(fn: Callable, **literals) -> Callable:
     Rules:
 
     * columns bind to parameters **by name**; anything the tool does not
-      declare is simply not passed;
+      declare is simply not passed. A parameter with a default takes a column
+      only when bound to it (``FROM_ROW``), never by name (core-asks L50c):
+      ``scale(x, factor=2)`` keeps its 2 though the input has ``factor``;
     * a tool with ``**kwargs`` receives the whole row, for the cases that
       genuinely want it (``identity``);
     * bound arguments fill the rest, and an explicit argument **wins** a name
@@ -242,9 +255,11 @@ def _d_apply(fn: Callable, **literals) -> Callable:
         *leading, row = args
         if not isinstance(row, dict):
             return fn(*leading, row, **literals)
-        merged = {**row, **literals}
+        merged = {**row, **{k: v for k, v in literals.items() if v is not FROM_ROW}}
         bound = merged if wants_everything else {
             k: v for k, v in merged.items() if k in declared
+            and (k in literals or parameters[k].default is inspect.Parameter.empty
+                 or getattr(parameters[k].default, "binds_by_name", False))
         }
         # An absent cell (reshaping.md §9.1): the parameter's default, as for a
         # missing argument, else None. A **kwargs tool just doesn't get the key.
