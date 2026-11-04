@@ -245,6 +245,27 @@ def test_widen_of_a_source_not_run_yet_is_checked_when_it_runs():
     assert refused(k, "w", lambda: mod.widen()(wf["r"]), "widen which column")
 
 
+def test_a_column_argument_never_becomes_or_replaces_an_output_column():
+    # C3: a filter returns its input's columns, nothing else. A column argument
+    # used to be handed on as a column, and to replace an input column of the
+    # same name: filter(v, temp=<fahrenheit>) showed fahrenheit as v's temp.
+    @tool
+    def hot(temp: float, limit: float = 38) -> bool:
+        return temp >= limit
+
+    @tool
+    def to_f(temp: float) -> float:
+        return temp * 9 / 5 + 32
+    k = Kernel(Catalog([hot, to_f]))
+    k["v"] = pd.DataFrame({"name": ["Ada", "Ben"], "temp": [37.0, 38.5]})
+    k["f"] = to_f[mod.map()](wf["v"])
+    k["added"] = hot[mod.filter()](wf["v"], limit=wf["v"][cols["temp"]])
+    k["covered"] = hot[mod.filter()](wf["v"], temp=wf["f"][cols["value"]])
+    k.run_all()
+    assert k.step("added").output.data.to_dict("list") == {"name": ["Ada", "Ben"], "temp": [37.0, 38.5]}
+    assert values(k, "covered", "temp") == [37.0, 38.5]
+
+
 @pytest.mark.xfail(strict=True, reason="S7 (D33): melt and pivot")
 def test_E25_melt_then_pivot_gives_back_the_table():
     k = Kernel(Catalog([]))

@@ -2,7 +2,7 @@
 
 > Every capability the tutorial checks, with its expression, what it should
 > do, and its status. Run 2026-11-03 at `2bd150e` by
-> `.venv/bin/python tutorial/tutorial.py`: **92 ✓ · 16 ✗ · 3 ?** (111 lessons; R11, R13 and R14 since 2026-11-03's first run).
+> `.venv/bin/python tutorial/tutorial.py`: **94 ✓ · 15 ✗ · 3 ?** (112 lessons; R11, R13, R14, A4b and A4c since 2026-11-03's first run).
 > ✓ does what we want · ✗ doesn't yet · ? not decided. The reasoning is in
 > [README.md](README.md).
 >
@@ -108,7 +108,8 @@
 | A2 | A step's value | `hot[mod.filter()](wf["v"], limit=wf["lim"])` | one value for every row | ✓ | |
 | A3 | A cell pick | `limit=wf["v"][0][cols["temp"]]` | one value for every row | ✓ | |
 | A4 | Aligned column | `limit=wf["srt"][cols["temp"]]` | row with row, by identity | ✓ | |
-| A4b | …a filter keeps its columns | same | `name`, `ward`, `temp` | ✗ | **new:** adds `limit` as a column |
+| A4b | …a filter keeps its columns | same | `name`, `ward`, `temp` | ✓ | fixed 2026-11-03 (C3): added `limit` as a column |
+| A4c | …an argument named like an input column | `hot[mod.filter()](wf["v"], temp=wf["f"][cols["value"]])` | `v`'s own `temp` kept | ✓ | fixed 2026-11-03: **was a silent wrong answer**, the argument's values shown as `v`'s `temp` |
 | A5 | Column from a subset | `limit=wf["h"][cols["temp"]]` | refused, writing the join | ✓ | |
 | A6 | Parent's column into its child | `to_f[mod.map()](wf["e"], temp=wf["v"][cols["temp"]])` | refused, writing the join | ✓ | D-child: keep the refusal |
 | A7 | Unknown argument | `to_f[mod.map()](wf["v"], nope=1)` | names what it accepts: `temp` | ✗ | **new:** says "accepts (none)" |

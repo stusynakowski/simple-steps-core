@@ -3,7 +3,7 @@
 > A walkthrough of what the library is for, what it refuses to do, and why,
 > one part at a time. Every claim is a lesson in [tutorial.py](tutorial.py),
 > run against the code: `.venv/bin/python tutorial/tutorial.py`. Written
-> 2026-11-03: 111 lessons, **92 ✓ · 16 ✗ · 3 ?**. What the app
+> 2026-11-03: 112 lessons, **94 ✓ · 15 ✗ · 3 ?**. What the app
 > asked for is checked by [handover.py](handover.py) (§5), and everything at
 > once by `scripts/sweep.py` (§6). The rules in full are in
 > [docs/design/model.md](../docs/design/model.md).
@@ -147,7 +147,7 @@ literal, a pick or a resource. A cell pick is one value for every row; a
 column pick pairs row by row, and only from an aligned step (principle 4).
 When binding is unclear, the step is `invalid` and names the fix.
 **Status:** ✓ A1–A6, A9.
-- ✗ **A4b, new:** a `filter` given a column argument (`limit=wf["srt"][cols["temp"]]`) adds `limit` to its output columns. A filter should return only its input's columns.
+- ✓ **A4b, fixed 2026-11-03:** a `filter` given a column argument (`limit=wf["srt"][cols["temp"]]`) added `limit` to its output columns. Fixing it found worse (A4c): an argument named like an input column *replaced* it, so `filter(v, temp=<fahrenheit>)` showed fahrenheit as `v`'s `temp`, silently. A verb now hands on only its input's own columns (C3).
 - ✗ **A7, new:** the unknown-argument message says `to_f()` "accepts (none)"; it accepts `temp`.
 - ✗ A8: a missing binding names the gap, not the fix. Planned S3 (CA-A).
 - ✗ A10: `map` after `map` fails, because the first map's column is `value`. S4 naming and S3 binding fix it together. **This is the most common friction for a new user.**
@@ -210,7 +210,7 @@ behaviour, so each needs your yes before it lands.
 | P9b | a lineage condition warns that it is positional | drop the warning for `row[…]` conditions |
 | V10 | `axis="columns"` is accepted and ignored | remove the setting |
 | R11 | `mod.widen(<step>)` is accepted and fails with `None` | **fixed 2026-11-03** |
-| A4b | a filter's column argument becomes an output column | the filter keeps only its input's columns |
+| A4b | a filter's column argument becomes an output column | **fixed 2026-11-03**, with A4c |
 | A7 | "accepts (none)" | list the tool's parameters |
 
 **Open choices**
@@ -279,7 +279,7 @@ core-asks probe (`--stress` adds the property test at 2,000 examples). Run
 | Suite | Result |
 |---|---|
 | tests | 783 passed, 1 skipped, 27 xfailed |
-| tutorial.py | 111 lessons: 92 ✓ · 16 ✗ · 3 ? |
+| tutorial.py | 112 lessons: 94 ✓ · 15 ✗ · 3 ? |
 | handover.py | 59 checks: 51 ✓ · 6 ✗ · 2 ? |
 | both examples | run |
 | core_asks.py | 36 of 39 done |

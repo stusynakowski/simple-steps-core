@@ -2280,6 +2280,7 @@ class Workflow:
         try:
             resolved = self._resolve_arguments(to_resolve, resources)
             source = self._input_for(resolved)
+            unpaired = source
             if paired and source is not None:
                 source = self._with_paired_columns(source, paired)
         except SelectionError as exc:
@@ -2313,6 +2314,8 @@ class Workflow:
                 "by": by, "keys": keys, "all": list(self.steps[s].output.data.index)}})
         try:
             step.output = resolved.run(source, tools)
+            if paired and unpaired is not None:
+                _unpair(step.output, unpaired, paired)
             step.output.data = _str_columns(step.output.data, step_id)
             _spread_record(resolved, step.output)
             _apply_naming(resolved, step.output, step_id, self.default_name_rule(resolved))
@@ -2626,6 +2629,30 @@ def _carry_id_columns(operation: Operation, source: Any, output: Output) -> None
             gaps.setdefault(name, []).append(i)
     output.mark_absent(gaps)
 
+
+
+def _unpair(output: Output, unpaired: Output, paired: dict) -> None:
+    """Take a verb's paired arguments back out of its output (C3).
+
+    A column argument joins the input as a column so the tool gets one value a
+    row (K19); a verb that carries its input's columns (``filter``, ``group``)
+    would hand it on. A column it added goes; an input column it covered gets
+    its own values back, so ``filter(v, temp=wf["f"][cols["value"]])`` keeps
+    ``v``'s temperatures."""
+    data, states = output.data, output.states
+    for name in paired:
+        if name not in data.columns:
+            continue
+        if name in unpaired.data.columns:
+            rows_ = [i for i in data.index if i in unpaired.data.index]
+            if len(rows_) == len(data.index):
+                data[name] = unpaired.data[name].reindex(data.index)
+                if name in states.columns and name in unpaired.states.columns:
+                    states[name] = unpaired.states[name].reindex(data.index)
+        elif name != output.meta.get("value_column"):
+            data.drop(columns=[name], inplace=True)
+            if name in states.columns:
+                states.drop(columns=[name], inplace=True)
 
 # Names used only inside functions, imported last so the modules can refer
 # to each other (see grid.py).

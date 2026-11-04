@@ -386,6 +386,12 @@ def ch7():
     lesson("A4b", "…and a filter's output keeps only its input's columns",
            list(s.data.columns), ["name", "ward", "temp"],
            "the argument 'limit' is added as a column")
+    k["f"] = to_f[mod.map()](wf["v"])
+    k.run("f")
+    s = put(k, "cv", hot[mod.filter()](wf["v"], temp=wf["f"][cols["value"]]))
+    lesson("A4c", "…and an argument named like an input column doesn't replace it",
+           data(s, "temp"), [37.0, 38.5, 36.9],
+           "the filter's output showed the argument's values as v's temp: a silent wrong answer")
     s = put(k, "d", hot[mod.filter()](wf["v"], limit=wf["h"][cols["temp"]]))
     lesson("A5", "a column from a subset is refused, writing the join", s.state, "invalid")
     s = put(k, "x", to_f[mod.map()](wf["e"], temp=wf["v"][cols["temp"]]))
