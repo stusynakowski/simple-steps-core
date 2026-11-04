@@ -218,7 +218,9 @@ other=254,
 ## 2026-11-04 · `test_L40f_run_makes_a_step_current` · at `fdb0c53`
 
 - **Broke:** AssertionError: ('s3', 's3_p', 'stale')
-- **Status:** open
+- **Status:** fixed in `090efdd`. With staleness no longer passed down, `run(x)` chose what to run before
+  starting, so a step that turned stale once the step before it re-ran was missed; it now asks each
+  step in turn
 
 ```
 test_L40f_run_makes_a_step_current(
