@@ -118,16 +118,17 @@ decision or plan step that brings it.
 
 | | Do | We want | Today | |
 |---|---|---|---|---|
-| X1 | an edit to `v` removes a column `f` reads | `f` is `invalid` at once, naming the column, **still showing its last values** | `invalid` at once, naming the column; its values **dropped** | ✗ SM |
-| X2 | the column put back, data as `f` last ran on | `f` is `completed` again, no re-run | `staged`: must re-run | ✗ SM |
+| X1 | an edit to `v` removes a column `f` reads | `f` is `invalid` at once, naming the column, **still showing its last values** | `invalid` at once, naming the column; its values **dropped** | ✓ (SM, 2026-11-03) |
+| X2 | the column put back, data as `f` last ran on | `f` is `completed` again, no re-run | `staged`: must re-run | ✓ (SM, 2026-11-03) |
 | X3 | `v` assigned the identical data again | nothing goes stale | `f` stays `completed` | ✓ |
-| X4 | `f`'s expression changed, then put back exactly as it ran | `f` is `completed` | `stale` (*"updated args"*) | ✗ SM |
+| X4 | `f`'s expression changed, then put back exactly as it ran | `f` is `completed` | `stale` (*"updated args"*) | ✓ (SM, 2026-11-03) |
 | X5 | `v` changes; `run("g")`, where `g` reads `h`, which reads `v` | `h` runs first, then `g` on fresh data: run makes a step current | `g` computed from `h`'s outdated values and shown `completed`, with a warning naming `h` and the version read; `h` still `stale` | ✗ SM |
 | X6 | `v` changes; ask `h` why it's stale | the reason among its warnings, where the app reads | `stale`; the reason only in output metadata, warnings empty | ✗ SS7 |
 | X7 | delete `h`, which `g` reads | refused, naming `g`; deleting anyway makes `g` `invalid`, naming `h` | refused, naming `g`; no delete-anyway | ✓ / ✗ SS7 |
 
-**Today:** 13 of the 21 examples do what we want (X7 for its refusal). Of the
-other 8: one is a silent wrong answer (R2, D-picks); four are the session
-model (X1, X2, X4, X5, decision SM); three are unbuilt (S1 naming, S5 binding,
-X6 the stale reason's place), with X7's delete-anyway. The rows, steps and
+**Today:** 13 of the 21 examples did what we want at `2bd150e`; X1, X2 and X4
+since the result store (2026-11-03), so 16. Of the other 5: one is a silent
+wrong answer (R2, D-picks); one is the session model's run (X5); three are
+unbuilt (S1 naming, S5 binding, X6 the stale reason's place), with X7's
+delete-anyway. The rows, steps and
 between-steps layers hold; the session layer is where the work is.

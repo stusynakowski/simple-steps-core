@@ -338,6 +338,7 @@ class Workflow:
         008 C10: their "not an earlier step" becomes "comes after", which says
         what to fix — reorder, don't create.
         """
+        moved = False
         for sid, st in self.steps.items():
             if sid == step_id or step_id not in st.operation.reads:
                 continue
@@ -346,6 +347,9 @@ class Workflow:
                 st.problems = problems
                 st.output = stage(st.operation, self, problems, sid)
                 st.warnings = warn(st.operation, self, sid)
+                moved = True
+        if moved:
+            self._refresh_staleness()           # settles: what the store holds comes back
 
     def __getitem__(self, step_id: str | int) -> StepRef:
         """A reference to a step, by **name** or by **position**.
@@ -393,7 +397,7 @@ class Workflow:
         of what it read is re-decided, and one whose input became invalid is
         invalid, saying which. Nothing runs; a step whose problems are the same
         keeps its output."""
-        changed = {step_id}
+        changed, moved = {step_id}, False
         for sid, st in self.steps.items():
             if sid in changed or not changed & set(self._depends_on(sid)):
                 continue
@@ -403,6 +407,9 @@ class Workflow:
                 st.problems = problems
                 st.output = stage(st.operation, self, problems, sid)
                 st.warnings = warn(st.operation, self, sid)
+                moved = True
+        if moved:
+            self._refresh_staleness()           # settles: what the store holds comes back
 
     def __delitem__(self, step_id: str) -> None:
         self.remove(step_id)
@@ -701,6 +708,27 @@ class Workflow:
         rows_ = meta.get("stale_rows")
         return None if rows_ is None else list(rows_)
 
+    def _settle(self) -> None:
+        """Put back what the store already holds (SM, ST5), upstream first.
+
+        A step whose run key the store holds shows that result: an expression
+        put back, or a column restored upstream, is ``completed`` again with no
+        re-run (S7, S9). A step that is ``invalid`` shows its newest result
+        rather than a blank plan (S8): its problems still decide its state.
+        Whether its inputs are current is :meth:`_refresh_staleness`'s, next."""
+        for sid, st in self.steps.items():
+            if st.problems:
+                kept = self.results(sid)
+                if kept and st.output.meta.get("staged"):
+                    st.output = kept[0]
+                continue
+            key = self.run_key(sid)
+            found = self.store.get(key) if key is not None else None
+            if found is None:
+                continue
+            st.output = found
+            found.meta.pop("edited", None)
+
     def _refresh_staleness(self) -> None:
         """Set every run step's ``stale``, and a short ``stale_reason``, from its stamps.
 
@@ -709,6 +737,7 @@ class Workflow:
         has new data), ``resource llm changed``, ``r is stale`` (a step it read
         is itself stale).
         """
+        self._settle()
         memo: dict[str, str | None] = {}
         partial: dict[str, set | None] = {}         # stale rows; None means all
 

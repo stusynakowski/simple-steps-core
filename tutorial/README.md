@@ -3,7 +3,7 @@
 > A walkthrough of what the library is for, what it refuses to do, and why,
 > one part at a time. Every claim is a lesson in [tutorial.py](tutorial.py),
 > run against the code: `.venv/bin/python tutorial/tutorial.py`. Written
-> 2026-11-03: 118 lessons, **103 ✓ · 13 ✗ · 2 ?**. What the app
+> 2026-11-03: 118 lessons, **106 ✓ · 10 ✗ · 2 ?**. What the app
 > asked for is checked by [handover.py](handover.py) (§5), and everything at
 > once by `scripts/sweep.py` (§6). The rules in full are in
 > [docs/design/model.md](../docs/design/model.md).
@@ -184,9 +184,7 @@ current. Putting something back exactly as it was is free.
 **Status:** ✓ S1–S3, S6, S10–S13. Every ✗ here has one cause: states are kept
 as flags, not derived (decision **SM**).
 - ✗ **S5:** `run("f")` computes `f` from `h`'s outdated rows and shows `completed`, while `h` stays `stale`. A warning on `f` names `h` and the version it read, so unlike P15 it isn't silent, but the state is wrong.
-- ✗ S7: an expression put back stays `stale`.
-- ✗ S8: a step made `invalid` upstream loses its values.
-- ✗ S9: when the column is put back, that step is `staged` and has to re-run.
+- ✓ S7, S8, S9, fixed 2026-11-03 by the result store (SM, ST5): an expression put back is `completed` again with no re-run; a step made `invalid` upstream keeps showing its last values; when the column comes back, it's `completed` again.
 - ✗ S4: the stale reason isn't among the step's warnings (SS7).
 
 ### 2.12 Save, load, provenance (Y)
@@ -278,7 +276,7 @@ core-asks probe (`--stress` adds the property test at 2,000 examples). Run
 | Suite | Result |
 |---|---|
 | tests | 783 passed, 1 skipped, 27 xfailed |
-| tutorial.py | 118 lessons: 103 ✓ · 13 ✗ · 2 ? |
+| tutorial.py | 118 lessons: 106 ✓ · 10 ✗ · 2 ? |
 | handover.py | 59 checks: 52 ✓ · 5 ✗ · 2 ? |
 | both examples | run |
 | core_asks.py | 36 of 39 done |

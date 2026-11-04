@@ -2,7 +2,7 @@
 
 > Every capability the tutorial checks, with its expression, what it should
 > do, and its status. Run 2026-11-03 at `2bd150e` by
-> `.venv/bin/python tutorial/tutorial.py`: **103 ✓ · 13 ✗ · 2 ?** (118 lessons; R10b, R11, R13–R16, A4b, A4c, A7, V2b, V9b, V10, V11 and Y5 since 2026-11-03's first run).
+> `.venv/bin/python tutorial/tutorial.py`: **106 ✓ · 10 ✗ · 2 ?** (118 lessons; S7–S9, R10b, R11, R13–R16, A4b, A4c, A7, V2b, V9b, V10, V11 and Y5 since 2026-11-03's first run).
 > ✓ does what we want · ✗ doesn't yet · ? not decided. The reasoning is in
 > [README.md](README.md).
 >
@@ -168,9 +168,9 @@
 | S4 | Why it's stale | `k.step("h").warnings` | the reason, among the warnings | ✗ | only in `needs_run()` and metadata. SS7 |
 | S5 | Run one step | `k.run("f")`, `h` stale | runs `h` first | ✗ | `f` computed from old rows and shown `completed`; a warning names `h` and its version. SM |
 | S6 | A value put back | 37 → 38 → 37 | `completed`, no re-run | ✓ | |
-| S7 | An expression put back | change `f`, then restore it | `completed`, no re-run | ✗ | stays `stale`. SM |
-| S8 | Column removed upstream | drop `temp` from `w` | `invalid`, keeping its last values | ✗ | values dropped. SM |
-| S9 | Column put back | restore `temp` | `completed`, no re-run | ✗ | `staged`: must re-run. SM |
+| S7 | An expression put back | change `f`, then restore it | `completed`, no re-run | ✓ | fixed 2026-11-03 (SM): its result is still in the store |
+| S8 | Column removed upstream | drop `temp` from `w` | `invalid`, keeping its last values | ✓ | fixed 2026-11-03 (SM): it shows its newest result |
+| S9 | Column put back | restore `temp` | `completed`, no re-run | ✓ | fixed 2026-11-03 (SM): the store holds its key |
 | S10 | Delete a step that's read | `del k["h"]` | refused, naming the reader | ✓ | no delete-anyway yet (SS7) |
 | S11 | Rename | `k.rename("lim", "limit")` | rewrites every reference | ✓ | |
 | S12 | Move | `k.move("f", 0)` | refused: `f` reads `h` | ✓ | |
