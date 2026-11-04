@@ -1120,7 +1120,8 @@ def bind_by_type(operation: Operation, workflow: "Workflow | None",
             continue                                  # by its name
         fits = _fitting(p, free, types)
         if len(fits) == 1:
-            bound[p.name] = StepRef(str(operation.input), workflow, columns={"names": [fits[0]]})
+            # unbound, as wf["…"] is: it names a step of whatever workflow holds it
+            bound[p.name] = StepRef(str(operation.input), None, columns={"names": [fits[0]]})
             free.remove(fits[0])
     if not bound:
         return operation
@@ -1359,9 +1360,31 @@ def _paired_arguments(operation: Operation, workflow: "Workflow | None") -> dict
         return {}
     # CA-D1: under a row-by-row verb the verb decides: a column passes each
     # row's cell whatever the parameter's type; only a DataFrame takes it whole.
-    return {name: value for name, value in op_.arguments.items()
-            if isinstance(value, StepRef) and _selection_kind(value) == "column"
-            and name in annotations and _wants(annotations[name]) != "frame"}
+    paired = {name: value for name, value in op_.arguments.items()
+              if isinstance(value, StepRef) and _selection_kind(value) == "column"
+              and name in annotations and _wants(annotations[name]) != "frame"}
+    # A whole step with one data column is that column (core-asks L37), to a
+    # parameter declared to take one value: `add[mod.map()](wf["r"], k=wf["d"])`.
+    # Untyped, a whole step is passed whole, as written.
+    for name, value in op_.arguments.items():
+        if name in paired or not isinstance(value, StepRef) or value.selected \
+                or name not in annotations or _wants(annotations[name]) != "scalar" \
+                or value.id not in workflow.steps or value.id == str(op_.input):
+            continue
+        basis = workflow.basis(value.id)
+        if basis is None or columns_unknown(basis):
+            continue
+        rows_ = len(basis.data) if not basis.meta.get("staged") else basis.meta.get("expected")
+        if rows_ == 1:
+            continue                           # one value: the same for every row (L37b)
+        up, here = str(op_.input), workflow._upstream_ids(value.id) | {value.id}
+        if up not in here and value.id not in workflow._upstream_ids(up) \
+                and not here & workflow._upstream_ids(up):
+            continue                           # unrelated rows: passed whole, as written
+        only = variables(predicted_columns(basis))
+        if len(only) == 1:
+            paired[name] = replace(value, columns={"names": only})
+    return paired
 
 
 #: How a warning's message says which kind it is.

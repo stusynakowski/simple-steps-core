@@ -321,6 +321,7 @@ class Workflow:
                 return value if all(a is b for a, b in zip(out, value)) else type(value)(out)
             return value
 
+        touched: list = []
         for sid, st in self.steps.items():
             if sid == source or (only is not None and sid != only):
                 continue
@@ -343,7 +344,9 @@ class Workflow:
             if any(a is not b for a, b in zip(modifiers, op_.modifiers)) \
                     or any(arguments[k] is not op_.arguments[k] for k in arguments):
                 st.operation = replace(op_, modifiers=tuple(modifiers), arguments=arguments)
+                touched.append(sid)
             if gone:
+                touched.append(sid)
                 rows_ = sorted(set(gone))
                 was = "; ".join(", ".join(f"{c}={_plain(v)!r}" for c, v in shown.iloc[n].items())
                                 for n in rows_[:3])
@@ -353,6 +356,15 @@ class Workflow:
                     "text": (f"{source!r} row {', '.join(map(str, rows_))} is gone "
                              f"(it was {was}): deleted, or edited while rows were "
                              f"added or deleted. Pick the row again")}
+        # checked again here: a step may name the source's rows without reading
+        # it any more, so no re-check after the source would reach it
+        for sid in dict.fromkeys(touched):
+            st = self.steps[sid]
+            before = st.problems
+            st.problems = check(st.operation, self, sid)
+            st.warnings = warn(st.operation, self, sid)
+            if st.problems != before:
+                self._restage_after(sid)        # what reads it hears it too
 
     def _as_operation(self, operation: Any) -> Any:
         """What declaring *operation* means, before it is checked: a selection

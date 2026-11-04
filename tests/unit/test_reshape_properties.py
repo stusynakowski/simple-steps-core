@@ -502,6 +502,17 @@ def test_L40d_undo_is_free(frame, changed, chain, which, other):
 # and a blank plan in the other (found by ST8 at STRESS=1)
 @example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]), changed=pd.DataFrame({"k": ["A"], "n": [pd.NA], "tags": [None], "rec": [{}]}),
          chain=[(0, 0, 0, 0), (257, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)], which=1, other=142)
+# a binding core wrote named the workflow it was written in, so the same
+# expression in another kernel read "a different Workflow" (found by S3)
+@example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
+         changed=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
+         chain=[(186, 0, 0, 0), (164, 0, 0, 0), (155, 1, 0, 0)], which=16, other=48)
+# a step that names a source's rows but no longer reads it wasn't checked
+# again when those rows went, in one order of edits (found by D-picks)
+@example(frame=pd.DataFrame({"k": ["A", "A"], "n": pd.array([pd.NA, pd.NA], dtype="Int64"),
+                             "tags": [None, None], "rec": [{}, {}]}),
+         changed=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
+         chain=[(0, 0, 0, 0), (257, 1, 0, 0)], which=1, other=0)
 # a step given an expression naming a later step, and that step, re-checked
 # each other forever after a run: it hung (found by ST8 at STRESS=1)
 @example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),

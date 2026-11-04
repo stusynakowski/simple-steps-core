@@ -102,3 +102,28 @@ def test_binding_waits_until_the_input_is_planned():
     assert k.step("x").formula == 'double_b[mod.map()](wf["s"], n=wf["s"][cols["d"]])'
     k.run_all()
     assert k.step("x").data["x"].tolist() == [2, 4]
+
+
+@tool
+def add_b(n: int, k: int) -> int:
+    return n + k
+
+
+def test_a_whole_step_with_one_column_pairs_by_row():
+    # core-asks L37: a step of one data column is that column
+    k = Kernel(Catalog(tools=[add_b, double_b]))
+    k["r"] = pd.DataFrame({"n": [1, 2, 3]})
+    k["d"] = double_b[mod.map()](wf["r"])
+    k["x"] = add_b[mod.map()](wf["r"], k=wf["d"])
+    k.run_all()
+    assert k.step("x").data["x"].tolist() == [3, 6, 9]
+    assert k.step("x").formula == 'add_b[mod.map()](wf["r"], k=wf["d"])'    # as written
+
+
+def test_a_one_value_step_is_the_same_for_every_row():
+    k = Kernel(Catalog(tools=[add_b]))
+    k["r"] = pd.DataFrame({"n": [1, 2, 3]})
+    k["ten"] = 10
+    k["x"] = add_b[mod.map()](wf["r"], k=wf["ten"])
+    k.run_all()
+    assert k.step("x").data["x"].tolist() == [11, 12, 13]

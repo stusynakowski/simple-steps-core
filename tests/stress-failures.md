@@ -564,3 +564,42 @@ other=2,
 ```
 no example printed
 ```
+
+## 2026-11-04 · `test_L40e_the_order_of_edits_doesnt_matter` · at `a99c748`
+
+- **Broke:** AssertionError: ('order', 's1', 's2', 'invalid', 'completed')
+- **Status:** fixed (D-picks): a step whose picks a source's change touched is checked again directly, since it may no longer read the source; pinned in L40e
+
+```
+test_L40e_the_order_of_edits_doesnt_matter(
+frame=   k     n  tags rec
+0  A  <NA>  None  {}
+1  A  <NA>  None  {},
+changed=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],
+chain=[(0, 0, 0, 0), (257, 1, 0, 0)],
+which=1,
+other=0,
+)
+```
+
+## 2026-11-04 · `test_L40e_the_order_of_edits_doesnt_matter` · at `a99c748` · STRESS=1
+
+- **Broke:** AssertionError: ('order', 's1_r', 's1_r', 'stale', 'invalid')
+- **Status:** fixed (S3): a binding core writes is an unbound reference, as `wf[…]` is, not one pinned to the workflow it was written in; pinned in L40e
+
+```
+test_L40e_the_order_of_edits_doesnt_matter(
+# The test always failed when commented parts were varied together.
+frame=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],  # or any other generated value
+changed=Empty DataFrame
+Columns: [k, n, tags, rec]
+Index: [],  # or any other generated value
+chain=[(186, 0, 0, 0), (164, 0, 0, 0), (155, 1, 0, 0)],
+which=16,
+other=48,
+)
+```
