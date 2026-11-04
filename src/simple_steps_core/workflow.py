@@ -518,9 +518,7 @@ class Workflow:
         out: dict[str, dict] = {}
         for name, st in self.steps.items():
             try:
-                recipe = {"operation": st.operation.to_dict()}
-                if st.literal is not NO_LITERAL and _literal_problem(st.literal) is None:
-                    recipe["literal"] = _encode_argument(st.literal)
+                parts = self._own_parts(st)
             except Exception as error:
                 # A step that can't be saved (a lambda) can't be reproduced: no
                 # id, for it or for anything that reads it.
@@ -530,17 +528,39 @@ class Workflow:
             if upstream:
                 out[name] = {"id": None, "why": f"it reads {upstream[0]!r}, which has no id"}
                 continue
-            parts = {
-                "recipe": _short_hash(recipe),
-                "tool": self._tool_hash(st.operation),
-                "resources": {r: self._resource_version(r, data=False)
-                              for r in sorted(st.operation.resources)},
-                "inputs": {r: out[r]["id"] if r in out else None
-                           for r in sorted(st.operation.reads)},
-            }
+            parts["inputs"] = {r: out[r]["id"] if r in out else None
+                               for r in sorted(st.operation.reads)}
             parts["id"] = _short_hash(parts)
             out[name] = parts
         return out
+
+    def _own_parts(self, st: Step) -> dict:
+        """What a step is made of by itself: its recipe (operation, or literal),
+        its tool's code and its resources' specs. Raises when it can't be saved."""
+        recipe = {"operation": st.operation.to_dict()}
+        if st.literal is not NO_LITERAL and _literal_problem(st.literal) is None:
+            recipe["literal"] = _encode_argument(st.literal)
+        return {"recipe": _short_hash(recipe),
+                "tool": self._tool_hash(st.operation),
+                "resources": {r: self._resource_version(r, data=False)
+                              for r in sorted(st.operation.resources)}}
+
+    def run_key(self, step_id: str, read: dict | None = None) -> str | None:
+        """The key a result of *step_id* is filed under (ST2): this step, with
+        this tool code and these resources, on exactly this data. Its name,
+        its own parts (:meth:`_own_parts`) and the data version of each step
+        and resource it reads: the stamps a run records, or now's. Another
+        recipe upstream that gives the same data gives the same key. None
+        when it can't be saved, or reads something that holds no data."""
+        st = self.steps[step_id]
+        try:
+            parts = self._own_parts(st)
+        except Exception:
+            return None
+        read = self._read_stamps(st.operation) if read is None else read
+        if any(v is None for v in read.values()):
+            return None
+        return _short_hash({"name": step_id, **parts, "read": dict(sorted(read.items()))})
 
     def recipe_id(self) -> str:
         """The workflow's id: its steps' ids, its resources and its naming."""
@@ -1516,6 +1536,21 @@ class Workflow:
             found.append(f"A6 {step_id}: planned {rows_['count']} rows, got {len(data)}")
         return found
 
+    def filed_unchanged(self) -> list[str]:
+        """A9 (ST4): a result is never changed once it's filed. Each step's
+        data still hashes to the version it was given when it ran (or was
+        declared); a later run, edit or view that changed it breaks this.
+        Values with no stable version (ST1) can't be checked, and aren't."""
+        found = []
+        for name, st in self.steps.items():
+            filed = st.output.meta.get("version")
+            if filed is None or st.output.meta.get("staged") or _unversioned(st.output.data):
+                continue
+            now = _data_version(st.output.data)
+            if now != filed:
+                found.append(f"A9 {name}: its data changed after it was filed ({filed} -> {now})")
+        return found
+
     def _lineage_join_breaks(self, step_id: str, on: str) -> list[str]:
         """A5 for a join on lineage: each row's two sides come from the same
         row of the step *on* names. Followed back by id, step by step (a
@@ -2111,6 +2146,7 @@ class Workflow:
         out = self.steps[step_id].output
         if not out.meta.get("staged"):
             out.meta["version"] = _data_version(out.data)
+            out.meta["run_key"] = self.run_key(step_id, read)
             unversioned = _unversioned(out.data)
             if unversioned:                       # D57: said, with the fix
                 names = ", ".join(unversioned)

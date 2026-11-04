@@ -282,3 +282,42 @@ def test_formula_names_are_the_catalogs():
     assert {"wf", "res", "mod", "cols", "rows", "op", "join", "stack", "zip_",
             "hot_i", "identity"} <= set(names)
     assert "to_f_i" not in names
+
+
+# ── the run key (ST2): this step, this code, on exactly this data ──────────
+@tool
+def hot_rk(temp: float, limit: float = 38) -> bool:
+    return temp >= limit
+
+
+@tool
+def src_rk() -> pd.DataFrame:
+    return pd.DataFrame({"temp": [37.0, 38.5]})
+
+
+def test_a_run_key_names_this_step_on_exactly_this_data():
+    k = Kernel(Catalog([hot_rk, src_rk]))
+    k["v"] = pd.DataFrame({"temp": [37.0, 38.5]})
+    k["lim"] = 38.0
+    k["h"] = hot_rk[mod.filter()](wf["v"], limit=wf["lim"])
+    k.run_all()
+    w = k.workflow
+    key = w.run_key("h")
+    assert key is not None and k.step("h").output.meta["run_key"] == key   # filed under it
+    k["lim"] = 37.0
+    assert w.run_key("h") != key                       # other data, other key
+    k["lim"] = 38.0
+    assert w.run_key("h") == key                       # put back: the same key
+    k["h"] = hot_rk[mod.filter(), mod.retry(times=2)](wf["v"], limit=wf["lim"])
+    assert w.run_key("h") != key                       # another expression
+    k["h"] = hot_rk[mod.filter()](wf["v"], limit=wf["lim"])
+    k["v"] = src_rk[mod.source()]()
+    k.run("v")
+    assert w.run_key("h") == key                       # another recipe, the same data
+
+
+def test_a_run_key_waits_for_data():
+    k = Kernel(Catalog([hot_rk, src_rk]))
+    k["v"] = src_rk[mod.source()]()
+    k["h"] = hot_rk[mod.filter()](wf["v"])
+    assert k.workflow.run_key("h") is None             # v holds no data yet

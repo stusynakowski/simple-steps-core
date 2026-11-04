@@ -131,10 +131,10 @@ way the store can go wrong is a run key matching the wrong result, shown
 | | Must hold | Status |
 |---|---|---|
 | ST1 | A data version never collides: different data, different version; a value with no content hash gets a version of its own each run, never reused, and the step says so | **done 2026-11-03**: an unpicklable object whose `repr` hid its contents (`<Model>`) shared one version; now unique, with *"Model has no stable version: … give Model a data_version()"* (D57) |
-| ST2 | A run key covers all that changes an output: the step's spec (expression, tool code, names), each input's data version, resource versions | the parts exist; next |
+| ST2 | A run key covers all that changes an output: the step's spec (expression, tool code, names), each input's data version, resource versions | **done 2026-11-03**: `Workflow.run_key(step)`, filed on each result as `meta["run_key"]`; another recipe upstream that gives the same data gives the same key |
 | ST3 | A tool that reads the outside world is never reused blindly | **owner, 2026-11-03: it re-runs every time until an "as of" is designed (D43–D46). Later: a lazy re-run, kept until asked to refresh, so it isn't recomputed needlessly** |
-| ST4 | A filed result is never changed: a test hashes it when filed and when read | to do, with ST2 |
-| ST5 | States come only from the workflow and the store (SM) | to do: fixes S5–S9 |
+| ST4 | A filed result is never changed: a test hashes it when filed and when read | **done 2026-11-03**: invariant A9, `Workflow.filed_unchanged()`, checked after every run of every test; it holds |
+| ST5 | States come only from the workflow and the store (SM). A step is current when the store holds its run key **and** every step it reads is current: an input given a new expression keeps its last data, marked stale, so its readers' keys still match | to do: fixes S5–S9 |
 | ST6 | `run(x)` makes `x` current, computing missing keys in order (C9) | to do |
 | ST7 | One store per kernel; keep each step's current result and its last few; dropping one only costs a re-run | to do |
 | ST8 | The laws: any order of edits ends where a fresh kernel would; undo is free (L40c, extended) | to do |

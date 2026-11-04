@@ -40,6 +40,7 @@ def _airtight(monkeypatch, request):
         plan = before.meta.get("plan") if before.meta.get("staged") else None
         step = run_step(self, step_id, *args, **kwargs)
         broken.extend(self.check_invariants(step_id, plan))
+        broken.extend(self.filed_unchanged())
         return step
 
     monkeypatch.setattr(Workflow, "_run_step", checked)
