@@ -72,11 +72,13 @@ def part_a():
     lesson("A2", "source, filter, map declare; nothing runs",
            states(k), {"p": "staged", "sick": "staged", "f": "staged"})
     k["g"] = "to_f[mod.map()](wf['p'])"
-    lesson("A3", "formula text is parsed against the catalog",
-           k.step("g").formula, 'to_f[mod.map()](wf["p"])',
-           "stored as the string literal: no parser in core (Formula.parse, plan S3). "
-           "The app's operation_formula.py is still to port")
+    lesson("A3a", "a plain string stays a string value (EX13)", data(k.step("g"), "value"),
+           ["to_f[mod.map()](wf['p'])"])
     del k["g"]
+    import simple_steps_core
+    lesson("A3b", "formula(text) parses against the catalog (EX13)",
+           hasattr(simple_steps_core, "formula"), True,
+           "no parser in core yet: the app's operation_formula.py, ported (plan S3)")
     lesson("A4", "validate(): {step: problems}, none here", {n: p for n, p in k.validate().items() if p}, {})
     k.run_all()
     text = repr(k)
