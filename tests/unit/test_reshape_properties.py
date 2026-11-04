@@ -32,7 +32,11 @@ from simple_steps_core.operation import op
 from simple_steps_core.output import is_id_column, variables
 from simple_steps_core.step import NO_LITERAL
 
-EXAMPLES = 2000 if os.environ.get("STRESS") else 100
+# STRESS=1 runs 500 examples (owner, 2026-11-04: 2,000 took too long for now);
+# STRESS=<n> runs n, so STRESS=2000 is the full run
+_STRESS = os.environ.get("STRESS")
+EXAMPLES = (int(_STRESS) if _STRESS and _STRESS.isdigit() and int(_STRESS) > 1
+            else 500 if _STRESS else 100)
 SETTINGS = settings(max_examples=EXAMPLES, deadline=None,
                     suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large])
 

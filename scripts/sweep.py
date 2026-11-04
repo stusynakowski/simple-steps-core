@@ -1,7 +1,7 @@
 """sweep.py — run every check core has, under coverage, and report.
 
     .venv/bin/python scripts/sweep.py            # all suites
-    .venv/bin/python scripts/sweep.py --stress   # and the property test at 2,000 examples
+    .venv/bin/python scripts/sweep.py --stress   # and the property test at 500 examples (STRESS=1)
 
 Runs the tests, the two tutorials (tutorial/tutorial.py: every capability;
 tutorial/handover.py: everything core-handover/ asked for), both examples,
@@ -41,11 +41,11 @@ def last_line(text: str) -> str:
 def main() -> int:
     suites = list(SUITES)
     if "--stress" in sys.argv:
-        suites.insert(1, ("property test ×2000", ["-m", "pytest", "-p", "no:warnings",
+        suites.insert(1, ("property test ×500", ["-m", "pytest", "-p", "no:warnings",
                                                   "tests/unit/test_reshape_properties.py"]))
     with tempfile.TemporaryDirectory() as tmp:
         env = {**os.environ, "COVERAGE_FILE": str(Path(tmp) / ".coverage")}
-        env.pop("STRESS", None)             # only the property-test suite runs at 2,000
+        env.pop("STRESS", None)             # only the property-test suite runs at 500
         print(f"{'suite':22} {'exit':>4}  result")
         failed = 0
         for name, args in suites:

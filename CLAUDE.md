@@ -28,7 +28,7 @@ input for this work. Read it; don't edit it.
 
 ```bash
 .venv/bin/python -m pytest                            # the tests
-STRESS=1 .venv/bin/python -m pytest tests/unit/test_reshape_properties.py   # the property test, 2,000 examples
+STRESS=1 .venv/bin/python -m pytest tests/unit/test_reshape_properties.py   # the property test, 500 examples (STRESS=2000 for the full run)
 .venv/bin/python examples/all_orchestrations/pipeline.py
 .venv/bin/python examples/kernel_session.py            # the working guide's session
 .venv/bin/python tutorial/tutorial.py                 # the tutorial: every capability, ✓ / ✗ / ?
