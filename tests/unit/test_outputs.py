@@ -397,3 +397,31 @@ def test_a_broken_expect_fails_where_expect():
     with pytest.raises(StepFailed, match="expected 5 rows, got 3"):
         k.run_all()
     assert k.step("g").output.notes[0] == {"error": "expected 5 rows, got 3", "where": "expect"}
+
+
+# ── D12: a source's declared return decides rows or one value ─────────────
+def test_a_source_declaring_a_list_of_values_gives_a_row_each():
+    from simple_steps_core import Catalog, Kernel, mod, tool
+
+    @tool
+    def ints_d12() -> list[int]:
+        return [1, 2, 3]
+
+    @tool
+    def plain_d12() -> list:
+        return [1, 2, 3]
+
+    @tool
+    def wrong_d12() -> list[int]:
+        return 5
+
+    k = Kernel(Catalog(tools=[ints_d12, plain_d12, wrong_d12]))
+    k["rows"] = ints_d12[mod.source()]()
+    k["one"] = plain_d12[mod.source()]()            # undeclared items: one value
+    k["bad"] = wrong_d12[mod.source()]()
+    k.run("rows"), k.run("one")
+    assert k.step("rows").data["value"].tolist() == [1, 2, 3]
+    assert k.step("one").data["value"].tolist() == [[1, 2, 3]]
+    k.run("bad")
+    assert k.step("bad").state == "failed"
+    assert k.step("bad").output.notes[0]["error"] == "wrong_d12 returned int; declared a list of int"

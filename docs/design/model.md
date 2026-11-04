@@ -206,7 +206,7 @@ anything else maps). *Built.*
 
 | Verb | Calls the tool | Output rows | Data columns out |
 |---|---|---|---|
-| `source` | once, no input | what it returns | a DataFrame's, a record's fields, else `value` |
+| `source` | once, no input | what it returns; a row per item when it declares `-> list[T]` (D12) | a DataFrame's, a record's fields, else `value` |
 | `map` | once per row | one per row | the step's name, or a record's fields |
 | `filter` | once per row | the rows it approves | the input's |
 | `expand` | once per row; returns a list | one per item | the step's name, or each item's fields; a dict's `key`, `value` |

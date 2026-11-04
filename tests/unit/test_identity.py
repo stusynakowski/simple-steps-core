@@ -170,7 +170,7 @@ def test_a_resource_that_reports_new_data_makes_its_users_stale():
     k.resources["ward"].beds.append(3)
     assert k.needs_run() == {"b": "stale: resource ward changed"}
     k.run("b")
-    assert k.step("b").output.data["value"].tolist() == [[1, 2, 3]]
+    assert k.step("b").output.data["value"].tolist() == [1, 2, 3]   # list[int]: a row each (D12)
     assert k.needs_run() == {}
 
 
@@ -239,7 +239,7 @@ def test_a_resource_passed_by_position_is_the_tools_argument():
     k["by_place"] = beds[mod.source()](res["ward"])
     assert k.step("by_place").operation.to_dict() == k.step("by_name").operation.to_dict()
     k.run_all()
-    assert k.step("by_place").data["value"].tolist() == [[1, 2]]
+    assert k.step("by_place").data["value"].tolist() == [1, 2]      # list[int]: a row each (D12)
 
 
 def test_a_plain_call_with_a_resource_says_to_make_a_step():

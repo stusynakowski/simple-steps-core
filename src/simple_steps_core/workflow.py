@@ -958,6 +958,8 @@ class Workflow:
         ``mod.name`` keeps the value in one cell, and a failed or caught call
         is left as it is."""
         output = step.output
+        if step.operation.naming is None and source_record(step.operation.fn) is None:
+            return Workflow._source_items(step)
         if step.operation.naming is not None or source_record(step.operation.fn) is None:
             return None
         column = output.meta.get("value_column") or VALUE_COLUMN
@@ -969,6 +971,26 @@ class Workflow:
         except ValueError as exc:
             return f"{step.operation.tool} {exc}"
         step.output = grid(frame)
+        step.output.meta["verb"] = "source"
+        return None
+
+    @staticmethod
+    def _source_items(step: Step) -> str | None:
+        """A source tool that declares ``-> list[T]`` gives a row per item
+        (D12): ``list[int]`` is rows, a plain ``list`` or no annotation one
+        value, since core never guesses. Returns why when it returned
+        something else; None otherwise."""
+        output = step.output
+        item = source_list_item(step.operation.fn)
+        column = output.meta.get("value_column") or VALUE_COLUMN
+        if item is None or len(output.failed) or output.meta.get("notes") \
+                or column not in output.data.columns or len(output.data) != 1:
+            return None
+        value = output.data[column].iloc[0]
+        if not isinstance(value, (list, tuple)):
+            return (f"{step.operation.tool} returned {type(_plain(value)).__name__}; "
+                    f"declared a list of {getattr(item, '__name__', item)}")
+        step.output = grid(pd.DataFrame({column: list(value)}))
         step.output.meta["verb"] = "source"
         return None
 
@@ -3268,7 +3290,7 @@ from .checks import (  # noqa: E402
 from .combines import _row_lookup, _run_combine, is_combine, own_id_columns  # noqa: E402
 from .errors import PayloadError, PlanBroken as _PlanBroken, ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402
 from .problems import Problem  # noqa: E402
-from .values import _record_fields, named_columns, record_return, source_record, source_rows  # noqa: E402
+from .values import _record_fields, named_columns, record_return, source_list_item, source_record, source_rows  # noqa: E402
 from .modifiers import (  # noqa: E402
     FROM_ROW,
     MODIFIERS,

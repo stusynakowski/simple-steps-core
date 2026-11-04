@@ -11,6 +11,7 @@ import inspect
 import numbers
 import pandas as pd
 import types
+import collections.abc
 import typing
 
 
@@ -400,6 +401,23 @@ def source_record(fn: Any) -> tuple[Any, bool] | None:
     if many:
         hint = typing.get_args(hint)[0]
     return (hint, many) if _record_fields(hint) else None
+
+
+def source_list_item(fn: Any) -> Any:
+    """The item type of a source that declares ``-> list[T]`` (D12), T not a
+    record (those are :func:`source_record`'s); None for anything else."""
+    hint = _return_hint(fn)
+    if hint is None:
+        return None
+    if typing.get_origin(hint) is typing.Annotated:
+        hint = typing.get_args(hint)[0]
+    if typing.get_origin(hint) not in (list, tuple) or len(typing.get_args(hint)) != 1:
+        return None
+    item = typing.get_args(hint)[0]
+    origin = typing.get_origin(item) or item
+    if _record_fields(item) or origin in (dict, collections.abc.Mapping):
+        return None             # a record: source_record's; a dict isn't declared (T8, W17)
+    return item
 
 
 def source_schema(fn: Any) -> dict | None:

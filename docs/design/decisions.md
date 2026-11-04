@@ -188,6 +188,7 @@ failure needing a new decision were reverted and pinned in
 | W14 | A fold's parameters (`add(acc, value)` under `collapse`) | still bound by name only: binding one would pair a column row by row inside a collapse, which isn't built. After D9 a fold names the column it reads (`add(acc, scored)`) | S3 |
 | W15 | **For the owner**: core-asks L26 asks five spellings of one block to agree, including `identity[mod.select(rows=…, cols=…)]` | not made: `select` takes `columns=`, and a `cols=` alias would be a second spelling, against EX1 (every setting checked) and C10 (one way to write each thing). The other four agree (`[1:3]["n"]`, `["n"][1:3]`, `[1:3, "n"]`, `[rows[1:3], cols["n"]]`); L26 stays open until you say which wins | S3 |
 | W16 | A whole step as a column argument (core-asks L37: `add[mod.map()](wf["r"], k=wf["doubled"])`) | pairs by row as its one data column when the parameter is declared to take one value and the step's rows are the input's (one reads the other, or they share a source); a one-row step is one value for every row (L37b), and an untyped parameter gets the step whole, as before | S3 |
+| W17 | D12 and T8 for `-> list[dict]` | T8 wins: an undeclared `list[dict]` stays one cell (a dict isn't a declared record); `list[T]` of any other non-record type gives a row per item. A source's one column keeps `value` (D9 names a verb's output; a source isn't one yet) | S4 |
 | W9 | **Open, found by L40d**: a condition on a *derived* step's row numbers (`row["s1_r"] == 0`, where `s1_r` keeps the source's rows) isn't rewritten when the source's rows move; only the source's own numbers are. Undo is still free (the rewrite is undone with the source) | left open: rewriting it needs each step's row map (PL2, later L6) | D-picks |
 
 ## 1. How to answer
@@ -315,7 +316,7 @@ The heart: once these land, the list-of-dicts model is true.
 | D21 | Nothing added unseen (`breaker`) | **yes**: owner, 2026-11-04 | shown in the formula, or not added | N11 |
 | D9 | One key is named after its step, not `value` **→ CA-D2: yes** | (your "stepname is a variable") | yes; `mod.name` still wins | X-D5, N4. **Done 2026-11-04** (core-asks L23): a step's one output column takes its name, staged and run (`checks.named_after_step`); a rename renames it, with no re-run, and rewrites the references to it (W8); `mod.name` still wins; the input's own column of that name keeps `value`, warning (W7b) |
 | D11 | A literal is one value **→ core-asks: yes** | yes | yes | N5 |
-| D12 | A source's return: rows or one value? | **yes**: owner, 2026-11-04 | its declared type decides: `list[T]` is rows; `list` or no annotation is one value | X-D10 |
+| D12 | A source's return: rows or one value? | **yes**: owner, 2026-11-04 | its declared type decides: `list[T]` is rows; `list` or no annotation is one value | X-D10. **Done 2026-11-04**: `-> list[int]` gives a row per item, a plain `list` or no annotation one value; a source that returns something else fails, saying what it declared (W17) |
 
 ### G. The app moves
 
