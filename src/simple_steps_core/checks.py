@@ -5,6 +5,7 @@ Moved from grid.py unchanged (phase 2 of docs/design/cleanup-plan.md).
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 from typing import Callable
 import inspect
@@ -1024,6 +1025,13 @@ def _column_warnings(operation: Operation, workflow: "Workflow | None" = None,
                 f"{verb.kind} writes {written!r} over the {written!r} column "
                 f"{str(operation.input)!r} already has; name the output "
                 f"(name=…) to keep both, or say replace=True to silence this")
+    # D9: the output takes the step's name, unless the input has that column
+    apart = replace(operation, input=None)        # as it would be named, with no input
+    if step_id is not None and _step_name_taken(operation, workflow, step_id) \
+            and named_after_step(apart, None, step_id) is not apart:
+        notes.append(f"its column is named 'value', not {step_id!r}: {str(operation.input)!r} "
+                     f"already has a column {step_id!r}, and a step never replaces one unasked. "
+                     f"Name it with mod.name(…), or name the step otherwise")
     # Only predict while the input's plan is staged (its expression new or
     # unrun, PL); once that expression runs, `check` is exact.
     upstream = workflow._basis_of_input(operation)
@@ -1063,6 +1071,38 @@ def _column_warnings(operation: Operation, workflow: "Workflow | None" = None,
         )
     return _warnings(notes + warnings, step_id)
 
+
+
+def named_after_step(operation: Operation, workflow: "Workflow | None",
+                     step_id: str | None) -> Operation:
+    """*operation*, its one output column named after its step (D9, core-asks
+    L23): ``k["temp_f"] = to_f[mod.map()](…)`` writes ``temp_f``, not
+    ``value``. Only where nothing else names it: no ``mod.name`` or naming
+    pattern, a verb that writes one column (not ``group``, whose key is
+    ``group``), not a record or a built-in reducer, which spread. Not when the
+    input already has a column of that name: a step never replaces a column
+    unasked (C4), so it keeps ``value``, and :func:`warn` says so."""
+    if step_id is None or operation.name_rule is not None or _is_auto(operation):
+        return operation
+    verb = operation.shape_verb
+    kind = verb.kind if verb is not None else None
+    if kind not in NAMED_VERBS or kind == "group" or DEFAULT_PAYLOAD.get(kind) != VALUE_COLUMN:
+        return operation
+    fn = operation.fn or BUILTIN_TOOLS.get(operation.tool)
+    if record_return(kind, fn) is not None:
+        return operation
+    if kind == "collapse" and fn is not None and reducer_form(fn) == "per_column":
+        return operation
+    if workflow is not None and workflow.default_name_rule(operation) is not None:
+        return operation
+    if _step_name_taken(operation, workflow, step_id):
+        return operation
+    return replace(operation, modifiers=(Modifier("name", {"to": step_id}), *operation.modifiers))
+
+
+def _step_name_taken(operation: Operation, workflow: "Workflow | None", step_id: str) -> bool:
+    """Is *step_id* already a column of the input, so the output can't take it (C4)?"""
+    return workflow is not None and step_id in workflow._known_columns(operation)
 
 
 #: The verbs that call their tool once per row, so a column given as an
@@ -1216,6 +1256,7 @@ def _paired_arguments(operation: Operation, workflow: "Workflow | None") -> dict
 #: How a warning's message says which kind it is.
 _WARNING_KINDS = (
     ("is written before", "modifier_order"),
+    ("its column is named 'value', not", "step_name_taken"),
     ("the column will be", "default_type"),
     ("isn't a named parameter", "unchecked_argument"),
     ("are positions", "rows_by_position"),
@@ -1743,6 +1784,7 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         out = stage(concrete, workflow, problems, step_id)
         out.meta["auto"] = {"verb": kind, "reason": why, "provisional": True}
         return out
+    operation = named_after_step(operation, workflow, step_id)      # D9
     if problems:
         kind = operation.shape_verb.kind if operation.shape_verb else None
         return Output(

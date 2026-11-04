@@ -22,6 +22,19 @@ import pandas as pd
 _GONE = object()          # a picked row that is gone (D-picks)
 
 
+def _name_problem(name: Any) -> str | None:
+    """Why *name* can't name a step (core-asks L47), or None. A `.` separates
+    a lineage column's parts (`#r.2`) and `#` starts core's own columns."""
+    if not isinstance(name, str) or not name:
+        return f"a step name must be a non-empty string, got {name!r}"
+    if "." in name:
+        return (f"a step name can't contain '.', which separates a lineage column's "
+                f"parts (#r.2): write {name.replace('.', '_')!r}")
+    if name.startswith("#"):
+        return f"a step name can't start with '#', which starts core's row columns: write {name.lstrip('#')!r}"
+    return None
+
+
 class Workflow:
     """Ordered Steps. Assign an Operation, get a Step that is already staged.
 
@@ -373,6 +386,8 @@ class Workflow:
     def __setitem__(self, step_id: str, operation: Any) -> None:
         _check_caller_scope()
         existed = step_id in self.steps
+        if not existed and _name_problem(step_id):
+            raise ValueError(_name_problem(step_id))
         # The app's additions stay with the step when it is re-declared.
         kept_extras = self.steps[step_id].extras if existed else {}
         operation = self._as_operation(operation)
@@ -629,12 +644,13 @@ class Workflow:
         """
         if old not in self.steps:
             raise KeyError(f"no step {old!r}; have {list(self.steps)}")
-        if not isinstance(new, str) or not new:
-            raise ValueError("a step id must be a non-empty string")
+        if _name_problem(new):
+            raise ValueError(_name_problem(new))
         if new == old:
             return
         if new in self.steps:
             raise ValueError(f"step {new!r} already exists")
+        carriers = self._carrying_own_column(old)        # D9: its column is named old
         self.steps = {(new if sid == old else sid): st
                       for sid, st in self.steps.items()}
         self.steps[new].name = new
@@ -666,6 +682,89 @@ class Workflow:
             if changed:
                 st.operation = Operation(op.tool, tuple(new_mods), new_args,
                                          op.fn, new_input, bound_to=op.bound_to)
+        if carriers:
+            self._rename_own_column(new, old, {new if c == old else c for c in carriers})
+
+    def _carrying_own_column(self, step_id: str) -> set[str]:
+        """*step_id* and the steps after it that carry its column unchanged,
+        when that column is named after it (D9); empty when it isn't."""
+        st = self.steps[step_id]
+        out = st.output
+        if out.meta.get("staged") or out.meta.get("value_column") != step_id \
+                or step_id not in out.data.columns or st.operation.name_rule is not None:
+            return set()
+        carriers = {step_id}
+        for sid, other in self.steps.items():
+            op_ = other.operation
+            if sid in carriers or op_.input is None or str(op_.input) not in carriers:
+                continue
+            if step_id in predicted_columns(other.output) \
+                    and other.output.meta.get("value_column") != step_id:
+                carriers.add(sid)
+        return carriers
+
+    def _rename_own_column(self, step_id: str, old: str, carriers: set[str]) -> None:
+        """A step renamed from *old*: the column it named after itself takes its
+        new name, with no re-run (a copy, filed under its new key: a filed
+        result never changes), and every step that names that column, reading
+        it from *step_id* or a step that carries it, names it so too (D9,
+        core-asks L23). Steps that carry it hold it under *old* until they
+        re-run, so they show stale."""
+        st = self.steps[step_id]
+        out = st.output
+        copy = Output(out.data.rename(columns={old: step_id}),
+                      out.states.rename(columns={old: step_id}),
+                      {k: v for k, v in out.meta.items() if k not in ("run_key", "version")})
+        copy.meta["value_column"] = step_id
+        copy.meta["version"] = _data_version(copy.data)
+        st.output = copy
+        self._file(step_id)
+
+        def renamed(value: Any) -> Any:
+            if isinstance(value, str):
+                return step_id if value == old else value
+            if isinstance(value, list):
+                return [renamed(v) for v in value]
+            if isinstance(value, tuple):
+                return tuple(renamed(v) for v in value)
+            if isinstance(value, dict):
+                out_ = {renamed(k) if isinstance(k, str) else k: v for k, v in value.items()}
+                if "col" in out_:
+                    out_["col"] = renamed(out_["col"])
+                for key in ("names", "on", "and", "or", "not", "where", "test"):
+                    if key in out_ and not isinstance(out_[key], str):
+                        out_[key] = renamed(out_[key])
+                return out_
+            return value
+
+        for sid, other in self.steps.items():
+            if sid == step_id:
+                continue
+            op_ = other.operation
+            changed = False
+            modifiers = op_.modifiers
+            if op_.input is not None and str(op_.input) in carriers:
+                modifiers = tuple(Modifier(m.kind, {k: renamed(v) if k != "name" else v
+                                                    for k, v in m.settings.items()})
+                                  for m in op_.modifiers)
+                changed = modifiers != op_.modifiers
+            arguments = {}
+            for key, value in op_.arguments.items():
+                if isinstance(value, StepRef) and value.id in carriers \
+                        and (value.columns is not None or value.rows is not None):
+                    moved = replace(value, columns=renamed(value.columns), rows=renamed(value.rows))
+                    changed = changed or moved != value
+                    value = moved
+                arguments[key] = value
+            if changed:
+                other.operation = replace(op_, modifiers=modifiers, arguments=arguments)
+            if sid in carriers and not other.output.meta.get("staged"):
+                # it shows the column under its old name: what reads it is
+                # checked against what it will produce once it re-runs (PL)
+                other.output.meta["edited"] = True
+        self._mark_stale_dependents(step_id)
+        self._recheck_downstream(step_id)
+        self._restage_after(step_id)
 
     def _mark_stale_dependents(self, step_id: str) -> None:
         """Re-decide staleness after *step_id* changed (009 §5–§6).
@@ -2681,6 +2780,7 @@ class Workflow:
             keys = self.trace(str(step.operation.input), list(source.data.index), s) or []
             source = Output(source.data, source.states, {**source.meta, "group": {
                 "by": by, "keys": keys, "all": list(self.steps[s].output.data.index)}})
+        resolved = named_after_step(resolved, self, step_id)            # D9
         try:
             step.output = resolved.run(source, tools)
             if paired and unpaired is not None:
@@ -3073,6 +3173,7 @@ from .checks import (  # noqa: E402
     columns_unknown,
     predicted_columns,
     stage,
+    named_after_step,
     warn,
     keeps_ids,
     _tool_parameters,
