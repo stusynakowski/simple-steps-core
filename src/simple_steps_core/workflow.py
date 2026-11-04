@@ -41,6 +41,11 @@ class Workflow:
         self.data_versions: dict[str, str] = {}
         #: The kernel's naming conventions (outputs-and-reshaping.md §10), or None.
         self.naming = naming
+        #: Every result kept, by run key (ST7): this step, this code, on this
+        #: data. Results are never changed once filed (A9).
+        self.store: dict[str, Output] = {}
+        #: Each step's keys in the store, oldest first; the last is its newest.
+        self.kept: dict[str, list[str]] = {}
 
     # ── resources ────────────────────────────────────────────────────────
     def define(self, name: str, type_: type, /, **settings: Any) -> ResRef:
@@ -215,6 +220,7 @@ class Workflow:
             # home, because they were never anything but a step's output.
             was_empty = existed and self.steps[step_id].output.meta.get("empty")
             self.steps[step_id] = self._literal_step(step_id, operation, kept_extras)
+            self._file(step_id)
             if existed:
                 self._mark_stale_dependents(step_id)
                 self._recheck_downstream(step_id)
@@ -417,6 +423,8 @@ class Workflow:
                 "first."
             )
         del self.steps[step_id]
+        for key in self.kept.pop(step_id, []):
+            self.store.pop(key, None)
 
     def rename(self, old: str, new: str) -> None:
         """Rename a step, rewriting every reference that pointed at it.
@@ -435,6 +443,8 @@ class Workflow:
         self.steps = {(new if sid == old else sid): st
                       for sid, st in self.steps.items()}
         self.steps[new].name = new
+        if old in self.kept:                  # its results; their keys follow in SM
+            self.kept[new] = self.kept.pop(old)
         for st in self.steps.values():
             op = st.operation
             changed = False
@@ -560,7 +570,34 @@ class Workflow:
         read = self._read_stamps(st.operation) if read is None else read
         if any(v is None for v in read.values()):
             return None
+        if st.literal is not NO_LITERAL:
+            # A value's data is its recipe: a DataFrame isn't in the recipe
+            # hash (it's data, not saved), so two would share a key.
+            parts["data"] = self.version(step_id)
         return _short_hash({"name": step_id, **parts, "read": dict(sorted(read.items()))})
+
+    #: How many results the store keeps for each step: its newest and the ones
+    #: before it (ST7). Dropping one only costs a re-run, never a wrong answer.
+    KEEP = 4
+
+    def _file(self, step_id: str) -> None:
+        """File *step_id*'s result in the store under its run key."""
+        output = self.steps[step_id].output
+        if output.meta.get("staged"):
+            return
+        key = output.meta.get("run_key") or self.run_key(step_id)
+        if key is None:
+            return
+        output.meta["run_key"] = key
+        self.store[key] = output
+        keys = [k for k in self.kept.get(step_id, []) if k != key] + [key]
+        while len(keys) > self.KEEP:
+            self.store.pop(keys.pop(0), None)
+        self.kept[step_id] = keys
+
+    def results(self, step_id: str) -> list[Output]:
+        """The results the store keeps for *step_id*, newest first."""
+        return [self.store[k] for k in reversed(self.kept.get(step_id, [])) if k in self.store]
 
     def recipe_id(self) -> str:
         """The workflow's id: its steps' ids, its resources and its naming."""
@@ -2147,6 +2184,7 @@ class Workflow:
         if not out.meta.get("staged"):
             out.meta["version"] = _data_version(out.data)
             out.meta["run_key"] = self.run_key(step_id, read)
+            self._file(step_id)
             unversioned = _unversioned(out.data)
             if unversioned:                       # D57: said, with the fix
                 names = ", ".join(unversioned)

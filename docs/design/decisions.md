@@ -136,7 +136,7 @@ way the store can go wrong is a run key matching the wrong result, shown
 | ST4 | A filed result is never changed: a test hashes it when filed and when read | **done 2026-11-03**: invariant A9, `Workflow.filed_unchanged()`, checked after every run of every test; it holds |
 | ST5 | States come only from the workflow and the store (SM). A step is current when the store holds its run key **and** every step it reads is current: an input given a new expression keeps its last data, marked stale, so its readers' keys still match | to do: fixes S5–S9 |
 | ST6 | `run(x)` makes `x` current, computing missing keys in order (C9) | to do |
-| ST7 | One store per kernel; keep each step's current result and its last few; dropping one only costs a re-run | to do |
+| ST7 | One store per kernel; keep each step's current result and its last few; dropping one only costs a re-run | **done 2026-11-03** (no behaviour change yet): `Workflow.store` (run key → result) and `results(step)`, newest first, `KEEP = 4` per step; a rename carries a step's results, a removal drops them. A value step's key includes its data: two different DataFrames assigned to one step had shared a key |
 | ST8 | The laws: any order of edits ends where a fresh kernel would; undo is free (L40c, extended) | to do |
 
 The two wrong answers, **D-picks** (P15, silent) and **SM** (S5: `completed`

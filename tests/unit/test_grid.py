@@ -984,9 +984,12 @@ def test_a_workflow_is_only_steps(three):
     # `resources` holds declarations (type + literal settings), never payloads;
     # `catalog` says what the workflow may use and `extras` holds the app's
     # additions, `naming` the kernel's naming conventions, `data_versions` the
-    # versions resources reported (K25); none of them is data.
+    # versions resources reported (K25); none of them is data. `store` keeps
+    # results by run key (ST7): the steps' own outputs, never a second copy.
     assert list(vars(wf)) == ["steps", "resources", "catalog", "extras",
-                              "data_versions", "naming"]
+                              "data_versions", "naming", "store", "kept"]
+    assert wf.results("raw") == [wf.step("raw").output]
+    assert wf.results("raw")[0] is wf.step("raw").output
 
 
 def test_running_a_source_step_is_a_no_op(three):

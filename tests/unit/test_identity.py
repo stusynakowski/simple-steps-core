@@ -321,3 +321,30 @@ def test_a_run_key_waits_for_data():
     k["v"] = src_rk[mod.source()]()
     k["h"] = hot_rk[mod.filter()](wf["v"])
     assert k.workflow.run_key("h") is None             # v holds no data yet
+
+
+def test_two_values_assigned_to_a_step_have_two_keys():
+    # A DataFrame isn't in a step's recipe hash (it's data): its version is.
+    k = Kernel(Catalog([]))
+    k["v"] = pd.DataFrame({"t": [1.0]})
+    first = k.workflow.run_key("v")
+    k["v"] = pd.DataFrame({"t": [2.0]})
+    assert k.workflow.run_key("v") != first
+
+
+def test_the_store_keeps_each_steps_newest_results_by_key():
+    k = Kernel(Catalog([hot_rk]))
+    w = k.workflow
+    k["v"] = pd.DataFrame({"temp": [37.0, 38.5]})
+    k["lim"] = 38.0
+    k["h"] = hot_rk[mod.filter()](wf["v"], limit=wf["lim"])
+    for limit in (38.0, 37.0, 36.0, 35.0, 34.0):
+        k["lim"] = limit
+        k.run_all()
+    kept = w.results("h")
+    assert len(kept) == w.KEEP and kept[0] is k.step("h").output
+    assert all(w.store[o.meta["run_key"]] is o for o in kept)
+    k.rename("h", "hot")
+    assert w.results("hot") == kept and w.results("h") == []
+    del k["hot"]
+    assert w.results("hot") == [] and all(o.meta["run_key"] not in w.store for o in kept)
