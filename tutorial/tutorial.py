@@ -303,6 +303,9 @@ def ch4():
     lesson("V2b", "a filter with no tool on several columns is refused, pointing to a pick",
            (s.state, [p.code for p in s.problems]), ("invalid", ["missing_setting"]),
            "kept every row: a whole row is always true (C5)")
+    s = put(k, "alone", Later(lambda: mod.map()))
+    lesson("V9b", "a modifier alone is not a step: refused, writing the step",
+           type(s).__name__, "TypeError", "ran on nothing: [None], completed")
     s = put(k, "two", to_f[mod.map(), mod.filter()](wf["v"]))
     lesson("V9", "one verb per step: two is refused", s.state, "invalid")
     s = put(k, "ax", to_f[mod.map(axis="columns")](wf["v"]))

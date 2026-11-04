@@ -171,11 +171,10 @@ class Workflow:
             operation = Operation(tool="identity", fn=identity)[
                 mod.select(**selection)](replace(operation, rows=None, columns=None))
         if isinstance(operation, Modifier):
-            # A bare shape verb is a complete step: it applies the tool that
-            # discards nothing, so `wf["flat"] = mod.expand()(ref)` needs no
-            # tool of its own. Execution modifiers are refused — a pass-through
-            # that retries is inert, and silently accepting it would hide a
-            # half-written step.
+            # A modifier alone is not a step: it has no input (over= is
+            # retired, EX3), and it used to run on nothing, a `map` giving
+            # [None] and a `filter` zero rows, both `completed`. Execution
+            # modifiers and sweeps say why they need a tool.
             default = DEFAULT_TOOL.get(operation.kind)
             if default is None:
                 # Three different reasons, and they used to collapse into one
@@ -193,8 +192,12 @@ class Workflow:
                     f"{operation.kind!r} needs a tool: it is {why}. "
                     f"Write <tool>[mod.{operation.kind}(...)] instead."
                 )
-            operation = Operation(tool=default,
-                                  fn=BUILTIN_TOOLS[default])[operation]
+            kind = operation.kind
+            how = (f"<tool>[mod.{kind}(…)](wf[\"…\"])" if kind in ("map", "filter", "group")
+                   else f"<tool>[mod.source()]()" if kind == "source"
+                   else f"mod.{kind}(…)(wf[\"…\"])")
+            raise TypeError(f"mod.{kind}(…) on its own is not a step: it has no "
+                            f"{'tool' if kind == 'source' else 'input'}. Write {how}")
 
         return operation
 

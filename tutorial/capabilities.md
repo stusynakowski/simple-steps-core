@@ -2,7 +2,7 @@
 
 > Every capability the tutorial checks, with its expression, what it should
 > do, and its status. Run 2026-11-03 at `2bd150e` by
-> `.venv/bin/python tutorial/tutorial.py`: **101 ✓ · 13 ✗ · 2 ?** (116 lessons; R10b, R11, R13–R16, A4b, A4c, A7, V2b, V10 and V11 since 2026-11-03's first run).
+> `.venv/bin/python tutorial/tutorial.py`: **102 ✓ · 13 ✗ · 2 ?** (117 lessons; R10b, R11, R13–R16, A4b, A4c, A7, V2b, V9b, V10 and V11 since 2026-11-03's first run).
 > ✓ does what we want · ✗ doesn't yet · ? not decided. The reasoning is in
 > [README.md](README.md).
 >
@@ -69,6 +69,7 @@
 | V8 | Inferred verb | `to_f(wf["v"])` | `map` | ✓ | |
 | V8b | Inferred verb, `-> bool` | `hot(wf["v"])` | a map of bools: never drops rows | ✗ | **inferred as `filter`, so rows drop.** D20b decided otherwise, not built |
 | V9 | One verb per step | `to_f[mod.map(), mod.filter()](…)` | `invalid` | ✓ | |
+| V9b | A modifier alone | `k["m"] = mod.map()` | refused, writing the step | ✓ | fixed 2026-11-03: ran on nothing, `[None]`, `completed` |
 | V10 | A setting that does nothing | `to_f[mod.map(axis="columns")](…)` | refused | ✓ | fixed 2026-11-03 (EX4): `axis` removed; was accepted and ignored |
 | V11 | `map(where=)` | `to_f[mod.map(where=…)](…)` | refused: a `filter`, then a `join`, says it | ✓ | removed 2026-11-03 (EX4), with `map`'s and `expand`'s unused `replace=` |
 

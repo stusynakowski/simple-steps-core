@@ -623,6 +623,18 @@ def test_an_execution_modifier_alone_is_refused():
         wf["bad"] = mod.retry(times=2)
 
 
+def test_a_modifier_alone_is_not_a_step():
+    # It ran on nothing: mod.map() gave [None] and mod.filter() zero rows,
+    # both completed. Refused, writing the step it should be.
+    wf = Workflow()
+    with pytest.raises(TypeError, match=r"mod.map\(…\) on its own is not a step: it has no input"):
+        wf["m"] = mod.map()
+    with pytest.raises(TypeError, match=r'Write mod.sort\(…\)\(wf\["…"\]\)'):
+        wf["s"] = mod.sort(by="n")
+    with pytest.raises(TypeError, match="it has no tool"):
+        wf["src"] = mod.source()
+
+
 def test_a_bare_modifier_no_longer_becomes_a_source_step():
     """It used to build a source step whose payload was the Modifier object."""
     wf = Workflow()
