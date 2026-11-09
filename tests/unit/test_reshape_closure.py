@@ -856,3 +856,38 @@ def test_PK1_every_row_lands_in_a_group_a_missing_key_too():
     assert data(k, "s")["g"].tolist() == ["B", "A", None]
     assert data(k, "s")["v"].tolist() == [[1, 4], [2], [3]]
     assert data(k, "n")["n"].tolist() == [2, 1, 1]
+
+
+def test_PK2_a_list_or_dict_key_groups_by_its_contents():
+    k = Kernel(Catalog([]))
+    k["p"] = pd.DataFrame({"g": [[1, 2], {"a": 1, "b": 2}, [1, 2], {"b": 2, "a": 1}, (1, 2)],
+                           "v": [1, 2, 3, 4, 5]})
+    k["s"] = gather[mod.collapse(by="g")](wf["p"])
+    k.run_all()
+    assert state(k, "s") == "completed"
+    assert data(k, "s")["g"].tolist() == [[1, 2], {"a": 1, "b": 2}, (1, 2)]   # as first seen
+    assert data(k, "s")["v"].tolist() == [[1, 3], [2, 4], [5]]                 # a tuple isn't a list
+
+
+def test_PK3_true_is_a_key_of_its_own_and_1_and_1_0_are_one():
+    k = Kernel(Catalog([]))
+    k["p"] = pd.DataFrame({"g": [1, True, 1.0, False, 0], "v": [1, 2, 3, 4, 5]}, dtype=object)
+    k["s"] = gather[mod.collapse(by="g")](wf["p"])
+    k.run_all()
+    keys = data(k, "s")["g"].tolist()
+    assert [type(x) for x in keys] == [int, bool, bool, int]                   # the first seen
+    assert keys == [1, True, False, 0]
+    assert data(k, "s")["v"].tolist() == [[1, 3], [2], [4], [5]]
+
+
+def test_PK4_collapse_with_no_by_gives_one_row_even_of_nothing():
+    k = Kernel(Catalog([]))
+    k["p"] = pd.DataFrame({"g": ["A"], "v": [1]})
+    k["e"] = mod.slice(start=5)(wf["p"])                              # no rows
+    k["all"] = gather[mod.collapse()](wf["e"])
+    k["n"] = op("count")[mod.collapse()](wf["e"])
+    k["by"] = gather[mod.collapse(by="g")](wf["e"])
+    k.run_all()
+    assert data(k, "all")["v"].tolist() == [[]]
+    assert data(k, "n")["n"].tolist() == [0]
+    assert len(data(k, "by")) == 0                                    # no keys, no groups

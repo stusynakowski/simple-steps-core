@@ -181,9 +181,9 @@ and takes sets; `widen`'s equivalents pad ragged tuples with `NaN`.
 | | Rule | Today | Owner, 2026-11-09 |
 |---|---|---|---|
 | PK1 | **Every row lands in one group.** A `None` or absent key is a group of its own, shown, so the user drops it or sees it (pandas `dropna=False`) | the row is dropped, silently: pandas' default | **yes, fix**. **Done 2026-11-09**: grouped with `dropna=False`, the key shown as the row held it (`None`, not `NaN`) |
-| PK2 | Any value is a key: lists and dicts group by their contents, shown as they were | the run stops (`unhashable type`) | yes |
-| PK3 | `True` and `False` are keys of their own, never `1` and `0`; `1` and `1.0` are one key, the first one seen | `1`, `1.0`, `True` are one group | **yes**: `True` apart |
-| PK4 | `collapse` with no `by=` gives one row, also of an empty input (`gather` `[]`, `count` 0) | to check | yes |
+| PK2 | Any value is a key: lists and dicts group by their contents, shown as they were | the run stops (`unhashable type`) | yes. **Done 2026-11-09**: core groups by its own key (`verbs._same_key`), not pandas'; `sort`, `join` and `distinct` still refuse such keys (V6) |
+| PK3 | `True` and `False` are keys of their own, never `1` and `0`; `1` and `1.0` are one key, the first one seen | `1`, `1.0`, `True` are one group | **yes**: `True` apart. **Done 2026-11-09** |
+| PK4 | `collapse` with no `by=` gives one row, also of an empty input (`gather` `[]`, `count` 0) | so (checked 2026-11-09, now pinned) | yes |
 | PK5 | `pack` takes any columns and values: one dict per row, keys in column order, an absent cell left out, `None` kept | so | yes |
 | PK6 | **`widen` takes a column of dicts, or of tuples all of one length** (supersedes EX10). Dicts: the union of their keys, in first-seen order, a key a row lacks `absent`. Tuples: a length that differs refuses the step, naming the lengths and rows; never padded | ragged tuples padded with `None`, shown as a value | **yes**: tuples back |
 | PK7 | `widen` refuses a list, pointing to `expand`: a list is items, a tuple is fields. Dicts and tuples mixed in one column are refused; a `None` cell gives `absent` fields and a warning (C6); any other cell fails its row | lists widen like tuples | **yes** |

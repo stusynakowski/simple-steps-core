@@ -256,12 +256,35 @@ def group_(source: Any, fn: Callable, *, name: str = "group",
                         "key": name, "n_in": len(frame)})
 
 
+def _same_key(value: Any) -> Any:
+    """What two keys must share to be one group (PK1–PK3): a missing key is
+    one key; `True` is never `1` (pandas and Python merge them); a list, dict
+    or set is its contents; `1` and `1.0` are one number."""
+    if _is_missing(value) or value is ABSENT:
+        return ("missing",)
+    if isinstance(value, (bool, np.bool_)):
+        return ("bool", bool(value))
+    if isinstance(value, Mapping):
+        return ("dict", frozenset((k, _same_key(v)) for k, v in value.items()))
+    if isinstance(value, (list, tuple)):
+        return (type(value).__name__, tuple(_same_key(v) for v in value))
+    if isinstance(value, (set, frozenset)):
+        return ("set", frozenset(_same_key(v) for v in value))
+    try:
+        hash(value)
+    except TypeError:
+        return ("repr", type(value).__name__, repr(value))
+    return ("value", value)
+
+
 def _groups(frame: pd.DataFrame, by: str) -> list:
-    """Each key's rows, in first-seen order. A missing key is a group of its
-    own, never dropped (PK1: pandas drops it by default); its key is shown as
-    the row held it, not as pandas' NaN."""
-    return [(frame.at[chunk.index[0], by] if _is_missing(key) else key, chunk)
-            for key, chunk in frame.groupby(by, sort=False, dropna=False)]
+    """Each key's rows, in first-seen order, the key shown as its first row
+    held it. Every row lands in a group: a missing key is one of its own,
+    never dropped (PK1: pandas drops it by default)."""
+    found: dict = {}
+    for index, value in zip(frame.index, frame[by]):
+        found.setdefault(_same_key(value), (value, []))[1].append(index)
+    return [(key, frame.loc[members]) for key, members in found.values()]
 
 
 def collapse_(source: Any, fn: Callable, *, by: str | None = None,
