@@ -1045,6 +1045,19 @@ class Workflow:
             columns = list(dict.fromkeys(columns))
         else:
             columns = list(dict.fromkeys(_source_column(op_, c) for c in step.output.data.columns))
+            settings = op_.shape_verb.settings
+            if kind == "widen":
+                # the column it spreads is read, though no output column is it
+                spread = settings.get("column")
+                consumed = [spread] if spread else [
+                    c for c in upstream.output.data.columns
+                    if c not in step.output.data.columns and not is_id_column(c)]
+                columns = list(dict.fromkeys([*columns, *consumed]))
+            elif kind == "pack":
+                packed = settings.get("columns")
+                packed = list(packed) if isinstance(packed, (list, tuple)) else [
+                    c for c in upstream.output.data.columns if not is_id_column(c)]
+                columns = list(dict.fromkeys([*columns, *packed]))
         if grouped:
             # A group's value reads what the tool takes, and its key: a row may
             # change group.

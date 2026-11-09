@@ -661,3 +661,25 @@ which=3,
 other=7,
 )
 ```
+
+## 2026-11-04 · `test_L40f_run_makes_a_step_current` · at `2c8944d` · STRESS=1
+
+- **Broke:** AssertionError: run(s3): s3 op("gather")[mod.collapse()](wf["s1"]) are different
+- **Status:** fixed: a widen's per-row stamps listed the columns it carries, not the dict column it spreads, so a cell gaining a key left it completed (a silent wrong answer, older than tonight); a pack had the same gap. Both now count the columns they consume. Pinned in L40f
+
+```
+test_L40f_run_makes_a_step_current(
+frame=   k     n  tags rec
+0  A  <NA>  None  {}
+1  A  <NA>  None  {}
+2  A  <NA>  None  {}
+3  A  <NA>  None  {},
+changed=   k     n  tags          rec
+0  A  <NA>  None           {}
+1  A  <NA>  None           {}
+2  A  <NA>  None           {}
+3  A  <NA>  None  {'a': None},
+chain=[(519, 0, 0, 0), (0, 0, 0, 0), (561, 2, 0, 0)],
+which=124,
+)
+```

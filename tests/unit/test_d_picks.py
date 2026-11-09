@@ -150,3 +150,16 @@ def test_a_source_put_back_by_its_tool_puts_the_pick_back():
     k["p"] = load[mod.source()]()                       # back: its result is in the store
     assert k.step("one").formula == 'wf["p"][1]'
     assert k.step("one").state == "completed" and k.step("one").output is held
+
+
+def test_a_widen_is_stale_when_the_dicts_it_spreads_change():
+    # found at STRESS=2000: a widen read "no columns", so new keys went unseen
+    k = Kernel(Catalog(tools=[]))
+    k["s"] = pd.DataFrame({"rec": [{}, {}]})
+    k["w"] = mod.widen()(wf["s"])
+    k["p"] = mod.pack(columns=["rec"])(wf["s"])
+    k.run_all()
+    k["s"] = pd.DataFrame({"rec": [{}, {"a": 1}]})
+    assert k.step("w").state == "stale" and k.step("p").state == "stale"
+    k.run_all()
+    assert list(k.step("w").data.columns) == ["a"]

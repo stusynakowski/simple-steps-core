@@ -576,6 +576,13 @@ def test_L40e_the_order_of_edits_doesnt_matter(frame, changed, chain, which, oth
 @pytest.mark.no_invariants
 @SETTINGS
 @given(grids(), grids(), chains(), st.integers(0, 999))
+# a widen's per-row stamps read no columns, so a dict cell gaining a key left
+# it completed, and run(x) never re-ran it (found at STRESS=2000)
+@example(frame=pd.DataFrame({"k": ["A"] * 4, "n": pd.array([pd.NA] * 4, dtype="Int64"),
+                             "tags": [None] * 4, "rec": [{}] * 4}),
+         changed=pd.DataFrame({"k": ["A"] * 4, "n": pd.array([pd.NA] * 4, dtype="Int64"),
+                               "tags": [None] * 4, "rec": [{}, {}, {}, {"a": None}]}),
+         chain=[(519, 0, 0, 0), (0, 0, 0, 0), (561, 2, 0, 0)], which=124)
 def test_L40f_run_makes_a_step_current(frame, changed, chain, which):
     """After the source changes, run(x) leaves x and all it reads current,
     and x is what a fresh kernel on the new source computes."""
