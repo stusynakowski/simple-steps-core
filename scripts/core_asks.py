@@ -610,9 +610,11 @@ def n_auto_modifier():
     wf = _wf()
     wf["x"] = add_n[mod.auto()](wf["readings"])
     wf.run("x")
-    picked = wf.step("x").output.meta.get("auto", {}).get("verb")
+    # EX6 (owner, 2026-11-03) replaces 009's "saved as auto": decided when
+    # written, saved as that verb, so the formula is what runs
     saved = json.loads(wf.to_json())["steps"][-1]["operation"]["modifiers"][-1]["kind"]
-    return picked == "collapse" and saved == "auto", f"ran as {picked}; saved as {saved}"
+    ran = wf.step("x").output.meta.get("verb")
+    return saved == "collapse", f"saved as {saved}; ran as {ran}"
 
 
 def p_to_source():
@@ -693,7 +695,7 @@ ASKS = [
     ("STOP", "(core) an uncaught failure stops run_all; try_except lets it through", stop_on_failure),
     ("C3", "(core) a public surface made of functions; tags", c3_public_functions),
     ("M", "(core) infer_verb accepts a bound method", m_infer_bound_method),
-    ("N", "(core) a written mod.auto(), resolved at run", n_auto_modifier),
+    ("N", "(core) a written mod.auto(), decided when written and saved (EX6)", n_auto_modifier),
     ("P", "(core) Operation.to_source() round-trips", p_to_source),
     ("C12", "(core) **kwargs tools warn and are marked open", c12_kwargs_warn),
     ("C16", "(core) an item knows its parent row; it meets it in a join on lineage", c16_row_ids),

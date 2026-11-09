@@ -271,7 +271,7 @@ def test_infer_verb_without_declaring_anything():
     k["p"] = [36.6, 38.2]
     k["e"] = mod.expand()(wf["p"])
     before = list(k.workflow.steps)
-    assert k.infer_verb("hot_i", "e")[0] == "filter"
+    assert k.infer_verb("hot_i", "e")[0] == "map"            # D20b: never filter
     assert k.infer_verb("hot_i") == ("source", "it reads no step")
     assert k.infer_verb("nope", "e") == ("map", "no tool named 'nope'")
     assert list(k.workflow.steps) == before

@@ -109,7 +109,7 @@ def test_K2_inference_does_not_depend_on_run_state(wf):
     unrun = Workflow()
     unrun["readings"] = to_rows_008.bind(data=DATA)[mod.source()]
     unrun["x"] = add_008(unrun["readings"])
-    kinds = [w.step("x").output.meta["auto"]["verb"] for w in (wf, unrun)]
+    kinds = [w.step("x").operation.shape_verb.kind for w in (wf, unrun)]
     assert kinds == ["collapse", "collapse"]
 
 
@@ -879,7 +879,7 @@ def test_K12_a_table_tool_gets_the_whole_grid(wf):
 
     wf["p"] = piv_008[mod.table()](wf["readings"])
     wf["inferred"] = piv_008(wf["readings"])
-    assert wf.step("inferred").output.meta["auto"]["verb"] == "table"
+    assert wf.step("inferred").operation.shape_verb.kind == "table"
     assert wf.step("p").describe() == (
         "table piv_008 · columns unknown until it runs · rows unknown until it runs")
     wf.run("p")
@@ -917,19 +917,18 @@ def fan_008(n) -> list:
     return [n] * n
 
 
-def test_N_auto_is_saved_as_auto_and_resolved_at_run(wf):
+def test_N_auto_is_decided_when_written_and_saved(wf):
+    # EX6: decided once, from the tool, and written; D20b: never a filter;
+    # D21: what auto adds (a breaker) is shown in the formula
     wf["f"] = is_big_008[mod.auto()](wf["readings"])
     wf["e"] = fan_008[mod.auto()](wf["readings"])
     wf["c"] = add_008[mod.auto()](wf["readings"])
     wf["s"] = scale_008[mod.auto(), mod.retry(times=1)](wf["readings"])
-    assert wf.step("f").output.meta["auto"] == {
-        "verb": "filter", "provisional": True,
-        "reason": "it returns a bool per row, so keep the rows that pass; "
-                  "adds breaker(after=5)"}
+    picked = {sid: wf.step(sid).operation.shape_verb.kind for sid in "fecs"}
+    assert picked == {"f": "map", "e": "expand", "c": "collapse", "s": "map"}
+    assert wf.step("f").formula == 'is_big_008[mod.map(), mod.breaker(after=5)](wf["readings"])'
+    assert [m.kind for m in wf.step("s").operation.modifiers] == ["retry", "breaker", "map"]
     wf.run_all()
-    picked = {sid: wf.step(sid).output.meta["auto"]["verb"] for sid in "fecs"}
-    assert picked == {"f": "filter", "e": "expand", "c": "collapse", "s": "map"}
-    assert [m.kind for m in wf.step("s").operation.modifiers] == ["retry", "auto"]
     back = Workflow.from_json(wf.to_session_json(), TOOLS_008)
     assert back.step("s").operation == wf.step("s").operation
     assert modifier_catalog()["auto"]["row_rule"] == "unknown"
@@ -1194,7 +1193,7 @@ def test_009_a_systematic_failure_trips_autos_breaker_after_5_calls(spent):
     assert out.notes[5]["error"] == (
         "not run: stopped after 5 failures in a row (ValueError: bad key)")
     assert list(out.row_states) == ["failed"] * 20
-    assert w.step("x").output.meta["auto"]["reason"].endswith("adds breaker(after=5)")
+    assert "mod.breaker(after=5)" in w.step("x").formula      # shown, D21
 
 
 def test_009_sporadic_failures_never_trip_it(spent):
@@ -1220,7 +1219,7 @@ def test_009_the_breaker_can_be_undone_or_changed(spent):
     w.run("stated")
     assert spent["calls"] == 10
     assert json.loads(w.to_json())["steps"][1]["operation"]["modifiers"] == [
-        {"kind": "breaker", "settings": {"after": None}}, {"kind": "auto", "settings": {}}]
+        {"kind": "breaker", "settings": {"after": None}}, {"kind": "map", "settings": {}}]
 
 
 def test_009_try_except_never_swallows_a_breaker_stop(spent):

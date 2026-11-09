@@ -450,6 +450,9 @@ class Workflow:
         if self.catalog is not None:
             operation = self.catalog.admit(operation)
         operation = self._resolve_picks(operation)       # S5d: row numbers saved as lineage
+        if _is_auto(operation) and len(operation.shape_verbs) == 1:
+            # D20b, EX6: the verb is decided now and written, never again at run
+            operation, _, _ = _provisional(operation, self)
         operation = bind_by_type(operation, self, step_id)   # S3: the binding, written
         self._gone.pop(step_id, None)                    # a new pick (D-picks)
         problems = check(operation, self, step_id)
@@ -3368,7 +3371,7 @@ from .references import (  # noqa: E402
     _where,
     rows,
 )
-from .run import _is_auto, _resolve_auto  # noqa: E402
+from .run import _is_auto, _provisional, _resolve_auto  # noqa: E402
 from .specs import WorkflowSpec  # noqa: E402
 from .step import (  # noqa: E402
     NO_LITERAL,

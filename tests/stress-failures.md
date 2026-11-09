@@ -683,3 +683,40 @@ chain=[(519, 0, 0, 0), (0, 0, 0, 0), (561, 2, 0, 0)],
 which=124,
 )
 ```
+
+## 2026-11-09 · `test_L40d_undo_is_free` · at `a1ad7f5` · STRESS=1
+
+- **Broke:** AssertionError: ('source put back', 's4', 'completed', 'invalid')
+- **Status:** open
+
+```
+test_L40d_undo_is_free(
+# The test always failed when commented parts were varied together.
+frame=   k     n  tags rec
+0  B  <NA>  None  {}
+1  A  <NA>  None  {},
+changed=   k     n  tags rec
+0  A  <NA>  None  {},
+chain=[(0, 0, 0, 0), (2, 0, 0, 0), (42, 224, 0, 0), (993, 3, 0, 0)],
+which=0,  # or any other generated value
+other=0,  # or any other generated value
+)
+```
+
+## 2026-11-09 · `test_L40d_undo_is_free` · at `a1ad7f5` + the EX6 piece · STRESS=1
+
+- **Broke:** AssertionError: ('source put back', 's4', 'completed', 'invalid')
+- **Status:** open, **W9**; older than the day's work (the same on `78c35ef`, `01f6279`, `a1ad7f5`). `s4 = wf["s3"][[0, -1]]` on a join of `s2` (a pick of `s0`) and `s0` is saved as lineage on both parents. An edit that drops `s0`'s row 0 rewrites `row["s0"]`'s numbers but not `row["s2"]`'s (a derived step's, W9), so both picked rows end up naming `s0` row 0; putting the source back can't tell them apart, and `s4` stays `invalid`. Needs each step's row map (PL2, L6). Not pinned: pinning an open bug fails the suite.
+
+```
+test_L40d_undo_is_free(
+frame=   k     n  tags rec
+0  B  <NA>  None  {}
+1  A  <NA>  None  {},
+changed=   k     n  tags rec
+0  A  <NA>  None  {},
+chain=[(0, 0, 0, 0), (2, 0, 0, 0), (42, 224, 0, 0), (993, 3, 0, 0)],
+which=0,
+other=0,
+)
+```

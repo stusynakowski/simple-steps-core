@@ -122,21 +122,20 @@ def test_execution_modifiers_do_not_change_the_result(wf):
 
 # ── verb inference: passing a reference picks the shape verb ─────────────
 def _inferred_kind(wf, sid):
-    # 009: the step saves mod.auto(); the verb it ran as is recorded on its output
-    assert wf.step(sid).operation.to_dict()["modifiers"][-1]["kind"] == "auto"
-    return wf.step(sid).output.meta["auto"]["verb"]
+    # EX6: the verb is decided when the step is written, and saved
+    return wf.step(sid).operation.shape_verb.kind
 
 
 def test_passing_a_reference_infers_the_verb(wf):
     assert _inferred_kind(wf, "auto_map") == "map"
-    assert _inferred_kind(wf, "auto_filter") == "filter"
+    assert _inferred_kind(wf, "auto_flags") == "map"            # D20b: never filter
     assert _inferred_kind(wf, "auto_collapse") == "collapse"
     assert _inferred_kind(wf, "auto_expand") == "expand"
 
 
 def test_inferred_steps_produce_the_same_results_as_explicit_ones(wf):
     assert wf.step("auto_map").output.values == [10, 20, 30, 20]        # like scored
-    assert wf.step("auto_filter").output.data["n"].tolist() == [2, 3, 2]  # like kept
+    assert wf.step("auto_flags").output.values == [False, True, True, True]  # kept is written
     assert wf.step("auto_collapse").output.item() == 8                  # like sum_n
     assert len(wf.step("auto_expand").output.data) == 8                 # like bursts
 

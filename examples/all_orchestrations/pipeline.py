@@ -176,7 +176,7 @@ def build() -> Workflow:
     # choices also get auto's default breaker(after=5). Write a verb yourself
     # (scale[mod.map()](…)) to choose instead — then nothing is added.
     wf["auto_map"] = scale(wf["readings"])          # ordinary tool    → map
-    wf["auto_filter"] = is_big(wf["readings"])      # returns bool     → filter
+    wf["auto_flags"] = is_big(wf["readings"])       # returns bool     → a map of bools (D20b)
     wf["auto_collapse"] = add_n(wf["readings"])     # (acc, x) reducer → collapse
     wf["auto_expand"] = fan_out(wf["readings"])     # returns list     → expand
 
@@ -446,10 +446,9 @@ def main() -> None:
     print("\nsweep (grid_search):")
     print(wf.step("grid_search").output.data.to_string(index=False))
 
-    print("\nauto (pass a reference, no verb — saved as auto, chosen from the data):")
-    for sid in ("auto_map", "auto_filter", "auto_collapse", "auto_expand"):
-        picked = wf.step(sid).output.meta["auto"]
-        print(f"  {sid:14} → {picked['verb']:9} ({picked['reason']})")
+    print("\nno verb written: core decides it from the tool and writes it (EX6):")
+    for sid in ("auto_map", "auto_flags", "auto_collapse", "auto_expand"):
+        print(f"  {sid:14} {wf.step(sid).formula}")
 
     print("\nstandard types as sources (each one cell):")
     for sid in ("a_list", "a_dict", "a_scalar"):

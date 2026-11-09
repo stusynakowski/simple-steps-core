@@ -126,7 +126,6 @@ def test_E7_brackets_take_ints_and_strings_only(k):
     assert refused(k, "b", lambda: wf["p"][None])
 
 
-@pytest.mark.xfail(strict=True, reason="S3 (CA-A, N2): a bare call infers map and writes it")
 def test_E8_a_column_to_a_value_parameter_is_a_call_per_row(k):
     k["f"] = to_f(wf["p"]["temp"])
     k.run("f")
@@ -173,7 +172,6 @@ def test_E15_D17_a_gathered_list_and_the_view_hold_plain_values():
     assert [type(v) for row in cells for v in row.values()] == [float, int, type(None), type(None)]
 
 
-@pytest.mark.xfail(strict=True, reason="S3 (N2): an inferred verb is never filter")
 def test_E18_a_bool_tool_with_no_verb_maps(k):
     k["h"] = is_hot(wf["p"]["temp"])
     k.run("h")
@@ -181,7 +179,6 @@ def test_E18_a_bool_tool_with_no_verb_maps(k):
     assert "filter" not in str(k.step("h").formula)
 
 
-@pytest.mark.xfail(strict=True, reason="S3 (D21, B5): nothing runs that the expression doesn't show")
 def test_E19_the_saved_expression_names_what_runs(k):
     k["f"] = to_f(wf["p"])
     formula = str(k.step("f").formula)

@@ -697,7 +697,7 @@ def test_a_bare_tool_call_on_a_reference_is_the_whole_step(three):
     wf = Workflow()
     wf["raw"] = three
     wf["scored"] = score(wf["raw"])
-    assert wf.step("scored").operation == score[mod.auto()](wf["raw"])   # 009: implicit auto
+    assert wf.step("scored").operation.shape_verb.kind == "map"        # EX6: decided, written
     wf.run_all()
     assert wf.step("scored").output.values == [10, 20, 30]
 
@@ -723,21 +723,24 @@ def test_inference_reads_a_reducer_as_collapse(three):
     wf = Workflow()
     wf["raw"] = three
     wf["sum"] = sum_up(wf["raw"])          # sum_up(acc, n) — acc is not a column
-    assert wf.step("sum").output.meta["auto"]["verb"] == "collapse"
+    assert wf.step("sum").operation.shape_verb.kind == "collapse"
     wf.run_all()
     assert wf.step("sum").output.item() == 6
 
 
-def test_inference_reads_a_bool_return_as_filter(three):
+def test_inference_reads_a_bool_return_as_a_map_never_a_filter(three):
+    # D20b: no verb written decides how many calls, never which rows stay
     @tool
     def big(n) -> bool:
         return n > 1
 
     wf = Workflow()
     wf["raw"] = three
-    wf["kept"] = big(wf["raw"])
-    assert wf.step("kept").output.meta["auto"]["verb"] == "filter"
+    wf["flags"] = big(wf["raw"])
+    assert wf.step("flags").operation.shape_verb.kind == "map"
+    wf["kept"] = big[mod.filter()](wf["raw"])                 # keeping rows is written
     wf.run_all()
+    assert wf.step("flags").output.values == [False, True, True]
     assert len(wf.step("kept").output.data) == 2
 
 
@@ -754,10 +757,11 @@ def test_inference_works_when_the_whole_chain_is_declared_first(three):
     wf = Workflow()
     wf["raw"] = three
     wf["scored"] = score(wf["raw"], weight=2)
-    wf["kept"] = big(wf["scored"])          # upstream staged
+    wf["flags"] = big(wf["scored"])         # upstream staged: a map of bools (D20b)
+    wf["kept"] = big[mod.filter()](wf["scored"])   # keeping rows is written
     wf["sum"] = add_up(wf["kept"])          # upstream staged, still a reducer
-    assert wf.step("kept").output.meta["auto"]["verb"] == "filter"
-    assert wf.step("sum").output.meta["auto"]["verb"] == "collapse"
+    assert wf.step("flags").operation.shape_verb.kind == "map"
+    assert wf.step("sum").operation.shape_verb.kind == "collapse"
     wf.run_all()
     assert wf.step("sum").output.item() == 120
 
@@ -813,7 +817,7 @@ def test_inference_reads_a_list_return_as_expand():
     wf = Workflow()
     wf["notes"] = pd.DataFrame({"note": ["clear sky", "heavy rain today"]})
     wf["word"] = words(wf["notes"])
-    assert wf.step("word").output.meta["auto"]["verb"] == "expand"
+    assert wf.step("word").operation.shape_verb.kind == "expand"
     wf.run_all()
     assert wf.step("word").output.values == ["clear", "sky", "heavy", "rain", "today"]
 
@@ -830,7 +834,7 @@ def test_inference_handles_string_annotations():
     def split_it(note) -> "list[str]":
         return note.split()
 
-    assert infer_verb(is_big.fn, grid(pd.DataFrame({"n": [1, 2]})), {})[0] == "filter"
+    assert infer_verb(is_big.fn, grid(pd.DataFrame({"n": [1, 2]})), {})[0] == "map"   # D20b
     assert infer_verb(split_it.fn, grid(pd.DataFrame({"note": ["a b"]})), {})[0] == "expand"
 
 
@@ -853,16 +857,16 @@ def test_inference_defaults_to_map(three):
     assert _auto_verb(score(wf["raw"]), wf) == "map"
 
 
-def test_an_unstated_orchestration_is_saved_as_auto(three):
-    """009 decision 6: implicit auto saves `mod.auto()`, decided from the data
-    at each run; staging shows the verb it would pick now, and its defaults."""
+def test_an_unstated_orchestration_is_saved_as_its_verb(three):
+    """EX6 (owner, 2026-11-03; replaces 009 decision 6): a step with no verb
+    written is saved with the one core decides, and what auto adds is shown
+    (D21), so the formula is what runs."""
     wf = Workflow()
     wf["raw"] = three
     wf["scored"] = score(wf["raw"])
     blob = wf.to_dict()["steps"][1]["operation"]
-    assert [m["kind"] for m in blob["modifiers"]] == ["auto"]
-    assert wf.step("scored").describe().startswith("map score · 3 cells (auto, for now:")
-    assert "adds breaker(after=5)" in wf.step("scored").describe()
+    assert [m["kind"] for m in blob["modifiers"]] == ["breaker", "map"]
+    assert wf.step("scored").formula == 'score[mod.map(), mod.breaker(after=5)](wf["raw"])'
 
 
 def test_infer_verb_explains_itself(three):

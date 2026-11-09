@@ -207,9 +207,12 @@ A tool call is `tool[modifiers](input, arguments)`. **Modifiers apply in the
 order written**, outermost first, like stacked decorators, and are stored as
 data in the step and applied each time it runs. *Built.*
 
-**Verbs** (at most one; none written means `auto`, inferred from the tool's
-types: `-> bool` filters, `-> list` expands, a first parameter `acc` collapses,
-anything else maps). *Built.*
+**Verbs** (at most one; none written means `auto`, decided from the tool's
+signature when the step is written and saved as that verb, never again at
+run (EX6): `-> list` expands, a first parameter `acc` collapses, a
+`DataFrame` parameter is a `table`, anything else maps, `-> bool` too: a
+filter is always written (D20b). What `auto` adds, `breaker(after=5)`, is
+written into the formula (D21). *Built 2026-11-09.*
 
 | Verb | Calls the tool | Output rows | Data columns out |
 |---|---|---|---|

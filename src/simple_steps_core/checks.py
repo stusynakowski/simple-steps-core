@@ -1932,7 +1932,8 @@ def infer_verb(fn: Callable, upstream: Any, literals: dict) -> tuple[str, str]:
                     else getattr(returns, "__name__", "")) or ""
     base = returns_name.split("[", 1)[0]          # "list[int]" -> "list"
     if returns is bool or base == "bool":
-        return "filter", "it returns a bool per row, so keep the rows that pass"
+        # D20b: auto decides how many calls, never which rows stay
+        return "map", "it returns a bool per row: a column of them; to keep rows, write mod.filter()"
     sequence = {"list", "tuple", "set"}
     if (returns in (list, tuple, set)
             or typing.get_origin(returns) in (list, tuple, set)
