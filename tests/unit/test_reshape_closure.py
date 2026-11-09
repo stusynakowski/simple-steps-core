@@ -891,3 +891,15 @@ def test_PK4_collapse_with_no_by_gives_one_row_even_of_nothing():
     assert data(k, "all")["v"].tolist() == [[]]
     assert data(k, "n")["n"].tolist() == [0]
     assert len(data(k, "by")) == 0                                    # no keys, no groups
+
+
+def test_PK9_expand_takes_lists_and_tuples_and_refuses_a_set():
+    k = Kernel(Catalog([]))
+    k["p"] = pd.DataFrame({"x": [[1, 2], (3, 4), {5, 6}]})
+    k["e"] = mod.expand(columns=["x"])(wf["p"])
+    k["t"] = identity[mod.expand()](wf["p"])
+    for s in ("e", "t"):
+        k.workflow.run(s)
+        out = k.workflow.steps[s].output
+        assert [v for v in data(k, s).iloc[:, -1].tolist() if not pd.isna(v)][:4] == [1, 2, 3, 4]
+        assert "sort it first" in str(out.notes)                   # a set has no order

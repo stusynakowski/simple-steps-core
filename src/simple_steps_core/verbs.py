@@ -501,11 +501,13 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
         if produced is None:
             none_rows += 1
             continue
-        if not mapping and (isinstance(produced, (str, bytes)) or not isinstance(produced, Iterable)):
+        if not mapping and (isinstance(produced, (str, bytes, set, frozenset))
+                            or not isinstance(produced, Iterable)):
             records.append({**record, "status": "failed", "unit": index,
-                            "error": f"not a list: {type(produced).__name__}. If a single "
-                                     f"value means a one-item list, say so first: "
-                                     f"as_list[mod.map()]"})
+                            "error": _not_a_list(produced) if isinstance(produced, (set, frozenset))
+                            else f"not a list: {type(produced).__name__}. If a single "
+                                 f"value means a one-item list, say so first: "
+                                 f"as_list[mod.map()]"})
             out_rows.append({name: None})
             ids.append(_child_id(index, 0))
             continue
@@ -574,6 +576,16 @@ def _filter_which(names: list, sid: str, flags: list | None = None) -> str:
             f"wf[{sid!r}][cols[{pick!r}] == True], or give the filter a tool")
 
 
+def _not_a_list(value: Any, column: str | None = None) -> str:
+    """Why expand won't unpack *value* (PK9): a set has no order to give its
+    items row numbers by."""
+    where = f" in {column!r}" if column else ""
+    if isinstance(value, (set, frozenset)):
+        return (f"a set{where} has no order to make rows in: sort it first, "
+                f"returning sorted(…) from the tool that makes it")
+    return f"not a list: {type(value).__name__}{where}"
+
+
 def _id_index(ids: list) -> pd.Index:
     """Row ids as an index that keeps their type: ints stay ints."""
     return pd.Index(ids, dtype=object if any(isinstance(i, str) for i in ids) or not ids else None)
@@ -620,9 +632,9 @@ def _unpack(source: Any, columns: list[str], restore: str | None, keep: bool = T
                 out_rows.append({c: None for c in variables(frame.columns)})
                 ids.append(_child_id(index, 0))
                 continue
-        bad = [c for c, v in lists.items() if not isinstance(v, list)]
-        lengths = {c: len(v) for c, v in lists.items() if isinstance(v, list)}
-        error = (f"not a list: {type(lists[bad[0]]).__name__} in {bad[0]!r}" if bad else
+        bad = [c for c, v in lists.items() if not isinstance(v, (list, tuple))]
+        lengths = {c: len(v) for c, v in lists.items() if isinstance(v, (list, tuple))}
+        error = (_not_a_list(lists[bad[0]], bad[0]) if bad else
                  None if len(set(lengths.values())) <= 1 else
                  "the lists don't line up: " + ", ".join(f"{c} has {n} items"
                                                           for c, n in lengths.items()))
