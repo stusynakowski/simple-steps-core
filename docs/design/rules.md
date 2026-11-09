@@ -44,8 +44,8 @@ rows ↔ a list, or columns ↔ a dict. Longer changes are several steps.
 | a row → a dict: `pack` | `widen` |
 
 Packing takes anything. Unpacking needs one shape: `widen` takes dicts (a
-key a row lacks is absent) or tuples all of one length (`c0, c1, …`, or a
-namedtuple's fields), never both, never padded. A list is items: `expand` it.
+key a row lacks is absent) or tuples all of one length (`var0, var1, …`, a
+namedtuple's fields, or `columns=[…]`), never both, never padded. A list is items: `expand` it.
 `expand` takes lists and tuples; a string is one value, and a set has no
 order, so sort it first.
 

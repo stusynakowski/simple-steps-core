@@ -157,7 +157,7 @@ def test_a_list_cell_expands_and_a_dict_cell_widens(wf):
 
 def test_a_tuple_column_widens_positionally(wf):
     cols = list(wf.step("split").output.data.columns)
-    assert "c0" in cols and "c1" in cols
+    assert "var0" in cols and "var1" in cols
 
 
 def test_builtin_reducers(wf):

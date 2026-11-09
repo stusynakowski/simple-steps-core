@@ -97,7 +97,7 @@ def risky(n):
 
 @tool
 def make_pair(n):
-    """tuple return — widen auto-names the positions c0, c1."""
+    """tuple return — widen auto-names the positions var0, var1."""
     return (n * 10, n * n)
 
 
@@ -187,9 +187,9 @@ def build() -> Workflow:
     wf["from_list"] = mod.expand()(wf["a_list"])            # list cell → rows
     wf["from_dict"] = mod.widen(columns=["x", "y"])(wf["a_dict"])  # dict → cols
 
-    # ── a column of tuples widens positionally (auto c0, c1) ──
+    # ── a column of tuples widens positionally (auto var0, var1) ──
     wf["pairs"] = make_pair[mod.map(), mod.name("value")](wf["readings"])
-    wf["split"] = mod.widen()(wf["pairs"])       # no columns= → c0, c1
+    wf["split"] = mod.widen()(wf["pairs"])       # no columns= → var0, var1
 
     # ── builtin reducers over a single-column grid ──
     wf["ns"] = mod.select(columns=["n"])(wf["readings"])

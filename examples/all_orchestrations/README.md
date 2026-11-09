@@ -51,7 +51,7 @@ need no registration — the no-tool reshapers (`select`, `drop`, `rename`,
 - **Verb inference**: passing a reference (`scale(wf["readings"])`) picks the
   verb — `map` / `filter` / `collapse` / `expand`.
 - **Standard-type sources**: a `list` / `dict` / scalar / tuple is **one cell**,
-  reshaped by a verb (`expand` a list, `widen` a dict or tuple → `c0, c1`);
+  reshaped by a verb (`expand` a list, `widen` a dict or tuple → `var0, var1`);
   only a DataFrame carries its own structure.
 - **Builtin reducers**: `gather`, `total`, `first`, `last`, `count`.
 - **Chained fan-out**: `map` over a `map`.

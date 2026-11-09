@@ -957,7 +957,8 @@ def _widen_columns(cells: list[Any], records: list[dict],
         if columns:
             return list(columns)
         fields = getattr(tuples[0][1], "_fields", None)
-        return list(fields) if fields else [f"c{i}" for i in range(width)]
+        # a position is a numeric name, so var0, var1, … as a source's are (L21, PK8)
+        return list(fields) if fields else [_column_name(i, i) for i in range(width)]
     if columns:
         return list(columns)
     # the union of the dicts' keys; a row that isn't one fails on its own
@@ -1366,6 +1367,7 @@ from .output import (  # noqa: E402
     Output,
     ROW_ID,
     _blocked,
+    _column_name,
     _is_missing,
     _normalize_missing,
     _str_columns,

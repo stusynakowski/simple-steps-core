@@ -1909,15 +1909,15 @@ def test_widen_is_one_shape_verb_like_the_rest(records):
     assert "at most one is allowed" in wf.step("both").problems[0]
 
 
-def test_widen_a_tuple_cell_auto_names_c0_c1():
+def test_widen_a_tuple_cell_auto_names_var0_var1():
     """A column of tuples widens instead of failing — positional names."""
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [(10, 1), (20, 4)]})
     wf["wide"] = mod.widen()(wf["raw"])          # no columns=
     wf.run_all()
     out = wf.step("wide").output
-    assert list(out.data.columns) == ["c0", "c1"]
-    assert list(out.data["c0"]) == [10, 20] and list(out.data["c1"]) == [1, 4]
+    assert list(out.data.columns) == ["var0", "var1"]                   # PK8, like L21
+    assert list(out.data["var0"]) == [10, 20] and list(out.data["var1"]) == [1, 4]
     assert set(_row_states(out)) == {"known"}
 
 
@@ -1960,7 +1960,7 @@ def test_widen_fails_a_list_row_pointing_to_expand():
     out = wf.step("wide").output
     assert _row_states(out) == ["known", "failed"]
     assert "mod.expand(columns=['value'])" in _errors(out)[1]
-    assert out.data["c0"].tolist()[0] == 10
+    assert out.data["var0"].tolist()[0] == 10
 
 
 def test_widen_refuses_dicts_and_tuples_in_one_column():
