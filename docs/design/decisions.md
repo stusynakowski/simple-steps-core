@@ -219,6 +219,7 @@ failure needing a new decision were reverted and pinned in
 | W16 | A whole step as a column argument (core-asks L37: `add[mod.map()](wf["r"], k=wf["doubled"])`) | pairs by row as its one data column when the parameter is declared to take one value and the step's rows are the input's (one reads the other, or they share a source); a one-row step is one value for every row (L37b), and an untyped parameter gets the step whole, as before | S3 |
 | W17 | D12 and T8 for `-> list[dict]` | T8 wins: an undeclared `list[dict]` stays one cell (a dict isn't a declared record); `list[T]` of any other non-record type gives a row per item. A source's one column keeps `value` (D9 names a verb's output; a source isn't one yet) | S4 |
 | W9 | **Open, found by L40d**: a condition on a *derived* step's row numbers (`row["s1_r"] == 0`, where `s1_r` keeps the source's rows) isn't rewritten when the source's rows move; only the source's own numbers are. Undo is still free (the rewrite is undone with the source) | left open: rewriting it needs each step's row map (PL2, later L6) | D-picks |
+| W18 | **Open, found by L40d (2026-11-09)**: a source edit that removes one picked row and moves another rewrites both to the same number; putting the source back can't tell them apart, so the pick stays rewritten | left open: same root as W9 (picks rewritten as numbers, in place); the fix keeps a pick by row identity and derives its numbers each time. Pinned, expected to fail | D-picks |
 
 ## 1. How to answer
 

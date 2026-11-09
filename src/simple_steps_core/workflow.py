@@ -2020,15 +2020,16 @@ class Workflow:
             found.append(f"A1 {step_id}: its {ROW_ID!r} column isn't its row ids")
         op_ = step.operation
         # None only where a row has no partner on that side (reshaping.md §5).
-        def may_be_none(column: str, start: str = step_id) -> bool:
+        def may_be_none(column: str, start: str = step_id, walked: set | None = None) -> bool:
             """A `#` column a stack or an outer join wrote, here or carried
             (through a zip_ too: an empty lineage cell is allowed, CA-L2)."""
-            seen = start
-            while seen in self.steps:
+            seen, walked = start, set() if walked is None else walked
+            while seen in self.steps and seen not in walked:    # a cycle ends it
+                walked.add(seen)
                 o = self.steps[seen].operation
                 if is_combine(o) and o.tool == "zip":
                     return any(column in self.steps[str(g)].output.data.columns
-                               and may_be_none(column, str(g))
+                               and may_be_none(column, str(g), walked)
                                for g in o.grids if str(g) in self.steps)
                 if is_combine(o):
                     return o.tool == "stack" or (o.tool == "join" and o.arguments.get("how", "inner") != "inner")
@@ -2317,8 +2318,11 @@ class Workflow:
     def _dropped_at(self, step_id: str, column: str) -> str | None:
         """The step at or before *step_id* that dropped or renamed `#` *column*,
         if that's why it's missing (reshaping.md §5: dropping a trace is a step)."""
-        seen = step_id
-        while seen in self.steps:
+        seen, walked = step_id, set()
+        while seen in self.steps and seen not in walked:
+            # two steps may read each other while an edit is half made: a
+            # cycle ends the walk, never loops it (found 2026-11-09, L40e)
+            walked.add(seen)
             op_ = self.steps[seen].operation
             verb = op_.shape_verb
             if verb is not None and verb.kind in ("drop", "rename") and \

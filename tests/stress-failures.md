@@ -687,7 +687,7 @@ which=124,
 ## 2026-11-09 · `test_L40d_undo_is_free` · at `a1ad7f5` · STRESS=1
 
 - **Broke:** AssertionError: ('source put back', 's4', 'completed', 'invalid')
-- **Status:** open
+- **Status:** open, **W9** (the entry below has the analysis); recorded by the suite on the first run, before the analysis
 
 ```
 test_L40d_undo_is_free(
@@ -706,7 +706,7 @@ other=0,  # or any other generated value
 ## 2026-11-09 · `test_L40d_undo_is_free` · at `a1ad7f5` + the EX6 piece · STRESS=1
 
 - **Broke:** AssertionError: ('source put back', 's4', 'completed', 'invalid')
-- **Status:** open, **W9**; older than the day's work (the same on `78c35ef`, `01f6279`, `a1ad7f5`). `s4 = wf["s3"][[0, -1]]` on a join of `s2` (a pick of `s0`) and `s0` is saved as lineage on both parents. An edit that drops `s0`'s row 0 rewrites `row["s0"]`'s numbers but not `row["s2"]`'s (a derived step's, W9), so both picked rows end up naming `s0` row 0; putting the source back can't tell them apart, and `s4` stays `invalid`. Needs each step's row map (PL2, L6). Not pinned: pinning an open bug fails the suite.
+- **Status:** open, **W9**; older than the day's work (the same on `78c35ef`, `01f6279`, `a1ad7f5`). `s4 = wf["s3"][[0, -1]]` on a join of `s2` (a pick of `s0`) and `s0` is saved as lineage on both parents. An edit that drops `s0`'s row 0 rewrites `row["s0"]`'s numbers but not `row["s2"]`'s (a derived step's, W9), so both picked rows end up naming `s0` row 0; putting the source back can't tell them apart, and `s4` stays `invalid`. Needs each step's row map (PL2, L6). Pinned as `test_W9_…` (expected to fail).
 
 ```
 test_L40d_undo_is_free(
@@ -744,3 +744,57 @@ other=0,
   stuck in its fourth test; the 10-minute dump showed one frame,
   `operation.py` in `shape_verbs`, then `<invalid frame>`. The next run, the
   same code, passed in 147 s: the slowness depends on the examples drawn.
+- **Found and fixed, 2026-11-09:** the slow-example log caught a `test_L40e`
+  example still running after 10 minutes. Replayed alone with a Python stack
+  sampler (faulthandler shows one frame on Python 3.13 here), every sample
+  sat in `checks.check` → `Workflow._dropped_at`: two steps edited to read
+  each other made a cycle, and `_dropped_at` followed inputs round it forever.
+  It now stops at a step it has seen, as `_same_ids` and `_aligned_root` did;
+  the invariant check's `may_be_none` got the same guard. Pinned in L40e (it
+  hung before the fix, passes in 7 s after).
+
+## 2026-11-09 · `test_L40d_undo_is_free` · at `d2757c3` · STRESS=1
+
+- **Broke:** AssertionError: ('expression put back', 's4', 's4', 'completed', 'stale')
+- **Status:** open, **W18**; older than the day's work (the same on `78c35ef`). A source edit that removes one picked row and moves another rewrites both picks to the same number (`(row["s0"] == 0) | (row["s0"] == 0)`); putting the source back can't tell them apart, so the pick stays rewritten and the step later shows `stale`. The same root as W9: picks are rewritten as numbers, in place. The fix is to keep a pick by row identity and derive its numbers each time. Pinned as `test_W18_…` (expected to fail)
+
+```
+test_L40d_undo_is_free(
+frame=       k     n       tags                     rec
+a.1.0  B  <NA>  [3, 2, 0]     {'b': 5, 'a': None}
+b.0.2  A  <NA>  [0, 3, 0]     {'b': None, 'a': 9}
+a      B  <NA>  [0, 3, 2]             {'b': None}
+a.1    A     8       None  {'a': None, 'b': None}
+1      B     3       None                      {},
+changed=       k     n tags       rec
+b.0.2  C  <NA>  [0]  {'b': 1},
+chain=[(0, 836, 837, 49),
+(352, 143, 86, 327),
+(934, 600, 755, 113),
+(13, 101, 224, 220),
+(321, 428, 562, 368)],
+which=166,
+other=683,
+)
+```
+
+## 2026-11-09 · `test_L40d_undo_is_free` · at `d2757c3` · STRESS=1
+
+- **Broke:** AssertionError: ('expression put back', 's2', 's2', 'completed', 'stale')
+- **Status:** open, **W18**; older than the day's work (the same on `78c35ef`). A source edit that removes one picked row and moves another rewrites both picks to the same number (`(row["s0"] == 0) | (row["s0"] == 0)`); putting the source back can't tell them apart, so the pick stays rewritten and the step later shows `stale`. The same root as W9: picks are rewritten as numbers, in place. The fix is to keep a pick by row identity and derive its numbers each time. Pinned as `test_W18_…` (expected to fail)
+
+```
+test_L40d_undo_is_free(
+frame=       k     n  tags rec
+a.1    A  <NA>  None  {}
+a      B  <NA>  None  {}
+0.1    A  <NA>  None  {}
+1      A  <NA>  None  {}
+b.0.2  A  <NA>  None  {},
+changed=   k     n  tags rec
+a  A  <NA>  None  {},
+chain=[(0, 0, 0, 0), (13, 1, 0, 0), (0, 0, 0, 0)],
+which=2,
+other=0,
+)
+```

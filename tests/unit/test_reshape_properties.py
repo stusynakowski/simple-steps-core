@@ -539,6 +539,24 @@ def test_L40d_undo_is_free(frame, changed, chain, which, other):
             assert after[s][1] is before[s][1], ("expression put back, re-ran", step, s)
 
 
+@pytest.mark.xfail(strict=True, reason="W18 (open): a gone row and a moved row both rewritten "
+                   "to the same number; the source put back can't tell them apart")
+def test_W18_picks_stay_apart_when_a_gone_row_and_a_moved_row_collide():
+    # found by L40d at 500 examples, 2026-11-09 (tests/stress-failures.md)
+    frame = pd.DataFrame({"k": ["A", "B", "A", "A", "A"], "n": pd.array([pd.NA] * 5, dtype="Int64"),
+                          "tags": pd.Series([None] * 5, dtype=object),
+                          "rec": pd.Series([{}] * 5, dtype=object)},
+                         index=["a.1", "a", "0.1", 1, "b.0.2"])
+    changed = frame.loc[["a"]].assign(k="A")             # row "a" edited, row "a.1" gone
+    catalog = _catalog(frame)
+    k, names = _build(catalog, [(0, 0, 0, 0), (13, 1, 0, 0), (0, 0, 0, 0)])
+    _run(k)
+    picked = str(k.step("s2").formula)
+    k["s0"] = changed
+    k["s0"] = catalog.tools["origin_pp"][mod.source()]()
+    assert str(k.step("s2").formula) == picked
+
+
 @pytest.mark.xfail(strict=True, reason="W9 (open): a condition on a derived step's rows "
                    "isn't rewritten when the source's rows move (needs row maps, PL2)")
 def test_W9_a_pick_of_a_joins_rows_survives_a_source_edit_put_back():
@@ -595,6 +613,14 @@ def test_W9_a_pick_of_a_joins_rows_survives_a_source_edit_put_back():
 @example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
          changed=pd.DataFrame({"k": ["A"], "n": [pd.NA], "tags": [None], "rec": [{}]}),
          chain=[(5, 0, 0, 0), (0, 0, 0, 0), (0, 1, 0, 0), (208, 0, 0, 0)], which=1, other=254)
+# two steps edited to read each other: a re-check of a collapse(by="#s") on
+# them walked the cycle forever looking for where `#s` was dropped (2026-11-09,
+# caught by the slow-example log)
+@example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
+         changed=pd.DataFrame({"k": ["B"], "n": pd.array([1], dtype="Int64"), "tags": [None],
+                               "rec": [{}]}),
+         chain=[(421, 630, 1, 457), (2, 275, 172, 99), (643, 462, 227, 417),
+                (522, 139, 237, 470), (812, 152, 805, 661)], which=471, other=68)
 @_timed
 def test_L40e_the_order_of_edits_doesnt_matter(frame, changed, chain, which, other):
     """Two edits, made in either order, give the same states and data."""
