@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import Any
 from typing import Callable
 from typing import Sequence
+import functools
 import hashlib
 import inspect
 import json
@@ -424,6 +425,14 @@ class Workflow:
         # The app's additions stay with the step when it is re-declared.
         kept_extras = self.steps[step_id].extras if existed else {}
         operation = self._as_operation(operation)
+        if _is_plain_function(operation):
+            # EX9 (owner, 2026-11-03): stored as a value it ran nowhere, and
+            # looked completed. A tool is registered, then called on a step.
+            name = getattr(operation, "__name__", "fn")
+            raise TypeError(
+                f"a Python function isn't a value: make it a tool, @tool on "
+                f"{'it' if name == '<lambda>' else name}, add it to the catalog, then call "
+                f"it on a step, k[{step_id!r}] = {'tool' if name == '<lambda>' else name}(wf[\"…\"])")
         if not isinstance(operation, Operation):
             # A bare value is a source step, and a source step's data **is its
             # output** — it arrived with the declaration, so there is nothing
@@ -3602,3 +3611,10 @@ def _apply_pickers(operation: Operation, source: Output) -> Output:
         source = MODIFIERS[m.kind].apply(identity, **m.settings)(source)
         source.meta["name"] = name
     return source
+
+
+def _is_plain_function(value: Any) -> bool:
+    """A Python function, lambda, method or partial: code, never a step's
+    value (EX9). A registered tool or an operation isn't one."""
+    return (inspect.isfunction(value) or inspect.ismethod(value)
+            or inspect.isbuiltin(value) or isinstance(value, functools.partial))

@@ -514,3 +514,12 @@ def test_L33_distinct_before_a_verb_is_a_step_of_its_own():
     k["r"] = pd.DataFrame({"n": [1, 1, 2]})
     k["d"] = twice_px[mod.distinct(), mod.map()](wf["r"])
     assert "at most one is allowed" in str(k.step("d").problems[0])
+
+
+def test_EX9_a_plain_function_is_refused_as_a_value():
+    k = Kernel(Catalog([]))
+    with pytest.raises(TypeError, match="@tool"):
+        k["fn"] = lambda temp: temp
+    assert "fn" not in k
+    k["n"] = 3                                                    # a value still is one
+    assert k.step("n").state == "completed"

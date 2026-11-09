@@ -206,8 +206,8 @@ def ch2():
     lesson("D10", "changing a resource's settings makes its readers stale",
            k.step("adj").state, "stale")
     s = put(k, "fn", lambda temp: temp)
-    lesson("D11", "assigning a Python function stores it as a value", s.state, "completed",
-           "should a bare function be refused, pointing to @tool and the catalog?", open_=True)
+    lesson("D11", "assigning a Python function is refused, pointing to @tool (EX9)",
+           isinstance(s, TypeError) and "@tool" in str(s), True)
 
 
 # ── 3. picks ─────────────────────────────────────────────────────────────

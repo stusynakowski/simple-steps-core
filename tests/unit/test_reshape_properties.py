@@ -501,6 +501,22 @@ def test_L40d_undo_is_free(frame, changed, chain, which, other):
             assert after[s][1] is before[s][1], ("expression put back, re-ran", step, s)
 
 
+@pytest.mark.xfail(strict=True, reason="W9 (open): a condition on a derived step's rows "
+                   "isn't rewritten when the source's rows move (needs row maps, PL2)")
+def test_W9_a_pick_of_a_joins_rows_survives_a_source_edit_put_back():
+    # found by L40d at 500 examples, 2026-11-09 (tests/stress-failures.md)
+    frame = pd.DataFrame({"k": ["B", "A"], "n": pd.array([pd.NA, pd.NA], dtype="Int64"),
+                          "tags": [None, None], "rec": [{}, {}]})
+    changed = frame.iloc[[1]].reset_index(drop=True)
+    catalog = _catalog(frame)
+    k, names = _build(catalog, [(0, 0, 0, 0), (2, 0, 0, 0), (42, 224, 0, 0), (993, 3, 0, 0)])
+    _run(k)
+    before = _snapshot(k, names)
+    k["s0"] = changed
+    k["s0"] = catalog.tools["origin_pp"][mod.source()]()
+    assert _snapshot(k, names)["s4"][0] == before["s4"][0] == "completed"
+
+
 @pytest.mark.no_invariants
 @SETTINGS
 @given(grids(), grids(), chains(), st.integers(0, 999), st.integers(0, 999))
