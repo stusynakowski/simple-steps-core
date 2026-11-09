@@ -466,3 +466,19 @@ def test_B11_a_change_to_a_passed_through_column_makes_the_step_stale():
     k.run_all()
     k["s0"] = pd.DataFrame({"k": ["A"], "n": [2]})        # k, the bound column, unchanged
     assert k.step("g").state == "stale"
+
+
+def test_W15_cols_is_columns_and_saved_as_columns():
+    # owner, 2026-11-09: cols= and columns= are both acceptable (core-asks L26)
+    k = Kernel(Catalog([]))
+    k["r"] = pd.DataFrame({"n": [10, 20, 30, 40], "ward": list("ABAB")})
+    k["a"] = mod.select(rows=slice(1, 3), cols=["n"])(wf["r"])
+    k["b"] = mod.select(rows=slice(1, 3), columns=["n"])(wf["r"])
+    k["d"] = mod.drop(cols=["ward"])(wf["r"])
+    k.run_all()
+    assert values(k, "a") == values(k, "b") == [20, 30]
+    assert str(k.step("a").formula) == str(k.step("b").formula).replace("'b'", "'a'")
+    assert "cols=" not in str(k.step("a").formula)
+    assert list(k.step("d").output.data.columns) == ["n"]
+    with pytest.raises(TypeError, match="cols= or columns="):
+        mod.select(cols=["n"], columns=["n"])

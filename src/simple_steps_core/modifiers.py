@@ -740,8 +740,17 @@ class _Mods:
                     raise TypeError("rename moves data columns and copies lineage: split them, "
                                     "mod.rename(columns={…}) and mod.copy(columns={'#r': …})")
                 return Modifier("copy", params)
-            if isinstance(params.get("rows"), Condition):
-                params["rows"] = {"where": params["rows"].tree}     # S5c: saved as data
+            if "cols" in params:
+                # owner, 2026-11-09 (W15, core-asks L26): cols= and columns= are
+                # both acceptable, saved as columns=, so one spec prints back
+                if "columns" in params:
+                    raise TypeError(f"mod.{kind}() takes cols= or columns=, not both: "
+                                    f"they are one setting")
+                params["columns"] = params.pop("cols")
+            if isinstance(params.get("rows"), (Condition, Rows, slice)):
+                # saved as data, as a pick saves it: a condition (S5c), a range
+                # {start, stop} (core-asks L32), rows[…]
+                params["rows"] = _row_part(params["rows"])
             if "over" in params:
                 # EX3 (owner, 2026-11-03): one way to give a step its input,
                 # after the brackets. A saved file never held over=.
@@ -765,6 +774,6 @@ mod = _Mods()
 from .system_tools import BUILTIN_TOOLS, DEFAULT_TOOL  # noqa: E402
 from .checks import ROWS_RULE  # noqa: E402
 from .operation import Operation  # noqa: E402
-from .references import TOOL_SETTINGS, Condition, _deref  # noqa: E402
+from .references import TOOL_SETTINGS, Condition, Rows, _deref, _row_part  # noqa: E402
 from .values import _type_label  # noqa: E402
 from .verbs import _Caught, _Stopped, _Tolerated  # noqa: E402
