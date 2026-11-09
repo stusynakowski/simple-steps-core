@@ -256,6 +256,14 @@ def group_(source: Any, fn: Callable, *, name: str = "group",
                         "key": name, "n_in": len(frame)})
 
 
+def _groups(frame: pd.DataFrame, by: str) -> list:
+    """Each key's rows, in first-seen order. A missing key is a group of its
+    own, never dropped (PK1: pandas drops it by default); its key is shown as
+    the row held it, not as pandas' NaN."""
+    return [(frame.at[chunk.index[0], by] if _is_missing(key) else key, chunk)
+            for key, chunk in frame.groupby(by, sort=False, dropna=False)]
+
+
 def collapse_(source: Any, fn: Callable, *, by: str | None = None,
               initial: Any = None, name: str = VALUE_COLUMN) -> Output:
     """``summarise`` — reduce to one row, or one row per ``by`` group.
@@ -270,7 +278,7 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
         # after the tool.
         key_name = getattr(by, "__name__", "key")
         keyed = frame.assign(**{key_name: _key_column(frame, by)})
-        groups = list(keyed.groupby(key_name, sort=False))
+        groups = _groups(keyed, key_name)
         groups = [(k, frame.loc[chunk.index]) for k, chunk in groups]
         by = key_name
     elif by is None:
@@ -291,7 +299,7 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
             raise SelectionError(
                 f"collapse groups by {by!r}, which {sid!r} does not have "
                 f"(it has {', '.join(map(str, frame.columns)) or 'no columns'})")
-        groups = list(frame.groupby(by, sort=False))
+        groups = _groups(frame, by)
 
     form = reducer_form(fn)
     reduced = [c for c in variables(frame.columns) if c != by]
@@ -379,7 +387,7 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
     data[_id_column_for(source)] = pd.Series([list(chunk.index) for _, chunk in groups],
                                              index=data.index, dtype=object)
     if by is not None:                       # key first reads better
-        data[by] = keys
+        data[by] = _typed(keys, data.index)
     if form == "per_column":
         # One column per variable, under its own name (R-D1); a column any
         # group left out (`total(numeric_only=True)`: not numbers) isn't written (L5).

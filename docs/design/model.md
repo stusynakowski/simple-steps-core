@@ -210,7 +210,7 @@ anything else maps). *Built.*
 | `map` | once per row | one per row | the step's name, or a record's fields |
 | `filter` | once per row | the rows it approves | the input's |
 | `expand` | once per row; returns a list | one per item | the step's name, or each item's fields; a dict's `key`, `value` |
-| `collapse` | once per group (`by=`) | one per group | the key, and the step's name or the fields |
+| `collapse` | once per group (`by=`) | one per group, in first-seen order; a missing key is a group of its own (PK1) | the key, and the step's name or the fields |
 | `group` | once per row; returns a key | one per row | the input's, plus the key |
 | `sweep` | once per combination of settings | one per combination | the settings, and the step's name |
 | `table` | once, with the whole input | what it returns | what it returns |

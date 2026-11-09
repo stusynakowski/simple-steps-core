@@ -843,3 +843,16 @@ def test_L51_an_empty_step_holds_a_place():
     assert k.workflow.steps["d"].problems == ()
     k.run_all()
     assert data(k, "d")["d"].tolist() == [2.0, 4.0]
+
+
+def test_PK1_every_row_lands_in_a_group_a_missing_key_too():
+    # pandas' groupby drops a None key by default; core shows it as its own
+    # group, so the user drops it, or sees it (owner, 2026-11-09)
+    k = Kernel(Catalog([]))
+    k["p"] = pd.DataFrame({"g": ["B", "A", None, "B"], "v": [1, 2, 3, 4]})
+    k["s"] = gather[mod.collapse(by="g")](wf["p"])
+    k["n"] = op("count")[mod.collapse(by="g")](wf["p"])
+    k.run_all()
+    assert data(k, "s")["g"].tolist() == ["B", "A", None]
+    assert data(k, "s")["v"].tolist() == [[1, 4], [2], [3]]
+    assert data(k, "n")["n"].tolist() == [2, 1, 1]

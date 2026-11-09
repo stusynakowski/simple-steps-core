@@ -62,7 +62,7 @@ are removals; EX5–EX6 are S3's binding work.
 | EX7 | **One printed form that round-trips**: `parse(print(x)) == x` for every expression; the saved form is the printed form. A property test generates expressions and checks it (beside L40) | expressions print; no round-trip test | **yes**: owner, 2026-11-03, with S3 |
 | EX8 | **The tutorial is the contract.** `tutorial/tutorial.py` runs in the test suite; a decision that lands changes its lesson's `want` in the same commit | run by hand | **yes**: owner, 2026-11-03: both tutorials run in the test suite |
 | EX9 | Assigning a bare Python function as a value is refused, pointing to `@tool` and the catalog (D11) | stored as a value, `completed` | **yes**: owner, 2026-11-03 |
-| **EX10** | **`widen` applies only to a column of dicts** (owner, 2026-11-03: **decided**). Tuple and list cells no longer widen to `c0, c1, …`: a tool returns a dict for fields, `expand` unpacks a list. When the column's type is known and isn't a dict, the step is `invalid` at once; when it's unknown, a cell that isn't a dict fails, the other rows run; a `None` cell gives `absent` fields (with C6, one meaning of no value) | tuples and lists widen by position to `c0, c1, …`; a `None` cell fails | **decided**; lands as its own piece, with `examples/all_orchestrations` (`split`) and its tests |
+| **EX10** | **`widen` applies only to a column of dicts** (owner, 2026-11-03: **decided**). Tuple and list cells no longer widen to `c0, c1, …`: a tool returns a dict for fields, `expand` unpacks a list. When the column's type is known and isn't a dict, the step is `invalid` at once; when it's unknown, a cell that isn't a dict fails, the other rows run; a `None` cell gives `absent` fields (with C6, one meaning of no value) | tuples and lists widen by position to `c0, c1, …`; a `None` cell fails | **superseded by PK6–PK8** (owner, 2026-11-09): tuples of one length widen too, and a list is refused |
 | EX11 | **A return type is declared or unknown, never guessed.** No annotation, `Any` or `object` is *unknown*: the tool runs, its plan says the type is unknown and why (*"declare the return type"*), `auto` may only infer `map` for it, and checks that need the type (EX10) happen per cell at run. A declared type (`-> float`, `-> dict`, `-> list[str]`, a record class) gets every check at declaration | unannotated tools run; `auto` infers `map` for them; the plan states the type `unknown` before a run and the observed type after (K27, checked 2026-11-03 by tutorial/handover.py); per-cell checks at run and the plan's *"declare the return type"* are what's left | yes |
 | EX12 | A lineage condition (`wf["e"][row["v"] == 1]`) gets no warning that its rows are positions: it isn't positional (P9b) | warns *"rows … are positions, and expand doesn't fix row order"* | **yes**: owner, 2026-11-03 |
 | EX13 | **A string assigned to a step stays a string value; formula text is parsed only when asked**: `k["g"] = formula("to_f[mod.map()](wf['p'])")`. `formula(text)` returns an operation, checked against the kernel's catalog when it's assigned, like any other expression. It is the app's `operation_formula.py`, ported (plan S3): it reads the text as a syntax tree and never runs it (checked 2026-11-03: `__import__`, `open`, lambdas and `__subclasses__` all refused, nothing ran). The app's formula bar calls it | `k["g"] = "to_f[…]"` stores the text as a string; no parser in core; the app's parser still uses `grid` names (`shape_verbs`, …) | **yes**: owner, 2026-11-03. **Done** 2026-11-03 (`simple_steps_core.formula`): built on core's own constructors rather than porting the app's JSON compiler, which predates picks, conditions and `mod.x(…)(wf[…])`; the same safety rule (a syntax tree, a short list of shapes, never `eval`), and a tool's input must be a step, since a tool called on a value runs at once. Every formula the tutorials print reads back as the same spec; 20 hostile formulas refused, nothing run; core-asks L29c passes |
@@ -161,6 +161,35 @@ on grammar, and both break the rule that an expression means what it shows.
 | N2 | May an inferred verb be `filter`? | **no**. **D20b** decided |
 | N3 | The modifiers core-asks left out | **all kept**; written order is applied order. *Squeeze*, the opposite of `widen`, is core's existing `mod.pack` |
 | N4 | Where core-asks is edited | **the core copy leads** |
+
+### PK. Pack and unpack (owner, 2026-11-09)
+
+Four verbs, two pairs. **Packing works on anything**: the data's shape never
+makes it fail, only a tool can, in its own cell. **Unpacking needs a
+consistent shape** and fails a row, or refuses the step, when it isn't one.
+Unpacking what was packed gives it back, whatever it was (rules.md 6).
+
+| | rows | columns |
+|---|---|---|
+| packs | `collapse`: a group's rows into one, each column a list | `pack`: a row's columns into one dict |
+| unpacks | `expand`: a list into a row per item | `widen`: a dict or a tuple into a column per field |
+
+Checked against pandas 3.0.6 (2026-11-09), where core differs on purpose:
+`groupby` drops `None` keys and sorts; `explode` turns `[]` into a `NaN` row
+and takes sets; `widen`'s equivalents pad ragged tuples with `NaN`.
+
+| | Rule | Today | Owner, 2026-11-09 |
+|---|---|---|---|
+| PK1 | **Every row lands in one group.** A `None` or absent key is a group of its own, shown, so the user drops it or sees it (pandas `dropna=False`) | the row is dropped, silently: pandas' default | **yes, fix**. **Done 2026-11-09**: grouped with `dropna=False`, the key shown as the row held it (`None`, not `NaN`) |
+| PK2 | Any value is a key: lists and dicts group by their contents, shown as they were | the run stops (`unhashable type`) | yes |
+| PK3 | `True` and `False` are keys of their own, never `1` and `0`; `1` and `1.0` are one key, the first one seen | `1`, `1.0`, `True` are one group | **yes**: `True` apart |
+| PK4 | `collapse` with no `by=` gives one row, also of an empty input (`gather` `[]`, `count` 0) | to check | yes |
+| PK5 | `pack` takes any columns and values: one dict per row, keys in column order, an absent cell left out, `None` kept | so | yes |
+| PK6 | **`widen` takes a column of dicts, or of tuples all of one length** (supersedes EX10). Dicts: the union of their keys, in first-seen order, a key a row lacks `absent`. Tuples: a length that differs refuses the step, naming the lengths and rows; never padded | ragged tuples padded with `None`, shown as a value | **yes**: tuples back |
+| PK7 | `widen` refuses a list, pointing to `expand`: a list is items, a tuple is fields. Dicts and tuples mixed in one column are refused; a `None` cell gives `absent` fields and a warning (C6); any other cell fails its row | lists widen like tuples | **yes** |
+| PK8 | **`widen`'s names.** A namedtuple or dataclass names its fields; `columns=[…]` names a tuple's positions, or chooses a dict's keys; otherwise a tuple's columns are `<column>_0, <column>_1, …`. `sep="_"` prefixes every field with the column's name, dicts too (`info_age`), so two widens never collide | namedtuples named; otherwise `c0, c1, …`; no prefix | **to confirm**: "add the potential for naming conventions" |
+| PK9 | `expand` takes lists and tuples; a string is never a list; a dict gives `key`, `value` rows; a set is refused (no order: sort it first) | `expand(columns=)` refuses a tuple | yes |
+| PK10 | `[]` gives no rows; `None` gives no rows and a warning; `collapse(by="#v")` gives the empty parent back. Lists expanded together must be of one length in each row, or that row fails | so | yes |
 
 ### Taken while you were away (2026-11-04, to confirm or reverse)
 

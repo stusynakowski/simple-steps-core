@@ -88,7 +88,9 @@ fails its row.
 
 *Grouping* is a new index plus a map: `mean_temp[collapse(by="ward")]` packs
 each ward's rows into lists, then calls `mean_temp(temp: list[float])` once
-per ward, keeping `ward` as a column.
+per ward, keeping `ward` as a column. Every row lands in a group: a row
+with no `ward` (`None`) makes a group of its own, shown, never dropped. To
+leave it out, filter it first.
 
 ## What core can't do, by design
 
