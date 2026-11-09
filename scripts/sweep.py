@@ -48,12 +48,16 @@ def main() -> int:
         env.pop("STRESS", None)             # only the property-test suite runs at 500
         print(f"{'suite':22} {'exit':>4}  result")
         failed = 0
+        logs = ROOT / ".sweep"             # each suite's output, written as it runs, so a
+        logs.mkdir(exist_ok=True)           # hang's stack dump (faulthandler_timeout) is on disk
         for name, args in suites:
-            run = subprocess.run([PY, "-m", "coverage", "run", "-p", *args], cwd=ROOT,
-                                 env={**env, "STRESS": "1"} if name.startswith("property") else env,
-                                 capture_output=True, text=True)
-            failed += run.returncode != 0
-            print(f"{name:22} {run.returncode:>4}  {last_line(run.stdout) or last_line(run.stderr)}")
+            log = logs / f"{name.replace(' ', '-').replace('×', 'x')}.log"
+            with log.open("w") as sink:
+                code = subprocess.run([PY, "-m", "coverage", "run", "-p", *args], cwd=ROOT,
+                                      env={**env, "STRESS": "1"} if name.startswith("property") else env,
+                                      stdout=sink, stderr=subprocess.STDOUT, text=True).returncode
+            failed += code != 0
+            print(f"{name:22} {code:>4}  {last_line(log.read_text())}")
         subprocess.run([PY, "-m", "coverage", "combine", "-q"], cwd=ROOT, env=env)
         out = Path(tmp) / "coverage.json"
         subprocess.run([PY, "-m", "coverage", "json", "-q", "-o", str(out)], cwd=ROOT, env=env)

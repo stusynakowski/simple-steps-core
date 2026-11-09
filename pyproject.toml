@@ -51,6 +51,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# A test running past 10 minutes dumps every thread's stack, without stopping:
+# where a hang is, recorded whatever runs the tests (tests/stress-failures.md)
+faulthandler_timeout = 600
 
 # Coverage is opt-in (`pytest --cov`) rather than in addopts, so the ordinary
 # test loop stays fast. See scripts/run_checks.sh for the full gate.

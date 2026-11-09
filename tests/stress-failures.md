@@ -720,3 +720,19 @@ which=0,
 other=0,
 )
 ```
+
+## Hangs: where they are recorded (2026-11-09)
+
+- **Seen:** `sweep.py --stress` ran 361 CPU minutes (2026-11-04, under coverage),
+  and three runs on 2026-11-09 went past 10 CPU minutes (a full test run at
+  `a1ad7f5` + the EX6 piece, and two `STRESS=1` property runs, one of them while
+  hypothesis shrank the W9 failure above). Each was killed before its stacks
+  could be read: the 2026-11-09 ones had their output piped into
+  `grep`/`head`/`tail`, the sweep held its output in memory.
+- **Not reproduced:** five `STRESS=1` runs writing to files (2026-11-09, at
+  `0c49e18`) passed in 130–167 s, with no test past 200 s.
+- **Now recorded:** `faulthandler_timeout = 600` (pyproject.toml) makes any test
+  past 10 minutes dump every thread's stack, without stopping it; `sweep.py`
+  writes each suite's output to `.sweep/<suite>.log` as it runs. A hang's
+  location is in that log (or the file a run is redirected to): add it here,
+  with the commit, before killing the run. Don't pipe a long run into `head`.
