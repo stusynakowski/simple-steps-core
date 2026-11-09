@@ -906,34 +906,58 @@ def drop_(source: Any, fn: Callable = identity, *,
                           source=source)
 
 
-def _widen_columns(cells: list[Any], records: list[dict]) -> list[str] | None:
-    """Column names when none were declared.
+def _rows_named(positions: list[int]) -> str:
+    return f"row{'s' if len(positions) > 1 else ''} {', '.join(map(str, positions))}"
 
-    A **sequence** cell (tuple/list) has no field names, so it is named
-    positionally ``c0, c1, …`` — the width is the longest completed row. A
-    **mapping** cell's fields are *not* guessed: returning ``None`` makes the
-    caller raise, because discovering a record's keys at run time is exactly the
-    unvalidatable-until-run case ``columns=`` exists to rule out.
+
+def _widen_columns(cells: list[Any], records: list[dict],
+                   columns: Sequence[str] | None) -> list[str]:
+    """The columns a widen writes, once the column's shape is checked (PK6).
+
+    Dicts or tuples, never both. **Dicts**: ``columns=`` chooses keys, else the
+    union of their keys, first seen first. **Tuples** are fields, so they all
+    have one length, never padded (pandas pads): a namedtuple names them,
+    ``columns=`` names them (as many as the items), else ``c0, c1, …``. A
+    shape that isn't one is refused, naming the rows by number.
     """
-    completed = [c for c, r in zip(cells, records) if r["status"] == "completed"]
-    if completed and all(isinstance(c, (list, tuple)) for c in completed):
-        width = max(len(c) for c in completed)
-        return [f"c{i}" for i in range(width)]
-    if not completed:
-        return []                                # nothing to read: no columns (an empty grid)
-    if any(isinstance(c, dict) for c in completed):
-        # the union of the records' keys; a row that isn't one fails on its own
-        return list(dict.fromkeys(k for c in completed if isinstance(c, dict) for k in c))
-    return None
+    present = [(n, c) for n, (c, r) in enumerate(zip(cells, records))
+               if r["status"] == "completed" and not (_is_missing(c) or c is ABSENT)]
+    dicts = [n for n, c in present if isinstance(c, Mapping)]
+    tuples = [(n, c) for n, c in present if isinstance(c, tuple)]
+    if dicts and tuples:
+        raise ValueError(f"widen takes dicts or tuples, not both: this column holds dicts "
+                         f"({_rows_named(dicts)}) and tuples ({_rows_named([n for n, _ in tuples])})")
+    if tuples:
+        lengths: dict = {}
+        for n, c in tuples:
+            lengths.setdefault(len(c), []).append(n)
+        if len(lengths) > 1:
+            raise ValueError(
+                "widen's tuples are fields, so each row has as many, and these differ: "
+                + ", ".join(f"{k} item{'s' if k != 1 else ''} ({_rows_named(ns)})"
+                            for k, ns in lengths.items())
+                + ". If they are items, expand them")
+        width = next(iter(lengths))
+        if columns and len(columns) != width:
+            raise ValueError(f"widen names {len(columns)} columns "
+                             f"({', '.join(map(repr, columns))}), and the tuples have "
+                             f"{width} items: name one per item")
+        if columns:
+            return list(columns)
+        fields = getattr(tuples[0][1], "_fields", None)
+        return list(fields) if fields else [f"c{i}" for i in range(width)]
+    if columns:
+        return list(columns)
+    # the union of the dicts' keys; a row that isn't one fails on its own
+    return list(dict.fromkeys(k for _n, c in present if isinstance(c, Mapping) for k in c))
 
 
-def _widen_cell(cell: Any, wanted: Sequence[str], explicit: bool) -> tuple[dict, str | None]:
-    """Lift one cell into the wanted columns, with a per-unit error or None.
+def _widen_cell(cell: Any, wanted: Sequence[str], spread: str) -> tuple[dict, str | None]:
+    """Lift one cell into the wanted columns, with a per-row error or None.
 
-    A **mapping** is matched by key, a **sequence** by position. Only an
-    *explicitly declared* column that the cell cannot supply is a failure — an
-    auto-named ragged row just gets ``None``, since its own width defined the
-    columns.
+    A dict is matched by key, a tuple by position; their shapes were checked
+    for the whole column first (PK6). A list, or any other value, fails its
+    own row (PK7).
     """
     if _is_missing(cell) or cell is ABSENT:
         # No dict at all: every field absent, never a failure (C6).
@@ -941,17 +965,14 @@ def _widen_cell(cell: Any, wanted: Sequence[str], explicit: bool) -> tuple[dict,
     if isinstance(cell, Mapping):
         # A key the record lacks is absent, never a failure (J-D2).
         return {c: (cell[c] if c in cell else ABSENT) for c in wanted}, None
-    if isinstance(cell, (list, tuple)):
-        values = {c: (cell[i] if i < len(cell) else None)
-                  for i, c in enumerate(wanted)}
-        if explicit and len(cell) < len(wanted):
-            return values, (f"IndexError: the sequence has {len(cell)} item(s), "
-                            f"too few for {len(wanted)} column(s) "
-                            f"({', '.join(map(repr, wanted))})")
-        return values, None
+    if isinstance(cell, tuple):
+        return dict(zip(wanted, cell)), None
+    if isinstance(cell, list):
+        return ({c: None for c in wanted},
+                f"TypeError: widen spreads fields, and a list is items: expand it, "
+                f"mod.expand(columns=[{spread!r}]), or make it a tuple")
     return ({c: None for c in wanted},
-            f"TypeError: widen needs a mapping per row (or a sequence), "
-            f"got {type(cell).__name__}")
+            f"TypeError: widen takes a dict or a tuple, got {type(cell).__name__}")
 
 
 def widen_(source: Any, fn: Callable = identity, *, column: str | None = None,
@@ -1000,21 +1021,14 @@ def widen_(source: Any, fn: Callable = identity, *, column: str | None = None,
         cells.append(cell)
         records.append(record)
 
-    explicit = bool(columns)
-    wanted = list(columns) if explicit else _widen_columns(cells, records)
-    if wanted is None:
-        raise ValueError(
-            "widen needs columns= — the fields to lift out of the record. A "
-            "record's fields are not guessed; only a tuple/list cell is "
-            "auto-named c0, c1, …. Declare the columns, or return a sequence."
-        )
+    wanted = _widen_columns(cells, records, columns)
 
     lifted: list[dict] = []
     for cell, record in zip(cells, records):
         if record["status"] != "completed":
             lifted.append({column: None for column in wanted})
             continue
-        values, error = _widen_cell(cell, wanted, explicit)
+        values, error = _widen_cell(cell, wanted, spread)
         lifted.append(values)
         if error:
             record["status"] = "failed"

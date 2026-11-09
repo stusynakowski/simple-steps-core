@@ -1869,7 +1869,7 @@ def test_a_non_mapping_cell_is_a_per_unit_failure():
     wf.run("wide")          # the failing step itself; run_all would stop here
     out = wf.step("wide").output
     assert _row_states(out) == ["known", "failed"]
-    assert "needs a mapping per row" in _errors(out)[1]
+    assert "takes a dict or a tuple" in _errors(out)[1]
     assert list(wf.step("wide").output.failed.index) == [1], "re-drivable"
 
 
@@ -1930,26 +1930,47 @@ def test_widen_a_tuple_with_explicit_columns_matches_by_position():
     assert list(out["a"]) == [10, 20] and list(out["b"]) == [1, 4]
 
 
-def test_widen_ragged_tuples_auto_pad_with_none():
+def test_widen_refuses_tuples_of_different_lengths_never_pads():
+    """PK6: tuples are fields, so every row has the same number; pandas pads."""
     wf = Workflow()
-    wf["raw"] = pd.DataFrame({"value": [(1, 2, 3), (9,)]})
-    wf["wide"] = mod.widen()(wf["raw"])          # width = 3
-    wf.run_all()
-    out = wf.step("wide").output
-    assert list(out.data.columns) == ["c0", "c1", "c2"]
-    assert out.data["c0"].tolist() == [1, 9]
-    assert out.data["c2"].iloc[0] == 3 and pd.isna(out.data["c2"].iloc[1])
-    assert set(_row_states(out)) == {"known"}, "ragged is not a failure"
+    wf["raw"] = pd.DataFrame({"value": [(1, 2, 3), (9,), (4, 5, 6)]})
+    wf["wide"] = mod.widen()(wf["raw"])
+    wf.run("wide")
+    step = wf.step("wide")
+    assert step.state == "failed"
+    assert "3 items (rows 0, 2)" in str(step.output.notes) and "1 item (row 1)" in str(step.output.notes)
 
 
-def test_widen_explicit_columns_too_many_for_a_short_tuple_is_a_failure():
+def test_widen_explicit_columns_must_match_the_tuples_length():
     wf = Workflow()
-    wf["raw"] = pd.DataFrame({"value": [(10, 1), (20,)]})
-    wf["wide"] = mod.widen(columns=["a", "b"])(wf["raw"])
-    wf.run("wide")          # the failing step itself; run_all would stop here
+    wf["raw"] = pd.DataFrame({"value": [(10, 1), (20, 4)]})
+    wf["wide"] = mod.widen(columns=["a", "b", "c"])(wf["raw"])
+    wf.run("wide")
+    step = wf.step("wide")
+    assert step.state == "failed"
+    assert "2 items" in str(step.output.notes) and "3 columns" in str(step.output.notes)
+
+
+def test_widen_fails_a_list_row_pointing_to_expand():
+    """PK7: a list is items, not fields; the other rows run."""
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"value": [(10, 1), [20, 4]]})
+    wf["wide"] = mod.widen()(wf["raw"])
+    wf.run("wide")
     out = wf.step("wide").output
     assert _row_states(out) == ["known", "failed"]
-    assert "too few" in _errors(out)[1]
+    assert "mod.expand(columns=['value'])" in _errors(out)[1]
+    assert out.data["c0"].tolist()[0] == 10
+
+
+def test_widen_refuses_dicts_and_tuples_in_one_column():
+    wf = Workflow()
+    wf["raw"] = pd.DataFrame({"value": [{"a": 1}, (2, 3)]})
+    wf["wide"] = mod.widen()(wf["raw"])
+    wf.run("wide")
+    step = wf.step("wide")
+    assert step.state == "failed"
+    assert "dicts (row 0) and tuples (row 1)" in str(step.output.notes)
 
 
 # ─────────────────────────────────────────────────────────────────────────

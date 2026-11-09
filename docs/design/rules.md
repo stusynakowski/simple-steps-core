@@ -43,6 +43,10 @@ rows ↔ a list, or columns ↔ a dict. Longer changes are several steps.
 | a column → a list: `gather[collapse()]` | `expand` |
 | a row → a dict: `pack` | `widen` |
 
+Packing takes anything. Unpacking needs one shape: `widen` takes dicts (a
+key a row lacks is absent) or tuples all of one length (`c0, c1, …`, or a
+namedtuple's fields), never both, never padded. A list is items: `expand` it.
+
 **7. Rows line up only when they are the same rows.** `zip_` and a column
 argument pair each row with the same row, in any order: a step beside its
 `map` or its `sort`. Anything else is refused, and core writes the join for
