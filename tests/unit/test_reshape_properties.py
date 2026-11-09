@@ -22,6 +22,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -50,18 +51,28 @@ SLOW_SECONDS = float(os.environ.get("SLOW_SECONDS", 30))
 
 
 def _timed(test):
+    log = Path(__file__).resolve().parents[2] / ".sweep" / "slow-examples.log"
+
+    def write(text: str) -> None:
+        log.parent.mkdir(exist_ok=True)
+        with log.open("a") as sink:
+            sink.write(text)
+
     @functools.wraps(test)
     def run(*args, **kwargs):
+        # written while it still runs, so an example that never ends is caught too
+        timer = threading.Timer(SLOW_SECONDS, write, [
+            f"## {test.__name__} · still running after {SLOW_SECONDS:.0f}s\n{kwargs!r}\n\n"])
+        timer.daemon = True
         started = time.perf_counter()
+        timer.start()
         try:
             return test(*args, **kwargs)
         finally:
+            timer.cancel()
             took = time.perf_counter() - started
             if took > SLOW_SECONDS:
-                log = Path(__file__).resolve().parents[2] / ".sweep" / "slow-examples.log"
-                log.parent.mkdir(exist_ok=True)
-                with log.open("a") as sink:
-                    sink.write(f"## {test.__name__} · {took:.0f}s\n{kwargs!r}\n\n")
+                write(f"   … {test.__name__} finished in {took:.0f}s\n\n")
     return run
 
 
