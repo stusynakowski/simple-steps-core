@@ -1294,7 +1294,22 @@ class Workflow:
     def _known_columns(self, operation: Operation) -> list[str]:
         """The columns this operation's input will have, in order, as far as known."""
         basis = self._basis_of_input(operation)
-        return [] if basis is None else predicted_columns(basis)
+        if basis is None:
+            return []
+        columns = predicted_columns(basis)
+        for m in operation.pickers:
+            # a picker's columns are what the verb sees, and binds from (L34)
+            chosen = m.settings.get("columns") if m.kind == "select" else None
+            names = chosen.get("names") if isinstance(chosen, dict) else chosen
+            if isinstance(names, (list, tuple)):
+                columns = [c for c in columns if is_id_column(c)] + [c for c in names if c in columns]
+            elif chosen is not None and not basis.meta.get("staged"):
+                try:
+                    columns = list(_apply_pickers(operation, basis).data.columns)
+                except (SelectionError, KeyError, TypeError, ValueError):
+                    pass
+                break
+        return columns
 
     def _columns_open(self, operation: Operation) -> bool:
         """Might this operation's input have columns not predicted yet? (008 K1)"""
@@ -1328,6 +1343,15 @@ class Workflow:
         if step is None or not step.valid:
             return None
         basis = self.basis(step.name)
+        if operation.pickers:
+            # the rows its pickers leave (L33): known once the input holds data,
+            # since a picker runs no tool
+            if basis.meta.get("staged"):
+                return None
+            try:
+                return _apply_pickers(operation, basis).data.index
+            except (SelectionError, KeyError, TypeError, ValueError):
+                return None
         index = basis.data.index
         return index if len(index) or not basis.meta.get("staged") else None
 
@@ -1838,7 +1862,10 @@ class Workflow:
         elif op_.input is not None and keeps_ids(kind, op_.shape_verb):
             source = str(op_.input)
             columns_only = kind == "select" and op_.shape_verb.settings.get("rows") is None
-            if kind in _ONE_TO_ONE or columns_only or kind is None:
+            # a picker before the verb that chose or ordered rows is a parent (L33)
+            picked = any(m.kind != "select" or m.settings.get("rows") is not None
+                         for m in op_.pickers)
+            if (kind in _ONE_TO_ONE or columns_only or kind is None) and not picked:
                 # one-to-one: its rows are its input's; it carries, adds nothing
                 for name, (ancestor, k_, cells) in self._lineage_ids(source, memo).items():
                     by_id = dict(zip(map(str, self.steps[source].output.data.index), cells))
@@ -2844,6 +2871,9 @@ class Workflow:
         try:
             resolved = self._resolve_arguments(to_resolve, resources)
             source = self._input_for(resolved)
+            if resolved.pickers and source is not None:
+                # pickers before the verb narrow its input first (L33, L34)
+                source, resolved = _apply_pickers(resolved, source), resolved.without_pickers()
             unpaired = source
             if paired and source is not None:
                 source = self._with_paired_columns(source, paired)
@@ -3559,3 +3589,13 @@ def _named(operation: Operation) -> str:
         if m.kind == "name" and isinstance(m.settings.get("to"), str):
             return m.settings["to"]
     return VALUE_COLUMN
+
+
+def _apply_pickers(operation: Operation, source: Output) -> Output:
+    """*source* narrowed by the pickers written before *operation*'s verb, in
+    written order (core-asks L33): each as its own step would run it."""
+    name = source.meta.get("name")
+    for m in operation.pickers:
+        source = MODIFIERS[m.kind].apply(identity, **m.settings)(source)
+        source.meta["name"] = name
+    return source

@@ -579,8 +579,9 @@ def test_C7_refusals(prices):
         prices["p"][1:5][2]
     with pytest.raises(SelectionError, match="empty"):
         prices["p"][[]]
-    with pytest.raises(TypeError, match="can't be a tool's input"):
-        scale_008[mod.map()](prices["p"][1:3])
+    # a pick as a tool's input is a select before the verb (core-asks L34)
+    picked = scale_008[mod.map()](prices["p"][1:3])
+    assert str(picked.input) == "p" and picked.pickers[0].settings == {"rows": {"start": 1, "stop": 3}}
     prices["far"] = prices["p"][9]
     assert prices.step("far").problems == (
         "select: 'p' has no row 9 (it has 5: 0–4)",)

@@ -375,10 +375,12 @@ def test_is_identity_sees_through_the_adapter():
     assert not is_identity(_d_apply(score.fn))
 
 
-def test_select_is_a_shape_verb_so_it_cannot_share_a_step(wide):
+def test_a_picker_may_stand_before_the_verb_but_not_a_second_verb(wide):
     wf = Workflow()
     wf["raw"] = wide
-    wf["both"] = op("identity")[mod.select(columns=["city"]), mod.map()](wf["raw"])
+    wf["picked"] = op("identity")[mod.select(columns=["city"]), mod.map()](wf["raw"])
+    assert wf.step("picked").problems == ()                  # a picker (core-asks L33)
+    wf["both"] = op("identity")[mod.drop(columns=["city"]), mod.map()](wf["raw"])
     assert "at most one is allowed" in wf.step("both").problems[0]
 
 

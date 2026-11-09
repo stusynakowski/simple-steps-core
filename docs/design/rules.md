@@ -15,6 +15,9 @@ nothing can read until it has an expression.
 `[0, 2]` is refused: rows 0 and 2 are `[[0, 2]]`. A row you pick is saved as the row
 it is, so the pick follows it when rows are sorted or filtered upstream.
 Core keeps its own identity for each row; you never see or type it.
+A pick can be a tool's input: `to_f(wf["p"]["temp"])`, `double(wf["r"][0:2])`.
+In the brackets, `select`, `slice` and `sort` may come before the verb:
+`double[mod.sort(by="n"), mod.map()](wf["r"])`.
 
 **3. Every row remembers where it came from.** Its lineage, `#v`, is the row
 of step `v` it came from, carried all the way down:

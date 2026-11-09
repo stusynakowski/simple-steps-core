@@ -154,8 +154,15 @@ Run, for `v` = Ada, Ben, Cy:
   "contains"; an empty cell fails every test. *Built* (S5c).
 - Text row ids (`rows["A"]`) and a list naming one row twice are refused.
   *Built.*
-- **Planned (S3):** strings choose columns in a pick (`wf['s']['n']`); a pick as
-  a tool's input; `[0, 2]` refused, pointing to `[[0, 2]]`.
+- Strings choose columns in a pick (`wf['s']['n']`); `[0, 2]` is refused,
+  pointing to `[[0, 2]]`. *Built.*
+- **A pick as a tool's input** (L34, built 2026-11-09):
+  `double[mod.map()](wf["r"][0:2])` is a `select` before the verb, and prints
+  back as written. **Pickers before the verb** (L33): `select`, `slice` and
+  `sort` may stand before it in one step, applied to the input in written
+  order; the verb sees, binds from and plans on what they leave, and a step
+  whose pickers chose or ordered rows adds `#r`. `distinct` is a step of its
+  own.
 
 **A pick follows its row when a source's data is replaced** (D-picks, built
 2026-11-04). The source matches its rows to the ones it has seen by their

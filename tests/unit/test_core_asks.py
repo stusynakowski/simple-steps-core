@@ -32,7 +32,7 @@ HOLDS = frozenset({
     "TEST-L20", "TEST-L21a", "TEST-L21b", "TEST-L22", "TEST-L23", "TEST-L24", "TEST-L47",   # M3
     "TEST-L25a", "TEST-L25b", "TEST-L26", "TEST-L46", "TEST-L49",
     "TEST-L27", "TEST-L28", "TEST-L29a", "TEST-L29b", "TEST-L29c", "TEST-L30a", "TEST-L30b",
-    "TEST-L31", "TEST-L31b", "TEST-L35", "TEST-L36", "TEST-L48a", "TEST-L48b",   # M4
+    "TEST-L31", "TEST-L31b", "TEST-L33", "TEST-L34", "TEST-L35", "TEST-L36", "TEST-L48a", "TEST-L48b",   # M4
     "TEST-L37", "TEST-L37b", "TEST-L38", "TEST-L39", "TEST-L50a", "TEST-L50b", "TEST-L50c",
     "TEST-L51a", "TEST-L51b", "TEST-L51c",                    # M5
     "TEST-L40", "TEST-L41a", "TEST-L41b", "TEST-L42", "TEST-L43a", "TEST-L43b", "TEST-L43c",

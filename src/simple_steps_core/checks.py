@@ -574,7 +574,7 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     # 6. the column verbs apply no tool (source may: it can compute its grid)
     for kind in ("select", "drop", "widen", "pack", "slice", "rename", "copy",
                  "sort", "distinct"):
-        if any(m.kind == kind for m in operation.modifiers) and not is_identity(fn):
+        if any(m.kind == kind for m in operation.shape_verbs) and not is_identity(fn):
             problems.append(f"{kind} applies no tool; use map to compute")
 
     coded(problems, "verb_takes_no_tool")

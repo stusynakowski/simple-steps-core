@@ -18,11 +18,6 @@ import numbers
 _NO_SOURCE = object()
 
 
-#: 008 C7: a selection as a tool's input is two reshapes in one step.
-_SELECTION_INPUT = ("a selection can't be a tool's input: make it its own step "
-                    "(wf[\"part\"] = wf[\"p\"][…]) and pass wf[\"part\"]")
-
-
 #: 008 K3: an Operation passed where a step's data belongs used to run as a
 #: one-cell source and report `completed` with `{'value': [None]}`.
 _NESTED_OPERATION = ("an operation can't be an input yet; make it its own step "
@@ -92,8 +87,9 @@ class Operation:
         # it is the data input, so it is hoisted to its own slot. Modifiers stay
         # literal-only and the data stays explicit.
         over = params.pop("over", None)
+        picker = None
         if isinstance(over, StepRef) and over.selected:
-            raise TypeError(_SELECTION_INPUT)
+            over, picker = _picked(over)
         if over is not None and not isinstance(over, (StepRef, str)):
             if isinstance(over, Operation):
                 raise TypeError(_NESTED_OPERATION)
@@ -103,7 +99,7 @@ class Operation:
         new_input = self.input if over is None else (
             over if isinstance(over, StepRef) else StepRef(over))
         return Operation(self.tool,
-                         self.modifiers + (Modifier(kind, params),),
+                         self.modifiers + (Modifier(kind, params),) + ((picker,) if picker else ()),
                          self.arguments, self.fn, new_input,
                          bound_to=self.bound_to)
 
@@ -143,9 +139,33 @@ class Operation:
         return tuple(reversed(self.modifiers))
 
     @property
+    def pickers(self) -> tuple[Modifier, ...]:
+        """The pickers written before the verb, in written order (core-asks
+        L33): ``double[mod.select(rows=…), mod.map()]`` narrows the input, then
+        maps. ``select``, ``slice`` and ``sort``; never the step's last shape."""
+        shapes = [m for m in self.layers if m.is_shape]
+        found = []
+        for m in shapes[:-1]:
+            if m.kind not in PICKERS:
+                break
+            found.append(m)
+        return tuple(found)
+
+    def without_pickers(self) -> "Operation":
+        """This operation as its verb runs it: on the input its pickers chose."""
+        pickers = self.pickers
+        if not pickers:
+            return self
+        return replace(self, modifiers=tuple(
+            m for m in self.modifiers if not any(m is p for p in pickers)))
+
+    @property
     def shape_verbs(self) -> tuple[Modifier, ...]:
-        """Every modifier that changes shape, innermost first."""
-        return tuple(m for m in self.modifiers if m.is_shape)
+        """Every modifier that changes shape, innermost first; pickers before
+        the verb aren't (L33)."""
+        pickers = self.pickers
+        return tuple(m for m in self.modifiers
+                     if m.is_shape and not any(m is p for p in pickers))
 
     @property
     def shape_verb(self) -> Modifier | None:
@@ -198,14 +218,21 @@ class Operation:
             head = self.tool
         else:
             head = f"op({_src(self.tool)})"
-        if self.modifiers:
+        layers, given = self.layers, self.input
+        pickers = self.pickers
+        if len(pickers) == 1 and isinstance(given, StepRef) and not given.selected \
+                and _as_pick(given, pickers[0]) is not None:
+            # one select before the verb prints as the pick it is (L34)
+            given = _as_pick(given, pickers[0])
+            layers = tuple(m for m in layers if m is not pickers[0])
+        if layers:
             head += "[" + ", ".join(
                 _name_source(m.settings) if m.kind == "name" else _modifier_source(m)
-                for m in self.layers) + "]"
+                for m in layers) + "]"
         kwargs = [f"{k}={_src(v)}" for k, v in self.arguments.items()]
         verb = self.shape_verb.kind if self.shape_verb else None
-        if self.input is not None:
-            return f"{head}({', '.join([_src(self.input), *kwargs])})"
+        if given is not None:
+            return f"{head}({', '.join([_src(given), *kwargs])})"
         if verb in ("source", "sweep"):
             return f"{head}({', '.join(kwargs)})"
         if kwargs:
@@ -230,20 +257,9 @@ class Operation:
         m = self.modifiers[0]
         if m.kind not in _RESHAPES:
             return None
-        rows_, columns = m.settings.get("rows"), m.settings.get("columns")
-        # Only plain selections print as one; a reference as a setting (C1,
-        # mod.select(columns=wf["cols"])) keeps the mod.select form.
-        plain = ((rows_ is None or (isinstance(rows_, (int, str, list, dict))
-                                    and not isinstance(rows_, bool)))
-                 and (columns is None or isinstance(columns, (list, tuple, dict))))
-        if m.kind == "select" and plain and set(m.settings) <= {"rows", "columns"}:
-            if isinstance(columns, (list, tuple)):
-                columns = {"names": list(columns)}
-            if columns == {"positions": {"start": None, "stop": None}}:
-                columns = None                      # every column: a plain copy
-            # header[k] drops its rows when printed (C28): say it explicitly.
-            if not (isinstance(columns, dict) and columns.get("header") and rows_ is not None):
-                return _src(replace(self.input, rows=rows_, columns=columns))
+        picked = _as_pick(self.input, m)
+        if picked is not None:
+            return _src(picked)
         return f"{_modifier_source(m)}({_src(self.input)})"
 
     def check(self, workflow: "Workflow | None" = None,
@@ -365,7 +381,11 @@ class Operation:
     def _wire(self, ref: "StepRef") -> "Operation":
         """Record that this step reads *ref* as its input, inferring a verb if none is set."""
         if ref.selected:
-            raise TypeError(_SELECTION_INPUT)
+            # a pick as the input is a select before the verb (L34): the verb
+            # is decided on the step it picks from, then the pick goes first
+            ref, picker = _picked(ref)
+            wired = self._wire(ref)
+            return replace(wired, modifiers=wired.modifiers + (picker,))
         if self.input is not None:
             # 008 K4: the call used to win silently over `over=`.
             raise TypeError(
@@ -433,6 +453,40 @@ class Operation:
 
 #: The verbs that run no tool, and so print as ``mod.<verb>(…)(wf["x"])``.
 _RESHAPES = frozenset({"select", "drop", "rename", "copy", "sort", "slice", "distinct", "widen", "pack"})
+
+#: What may stand before a verb in one step, narrowing or ordering its input
+#: (core-asks L33). `distinct` writes lineage of its own: a step of its own.
+PICKERS = frozenset({"select", "slice", "sort"})
+
+
+def _as_pick(given: Any, m: Any) -> Any:
+    """*m*, a ``select`` on *given*, as the pick ``wf[…][…]`` that says it, or
+    None. Only plain selections print as one; a reference as a setting (C1,
+    ``mod.select(columns=wf["cols"])``) keeps the ``mod.select`` form."""
+    if m.kind != "select" or not isinstance(given, StepRef) or given.selected \
+            or not set(m.settings) <= {"rows", "columns"}:
+        return None
+    rows_, columns = m.settings.get("rows"), m.settings.get("columns")
+    plain = ((rows_ is None or (isinstance(rows_, (int, str, list, dict))
+                                and not isinstance(rows_, bool)))
+             and (columns is None or isinstance(columns, (list, tuple, dict))))
+    if not plain:
+        return None
+    if isinstance(columns, (list, tuple)):
+        columns = {"names": list(columns)}
+    if columns == {"positions": {"start": None, "stop": None}}:
+        columns = None                          # every column: a plain copy
+    # header[k] drops its rows when printed (C28): say it explicitly.
+    if isinstance(columns, dict) and columns.get("header") and rows_ is not None:
+        return None
+    return replace(given, rows=rows_, columns=columns)
+
+
+def _picked(ref: Any) -> tuple[Any, Any]:
+    """A pick as a step's input (core-asks L34, EX5): the step it picks from,
+    and the `select` that picks, written before the verb."""
+    settings = {k: v for k, v in (("rows", ref.rows), ("columns", ref.columns)) if v is not None}
+    return replace(ref, rows=None, columns=None), Modifier("select", settings)
 
 
 def _with_tool(value: Any, table: dict) -> Any:

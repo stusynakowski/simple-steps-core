@@ -482,3 +482,38 @@ def test_W15_cols_is_columns_and_saved_as_columns():
     assert list(k.step("d").output.data.columns) == ["n"]
     with pytest.raises(TypeError, match="cols= or columns="):
         mod.select(cols=["n"], columns=["n"])
+
+
+@tool
+def twice_px(n: int) -> int:
+    return n * 2
+
+
+def test_L34_a_column_pick_as_input_decides_the_binding():
+    # D6's main form, to_f(wf["p"]["temp"]): two int columns fit, the pick says which
+    k = Kernel(Catalog([twice_px]))
+    k["r"] = pd.DataFrame({"n": [1, 2, 3], "m": [7, 8, 9]})
+    k["d"] = twice_px[mod.map()](wf["r"]["m"])
+    assert k.step("d").problems == ()
+    k.run_all()
+    assert values(k, "d") == [14, 16, 18]
+    # the pick prints as written; the binding by type is written too (W10)
+    assert str(k.step("d").formula) == 'twice_px[mod.map()](wf["r"][cols["m"]], n=wf["r"][cols["m"]])'
+
+
+def test_L33_pickers_run_before_the_verb_and_the_plan_knows_the_rows():
+    k = Kernel(Catalog([twice_px]))
+    k["r"] = pd.DataFrame({"n": [30, 10, 20]})
+    k.run("r")
+    k["s"] = twice_px[mod.sort(by="n"), mod.slice(start=0, stop=2), mod.map()](wf["r"])
+    assert len(k.step("s").output.data) == 2                   # planned: the rows the pickers leave
+    k.run("s")
+    assert values(k, "s") == [20, 40]
+    assert k.workflow.lineage("s") == {"#r": [1, 2]}           # rows 1 and 2 of r, in n's order
+
+
+def test_L33_distinct_before_a_verb_is_a_step_of_its_own():
+    k = Kernel(Catalog([twice_px]))
+    k["r"] = pd.DataFrame({"n": [1, 1, 2]})
+    k["d"] = twice_px[mod.distinct(), mod.map()](wf["r"])
+    assert "at most one is allowed" in str(k.step("d").problems[0])
