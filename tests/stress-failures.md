@@ -736,3 +736,11 @@ other=0,
   writes each suite's output to `.sweep/<suite>.log` as it runs. A hang's
   location is in that log (or the file a run is redirected to): add it here,
   with the commit, before killing the run. Don't pipe a long run into `head`.
+- **Sampling** (added the same day): `kill -USR1 <pid>` dumps a running test
+  run's stacks and lets it go on (tests/conftest.py); any property example
+  slower than 30 s (`SLOW_SECONDS`) is written to `.sweep/slow-examples.log`
+  with its arguments, to replay and profile it.
+- **2026-11-09, at the EX12 piece:** a `STRESS=1` run reached 11 CPU minutes,
+  stuck in its fourth test; the 10-minute dump showed one frame,
+  `operation.py` in `shape_verbs`, then `<invalid frame>`. The next run, the
+  same code, passed in 147 s: the slowness depends on the examples drawn.

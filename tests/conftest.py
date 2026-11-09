@@ -8,8 +8,10 @@ only when it builds a broken state on purpose.
 
 from __future__ import annotations
 
+import faulthandler
 import os
 import re
+import signal
 import subprocess
 from datetime import date
 from pathlib import Path
@@ -25,6 +27,10 @@ PENDING: dict[str, str] = {}
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "no_invariants: don't check the airtight invariants")
+    # `kill -USR1 <pid>` dumps every thread's stack and the run goes on: sample a
+    # slow run as often as needed to see where it spends its time
+    # (tests/stress-failures.md, Hangs)
+    faulthandler.register(signal.SIGUSR1, all_threads=True)
 
 
 @pytest.fixture(autouse=True)

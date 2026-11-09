@@ -19,8 +19,11 @@ still does. ``STRESS=1`` runs many more examples.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
+import time
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -40,6 +43,26 @@ EXAMPLES = (int(_STRESS) if _STRESS and _STRESS.isdigit() and int(_STRESS) > 1
             else 500 if _STRESS else 100)
 SETTINGS = settings(max_examples=EXAMPLES, deadline=None,
                     suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large])
+
+#: An example slower than this is written to .sweep/slow-examples.log with its
+#: arguments, so a slow run can be replayed and profiled (stress-failures.md, Hangs)
+SLOW_SECONDS = float(os.environ.get("SLOW_SECONDS", 30))
+
+
+def _timed(test):
+    @functools.wraps(test)
+    def run(*args, **kwargs):
+        started = time.perf_counter()
+        try:
+            return test(*args, **kwargs)
+        finally:
+            took = time.perf_counter() - started
+            if took > SLOW_SECONDS:
+                log = Path(__file__).resolve().parents[2] / ".sweep" / "slow-examples.log"
+                log.parent.mkdir(exist_ok=True)
+                with log.open("a") as sink:
+                    sink.write(f"## {test.__name__} · {took:.0f}s\n{kwargs!r}\n\n")
+    return run
 
 
 # ── tools the chains use: total over None and absent, some raise ─────────────
@@ -310,6 +333,7 @@ def _same(a: Kernel, b: Kernel, names: list[str], why: str) -> None:
 @example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
          chain=[(42, 0, 0, 0), (139, 1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0),
                 (44, 2, 0, 2)])
+@_timed
 def test_L40_reshaping_is_closed(frame, chain):
     k, names = _build(_catalog(frame), chain)
     plans = {s: k.workflow.steps[s].output.meta.get("plan") for s in names
@@ -357,6 +381,7 @@ def test_L40_reshaping_is_closed(frame, chain):
 @pytest.mark.no_invariants
 @SETTINGS
 @given(grids(), chains())
+@_timed
 def test_L40b_a_saved_workflow_runs_the_same(frame, chain):
     catalog = _catalog(frame)
     k, names = _build(catalog, chain)
@@ -381,6 +406,7 @@ def test_L40b_a_saved_workflow_runs_the_same(frame, chain):
          changed=pd.DataFrame({"k": ["A", "A"], "n": [pd.NA, pd.NA], "tags": [None, None],
                                "rec": [{}, {}]}),
          chain=[(993, 0, 0, 0), (811, 0, 0, 1)])
+@_timed
 def test_L40c_an_edit_then_a_rerun_matches_a_fresh_run(frame, changed, chain):
     k, names = _build(_catalog(frame), chain)
     _run(k)
@@ -472,6 +498,7 @@ def _redeclare(k: Kernel, name: str, expression) -> bool:
          changed=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
          chain=[(0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (419, 0, 0, 1), (0, 0, 0, 0)],
          which=600, other=0)
+@_timed
 def test_L40d_undo_is_free(frame, changed, chain, which, other):
     """An edit put back leaves every step as it was, holding the very same
     result: nothing re-runs."""
@@ -557,6 +584,7 @@ def test_W9_a_pick_of_a_joins_rows_survives_a_source_edit_put_back():
 @example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
          changed=pd.DataFrame({"k": ["A"], "n": [pd.NA], "tags": [None], "rec": [{}]}),
          chain=[(5, 0, 0, 0), (0, 0, 0, 0), (0, 1, 0, 0), (208, 0, 0, 0)], which=1, other=254)
+@_timed
 def test_L40e_the_order_of_edits_doesnt_matter(frame, changed, chain, which, other):
     """Two edits, made in either order, give the same states and data."""
     catalog = _catalog(frame)
@@ -599,6 +627,7 @@ def test_L40e_the_order_of_edits_doesnt_matter(frame, changed, chain, which, oth
          changed=pd.DataFrame({"k": ["A"] * 4, "n": pd.array([pd.NA] * 4, dtype="Int64"),
                                "tags": [None] * 4, "rec": [{}, {}, {}, {"a": None}]}),
          chain=[(519, 0, 0, 0), (0, 0, 0, 0), (561, 2, 0, 0)], which=124)
+@_timed
 def test_L40f_run_makes_a_step_current(frame, changed, chain, which):
     """After the source changes, run(x) leaves x and all it reads current,
     and x is what a fresh kernel on the new source computes."""
