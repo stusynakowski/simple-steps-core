@@ -1015,11 +1015,14 @@ def _column_warnings(operation: Operation, workflow: "Workflow | None" = None,
     # 008 C7: a row position reads a different row next run when the step it
     # reads doesn't fix its row order.
     for ref in [*operation.arguments.values(),
-                *(StepRef(str(operation.input), rows=verb.settings.get("rows"))
-                  if verb.kind == "select" and verb.settings.get("rows") is not None
-                  else None,)]:
-        if not isinstance(ref, StepRef) or not isinstance(ref.rows, dict):
-            continue                        # ids follow their rows; only ranges are positions
+                *(StepRef(str(operation.input), rows=m.settings.get("rows"))
+                  for m in (verb, *operation.pickers)
+                  if m.kind == "select" and m.settings.get("rows") is not None)]:
+        if not isinstance(ref, StepRef) or not isinstance(ref.rows, dict) \
+                or not {"start", "stop"} & set(ref.rows):
+            # ids follow their rows, and a condition names rows by what they
+            # hold or came from (EX12); only ranges are positions
+            continue
         read = workflow.steps.get(ref.id)
         made_by = read.operation.shape_verb.kind if read and read.operation.shape_verb else None
         if made_by in ("filter", "expand", "group", "distinct", "collapse"):

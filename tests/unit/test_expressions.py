@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from simple_steps_core import Catalog, Kernel, cols, join, mod, stack, tool, wf
+from simple_steps_core import Catalog, Kernel, cols, join, mod, row, stack, tool, wf
 from simple_steps_core.operation import op
 
 
@@ -523,3 +523,13 @@ def test_EX9_a_plain_function_is_refused_as_a_value():
     assert "fn" not in k
     k["n"] = 3                                                    # a value still is one
     assert k.step("n").state == "completed"
+
+
+def test_EX12_a_lineage_condition_isnt_positional_a_range_is():
+    k = Kernel(Catalog([]))
+    k["l"] = pd.DataFrame({"xs": [[1, 2], [3]]})
+    k["e"] = mod.expand(columns=["xs"])(wf["l"])
+    k["kid"] = wf["e"][row["l"] == 0]
+    k["pos"] = wf["e"][0:2]
+    assert not any("positions" in str(w) for w in k.step("kid").warnings)
+    assert any("positions" in str(w) for w in k.step("pos").warnings)

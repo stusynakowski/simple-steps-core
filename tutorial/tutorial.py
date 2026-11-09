@@ -233,9 +233,7 @@ def ch3():
     s = put(k, "kid", wf["e"][row["v"] == 1])
     lesson("P9", "a condition on lineage chooses the rows that came from row 1 of v",
            list(s.data["e"]), [38.5, 39.5])
-    lesson("P9b", "…without a warning that it is positional", len(s.warnings), 0,
-           "warns 'rows … are positions, and expand doesn't fix row order': a lineage "
-           "condition isn't positional")
+    lesson("P9b", "…without a warning that it is positional (EX12)", len(s.warnings), 0)
     lesson("P10", "columns are picked with cols[…]",
            data(put(k, "col", wf["v"][cols["temp"]])), {"temp": [37.0, 38.5, 36.9]})
     s = put(k, "str", Later(lambda: wf["v"]["temp"]))
