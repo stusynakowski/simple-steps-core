@@ -148,7 +148,9 @@ def _call(node: ast.Call) -> Any:
         raise FormulaError(f"{ast.unparse(node.func)} can't be called in a formula")
     args = [_build(a) for a in node.args]
     kwargs = {k.arg: _build(k.value) for k in node.keywords}
-    if isinstance(fn, (Operation, BoundTool)) and any(not isinstance(a, StepRef) for a in args):
+    if isinstance(fn, (Operation, BoundTool)) and any(
+            not (isinstance(a, StepRef) or (i and isinstance(a, ResRef))) for i, a in enumerate(args)):
+        # After the input, a resource may go by position, as in Python (012 C40).
         # Called on a value, a tool runs at once; a formula never runs anything.
         raise FormulaError(f"{ast.unparse(node)}: a tool's input in a formula is a step "
                            f"or a pick, wf[\"…\"]; values go in as name=value")

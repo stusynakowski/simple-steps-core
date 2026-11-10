@@ -559,3 +559,52 @@ def test_C42_20_join_on_takes_column_names_only(on, says):
         join(wf["s"], wf["t"], on=eval(on, {"wf": wf, "res": res}))
     with pytest.raises(ValueError, match=says):
         formula(f'join(wf["s"], wf["t"], on={on})')
+
+
+from simple_steps_core import resource  # noqa: E402
+
+
+@resource
+class LLM:
+    def __init__(self, name: str = "tiny"):
+        self.name = name
+
+
+@tool
+def summarize(text: str, llm: LLM) -> str:
+    return f"{llm.name}:{text[:3]}"
+
+
+@tool
+def notes() -> pd.DataFrame:
+    return pd.DataFrame({"text": ["alpha", "beta"]})
+
+
+def _llm_kernel():
+    k = Kernel(Catalog(tools=[notes, summarize], resources=[LLM]))
+    k["s"] = notes[mod.source()]()
+    k.define("tiny", LLM)
+    return k, summarize
+
+
+def test_C40_a_resource_by_position_in_formula_text_binds_as_in_python():
+    """012 C40: the Python line is accepted and saved as llm=res["tiny"]; the
+    same line as formula text was refused. Now both save the same step."""
+    from simple_steps_core import formula
+    k, summarize = _llm_kernel()
+    k["py"] = summarize[mod.map()](wf["s"], res["tiny"])
+    k["summary"] = formula('summarize[mod.map()](wf["s"], res["tiny"])')
+    assert k.step("summary").formula == k.step("py").formula \
+        == 'summarize[mod.map()](wf["s"], llm=res["tiny"])'
+    k.run("summary")
+    assert list(k.step("summary").output.data["summary"]) == ["tiny:alp", "tiny:bet"]
+    assert formula(k.step("summary").formula) == formula('summarize[mod.map()](wf["s"], llm=res["tiny"])')
+
+
+def test_C40_a_held_resource_with_a_tool_core_cant_see_is_refused():
+    """A tool not in the catalog has no parameters to bind to: refused when
+    assigned, saying to pass it by keyword, never saved half-bound."""
+    from simple_steps_core import formula
+    k, _ = _llm_kernel()
+    with pytest.raises(TypeError, match="by keyword"):
+        k["x"] = formula('nowhere[mod.map()](wf["s"], res["tiny"])')

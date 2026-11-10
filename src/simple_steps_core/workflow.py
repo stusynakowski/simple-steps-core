@@ -417,6 +417,16 @@ class Workflow:
 
         return operation
 
+    def _bind_held(self, operation: Operation) -> Operation:
+        """Bind the resources a formula passed by position (012 C40), now the
+        catalog has supplied the tool: as the Python API binds them, by type."""
+        held, operation = operation.held, replace(operation, held=())
+        source = operation.input
+        if isinstance(source, StepRef):
+            source = replace(source, workflow=self)
+        bound = operation.bind(**_bind_positional(operation, source, held, {}))
+        return replace(bound, inputs=operation.inputs)
+
     def __setitem__(self, step_id: str, operation: Any) -> None:
         _check_caller_scope()
         existed = step_id in self.steps
@@ -458,6 +468,8 @@ class Workflow:
         operation = _attach_bound(operation, self.resources)
         if self.catalog is not None:
             operation = self.catalog.admit(operation)
+        if operation.held:                               # 012 C40: res[…] by position
+            operation = self._bind_held(operation)
         operation = self._resolve_picks(operation)       # S5d: row numbers saved as lineage
         if _is_auto(operation) and len(operation.shape_verbs) == 1:
             # D20b, EX6: the verb is decided now and written, never again at run
@@ -3349,7 +3361,7 @@ from .checks import (  # noqa: E402
 from .combines import _row_lookup, _run_combine, is_combine, own_id_columns  # noqa: E402
 from .errors import PayloadError, PlanBroken as _PlanBroken, ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402
 from .problems import Problem  # noqa: E402
-from .values import _record_fields, named_columns, record_return, source_list_item, source_record, source_rows  # noqa: E402
+from .values import _bind_positional, _record_fields, named_columns, record_return, source_list_item, source_record, source_rows  # noqa: E402
 from .modifiers import (  # noqa: E402
     FROM_ROW,
     MODIFIERS,
