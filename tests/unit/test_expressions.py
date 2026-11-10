@@ -608,3 +608,56 @@ def test_C40_a_held_resource_with_a_tool_core_cant_see_is_refused():
     k, _ = _llm_kernel()
     with pytest.raises(TypeError, match="by keyword"):
         k["x"] = formula('nowhere[mod.map()](wf["s"], res["tiny"])')
+
+
+@tool
+def first_letter(city: str) -> str:
+    return city[0]
+
+
+@tool
+def towns() -> pd.DataFrame:
+    return pd.DataFrame({"n": [2, 1], "city": ["b", "a"]})
+
+
+def _towns_kernel():
+    k = Kernel(Catalog(tools=[towns, first_letter, dbl_n]))
+    k["s"] = towns[mod.source()]()
+    return k
+
+
+@tool
+def dbl_n(n: int) -> int:
+    return 2 * n
+
+
+@pytest.mark.parametrize("text, says", [
+    ('mod.slice(start=n)(wf["s"])', 'mod.slice(start=n): text needs quotes, "n"'),
+    ('mod.expand(columns=[n])(wf["s"])', 'mod.expand(columns=[n]): text needs quotes, "n"'),
+    ('join(wf["s"], wf["t"], on=n)', 'join(on=n): text needs quotes, "n"'),
+    ('join(wf["s"], wf["t"], on=[n, "city"])', 'join(on=[n, \'city\']): text needs quotes, "n"'),
+    ('dbl_n[mod.map()](wf["s"], n=x)', 'n=x: x is not defined. A step is wf["x"]; text is "x"'),
+    ('dbl_n[mod.map()](s)', 's is not defined. To use the step "s", write wf["s"]'),
+])
+def test_C41_a_bare_name_is_refused_while_reading(text, says):
+    """012 C41, #21, #28, #32: a bare name is a tool only where a tool goes."""
+    from simple_steps_core import formula
+    with pytest.raises(ValueError) as caught:
+        formula(text)
+    assert says in str(caught.value)
+
+
+def test_C41_a_bare_name_in_a_setting_that_takes_a_tool_is_that_tool():
+    """mod.sort(by=first_letter) as text is the same step as in Python, and
+    round-trips; a name that isn't a tool says to quote it."""
+    from simple_steps_core import formula
+    k = _towns_kernel()
+    k["py"] = mod.sort(by=first_letter)(wf["s"])
+    k["text"] = formula('mod.sort(by=first_letter)(wf["s"])')
+    assert k.step("text").formula == k.step("py").formula == 'mod.sort(by=first_letter)(wf["s"])'
+    k.run("text")
+    assert list(k.step("text").output.data["city"]) == ["a", "b"]
+    k["bad"] = formula('mod.sort(by=n)(wf["s"])')
+    said = " ".join(k.step("bad").problems)
+    assert 'by=n: n is not a tool; text needs quotes, by="n"' in said
+    assert "<Operation" not in k.step("bad").formula

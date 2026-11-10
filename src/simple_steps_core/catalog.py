@@ -987,7 +987,8 @@ class Catalog:
             if m.kind not in self._modifiers:
                 found.append(_outside(f"modifier {m.kind!r} is not in this workflow's catalog"))
         values = [*operation.arguments.values(),
-                  *(v for m in operation.modifiers for v in m.settings.values())]
+                  *(v for m in operation.modifiers for v in m.settings.values()
+                    if not isinstance(v, ToolRef))]       # a setting's ToolRef: check 6e says it
         for value in values:
             name = (value.id if isinstance(value, (Tool, ToolRef)) else None)
             if name is not None and name not in self._tools and name not in self._builtins:

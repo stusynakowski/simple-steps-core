@@ -26,7 +26,7 @@ from typing import Any
 from .combines import join, stack, zip_
 from .modifiers import Modifier, _Mods, mod
 from .operation import Operation, op
-from .references import BoundTool, ResRef, StepRef, cols, res, row, rows, wf
+from .references import TOOL_SETTINGS, BoundTool, ResRef, StepRef, ToolRef, cols, res, row, rows, wf
 
 
 class FormulaError(ValueError):
@@ -146,8 +146,11 @@ def _call(node: ast.Call) -> Any:
     fn = _build(node.func)
     if not _callable(fn):
         raise FormulaError(f"{ast.unparse(node.func)} can't be called in a formula")
+    _refuse_bare_names(node, fn)
+    kind = _modifier_kind(fn)
     args = [_build(a) for a in node.args]
-    kwargs = {k.arg: _build(k.value) for k in node.keywords}
+    kwargs = {k.arg: (_tool_names(k.value) if k.arg in TOOL_SETTINGS.get(kind, ()) else _build(k.value))
+              for k in node.keywords}
     if isinstance(fn, (Operation, BoundTool)) and any(
             not (isinstance(a, StepRef) or (i and isinstance(a, ResRef))) for i, a in enumerate(args)):
         # After the input, a resource may go by position, as in Python (012 C40).
@@ -160,6 +163,57 @@ def _call(node: ast.Call) -> Any:
         raise
     except (TypeError, ValueError) as exc:                   # core's own refusal, said
         raise FormulaError(f"{ast.unparse(node)}: {exc}") from None
+
+
+def _modifier_kind(fn: Any) -> str | None:
+    """``"sort"`` for ``mod.sort``; None for anything else."""
+    if getattr(fn, "__qualname__", "").startswith("_Mods"):
+        return fn.__name__
+    return None
+
+
+def _bare(node: ast.AST) -> list[ast.Name]:
+    """The bare names standing as values in *node*: the node itself, or the
+    items of a list, tuple, set or dict. Not inside a call or a subscript."""
+    if isinstance(node, ast.Name):
+        return [] if node.id in NAMES else [node]
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return [n for e in node.elts for n in _bare(e)]
+    if isinstance(node, ast.Dict):
+        return [n for e in (*node.keys, *node.values) if e is not None for n in _bare(e)]
+    return []
+
+
+def _refuse_bare_names(node: ast.Call, fn: Any) -> None:
+    """A bare name is a tool only where a tool goes (012 C41): in the tool slot,
+    and in a setting that takes one (TOOL_SETTINGS). Elsewhere it is text
+    without its quotes, or a step without wf[…], and is refused, saying so."""
+    kind = _modifier_kind(fn)
+    for k in node.keywords:
+        if kind is not None and k.arg in TOOL_SETTINGS.get(kind, ()) and isinstance(k.value, ast.Name):
+            continue                                         # mod.sort(by=first_letter): a tool
+        names = _bare(k.value)
+        if not names:
+            continue
+        name = names[0].id
+        if isinstance(fn, (Operation, BoundTool)):
+            raise FormulaError(f"{k.arg}={ast.unparse(k.value)}: {name} is not defined. "
+                               f"A step is wf[\"{name}\"]; text is \"{name}\"")
+        where = f"mod.{kind}" if kind else ast.unparse(node.func)
+        raise FormulaError(f"{where}({k.arg}={ast.unparse(k.value)}): text needs quotes, \"{name}\"")
+    if isinstance(fn, (Operation, BoundTool)):
+        for a in node.args:
+            if isinstance(a, ast.Name) and a.id not in NAMES:
+                raise FormulaError(f"{ast.unparse(node)}: {a.id} is not defined. "
+                                   f"To use the step \"{a.id}\", write wf[\"{a.id}\"]")
+
+
+def _tool_names(node: ast.AST) -> Any:
+    """A setting that takes a tool: a bare name on its own is that tool, ``{"$tool": name}``
+    as Python saves a @tool there (008 C2); anything else is built as usual."""
+    if isinstance(node, ast.Name) and node.id not in NAMES and not node.id.startswith("_"):
+        return ToolRef(node.id)
+    return _build(node)
 
 
 def _callable(fn: Any) -> bool:

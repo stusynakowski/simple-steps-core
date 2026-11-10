@@ -772,8 +772,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
             elif isinstance(value, ToolRef) and value.id not in BUILTIN_TOOLS \
                     and not (getattr(workflow, "catalog", None) is not None
                              and value.id in workflow.catalog.functions):
-                problems.append(f"{modifier.kind}'s {name}= names tool "
-                                f"{value.id!r}, which is not registered")
+                problems.append(f"{modifier.kind}'s {name}={value.id}: {value.id} is not a tool; "
+                                f"text needs quotes, {name}=\"{value.id}\" (012 C41)")
 
     coded(problems, "bad_tool_setting")
 
