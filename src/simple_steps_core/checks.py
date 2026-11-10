@@ -575,7 +575,8 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
     for kind in ("select", "drop", "widen", "pack", "slice", "rename", "copy",
                  "sort", "distinct"):
         if any(m.kind == kind for m in operation.shape_verbs) and not is_identity(fn):
-            problems.append(f"{kind} applies no tool; use map to compute")
+            problems.append(f"{kind} applies no tool: write mod.{kind}(…)(wf[\"…\"]). To compute "
+                            f"with {operation.tool}, use map: {operation.tool}[mod.map()](wf[\"…\"])")
 
     coded(problems, "verb_takes_no_tool")
 

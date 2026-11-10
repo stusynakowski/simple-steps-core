@@ -57,7 +57,7 @@ class Operation:
     #: ``$res``. ``None`` for an ordinary tool. The method's name is the last
     #: segment of :attr:`tool_id` (``"FakeDB.lookup"``).
     bound_to: Any = None
-    #: Resources passed by position to a tool whose parameters aren't known
+    #: Values passed by position to a tool whose parameters aren't known
     #: yet (formula text names a tool, 012 C40): bound by type when the step is
     #: assigned and the catalog supplies the tool, then emptied. Never saved.
     held: tuple = field(default=(), repr=False)
@@ -366,10 +366,10 @@ class Operation:
             # the parameter its type fits, as it would after an input.
             more, source = (source, *more), _NO_SOURCE
         held: tuple = ()
-        if more and isinstance(source, StepRef) and all(isinstance(v, ResRef) for v in more) \
+        if more and isinstance(source, StepRef) and not any(isinstance(v, Operation) for v in more) \
                 and (self.fn or BUILTIN_TOOLS.get(self.tool)) is None:
             # 012 C40: the tool's parameters aren't known here (formula text);
-            # the resources wait for the catalog, and bind when assigned.
+            # the values wait for the catalog, and bind when assigned (008 C1).
             held, more = more, ()
         if more:
             # 008 C1: positional arguments after the input bind like keywords.

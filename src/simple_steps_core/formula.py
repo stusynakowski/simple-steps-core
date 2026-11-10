@@ -24,7 +24,7 @@ import operator
 from typing import Any
 
 from .combines import join, stack, zip_
-from .modifiers import Modifier, _Mods, mod
+from .modifiers import MODIFIERS, Modifier, _Mods, mod
 from .operation import Operation, op
 from .references import TOOL_SETTINGS, BoundTool, resource_alone, ResRef, StepRef, ToolRef, cols, res, row, rows, wf
 
@@ -54,11 +54,56 @@ def formula(text: str) -> Any:
     try:
         tree = ast.parse(body, mode="eval").body
     except SyntaxError as exc:
-        raise FormulaError(f"not a formula: {exc.msg}") from None
+        raise FormulaError(_not_an_expression(body) or f"not a formula: {exc.msg}") from None
+    if isinstance(tree, ast.BinOp) and type(tree.op) not in COMBINE:
+        raise FormulaError(f"{_text(tree)}: {EXPECTED}")              # 012 #10
     built = _build(tree)
     if isinstance(built, ResRef):
         raise FormulaError(resource_alone(built.name))
     return built
+
+
+#: What a formula is, for a refusal that can't say what was meant (012 #10).
+EXPECTED = ('expected tool[mod.verb(…)](wf["…"], …): a tool, its modifiers in brackets, '
+            "and a call with the step it reads")
+
+#: Computed values: a call by a bare name or of a tool, or arithmetic.
+LITERAL_HINT = 'an argument is a literal (text, a number, a list, …) or wf["…"]'
+
+
+def _text(node: ast.AST) -> str:
+    """*node* as written, its strings in double quotes as core prints them."""
+    text = ast.unparse(node)
+    return text.replace("'", '"') if '"' not in text else text
+
+
+def _not_an_expression(body: str) -> str | None:
+    """012 #1: an assignment in the text says what to write instead."""
+    try:
+        tree = ast.parse(body)
+    except SyntaxError:
+        return None
+    if len(tree.body) != 1 or not isinstance(tree.body[0], ast.Assign):
+        return None
+    target, value = tree.body[0].targets[0], tree.body[0].value
+    if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name) \
+            and target.value.id == "res":
+        name = _text(target.slice)
+        made = (_text(value.func) if isinstance(value, ast.Call) else "Type")
+        return (f"a step can use a resource but not create one; declare it in the "
+                f"workflow: k.define({name}, {made}, …)")
+    return f"a formula is what goes after the =: write {_text(value)}, and assign it to the step"
+
+
+def _computed(node: ast.AST) -> bool:
+    """A value the text computes, which a formula never does: ``str(1)``,
+    ``dbl[mod.map()](…)``, ``1 + x``. Conditions (``&``, ``|``, ``.isin``) aren't."""
+    if isinstance(node, ast.BinOp):
+        return type(node.op) not in COMBINE
+    if isinstance(node, ast.Call):
+        return isinstance(node.func, (ast.Name, ast.Subscript)) and not (
+            isinstance(node.func, ast.Name) and node.func.id in NAMES)
+    return False
 
 
 def _build(node: ast.AST) -> Any:
@@ -102,13 +147,45 @@ def _build(node: ast.AST) -> Any:
         return _attribute(node)
     if isinstance(node, ast.Subscript):
         value = _build(node.value)
+        _refuse_subscript(node, value)
         if not _subscriptable(value):
             raise FormulaError(f"{ast.unparse(node.value)} can't take […] in a formula")
-        return value[_key(node.slice)]
+        try:
+            return value[_key(node.slice)]
+        except KeyError as exc:                              # wf[…], res[…]: said plainly
+            raise FormulaError(str(exc.args[0]) if exc.args else str(exc)) from None
     if isinstance(node, ast.Call):
         return _call(node)
+    if isinstance(node, ast.BinOp):
+        raise FormulaError(f"{_text(node)}: a formula doesn't compute; arithmetic goes "
+                           "in a tool, as its own step")
     raise FormulaError(f"{ast.unparse(node)}: a {type(node).__name__.lower()} isn't "
                        "allowed in a formula")
+
+
+def _refuse_subscript(node: ast.Subscript, value: Any) -> None:
+    """012 #3, #4, #49–#51: brackets on the wrong thing say what goes there."""
+    key = node.slice
+    if value is wf or value is res:
+        if isinstance(key, ast.Constant) and isinstance(key.value, str):
+            return
+        what, example = (("a step", "readings") if value is wf else ("a resource", "db"))
+        if isinstance(key, ast.Name) and key.id not in NAMES:
+            example = key.id
+            sep = ":"
+        else:
+            sep = ","
+        raise FormulaError(f'{"wf" if value is wf else "res"}[…] takes {what} name in quotes'
+                           f'{sep} {"wf" if value is wf else "res"}["{example}"]')
+    if isinstance(value, ResRef):
+        raise FormulaError(f'{_text(node.value)} is not a tool name; a resource\'s tool is '
+                           f'{_text(node.value)}.<tool>[mod.map()](wf["…"])')
+    parts = key.elts if isinstance(key, ast.Tuple) else [key]
+    if isinstance(value, StepRef) and any(
+            isinstance(p, ast.Call) and isinstance(p.func, ast.Attribute)
+            and isinstance(p.func.value, ast.Name) and p.func.value.id == "mod" for p in parts):
+        raise FormulaError(f"{_text(node.value)} is not a tool name; a tool goes before the "
+                           f"brackets: tool[{_text(key)}]({_text(node.value)})")
 
 
 def _attribute(node: ast.Attribute) -> Any:
@@ -125,6 +202,9 @@ def _attribute(node: ast.Attribute) -> Any:
         return getattr(value, name)                          # res["db"].lookup: its tool
     if name in OPERAND_ATTRIBUTES and type(value).__module__.endswith(".references"):
         return getattr(value, name)                          # cols["x"].isin, row["s"].idx
+    if isinstance(node.value, ast.Name) and node.value.id not in NAMES:
+        raise FormulaError(f"{ast.unparse(node)} is not a tool. A formula reads only "
+                           "mod.<modifier>, res[…].<tool>, .isin and .idx")      # 012 #5
     raise FormulaError(f"{ast.unparse(node)}: a formula reads only mod.<modifier>, "
                        "res[…].<tool>, .isin and .idx")
 
@@ -146,26 +226,67 @@ def _key(node: ast.AST) -> Any:
 def _call(node: ast.Call) -> Any:
     if any(isinstance(a, ast.Starred) for a in node.args) or any(k.arg is None for k in node.keywords):
         raise FormulaError(f"{ast.unparse(node)}: a formula can't unpack arguments (* or **)")
+    if isinstance(node.func, ast.Name) and node.func.id in MODIFIERS \
+            and node.func.id not in NAMES:
+        raise FormulaError(f"{node.func.id}() isn't a modifier; write mod.{node.func.id}(…), "
+                           "mod.select(…), mod.retry(…), …")                    # 012 #23
     fn = _build(node.func)
     if not _callable(fn):
         raise FormulaError(f"{ast.unparse(node.func)} can't be called in a formula")
     _refuse_bare_names(node, fn)
+    _refuse_computed(node, fn)
     kind = _modifier_kind(fn)
+    if fn in (join, stack, zip_):
+        _refuse_combine_inputs(node, fn)
     args = [_build(a) for a in node.args]
     kwargs = {k.arg: (_tool_names(k.value) if k.arg in TOOL_SETTINGS.get(kind, ()) else _build(k.value))
               for k in node.keywords}
-    if isinstance(fn, (Operation, BoundTool)) and any(
-            not (isinstance(a, StepRef) or (i and isinstance(a, ResRef))) for i, a in enumerate(args)):
-        # After the input, a resource may go by position, as in Python (012 C40).
+    if isinstance(fn, (Operation, BoundTool)) and args:
         # Called on a value, a tool runs at once; a formula never runs anything.
-        raise FormulaError(f"{ast.unparse(node)}: a tool's input in a formula is a step "
-                           f"or a pick, wf[\"…\"]; values go in as name=value")
+        # After the input, values go by position as in Python (008 C1, 012 C40).
+        first = args[0]
+        if isinstance(first, str):
+            raise FormulaError(f"{_text(node)}: the input must be a step reference; "
+                               f"{_text(node.args[0])} is a string. Did you mean wf[{_text(node.args[0])}]?")
+        if any(isinstance(a, Operation) for a in args):
+            raise FormulaError(f"{_text(node)}: an operation can't be an input; make it its "
+                               f"own step and pass wf[\"…\"]")                # 012 #27
+        if not isinstance(first, StepRef):
+            raise FormulaError(f"{_text(node)}: the input must be a step reference, "
+                               f"wf[\"…\"], not {_text(node.args[0])}")        # 012 #30
     try:
         return fn(*args, **kwargs)
     except FormulaError:
         raise
     except (TypeError, ValueError) as exc:                   # core's own refusal, said
         raise FormulaError(f"{ast.unparse(node)}: {exc}") from None
+
+
+def _refuse_computed(node: ast.Call, fn: Any) -> None:
+    """012 #22, #31, #33, #41: a setting or argument the text would compute."""
+    for k in node.keywords:
+        if not _computed(k.value):
+            continue
+        if isinstance(fn, (Operation, BoundTool)):
+            raise FormulaError(f"{k.arg}={_text(k.value)}: {LITERAL_HINT}; to compute it, "
+                               f"make it its own step and pass wf[\"…\"]")
+        kind = _modifier_kind(fn)
+        where = f"mod.{kind}" if kind else _text(node.func)
+        raise FormulaError(f"{where}({k.arg}=…) must be a literal, not {_text(k.value)}")
+
+
+def _refuse_combine_inputs(node: ast.Call, fn: Any) -> None:
+    """012 #16, #18: a combine reads steps, by position; its settings go by keyword."""
+    name = _text(node.func)
+    least = 1 if fn is stack else 2
+    if len(node.args) < least:
+        steps = 'wf["a"], …' if fn is stack else 'wf["a"], wf["b"], …'
+        raise FormulaError(f"{name} reads steps: {name}({steps})")
+    for a in node.args:
+        if isinstance(a, ast.Constant):
+            hint = ' Settings go by keyword, e.g. on="city"' if fn is join else " Settings go by keyword"
+            raise FormulaError(f"{name} combines steps; each positional argument is "
+                               f"wf[\"…\"], not {a.value!r}.{hint}")
 
 
 def _modifier_kind(fn: Any) -> str | None:

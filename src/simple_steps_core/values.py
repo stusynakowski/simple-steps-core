@@ -642,9 +642,13 @@ def _bind_positional(operation: "Operation", source: Any, values: tuple,
             target = next((p for p in free_for_values if p in free), None)
             if target is None:
                 names = ", ".join(p.name for p in parameters) or "(none)"
+                shown = f'wf["{value.id}"]' if isinstance(value, StepRef) else repr(value)
+                combine = ('; a step reads one input: to combine steps use join(wf["a"], '
+                           'wf["b"], on=…), stack(wf["a"], wf["b"]) or zip_(wf["a"], wf["b"])'
+                           if isinstance(value, StepRef) else "")
                 raise TypeError(
                     f"{operation.tool}() has no free parameter left for "
-                    f"{value!r}; it takes {names}. Pass it by keyword.")
+                    f"{shown}; it takes {names}. Pass it by keyword{combine}")
         bound[target.name] = value
         free.remove(target)
     return bound

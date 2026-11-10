@@ -712,3 +712,86 @@ def test_C43_a_source_takes_no_input():
         notes[mod.source()](wf["s"])
     with pytest.raises(ValueError, match=re.escape(says)):
         formula('notes[mod.source()](wf["s"])')
+
+
+@resource
+class DB:
+    def __init__(self, url: str = "x"):
+        self.url = url
+
+    @bound_tool
+    def lookup(self, n: int) -> int:
+        return n
+
+
+@tool
+def dbl(n: int) -> int:
+    return 2 * n
+
+
+@tool
+def two() -> pd.DataFrame:
+    return pd.DataFrame({"n": [1, 2]})
+
+
+#: core asks 012, C44: each refusal says what was probably meant and how to
+#: write it (the app's proposed text, adjusted where core differs: #12 and #13
+#: bind by position as in Python, 008 C1; #48 names what a pick takes now).
+C44 = {
+    1: ('res["db"] = DB(url="x")', 'a step can use a resource but not create one; declare it in the workflow: k.define("db", DB, …)'),
+    3: ('res["db"][mod.map()](wf["s"])', 'res["db"] is not a tool name'),
+    4: ('wf["s"][mod.map()](wf["t"])', 'wf["s"] is not a tool name'),
+    5: ('os.system(wf["s"])', "os.system is not a tool"),
+    10: ("1 + 2", 'expected tool[mod.verb(…)](wf["…"], …): a tool, its modifiers in brackets, and a call with the step it reads'),
+    12: ('dbl[mod.map()](wf["s"], wf["t"])', 'to combine steps use join(wf["a"], wf["b"], on=…), stack(wf["a"], wf["b"]) or zip_(wf["a"], wf["b"])'),
+    13: ('dbl[mod.map()](wf["s"], 3)', "dbl() has no free parameter left for 3"),
+    16: ("join()", 'join reads steps: join(wf["a"], wf["b"], …)'),
+    18: ('join(wf["s"], "n")', 'join combines steps; each positional argument is wf["…"], not \'n\'. Settings go by keyword, e.g. on="city"'),
+    22: ('join(wf["s"], wf["t"], on=str(1))', "join(on=…) must be a literal, not str(1)"),
+    23: ('dbl[map()](wf["s"])', "map() isn't a modifier; write mod.map(…), mod.select(…), mod.retry(…), …"),
+    27: ('dbl[mod.map()](dbl[mod.map()](wf["s"]))', 'an operation can\'t be an input; make it its own step and pass wf["…"]'),
+    29: ('dbl[mod.map()]("s")', 'the input must be a step reference; "s" is a string. Did you mean wf["s"]?'),
+    30: ("dbl[mod.map()](3)", 'the input must be a step reference, wf["…"], not 3'),
+    31: ('dbl[mod.map()](wf["s"], n=str(1))', 'n=str(1): an argument is a literal (text, a number, a list, …) or wf["…"]; to compute it, make it its own step and pass wf["…"]'),
+    33: ('dbl[mod.map()](wf["s"], n=1+x)', "n=1 + x: an argument is a literal"),
+    37: ('dbl[mod.sort(by="n")](wf["s"])', 'sort applies no tool: write mod.sort(…)(wf["…"]). To compute with dbl, use map: dbl[mod.map()](wf["…"])'),
+    41: ('identity[mod.sort(by=str(1))](wf["s"])', "mod.sort(by=…) must be a literal, not str(1)"),
+    48: ('wf["s"][1.5]', 'wf["s"][…] takes rows by number ([1], [[0, 2]], [1:3]) or a condition, or columns by name ("n", cols["n"]); got 1.5'),
+    49: ('dbl[mod.map()](wf[s])', 'wf[…] takes a step name in quotes: wf["s"]'),
+    50: ('dbl[mod.map()](wf["s"], db=res[db])', 'res[…] takes a resource name in quotes: res["db"]'),
+    51: ('wf[mod.map()](wf["s"])', 'wf[…] takes a step name in quotes, wf["readings"]'),
+}
+
+
+@pytest.mark.parametrize("case", sorted(C44))
+def test_C44_a_refusal_says_how_to_write_it(case):
+    from simple_steps_core import formula
+    text, says = C44[case]
+    k = Kernel(Catalog(tools=[towns, two, dbl], resources=[DB]))
+    k["s"] = towns[mod.source()]()
+    k["t"] = two[mod.source()]()
+    k.define("db", DB)
+    try:
+        k["x"] = formula(text)
+        said = " ".join(k.step("x").problems)
+    except (TypeError, ValueError) as exc:
+        said = str(exc)
+    assert says in said
+    assert "<Operation" not in said and "binop" not in said
+
+
+@tool
+def scale(n: int, factor: float = 1.0) -> float:
+    return n * factor
+
+
+def test_C44_12_values_by_position_in_text_bind_as_in_python():
+    """008 C1 in formula text: after the input, a value takes the tool's next
+    free parameter, the same step Python saves."""
+    from simple_steps_core import formula
+    k = Kernel(Catalog(tools=[towns, scale]))
+    k["s"] = towns[mod.source()]()
+    k["py"] = scale[mod.map()](wf["s"], 2)
+    k["text"] = formula('scale[mod.map()](wf["s"], 2)')
+    assert k.step("text").formula == k.step("py").formula.replace("py", "text") \
+        == 'scale[mod.map()](wf["s"], factor=2)'

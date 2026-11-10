@@ -19,8 +19,11 @@
 > | C42.38 | assign: `'ResRef' object is not iterable` | accepted, printed `mod.sort(by=res["db"])(wf["s"])`: accepted wrongly (C43's kind) |
 > | C40 | — | confirmed: the Python form saves as `summarize[mod.map()](wf["s"], llm=res["db"])`; the same text is refused by `formula()`. **Fixed 2026-11-09**: the text saves the same step |
 >
-> C42.7, C42.19, C42.21 and C43.6, 9, 15 reproduced as written. **C40–C43 fixed
-> 2026-11-09** (plan.md S12 has each). C44 and
+> C42.7, C42.19, C42.21 and C43.6, 9, 15 reproduced as written. **C40–C44 fixed
+> 2026-11-09** (plan.md S12 has each). C44 as proposed, except: #12 and #13
+> bind by position as the Python API does (008 C1), refusing only when the tool
+> has no parameter left; #48 doesn't offer `rows["0.1"]`, retired; #39 is kept,
+> as a step may stand in a setting that takes names. C44 and
 > C39/C36 not re-run yet.
 
 ## Summary

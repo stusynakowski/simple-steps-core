@@ -51,8 +51,8 @@ def _row_part(key: Any, strings: bool = False) -> Any:
             raise SelectionError("an empty row selection selects nothing")
         return [_row_part(k, strings) for k in key]
     raise SelectionError(
-        f"rows are selected by row id, a list of row ids or a range of "
-        f"positions; got {type(key).__name__}")
+        f'[…] takes rows by number ([1], [[0, 2]], [1:3]) or a condition, or columns by '
+        f'name ("n", cols["n"]); got {key!r}')
 
 
 def _col_part(key: Any) -> dict:
@@ -623,7 +623,12 @@ class StepRef:
             if kind == "columns":
                 col_sel = part.sel
             else:
-                row_sel = _row_part(part)
+                try:
+                    row_sel = _row_part(part)
+                except SelectionError as exc:
+                    if str(exc).startswith("[…] takes"):        # 012 #48: name the step
+                        raise SelectionError(f'wf["{self.id}"]{exc}') from None
+                    raise
         return replace(self, rows=row_sel, columns=col_sel)
 
 
@@ -640,7 +645,7 @@ class _Wf:
 
     def __getitem__(self, step_id: str) -> StepRef:
         if not isinstance(step_id, str) or not step_id:
-            raise KeyError(f"a step reference takes a step id (a string), got {step_id!r}")
+            raise KeyError(f'wf[…] takes a step name in quotes, wf["readings"]; got {step_id!r}')
         return StepRef(step_id)
 
     def __getattr__(self, name: str):
@@ -773,7 +778,7 @@ class _Res:
 
     def __getitem__(self, name: str) -> ResRef:
         if not isinstance(name, str) or not name.isidentifier():
-            raise KeyError(f"a resource name must be an identifier, got {name!r}")
+            raise KeyError(f'res[…] takes a resource name in quotes, res["db"]; got {name!r}')
         return ResRef(name)
 
     def __repr__(self) -> str:
