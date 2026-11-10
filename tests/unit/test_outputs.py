@@ -420,8 +420,8 @@ def test_a_source_declaring_a_list_of_values_gives_a_row_each():
     k["one"] = plain_d12[mod.source()]()            # undeclared items: one value
     k["bad"] = wrong_d12[mod.source()]()
     k.run("rows"), k.run("one")
-    assert k.step("rows").data["value"].tolist() == [1, 2, 3]
-    assert k.step("one").data["value"].tolist() == [[1, 2, 3]]
+    assert k.step("rows").data["rows"].tolist() == [1, 2, 3]
+    assert k.step("one").data["one"].tolist() == [[1, 2, 3]]
     k.run("bad")
     assert k.step("bad").state == "failed"
     assert k.step("bad").output.notes[0]["error"] == "wrong_d12 returned int; declared a list of int"

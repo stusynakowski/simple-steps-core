@@ -575,10 +575,15 @@ def _modifier_settings(name: str, kind: ModifierKind) -> list[dict]:
             if p.kind is inspect.Parameter.VAR_POSITIONAL:
                 continue
             required = p.default is inspect.Parameter.empty
-            settings.append({"name": p.name, "type": _setting_type(name, p.name),
-                             "required": required,
-                             "default": None if required or p.default is _NO_DEFAULT
-                             else p.default})
+            setting = {"name": p.name, "type": _setting_type(name, p.name),
+                       "required": required,
+                       "default": None if required or p.default is _NO_DEFAULT
+                       else p.default}
+            if p.name == "name" and p.default == VALUE_COLUMN and name in NAMED_VERBS \
+                    and name != "group" and DEFAULT_PAYLOAD.get(name) == VALUE_COLUMN:
+                # D9: the output is named after its step (012 C36)
+                setting["default"], setting["default_is"] = None, "the step's name"
+            settings.append(setting)
     except (TypeError, ValueError):
         pass
     if takes_extra:                       # sweep: extra named params are the data
@@ -780,7 +785,8 @@ mod = _Mods()
 # Names used only inside functions, imported last so the modules can refer
 # to each other (see grid.py).
 from .system_tools import BUILTIN_TOOLS, DEFAULT_TOOL  # noqa: E402
-from .checks import ROWS_RULE  # noqa: E402
+from .checks import DEFAULT_PAYLOAD, NAMED_VERBS, ROWS_RULE  # noqa: E402
+from .output import VALUE_COLUMN  # noqa: E402
 from .operation import Operation  # noqa: E402
 from .references import TOOL_SETTINGS, Condition, ResRef, Rows, _deref, _row_part  # noqa: E402
 from .values import _type_label  # noqa: E402

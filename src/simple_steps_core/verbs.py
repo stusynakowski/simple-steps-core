@@ -1332,7 +1332,7 @@ def source_(value: Any, fn: Callable = identity, **_params) -> Output:
     returned DataFrame becomes the step's rows and columns.
     """
     if is_identity(fn):
-        return grid(value)
+        return _wrapped(grid(value), value)
     # A no-input tool: an empty row lets `_d_apply` fill the bound arguments.
     # A tool that raises is a failed step, like any other unit — it no longer
     # escapes `run` (the run stops on it unless the step catches it).
@@ -1342,10 +1342,20 @@ def source_(value: Any, fn: Callable = identity, **_params) -> Output:
         return _source_failure(str(exc), caught=True)
     except Exception as exc:
         return _source_failure(f"{type(exc).__name__}: {exc}", caught=None)
-    out = grid(value)
+    out = _wrapped(grid(value), value)
     if caught is not None:
         out.meta["notes"] = {i: {"error": f"caught {caught}; used the default",
                                  "caught": True} for i in out.data.index}
+    return out
+
+
+def _wrapped(out: Output, value: Any) -> Output:
+    """Mark a source's one column that core made, ``value``, holding something
+    that isn't a table: the step names it after itself (FT2, 012 C39). A
+    DataFrame's columns are its own."""
+    if not isinstance(value, (pd.DataFrame, pd.Series, Output)) \
+            and list(out.data.columns) == [VALUE_COLUMN]:
+        out.meta["wrapped"] = True
     return out
 
 

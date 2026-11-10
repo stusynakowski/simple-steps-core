@@ -36,6 +36,19 @@ def _name_problem(name: Any) -> str | None:
     return None
 
 
+def _named_after(output: Output, step_id: str) -> Output:
+    """A source's or a literal's one column, which core made (``value``),
+    named after its step, as every other step's is (FT2, owner 2026-11-09;
+    012 C39; reverses W17). A table's own columns are kept."""
+    if not output.meta.get("wrapped") or VALUE_COLUMN not in output.data.columns:
+        return output
+    output.data = output.data.rename(columns={VALUE_COLUMN: step_id})
+    if VALUE_COLUMN in output.states.columns:
+        output.states = output.states.rename(columns={VALUE_COLUMN: step_id})
+    output.meta["value_column"] = step_id
+    return output
+
+
 class Workflow:
     """Ordered Steps. Assign an Operation, get a Step that is already staged.
 
@@ -164,16 +177,17 @@ class Workflow:
         (G17, the project rule): a step with no expression yet, a 1×1 grid
         holding ``"empty"``, staged, that nothing can read until it has one."""
         if value is None:
+            # its one column is named after it, as every step's (FT2, 012 C39)
             plan = {"rows": {"certainty": "exact", "count": 1},
-                    "columns": {"certainty": "exact", "names": [VALUE_COLUMN]}, "types": {},
+                    "columns": {"certainty": "exact", "names": [step_id]}, "types": {},
                     "inverse": {"kind": "generated"}}
-            empty = Output(pd.DataFrame({VALUE_COLUMN: ["empty"]}, index=[0]),
+            empty = Output(pd.DataFrame({step_id: ["empty"]}, index=[0]),
                            meta={"staged": True, "empty": True, "plan": plan,
-                                 "inverse": {"kind": "generated"}})
+                                 "value_column": step_id, "inverse": {"kind": "generated"}})
             return Step(step_id, Operation(tool="identity", fn=identity)[mod.source()],
                         empty, extras=extras, literal=None)
         step = Step(step_id, Operation(tool="identity", fn=identity)[mod.source()],
-                    source_(value), extras=extras, literal=value)
+                    _named_after(source_(value), step_id), extras=extras, literal=value)
         step.output.meta["version"] = _data_version(step.output.data)
         step.output.meta["read"] = {}
         step.output.meta["inverse"] = {"kind": "generated"}
@@ -718,6 +732,8 @@ class Workflow:
         if new in self.steps:
             raise ValueError(f"step {new!r} already exists")
         carriers = self._carrying_own_column(old)        # D9: its column is named old
+        if self.steps[old].output.meta.get("empty"):     # FT2: the empty step's too
+            self.steps[old].output = self._literal_step(new, None, self.steps[old].extras).output
         self.steps = {(new if sid == old else sid): st
                       for sid, st in self.steps.items()}
         self.steps[new].name = new
@@ -1025,6 +1041,7 @@ class Workflow:
                     f"declared a list of {getattr(item, '__name__', item)}")
         step.output = grid(pd.DataFrame({column: list(value)}))
         step.output.meta["verb"] = "source"
+        step.output.meta["wrapped"] = column == VALUE_COLUMN       # a row per item (D12)
         return None
 
     def _ask_data_versions(self, operation: Operation,
@@ -2824,6 +2841,8 @@ class Workflow:
                     step.output = _failed_output(step.operation, failure, "declared")
                     self._restage_after(step_id)
                     return step
+                if step.operation.naming is None:
+                    step.output = _named_after(step.output, step_id)      # FT2
                 mismatch = _output_mismatch(step.operation, step.output.data)
                 if mismatch:
                     step.output = _failed_output(step.operation, mismatch,

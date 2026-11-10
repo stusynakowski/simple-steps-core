@@ -72,7 +72,7 @@ def part_a():
     lesson("A2", "source, filter, map declare; nothing runs",
            states(k), {"p": "staged", "sick": "staged", "f": "staged"})
     k["g"] = "to_f[mod.map()](wf['p'])"
-    lesson("A3a", "a plain string stays a string value (EX13)", data(k.step("g"), "value"),
+    lesson("A3a", "a plain string stays a string value (EX13)", data(k.step("g"), "g"),
            ["to_f[mod.map()](wf['p'])"])
     del k["g"]
     from simple_steps_core import formula

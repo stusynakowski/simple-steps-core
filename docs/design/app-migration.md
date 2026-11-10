@@ -223,6 +223,11 @@ is copied from it, not the other way round.
 | S5e | lineage is read-only: `mod.copy(columns={"#r": "parent"})` copies it into a data column (the row numbers as shown); `mod.rename` of a `#` column copies too and is saved as `mod.copy` (mixing data and lineage in one rename is refused); picking a `#` column (`cols["#"]`, `select(columns=["#…"])`) is refused, pointing to `mod.copy` | rewrite picks of `#` columns as `mod.copy` |
 | S5d | `collapse(by="#s")` runs after `s` and goes stale when `s` changes (it waited only for its input) | — |
 | S2 | a numeric or empty column name becomes `var<n>` (`0`, `"0"` → `var0`, `2023` → `var2023`); a clash is refused naming both | expressions that named `"0"` name `var0` |
+| S12 | `formula(text)` reads a resource or value passed by position after the input as Python does (008 C1, 012 C40): `summarize[mod.map()](wf["s"], res["tiny"])` saves `llm=res["tiny"]` | drop `SHIM(core §C40)` |
+| S12 | a bare name is a tool only where a tool goes (012 C41): `mod.sort(by=first_letter)` is that tool, saved `{"$tool": …}`; `mod.sort(by=n)` with no tool `n` is a problem, *text needs quotes*; a bare name anywhere else is refused while reading | drop `SHIM(core §C41)` |
+| S12 | refused, with what to write: `res["db"]` on its own, a resource in any modifier setting or in `join(on=…)`, a step in `join(on=…)` (it hung), a step with no input other than a source (FT1), a source given an input (012 C42, C43) | show core's message |
+| S12 | every refusal of formula text says what was probably meant and how to write it (012 C44) | show core's message |
+| S12 | **a source's, a literal's and the empty step's one column is named after the step**, not `value` (FT2, 012 C39; a table's own columns are kept); renaming the step renames it. `describe()` shows `name=` defaulting to `"the step's name"` (`default_is`), not `'value'` (C36) | rewrite `"value"` references to sources and literals; read `default_is` |
 
 **Coming** (planned; this list becomes "landed" row by row)
 

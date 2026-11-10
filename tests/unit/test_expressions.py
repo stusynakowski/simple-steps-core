@@ -795,3 +795,38 @@ def test_C44_12_values_by_position_in_text_bind_as_in_python():
     k["text"] = formula('scale[mod.map()](wf["s"], 2)')
     assert k.step("text").formula == k.step("py").formula.replace("py", "text") \
         == 'scale[mod.map()](wf["s"], factor=2)'
+
+
+def test_C39_a_source_a_literal_and_the_empty_step_are_named_after_their_step():
+    """FT2 (owner, 2026-11-09; 012 C39, reverses W17): one column, named after
+    the step, as every other step's (D9). A DataFrame keeps its own columns;
+    a rename renames the column, the empty step's too."""
+    @tool
+    def three() -> list[int]:
+        return [1, 2, 3]
+
+    @tool
+    def frame() -> pd.DataFrame:
+        return pd.DataFrame({"value": [1]})
+
+    k = Kernel(Catalog(tools=[three, frame]))
+    k["src"] = three[mod.source()]()
+    k["df"] = frame[mod.source()]()
+    k["lim"] = 38.0
+    k["e"] = None
+    k.run_all()
+    assert list(k.step("src").data.columns) == ["src"]
+    assert list(k.step("df").data.columns) == ["value"]          # its own
+    assert list(k.step("lim").data.columns) == ["lim"]
+    assert list(k.step("e").data.columns) == ["e"]
+    k.rename("lim", "limit")
+    k.rename("e", "later")
+    assert list(k.step("limit").data.columns) == ["limit"]
+    assert list(k.step("later").data.columns) == ["later"]
+
+
+def test_C36_describe_says_a_name_defaults_to_the_step():
+    """012 C36: describe() gave map's name= a default of 'value'."""
+    d = Catalog(tools=[dbl]).describe()["modifiers"]
+    name = next(s for s in d["map"]["settings"] if s["name"] == "name")
+    assert name["default"] is None and name["default_is"] == "the step's name"

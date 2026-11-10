@@ -107,7 +107,7 @@ def test_a_formula_runs_like_the_line_it_writes():
 def test_a_plain_string_stays_a_string_value():
     k = Kernel(CAT)
     k["g"] = "to_f_x[mod.map()](wf['p'])"
-    assert k.step("g").data["value"].tolist() == ["to_f_x[mod.map()](wf['p'])"]
+    assert k.step("g").data["g"].tolist() == ["to_f_x[mod.map()](wf['p'])"]
 
 
 def test_a_tool_not_in_the_catalog_is_a_problem_when_assigned():

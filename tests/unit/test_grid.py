@@ -564,7 +564,8 @@ def test_modifier_catalog_is_json_and_lists_each_verbs_settings():
     # settings are typed, with required/default
     by_name = {s["name"]: s for s in mc["map"]["settings"]}
     assert "over" not in by_name, "the data input is not a modifier setting"
-    assert by_name["name"]["type"] == "str" and by_name["name"]["default"] == "value"
+    assert by_name["name"]["type"] == "str" and by_name["name"]["default"] is None
+    assert by_name["name"]["default_is"] == "the step's name"     # D9 (012 C36)
     # an execution modifier has no row rule and a required setting
     assert mc["retry"]["class"] == "execution" and mc["retry"]["row_rule"] is None
     assert {s["name"] for s in mc["retry"]["settings"]} == {"times"}
@@ -1275,7 +1276,7 @@ def test_any_bare_value_becomes_a_source_step():
     assert wf.step("xs").state == "completed"
     # A list is one cell, not one row per element — reshape with expand.
     assert len(wf.step("xs").output.data) == 1
-    assert wf.step("xs").output.data["value"].iloc[0] == [1, 2, 3]
+    assert wf.step("xs").output.data["xs"].iloc[0] == [1, 2, 3]   # named after it (FT2)
 
 
 def test_a_list_source_expands_into_rows():

@@ -216,7 +216,7 @@ written into the formula (D21). *Built 2026-11-09.*
 
 | Verb | Calls the tool | Output rows | Data columns out |
 |---|---|---|---|
-| `source` | once, no input | what it returns; a row per item when it declares `-> list[T]` (D12) | a DataFrame's, a record's fields, else `value` |
+| `source` | once, no input | what it returns; a row per item when it declares `-> list[T]` (D12) | a DataFrame's, a record's fields, else the step's name (FT2) |
 | `map` | once per row | one per row | the step's name, or a record's fields |
 | `filter` | once per row | the rows it approves | the input's |
 | `expand` | once per row; returns a list | one per item | the step's name, or each item's fields; a dict's `key`, `value` |
@@ -236,7 +236,7 @@ output): `retry`, `timeout`, `breaker`; `try_except` (a failure becomes a
 `expect` (what staging promises). A failed row's note says where it failed:
 `tool`, `timeout`, `retry`, `breaker`, `expect`, `upstream`. *Built.*
 
-**Naming:** one output column takes its step's name (D9, built 2026-11-04: `k["temp_f"] = to_f[mod.map()](…)` writes `temp_f`, and a rename renames it), unless `mod.name` names it, or the input already has a column of that name (it keeps `value`, warning); a
+**Naming:** one output column takes its step's name (D9, built 2026-11-04: `k["temp_f"] = to_f[mod.map()](…)` writes `temp_f`, and a rename renames it), unless `mod.name` names it, or the input already has a column of that name (it keeps `value`, warning). A source's, a literal's and the empty step's one column is named after its step too (FT2, 2026-11-09); a
 declared record spreads into one column per field. Data column names are
 unique, never start with `#`, and two that would collide are a problem.
 *Built.* Step names with a `.` or a leading `#` are refused (built

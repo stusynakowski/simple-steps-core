@@ -143,7 +143,7 @@ def test_inferred_steps_produce_the_same_results_as_explicit_ones(wf):
 # ── standard Python types as sources: each is one cell, reshaped by a verb ──
 def test_standard_types_are_one_cell(wf):
     assert wf.step("a_list").output.shape == (1, 1)
-    assert wf.step("a_list").output.data["value"].iloc[0] == [1, 2, 3, 4]
+    assert wf.step("a_list").output.data["a_list"].iloc[0] == [1, 2, 3, 4]
     assert wf.step("a_dict").output.shape == (1, 1)
     assert wf.step("a_scalar").output.shape == (1, 1)
 

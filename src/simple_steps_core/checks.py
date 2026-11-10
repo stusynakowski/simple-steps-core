@@ -1122,6 +1122,8 @@ def bind_by_type(operation: Operation, workflow: "Workflow | None",
     if up is None or not up.valid or (step_id in workflow.steps and list(workflow.steps).index(
             str(operation.input)) > list(workflow.steps).index(step_id)):
         return operation                       # its input is a problem: said as one, not bound
+    if up.output.meta.get("empty"):
+        return operation                       # a placeholder column: bound once it has data (FT2)
     verb = operation.shape_verb
     if verb is None or verb.kind not in _ROW_BY_ROW or workflow._columns_open(operation):
         return operation

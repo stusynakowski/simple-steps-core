@@ -181,18 +181,18 @@ def ch2():
     k = base()
     lesson("D1", "a source tool: its DataFrame becomes the rows",
            data(k.step("v"), "name"), ["Ada", "Ben", "Cy"])
-    lesson("D2", "a literal is one cell (a control, like a typed-in cell)",
-           data(put(k, "lim", 38.0)), {"value": [38.0]})
+    lesson("D2", "a literal is one cell (a control, like a typed-in cell), named after its step",
+           data(put(k, "lim", 38.0)), {"lim": [38.0]})
     lesson("D3", "a list is one cell until a verb says what its items mean",
-           data(put(k, "lst", [1, 2, 3])), {"value": [[1, 2, 3]]})
+           data(put(k, "lst", [1, 2, 3])), {"lst": [[1, 2, 3]]})
     lesson("D4", "a dict is one cell too",
-           data(put(k, "dct", {"x": 1, "y": 2})), {"value": [{"x": 1, "y": 2}]})
+           data(put(k, "dct", {"x": 1, "y": 2})), {"dct": [{"x": 1, "y": 2}]})
     lesson("D5", "a DataFrame assigned directly is rows",
            data(put(k, "df", pd.DataFrame({"name": ["Ada", "Zed"], "score": [1, 2]})), "name"),
            ["Ada", "Zed"])
     s = put(k, "empty", None)
     lesson("D6", "an empty step is one cell 'empty', staged",
-           (s.state, data(s)), ("staged", {"value": ["empty"]}))
+           (s.state, data(s)), ("staged", {"empty": ["empty"]}))
     s = put(k, "r", to_f[mod.map()](wf["empty"]))
     lesson("D7", "nothing can read an empty step", s.state, "invalid")
     s = put(k, "sw", label[mod.sweep(a=[1, 2], b=["x", "y"])]())
