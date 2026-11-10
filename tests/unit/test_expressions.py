@@ -15,6 +15,8 @@ written when S5 is detailed: core has no per-row staleness to test yet.
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -561,13 +563,17 @@ def test_C42_20_join_on_takes_column_names_only(on, says):
         formula(f'join(wf["s"], wf["t"], on={on})')
 
 
-from simple_steps_core import resource  # noqa: E402
+from simple_steps_core import bound_tool, resource  # noqa: E402
 
 
 @resource
 class LLM:
     def __init__(self, name: str = "tiny"):
         self.name = name
+
+    @bound_tool
+    def lookup(self, text: str) -> str:
+        return text
 
 
 @tool
@@ -661,3 +667,48 @@ def test_C41_a_bare_name_in_a_setting_that_takes_a_tool_is_that_tool():
     said = " ".join(k.step("bad").problems)
     assert 'by=n: n is not a tool; text needs quotes, by="n"' in said
     assert "<Operation" not in k.step("bad").formula
+
+
+def test_C42_7_a_resource_on_its_own_is_not_a_step():
+    """012 #7: the refusal named data_version, an internal."""
+    from simple_steps_core import formula
+    k, _ = _llm_kernel()
+    says = 'res["tiny"] on its own is a resource, not a step'
+    with pytest.raises(ValueError, match=re.escape(says)):
+        formula('res["tiny"]')
+    with pytest.raises(TypeError, match=re.escape(says)):
+        k["x"] = res["tiny"]
+
+
+def test_C42_38_a_resource_in_a_modifier_setting_is_refused():
+    """012 #38: core accepted mod.sort(by=res["db"]), a step that can't run."""
+    from simple_steps_core import formula
+    says = "mod.sort(by=…) is a setting, and settings are literals. A resource goes in the call"
+    with pytest.raises(TypeError, match=re.escape(says)):
+        mod.sort(by=res["tiny"])
+    with pytest.raises(ValueError, match=re.escape(says)):
+        formula('identity[mod.sort(by=res["tiny"])](wf["s"])')
+
+
+@pytest.mark.parametrize("text, says", [
+    ('summarize[mod.map()]', 'map reads a step: summarize[mod.map()](wf["…"])'),
+    ('res["tiny"].lookup[mod.map()]', 'map reads a step: res["tiny"].lookup[mod.map()](wf["…"])'),
+])
+def test_C43_an_operation_with_no_input_is_not_assignable(text, says):
+    """012 C43 #6, #9; FT1 (owner, 2026-11-09): not a step to wire later.
+    A step to wire later is the empty step."""
+    from simple_steps_core import formula
+    k, _ = _llm_kernel()
+    with pytest.raises(TypeError, match=re.escape(says)):
+        k["x"] = formula(text)
+    assert "x" not in k.workflow.steps
+
+
+def test_C43_a_source_takes_no_input():
+    """012 C43 #15: dbl[mod.source()](wf["s"]) was accepted."""
+    from simple_steps_core import formula
+    says = 'source takes no input: notes[mod.source()]()'
+    with pytest.raises(TypeError, match=re.escape(says)):
+        notes[mod.source()](wf["s"])
+    with pytest.raises(ValueError, match=re.escape(says)):
+        formula('notes[mod.source()](wf["s"])')

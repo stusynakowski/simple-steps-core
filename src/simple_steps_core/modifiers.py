@@ -760,6 +760,14 @@ class _Mods:
                 raise TypeError(
                     f"over= is retired: give the input after the brackets, "
                     f"tool[mod.{kind}(…)](wf[\"…\"]) or mod.{kind}(…)(wf[\"…\"])")
+            for name, value in params.items():
+                items = (value if isinstance(value, (list, tuple)) else
+                         [*value.keys(), *value.values()] if isinstance(value, dict) else [value])
+                if any(isinstance(v, ResRef) for v in items):
+                    # 012 #38: accepted, a step that couldn't run
+                    raise TypeError(f"mod.{kind}({name}=…) is a setting, and settings are "
+                                    f"literals. A resource goes in the call: "
+                                    f"tool[…](wf[\"…\"], name=res[\"…\"])")
             return Modifier(kind, params)
         make.__name__ = kind
         return make
@@ -774,6 +782,6 @@ mod = _Mods()
 from .system_tools import BUILTIN_TOOLS, DEFAULT_TOOL  # noqa: E402
 from .checks import ROWS_RULE  # noqa: E402
 from .operation import Operation  # noqa: E402
-from .references import TOOL_SETTINGS, Condition, Rows, _deref, _row_part  # noqa: E402
+from .references import TOOL_SETTINGS, Condition, ResRef, Rows, _deref, _row_part  # noqa: E402
 from .values import _type_label  # noqa: E402
 from .verbs import _Caught, _Stopped, _Tolerated  # noqa: E402

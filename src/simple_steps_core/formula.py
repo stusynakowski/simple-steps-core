@@ -26,7 +26,7 @@ from typing import Any
 from .combines import join, stack, zip_
 from .modifiers import Modifier, _Mods, mod
 from .operation import Operation, op
-from .references import TOOL_SETTINGS, BoundTool, ResRef, StepRef, ToolRef, cols, res, row, rows, wf
+from .references import TOOL_SETTINGS, BoundTool, resource_alone, ResRef, StepRef, ToolRef, cols, res, row, rows, wf
 
 
 class FormulaError(ValueError):
@@ -55,7 +55,10 @@ def formula(text: str) -> Any:
         tree = ast.parse(body, mode="eval").body
     except SyntaxError as exc:
         raise FormulaError(f"not a formula: {exc.msg}") from None
-    return _build(tree)
+    built = _build(tree)
+    if isinstance(built, ResRef):
+        raise FormulaError(resource_alone(built.name))
+    return built
 
 
 def _build(node: ast.AST) -> Any:

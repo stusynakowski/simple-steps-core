@@ -19,7 +19,8 @@
 > | C42.38 | assign: `'ResRef' object is not iterable` | accepted, printed `mod.sort(by=res["db"])(wf["s"])`: accepted wrongly (C43's kind) |
 > | C40 | — | confirmed: the Python form saves as `summarize[mod.map()](wf["s"], llm=res["db"])`; the same text is refused by `formula()`. **Fixed 2026-11-09**: the text saves the same step |
 >
-> C42.7, C42.19, C42.21 and C43.6, 9, 15 reproduce as written. C44 and
+> C42.7, C42.19, C42.21 and C43.6, 9, 15 reproduced as written. **C40–C43 fixed
+> 2026-11-09** (plan.md S12 has each). C44 and
 > C39/C36 not re-run yet.
 
 ## Summary

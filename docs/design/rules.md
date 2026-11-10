@@ -1,13 +1,15 @@
 # The rules of the game
 
-> Ten rules for how data moves through a workflow. If you know these, you
-> know what core will do. Updated 2026-11-03, in step with the code at
-> `d69b5f1`; the detail behind each rule is in [model.md](model.md).
+> The rules for how data moves through a workflow. If you know these, you
+> know what core will do. Updated 2026-11-09, in step with the code on
+> `core-handover`; the detail behind each rule is in [model.md](model.md).
 
 **1. Everything is a grid.** Rows are samples, columns are variables. One
 value is a 1×1 grid; a list or dict in a cell is still a grid. A step with
 no expression yet (`k["x"] = None`) is **empty**: one cell, `"empty"`, that
-nothing can read until it has an expression.
+nothing can read until it has an expression. That is the only step without
+an input: `dbl[mod.map()]` on its own is refused (*map reads a step*), and a
+source takes none.
 
 **2. Rows are numbered `0…n-1`, as you see them.** `wf["s"][3]`, `[-1]`,
 `[[0, 2]]`, `[1:3]` pick rows by number; a string picks a column,
@@ -101,6 +103,14 @@ per ward, keeping `ward` as a column. Every row lands in a group: a row
 with no `ward` (`None`) makes a group of its own, shown, never dropped. To
 leave it out, filter it first. Any value is a key: a list or dict groups by
 what it holds, `True` is never `1`, and `1` and `1.0` are one key.
+
+**14. Formula text means what the Python means.** `formula(text)` reads the
+same line Python would and never runs it. Text goes in quotes: a bare name
+is a tool, and only where a tool goes, as the tool in front of the brackets
+or `mod.sort(by=first_letter)`; `mod.sort(by=n)` is refused, *text needs
+quotes, "n"*. A step is `wf["s"]`, a resource `res["db"]`, and a resource may
+follow the input by position, as in Python. Settings are literals, or a step;
+never a resource.
 
 ## What core can't do, by design
 

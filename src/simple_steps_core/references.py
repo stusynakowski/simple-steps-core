@@ -738,6 +738,13 @@ class ToolRef:
         return f"<tool {self.id!r}>"
 
 
+def resource_alone(name: str) -> str:
+    """012 #7: what to write instead of a resource on its own."""
+    return (f'res["{name}"] on its own is a resource, not a step. Use one of its tools, '
+            f'res["{name}"].<tool>[mod.map()](wf["…"]), or pass it to a tool, '
+            f'tool[…](wf["…"], name=res["{name}"])')
+
+
 @dataclass(frozen=True)
 class ResRef:
     """A reference to a declared resource — ``res["db"]``, saved as ``{"$res": "db"}``.

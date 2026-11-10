@@ -378,6 +378,8 @@ class Operation:
         if isinstance(source, Operation) or any(isinstance(v, Operation) for v in more):
             raise TypeError(_NESTED_OPERATION)
         if isinstance(source, StepRef):
+            if operation.shape_verb is not None and operation.shape_verb.kind == "source":
+                raise TypeError(f"source takes no input: {as_typed(operation)}()")   # 012 C43
             wired = operation._wire(source)
             return replace(wired, held=held) if held else wired
         if source is _NO_SOURCE:
@@ -468,6 +470,17 @@ _RESHAPES = frozenset({"select", "drop", "rename", "copy", "sort", "slice", "dis
 #: What may stand before a verb in one step, narrowing or ordering its input
 #: (core-asks L33). `distinct` writes lineage of its own: a step of its own.
 PICKERS = frozenset({"select", "slice", "sort"})
+
+
+def as_typed(operation: "Operation") -> str:
+    """*operation*'s formula as a user types it: a tool by its name, even when
+    core holds no function for it yet (formula text), never ``op("…")``."""
+    text = operation.to_source()
+    prefix = f"op({_src(operation.tool)})"
+    if text.startswith(prefix) and operation.tool.isidentifier() \
+            and operation.tool not in BUILTIN_TOOLS:
+        text = operation.tool + text[len(prefix):]
+    return text
 
 
 def _as_pick(given: Any, m: Any) -> Any:

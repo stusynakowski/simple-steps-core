@@ -371,6 +371,8 @@ class Workflow:
         """What declaring *operation* means, before it is checked: a selection
         becomes a select step, a bare shape verb gets its default tool. Anything
         else is returned as it is (an Operation, or a literal value)."""
+        if isinstance(operation, ResRef):
+            raise TypeError(resource_alone(operation.name))     # 012 #7
         if isinstance(operation, StepRef):
             # 008 C7 (K9): `wf["block"] = wf["p"][1:5][cols["a":"c"]]` is a
             # select step — visible, saved and re-runnable. A plain reference
@@ -470,6 +472,13 @@ class Workflow:
             operation = self.catalog.admit(operation)
         if operation.held:                               # 012 C40: res[…] by position
             operation = self._bind_held(operation)
+        if operation.input is None and not is_combine(operation) and not (
+                operation.shape_verb is not None
+                and operation.shape_verb.kind in ("source", "sweep")):
+            # FT1 (owner, 2026-11-09; 012 C43): an operation with no input is
+            # not a step to wire later; that is the empty step, then edited
+            verb = operation.shape_verb.kind if operation.shape_verb else "a tool"
+            raise TypeError(f"{verb} reads a step: {as_typed(operation)}(wf[\"…\"])")
         operation = self._resolve_picks(operation)       # S5d: row numbers saved as lineage
         if _is_auto(operation) and len(operation.shape_verbs) == 1:
             # D20b, EX6: the verb is decided now and written, never again at run
@@ -3370,7 +3379,7 @@ from .modifiers import (  # noqa: E402
     is_shape,
     mod,
 )
-from .operation import Operation, _src  # noqa: E402
+from .operation import Operation, _src, as_typed  # noqa: E402
 from .output import (  # noqa: E402
     _state_column,
     Output,
@@ -3386,6 +3395,7 @@ from .output import (  # noqa: E402
     _typed,
 )
 from .references import (  # noqa: E402
+    resource_alone,
     ResRef,
     StepRef,
     ToolRef,
