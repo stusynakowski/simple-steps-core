@@ -26,6 +26,13 @@ what the workflow is now.
 | SS6 | Core has no `running` state; it stays the app's | none in core | **yes**: owner, 2026-11-03 |
 | SS7 | A stale step's reason is among its warnings, where the app reads it (core-asks L42); delete-anyway, `k.remove(name, force=True)` (L43d, **CA-6**) | the reason is in output metadata only; no delete-anyway | **yes**: owner, 2026-11-03. **Done 2026-11-04**: a stale step warns `stale: <reason>` (code `stale`); a step that read a stale one warns `read 's', which is stale (…); run(x) runs it first` (`read_stale`, W6); `k.remove(name, force=True)` |
 
+**Formula text** (core asks 012, 2026-11-09; plan.md S12).
+
+| | Decision | Today (run 2026-11-09) | Recommended |
+|---|---|---|---|
+| **FT1** | **Is an unwired operation assignable?** `k["x"] = dbl[mod.map()]` with no input, or `res["db"].lookup[mod.map()]` (012 C43) | accepted, printed as written; the step can't run | **no**: refuse it, writing the input, *map reads a step: dbl[mod.map()](wf["…"])*. A step to wire later is the empty step, then edited. Likewise a source given an input |
+| **FT2** | **A source's, a literal's and the empty step's one column**, `value` or the step's name (012 C39); `map`'s `name` default `'value'` in `describe()` (C36) | `value`, by W17 (D9 names a verb's output; a source isn't one) | **the step's name**, as every other step (D9): one rule, and W17 reversed. `describe()` shows `name`'s default as the step's name. Changes saved specs that read `"value"` from a source, so it lands before G |
+
 **Rows when a source's data changes** (model.md §10).
 
 | | Decision | Today | Recommended |

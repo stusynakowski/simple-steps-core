@@ -58,7 +58,8 @@ change is confirmed before it lands.
 | **S5f** | **Freeze** (2026-11-03) | pairing by identity: aligned means the same rows in any order (CA-11, amended); the A5 check traces every join on lineage back by id; a group never joins on lineage (unpack it first); an edit re-checks everything downstream, and a step reading an `invalid` one is `invalid`; three crashes found at `STRESS=1` fixed; every property-test failure listed ([tests/stress-failures.md](../../tests/stress-failures.md)); the docs consolidated into model.md | M2, M6 L40 | — | ✓ 2026-11-03 |
 | **S4** | **Naming** | one output named after its step; a dict's keys as columns; `var<n>`; ints stay ints; step names identifiers; sources and literals (D12) | M3 (L20–L24, L46, L47) | medium | **D9, D12, L22 and L47 done 2026-11-04**; `var<n>` to do |
 | **S3** | **Grammar and binding** | strings choose columns; pickers before the verb; a pick as an input; **binding at staging, saved explicitly** (CA-A); `mod.cast`; verbs inferred and written (`auto` resolved, D20); nothing unseen (D21) | M4, M5 (L25–L39, L48–L51) | **large** | **in progress 2026-11-04**: done: strings choose columns (D2: L25a, L25b, L46, L49), binding by type written into the expression (L50a–c, L51a, L51c), `mod.cast` (L51b), a one-column step pairing by row (L37). A pick as a tool's input and pickers before the verb done 2026-11-09 (L33, L34, EX5). `auto` decided and written, never filter, nothing added unseen done 2026-11-09 (D20b, EX6, D21). To do: D18, D19; L26 done 2026-11-09 (W15: `cols=` and `columns=` both) |
-| **S11** | **Live editing** (**recommended next**) | the session model (SM, [model.md §8.1](model.md#81-the-proposed-session-model-sm)): a result store filed by run key (K22, from step D), stored as **ST** (row maps, columns and media filed once by content hash), every state derived from it, never flagged; `needs_run()` and `running` (SS5, SS6); stale reasons among the warnings, delete anyway (SS7); picks into a source follow their rows when its data changes (D-picks); readers re-checked at once ✓ (`baec929`); renames rewrite what core wrote ✓ | M6 (L41–L43, L52) | medium | **mostly done 2026-11-04**: SM decided (no staleness passed down), SS7, D-picks, PL. To do: the old flags removed (no behaviour change; can follow the move) |
+| **S11** | **Live editing** | the session model (SM, [model.md §8.1](model.md#81-the-proposed-session-model-sm)): a result store filed by run key (K22, from step D), stored as **ST** (row maps, columns and media filed once by content hash), every state derived from it, never flagged; `needs_run()` and `running` (SS5, SS6); stale reasons among the warnings, delete anyway (SS7); picks into a source follow their rows when its data changes (D-picks); readers re-checked at once ✓ (`baec929`); renames rewrite what core wrote ✓ | M6 (L41–L43, L52) | medium | **mostly done 2026-11-04**: SM decided (no staleness passed down), SS7, D-picks, PL. To do: the old flags removed (no behaviour change; can follow the move) |
+| **S12** | **Formula text** (core asks 012, 2026-11-09; **recommended next**) | the app replaces its formula parser with core's `formula(text)`, so the text must mean what the Python means and every refusal must be readable. C40: a positional `res["…"]` after the input binds as in Python. C41: a bare name in a setting refused (*text needs quotes*). C42: no raw Python errors, and the `join(on=wf["s"])` hang fixed. C43: unwired or misplaced operations refused (FT1). C44: 25 refusals reworded. C39/C36: the `value` column of sources, literals and the empty step (FT2). §3 below | [012](core-asks/012-formula-text.md) | small–medium | to do; needs FT1, FT2 |
 | **G** | **The app moves** | [app-migration.md](app-migration.md), onto the new syntax; core's to-dos T6, T9–T13 | — | medium (in the app) | D50, D52, D53 decided 2026-11-04 |
 | **D** | **Sessions** | outputs kept by version (K22), progress and `cancel()` (K23, K14), re-run failed or stale rows (K15, D42), stages (R9), autorun | — | medium–large | needs D-D1, D-D2, D42 |
 | **E** | **Storage** | the output store (C32, K16); media handles (R7) | — | medium | needs E-D1 |
@@ -282,6 +283,36 @@ D19, D12, D20, D21).
 | an unnamed single key is `value` | the step's name (`k["temp_f"] = …` → `temp_f`); `mod.name` still wins | `workflow.default_name_rule` | D9 |
 | a source's `list[int]` is one value | its declared type decides: `list[T]` is rows; `list` or none is one value | the source path in `workflow` | D12 |
 | a literal is one value | the same (confirmed) | — | D11 |
+
+### S12. Formula text (core asks 012)
+
+From the app, 2026-11-09, at `fed4d1a` (v1.0.1): what it needs before it
+drops its own parser for `formula(text)`. The asks and every case are
+[core-asks/012-formula-text.md](core-asks/012-formula-text.md); core re-ran
+them the same day (its header). Until they land the app keeps two shims,
+`SHIM(core §C40)` and `SHIM(core §C41)`, and takes core's wording as it is.
+
+Order: one piece each, priority 1 first. Each lands as a patch release
+(`1.0.x`) the app can pin, since none changes what a valid formula means.
+
+| | Priority | Today (run 2026-11-09) | After | Where | Tests |
+|---|---|---|---|---|---|
+| **C42.20** | **1** (a hang) | `join(wf["s"], wf["t"], on=wf["s"])` never returns: `list(on)` iterates a `StepRef` by `__getitem__` forever | `StepRef` and `ResRef` aren't iterable (`__iter__` raises); a step or resource in `on=` refused: *"join(on=…) is a setting, and settings are literals"* | `references`, `checks.check` (join's `on`) | 012 #20, with a time limit |
+| C40 | 1 | `formula('summarize[mod.map()](wf["s"], res["tiny"])')` refused; the Python form is accepted and saved as `llm=res["tiny"]` | a positional `res["…"]` after the input binds as the Python API binds it, and saves as `name=res["…"]` | `formula` (positional arguments), `operation._wire` | 012 C40; formula ↔ Python round trip |
+| C41 | 1 | `mod.sort(by=n)` takes `n` as a tool `op("n")`; printed `by=<Operation n>` | refused while reading: *"mod.sort(by=n): text needs quotes, \"n\""*. A bare name in a setting is a tool only where the setting takes one | `formula` (settings) | 012 C41, #21 |
+| C42 | 1 | five raw errors: #7 `data_version has no instance…`, #19 and #38 `'ResRef' object is not iterable` (core accepts #38), #20 the hang, #21 `a bracket layer must be a Modifier… got int` | each refusal says what was written and how to write it (012's *Proposed* column) | `formula`, `checks` | 012 #7, 19, 20, 21, 38 |
+| C43 | 2 | accepted: `res["db"].lookup[mod.map()]`, `dbl[mod.map()]` (no input), `dbl[mod.source()](wf["s"])` (a source given an input) | refused: *map reads a step: …*, *source takes no input: …*, unless FT1 says an unwired operation is a step to wire later | `checks` (wiring) | 012 #6, 9, 15 |
+| C44 | 2 | 25 refusals right but terse; some leak internals (`binop`, `got Modifier`, `<Operation s>`) | 012's *Proposed* wording, which says what was probably meant: `wf[s]` → *wf[…] takes a step name in quotes*; `dbl[map()]` → *write mod.map(…)*; and so on | `formula`, `checks`, `references` | one table-driven test over 012's C44 rows |
+| C39, C36 | 3 | a source's, a literal's and the empty step's one column is `value`; `describe()` gives `map`'s `name` a default of `'value'` | by FT2 | `workflow` (naming), `catalog.describe` | the app's 008, *At core v1.0.1* |
+
+**Decisions it needs** (decisions.md §0, *Formula text*): FT1 (is an unwired
+operation assignable?) and FT2 (does a source's one column take the step's
+name, reversing W17?). C40–C42 and C44 need none: each is a fix or wording,
+confirmed piece by piece as usual.
+
+**Done means:** every case in 012 refuses with its proposed text (or the
+agreed one) or is accepted as the Python form is; nothing hangs or raises a
+raw Python error; the app drops both shims.
 
 ### After S4, and S11
 

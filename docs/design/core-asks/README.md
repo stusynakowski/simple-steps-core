@@ -13,6 +13,7 @@ work. It's the source; the app's docs link here rather than copy it.
 | [plan.md](plan.md) | The work: decisions (D1–D5, all settled), milestones M0–M6, changes L1–L43, a test for each with today's result | what to build first, and when it's done |
 | [probe.py](probe.py) | Every test in plan.md, run against core alone: PASS / FAIL / SKIP | checking progress |
 | [CLAUDE.md](CLAUDE.md) | Rules for an agent working on this in core | how to work |
+| [012-formula-text.md](012-formula-text.md) | The app's asks of 2026-11-09 (C40–C44, C39/C36): `formula(text)` meaning what the Python means, and readable refusals. Core's plan step S12 | what the app needs before it drops its parser |
 
 Read in that order: model, then plan, then run the probe.
 
