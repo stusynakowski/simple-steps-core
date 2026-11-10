@@ -379,7 +379,7 @@ class Operation:
             raise TypeError(_NESTED_OPERATION)
         if isinstance(source, StepRef):
             if operation.shape_verb is not None and operation.shape_verb.kind == "source":
-                raise TypeError(f"source takes no input: {as_typed(operation)}()")   # 012 C43
+                raise TypeError(f"source takes no input: {as_typed(operation)}")   # 012 C43
             wired = operation._wire(source)
             return replace(wired, held=held) if held else wired
         if source is _NO_SOURCE:

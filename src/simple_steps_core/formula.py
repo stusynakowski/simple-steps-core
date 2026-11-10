@@ -259,7 +259,7 @@ def _call(node: ast.Call) -> Any:
     except FormulaError:
         raise
     except (TypeError, ValueError) as exc:                   # core's own refusal, said
-        raise FormulaError(f"{ast.unparse(node)}: {exc}") from None
+        raise FormulaError(f"{_text(node)}: {exc}") from None
 
 
 def _refuse_computed(node: ast.Call, fn: Any) -> None:
