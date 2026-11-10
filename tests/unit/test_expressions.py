@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from simple_steps_core import Catalog, Kernel, cols, join, mod, row, stack, tool, wf
+from simple_steps_core import Catalog, Kernel, cols, join, mod, res, row, stack, tool, wf
 from simple_steps_core.operation import op
 
 
@@ -533,3 +533,29 @@ def test_EX12_a_lineage_condition_isnt_positional_a_range_is():
     k["pos"] = wf["e"][0:2]
     assert not any("positions" in str(w) for w in k.step("kid").warnings)
     assert any("positions" in str(w) for w in k.step("pos").warnings)
+
+
+# ── S12, core asks 012: formula text ─────────────────────────────────────
+
+def test_C42_20_a_step_reference_is_not_iterable():
+    """012 #20: `list(wf["s"])` iterated `wf["s"][0]`, `[1]`, … forever (no
+    __iter__, so Python fell back to __getitem__). Now it is refused at once."""
+    with pytest.raises(TypeError, match="not a list"):
+        list(wf["s"])
+    with pytest.raises(TypeError):
+        list(res["db"])
+
+
+@pytest.mark.parametrize("on, says", [
+    ('wf["s"]', "settings are literals"),
+    ('res["db"]', "takes no resource"),
+    ('[wf["s"]]', "settings are literals"),
+])
+def test_C42_20_join_on_takes_column_names_only(on, says):
+    """012 #19, #20: a step or resource in join(on=…) is refused when the join
+    is built, from Python and from formula text, and nothing hangs."""
+    from simple_steps_core import formula
+    with pytest.raises(TypeError, match=says):
+        join(wf["s"], wf["t"], on=eval(on, {"wf": wf, "res": res}))
+    with pytest.raises(ValueError, match=says):
+        formula(f'join(wf["s"], wf["t"], on={on})')

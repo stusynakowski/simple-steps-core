@@ -582,6 +582,12 @@ class StepRef:
                                  "take it from wf[…] before selecting")
         return replace(self, columns={"header": True})
 
+    def __iter__(self):
+        # Without this, Python iterates by __getitem__(0), (1), … and every
+        # index is a valid pick, so list(wf["s"]) never ends (012 #20).
+        raise TypeError(f"wf[{self.id!r}] is a step reference, not a list: "
+                        "it can't be iterated or passed where names go")
+
     def __getitem__(self, key: Any) -> "StepRef":
         """``wf["p"][1:5]``, ``[cols["a":"c"]]``, ``[1:5, cols[…]]`` — in any order.
 

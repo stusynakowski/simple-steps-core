@@ -14,7 +14,7 @@
 >
 > | # | The app saw | Core's run |
 > |---|---|---|
-> | C42.20 | assign: (empty message) | **hangs**: `checks.check` runs `list(on)` on a `StepRef`; with no `__iter__`, Python iterates `wf["s"][0]`, `[1]`, … forever (100 s at full CPU, stopped). Priority 1 |
+> | C42.20 | assign: (empty message) | **hangs**: `checks.check` runs `list(on)` on a `StepRef`; with no `__iter__`, Python iterates `wf["s"][0]`, `[1]`, … forever (100 s at full CPU, stopped). Priority 1. **Fixed 2026-11-09**: a step reference isn't iterable, and `join(on=wf[…])` / `on=res[…]` are refused with #19 and #20's proposed text |
 > | C41 | reading `step.formula` raises `PayloadError` | `step.formula` prints `mod.sort(by=<Operation n>)(wf["s"])`: no crash, still wrong |
 > | C42.38 | assign: `'ResRef' object is not iterable` | accepted, printed `mod.sort(by=res["db"])(wf["s"])`: accepted wrongly (C43's kind) |
 > | C40 | — | confirmed: the Python form saves as `summarize[mod.map()](wf["s"], llm=res["db"])`; the same text is refused by `formula()` |

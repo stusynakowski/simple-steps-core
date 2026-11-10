@@ -303,6 +303,13 @@ def join(left: Any, right: Any, *, on: Any = None, how: str = "inner",
     """Merge two grids on a shared key, like ``pd.merge``. The row count is
     **unknown** until it runs (1:1, 1:many, many:many); columns are the union,
     with ``suffixes`` applied to any non-key collision."""
+    for key in (on if isinstance(on, (list, tuple)) else [on]):
+        if isinstance(key, ResRef):
+            raise TypeError(f"join(on=res[{key.name!r}]): join applies no tool, so it takes no resource")
+        if isinstance(key, StepRef):
+            raise TypeError(f"join(on={key.id!r}): join(on=…) is a setting, and settings are "
+                            "literals, the key column's name, on=\"city\". The steps it "
+                            "combines go first, as wf[\"…\"]")
     return _combine_op("join", (left, right),
                        {"on": on, "how": how, "suffixes": list(suffixes)})
 
@@ -396,6 +403,6 @@ def _run_combine(operation: Operation, frames: list[pd.DataFrame]) -> Output:
 from .checks import columns_unknown, predicted_columns  # noqa: E402
 from .operation import Operation  # noqa: E402
 from .output import Output, VALUE_COLUMN  # noqa: E402
-from .references import StepRef  # noqa: E402
+from .references import ResRef, StepRef  # noqa: E402
 from .output import ROW_ID, _is_missing, _typed, is_id_column  # noqa: E402
 from .workflow import Workflow  # noqa: E402
