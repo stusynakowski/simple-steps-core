@@ -70,14 +70,13 @@ the secret again, and the steps that use that resource wait for it.
 | a list, a list of dicts, a dict | typed Parquet (`list<…>`, `struct`, `map<string, …>`) | **yes** when the column has one shape | yes |
 | a datetime with a time zone, a `Decimal`, `bytes` | typed Parquet | **yes** | yes |
 | a mixed column (`1`, `"a"`), tuples, dict keys that aren't strings, ints past 64 bits | tagged JSON: each value names its type | **yes** | Parquet refuses all four as typed columns; tagged JSON is to build |
-| a numpy array, any dtype but `object` | `media/<hash>.npy`, written without pickle | **yes**: dtype, shape, memory order, byte order, `NaN`s | yes: uint8 images, float16/32, bool, complex, datetime64, structured, Fortran order, 0-d, big-endian |
+| a numpy array (a tensor), any dtype but `object` | `media/<hash>.npy`, written without pickle | **yes**: dtype, shape, memory order, byte order, `NaN`s | yes: uint8 images, float16/32, bool, complex, datetime64, structured, Fortran order, 0-d, big-endian |
 | a numpy array of `object` | tagged JSON when its items can be; else not saved | when its items are | `.npy` refuses it without pickle |
 | a Pillow image, modes `1`, `L`, `LA`, `P`, `RGB`, `RGBA`, `I;16` | `media/<hash>.png` | **pixels yes** | yes |
 | a Pillow image, modes `I`, `F`, `CMYK` | `media/<hash>.tiff` | **pixels yes** | yes. (PNG turns `I` into `I;16`, and refuses `F` and `CMYK`) |
 | an image's file format and metadata (EXIF, `info`) | `meta.json`, when JSON can hold it | **no, today**: a JPEG saved as PNG keeps its pixels and loses `format` and `info` | yes: `format` JPEG→PNG, `info` four keys→none. S-D2 |
 | a Plotly figure | `media/<hash>.json`, Plotly's JSON | **the figure yes**: every field the same, the JSON stable from the first reload on | yes. Two gaps, both to close: an array inside a figure loads as Plotly's encoded form `{'dtype', 'bdata'}`, not an array (core decodes it back); and the figure's data version changes on reload (core versions a figure by its canonical JSON). S-D3 |
 | an object whose class gives `to_saved()` / `from_saved()` | what the class writes; the class found through the catalog | **yes**, as the class defines | to build |
-| a torch tensor | not saved today | — | torch isn't installed in core or the app. Later, through `safetensors`, when a user needs it |
 | any other object | **not saved** | **no**: the step loads `stale`, *"column `c`: Thing can't be saved; give Thing to_saved(), or re-run"* | Parquet and `.npy` refuse it; pickle is never used |
 
 **What is never saved, by design:** a tool's code (the workflow saves its
@@ -120,7 +119,7 @@ saved)"*).
 
 | | Decision | Recommended |
 |---|---|---|
-| **S-D1** | **Media kinds are built in, as optional codecs**: numpy arrays (`.npy`), Pillow images (PNG, or TIFF for `I`, `F`, `CMYK`), Plotly figures (JSON). Each is used only when its library is installed; core doesn't depend on Pillow or Plotly. More kinds come through the catalog (a codec: a type, `save(value) -> bytes`, `load(bytes) -> value`), torch through `safetensors` first among them | yes |
+| **S-D1** | **Media kinds are built in, as optional codecs**: numpy arrays (`.npy`), Pillow images (PNG, or TIFF for `I`, `F`, `CMYK`), Plotly figures (JSON). Each is used only when its library is installed; core doesn't depend on Pillow or Plotly. More kinds come through the catalog (a codec: a type, `save(value) -> bytes`, `load(bytes) -> value`) | yes. **Tensors are numpy arrays** (owner, 2026-11-16): no torch or other tensor library in core; one would come as a catalog codec only when a user needs it |
 | **S-D2** | **An image's format and metadata.** Keep `format` and JSON-able `info` in `meta.json` and put them back on load; or, for an image a tool read from a file and didn't change, keep the original file's bytes | keep `format` and `info`: the pixels are already exact, and it costs nothing |
 | **S-D3** | **A Plotly figure's identity is its canonical JSON** (keys sorted, arrays decoded), for its data version and the save check; arrays inside it load as numpy arrays | yes: else every saved figure reports a false loss |
 | **S-D4** | **The report**: `k.save` returns it and writes `report.json`; an empty report means exact | yes |
