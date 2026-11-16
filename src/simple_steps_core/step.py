@@ -74,6 +74,17 @@ class _NoLiteral:
 NO_LITERAL = _NoLiteral()
 
 
+class _MissingData:
+    """The :attr:`Step.literal` of a step declared with data that loaded
+    without it (P1c): it is still a data step, so its spec still says so."""
+
+    def __repr__(self) -> str:
+        return "<data not loaded>"
+
+
+MISSING_DATA = _MissingData()
+
+
 def _get_warnings(step: "Step") -> tuple:
     """What checks found, then what is stale (SS7): set apart, so a check
     that writes a step's warnings never drops its stale note."""
@@ -114,11 +125,15 @@ class Step:
     def spec(self) -> "StepSpec":
         """The step's saved form: its name and operation, never its output.
         A literal step's value is its recipe, so a literal is saved."""
-        saved = None
+        saved, data = None, None
         if self.literal is not NO_LITERAL and _literal_problem(self.literal) is None:
             saved = {"value": _encode_argument(self.literal)}
+        elif self.literal is not NO_LITERAL and self.literal is not None:
+            # data, not a literal (a DataFrame): a session folder holds it
+            # (Kernel.save writes where); a light export says it isn't here
+            data = {"in": None}
         return StepSpec(self.name, self.operation.to_dict(),
-                        _checked_extras(self.extras), saved)
+                        _checked_extras(self.extras), saved, data)
 
     @property
     def valid(self) -> bool:

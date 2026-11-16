@@ -481,12 +481,32 @@ class Kernel:
         """A kernel from :meth:`to_json`, checked against *catalog*."""
         return cls._load(json.loads(text), catalog)
 
+    def save(self, folder) -> dict:
+        """Save this session as a folder (plan P1c, docs/design/saving.md):
+        ``workflow.json``, and ``data/<step>.parquet`` for each step declared
+        with data. Every column is written the plainest way that reads back
+        exactly, and checked; the report (also ``report.json``) lists what
+        couldn't be kept exactly, and ``report["exact"]`` is True when nothing
+        was. Saving again into the same folder replaces it."""
+        from . import saving
+        return saving.save(self, folder)
+
     @classmethod
-    def _load(cls, blob: dict, catalog: Catalog) -> "Kernel":
+    def load(cls, folder, catalog: Catalog) -> "Kernel":
+        """A kernel from a session folder :meth:`save` wrote, checked against
+        *catalog*. Runs no code: a step whose data is missing, changed since
+        the save or wasn't saved loads ``invalid``, saying why."""
+        from . import saving
+        return saving.load(cls, folder, catalog)
+
+    @classmethod
+    def _load(cls, blob: dict, catalog: Catalog, *, data: dict | None = None,
+              data_problems: dict | None = None) -> "Kernel":
         naming = Naming.from_dict(blob.get("naming"))
         kernel = cls(catalog, naming)
         blob = {k: v for k, v in blob.items() if k not in ("catalog", "naming")}
-        kernel.workflow = Workflow.from_dict(blob, catalog=catalog, naming=naming)
+        kernel.workflow = Workflow.from_dict(blob, catalog=catalog, naming=naming,
+                                             data=data, data_problems=data_problems)
         return kernel
 
     # ── display ──────────────────────────────────────────────────────────

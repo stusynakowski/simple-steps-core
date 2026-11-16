@@ -1,0 +1,294 @@
+"""Saving a session as a folder, and loading it back (plan P1c; saving.md).
+
+Layer 1: the workflow and the data entered into its steps. A DataFrame
+assigned to a step was dropped by ``to_json``, and ``run_all`` then raised
+(found 2026-11-16). Now it is saved as ``data/<step>.parquet``, each column
+written the plainest way that reads back exactly, checked by data version;
+what can't be saved is reported, and loads as an ``invalid`` step, never a
+raise.
+"""
+
+import datetime as dt
+import decimal
+import json
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from simple_steps_core import Catalog, Kernel, mod, tool, wf
+from simple_steps_core.output import _data_version
+
+
+@tool
+def dbl(n: int) -> int:
+    return 2 * n
+
+
+CAT = Catalog(tools=[dbl])
+
+
+def _roundtrip(tmp_path, frame, name="s"):
+    k = Kernel(CAT)
+    k[name] = frame
+    report = k.save(tmp_path / "session")
+    loaded = Kernel.load(tmp_path / "session", CAT)
+    return k, loaded, report
+
+
+def test_a_dataframe_step_is_saved_and_loads_back_the_same(tmp_path):
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"n": [1, 2, 3], "name": ["Ada", "Ben", "Cy"]})
+    k["t"] = dbl[mod.map()](wf["s"])
+    k.run_all()
+    report = k.save(tmp_path / "session")
+    assert report["exact"] is True
+    assert (tmp_path / "session" / "workflow.json").exists()
+    assert (tmp_path / "session" / "data" / "s.parquet").exists()
+
+    loaded = Kernel.load(tmp_path / "session", CAT)
+    assert loaded.step("s").state == "completed"
+    assert _data_version(loaded.step("s").output.data) == _data_version(k.step("s").output.data)
+    loaded.run_all()
+    assert loaded.step("t").output.data["t"].tolist() == [2, 4, 6]
+
+
+@pytest.mark.parametrize("column", [
+    pytest.param([1, None, 3], id="ints with a gap"),
+    pytest.param([1.0, None, float("nan")], id="None apart from NaN"),
+    pytest.param([[0, 2], [1], []], id="lists"),
+    pytest.param([(1, "a"), (2, "b"), (3, "c")], id="tuples"),
+    pytest.param([{"a": 1}, {"b": "x"}, {}], id="dicts with different keys"),
+    pytest.param([1, "a", 2.5], id="mixed types"),
+    pytest.param([2 ** 70, 1, -2 ** 65], id="ints past 64 bits"),
+    pytest.param([True, 1, 0], id="bool apart from int"),
+    pytest.param([dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc), None, None], id="datetimes"),
+    pytest.param([decimal.Decimal("1.10"), None, None], id="decimals"),
+    pytest.param([b"\x00\xff", b"", None], id="bytes"),
+    pytest.param([np.float32(1.5), np.int8(3), None], id="numpy scalars"),
+    pytest.param([{1: "int key"}, {(1, 2): "tuple key"}, None], id="non-string keys"),
+    pytest.param([{"$dict": "looks like a tag"}, None, None], id="a dict that looks like a tag"),
+])
+def test_every_kind_of_column_reads_back_exactly(tmp_path, column):
+    frame = pd.DataFrame({"c": pd.Series(column, dtype=object), "n": [1, 2, 3]})
+    k, loaded, report = _roundtrip(tmp_path, frame)
+    assert report["exact"] is True
+    before, after = k.step("s").output.data, loaded.step("s").output.data
+    assert _data_version(after) == _data_version(before)
+    assert [type(v) for v in after["c"]] == [type(v) for v in before["c"]]
+
+
+def test_dtypes_column_names_and_the_index_are_kept(tmp_path):
+    frame = pd.DataFrame({0: [1, 2], "2023": [1.5, 2.5], "flag": [True, False],
+                          "when": pd.to_datetime(["2026-01-01", "2026-02-01"])},
+                         index=pd.Index(["a", "b"], name="id"))
+    k, loaded, report = _roundtrip(tmp_path, frame)
+    assert report["exact"] is True
+    before, after = k.step("s").output.data, loaded.step("s").output.data
+    assert list(after.columns) == list(before.columns)
+    assert list(after.dtypes.astype(str)) == list(before.dtypes.astype(str))
+    assert list(after.index) == list(before.index)
+    assert _data_version(after) == _data_version(before)
+
+
+def test_a_typed_column_opens_without_core(tmp_path):
+    frame = pd.DataFrame({"n": [1, 2, 3], "name": ["Ada", "Ben", "Cy"]})
+    _roundtrip(tmp_path, frame)
+    plain = pd.read_parquet(tmp_path / "session" / "data" / "s.parquet")
+    assert plain["n"].tolist() == [1, 2, 3]
+    assert plain["name"].tolist() == ["Ada", "Ben", "Cy"]
+
+
+def test_a_value_that_cant_be_saved_is_reported_and_loads_invalid(tmp_path):
+    class Model:
+        pass
+
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"m": [Model(), Model()], "n": [1, 2]})
+    k["u"] = [1, 2, 3]
+    report = k.save(tmp_path / "session")
+    assert report["exact"] is False
+    assert "m" in report["steps"]["s"]["not_saved"]
+    assert "Model" in report["steps"]["s"]["not_saved"]["m"]
+    assert json.loads((tmp_path / "session" / "report.json").read_text())["exact"] is False
+
+    loaded = Kernel.load(tmp_path / "session", CAT)
+    assert loaded.step("s").state == "invalid"
+    assert any("m" in p.message and "Model" in p.message for p in loaded.step("s").problems)
+    assert loaded.step("u").state == "completed"
+    loaded.run_all()                                  # never raises
+
+
+def test_a_missing_data_file_loads_invalid_and_runs_the_rest(tmp_path):
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"n": [1, 2]})
+    k["t"] = dbl[mod.map()](wf["s"])
+    k["u"] = [1, 2]
+    k.save(tmp_path / "session")
+    (tmp_path / "session" / "data" / "s.parquet").unlink()
+
+    loaded = Kernel.load(tmp_path / "session", CAT)
+    assert loaded.step("s").state == "invalid"
+    assert any("data/s.parquet" in p.message for p in loaded.step("s").problems)
+    assert loaded.step("t").state == "invalid"
+    loaded.run_all()
+    assert loaded.step("u").state == "completed"
+
+
+def test_a_changed_data_file_loads_invalid_naming_it(tmp_path):
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"n": [1, 2]})
+    k.save(tmp_path / "session")
+    other = Kernel(CAT)
+    other["s"] = pd.DataFrame({"n": [5, 6]})
+    other.save(tmp_path / "other")
+    (tmp_path / "other" / "data" / "s.parquet").replace(tmp_path / "session" / "data" / "s.parquet")
+
+    loaded = Kernel.load(tmp_path / "session", CAT)
+    assert loaded.step("s").state == "invalid"
+    assert any("changed since it was saved" in p.message for p in loaded.step("s").problems)
+
+
+def test_the_light_export_says_the_data_isnt_in_it_and_never_raises():
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"n": [1, 2]})
+    k["t"] = dbl[mod.map()](wf["s"])
+    loaded = Kernel.from_json(k.to_json(), CAT)
+    assert loaded.step("s").state == "invalid"
+    assert any("k.save" in p.message for p in loaded.step("s").problems)
+    loaded.run_all()                                  # raised ValueError before
+
+
+def test_a_json_literal_stays_in_the_workflow_file(tmp_path):
+    k = Kernel(CAT)
+    k["lim"] = 38
+    k["xs"] = [3, 1, 2]
+    k.save(tmp_path / "session")
+    assert not (tmp_path / "session" / "data").exists() or \
+        not any((tmp_path / "session" / "data").iterdir())
+    loaded = Kernel.load(tmp_path / "session", CAT)
+    for name in ("lim", "xs"):           # a list literal is one value (D11)
+        assert loaded.step(name).output.data[name].tolist() == \
+            k.step(name).output.data[name].tolist()
+
+
+def test_a_step_name_that_isnt_a_safe_file_name_is_escaped(tmp_path):
+    k = Kernel(CAT)
+    k["a/b c"] = pd.DataFrame({"n": [1, 2]})
+    k.save(tmp_path / "session")
+    files = [p.name for p in (tmp_path / "session" / "data").iterdir()]
+    assert files and all("/" not in f and " " not in f for f in files)
+    loaded = Kernel.load(tmp_path / "session", CAT)
+    assert loaded.step("a/b c").output.data["n"].tolist() == [1, 2]
+
+
+def test_saving_again_replaces_the_data(tmp_path):
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"n": [1, 2]})
+    k.save(tmp_path / "session")
+    k["s"] = pd.DataFrame({"n": [7, 8, 9]})
+    k.save(tmp_path / "session")
+    loaded = Kernel.load(tmp_path / "session", CAT)
+    assert loaded.step("s").output.data["n"].tolist() == [7, 8, 9]
+
+
+def test_a_data_steps_spec_round_trips_without_its_data():
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"n": [1, 2]})
+    k["t"] = dbl[mod.map()](wf["s"])
+    assert Kernel.from_spec(k.spec, CAT).spec == k.spec
+
+
+def test_resaving_a_session_whose_data_didnt_load_says_so(tmp_path):
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"n": [1, 2]})
+    k.save(tmp_path / "a")
+    (tmp_path / "a" / "data" / "s.parquet").unlink()
+    loaded = Kernel.load(tmp_path / "a", CAT)
+    assert loaded.step("s").formula == "<data not loaded>"
+    report = loaded.save(tmp_path / "b")
+    assert report["exact"] is False
+    assert "wasn't loaded" in report["steps"]["s"]["not_saved"]["*"]
+    assert Kernel.load(tmp_path / "b", CAT).step("s").state == "invalid"
+
+
+# ── the tagged form, value by value ──────────────────────────────────────
+from simple_steps_core.saving import NotSaved, tag, untag  # noqa: E402
+
+
+@pytest.mark.parametrize("value", [
+    pd.NA, pd.NaT, np.datetime64("2026-01-01T10:00", "m"), np.timedelta64(5, "s"),
+    np.bool_(True), np.float16(0.5), bytearray(b"ab"), complex(1, -2), float("inf"),
+    pd.Timestamp("2026-03-01 12:00:00.000000001", tz="Europe/London"),
+    pd.Timedelta(90, unit="s"), dt.date(2026, 1, 2), dt.time(10, 30, 5),
+    dt.timedelta(days=1, seconds=3, microseconds=7),
+    dt.datetime(2026, 1, 1, 9, tzinfo=__import__("zoneinfo").ZoneInfo("Europe/Paris")),
+    {1, 2}, frozenset({"a"}), {"k": [(1, None), {2.5}]},
+])
+def test_tag_gives_every_kind_of_value_back(value):
+    back = untag(json.loads(json.dumps(tag(value))))
+    assert type(back) is type(value)
+    assert json.dumps(tag(back), sort_keys=True) == json.dumps(tag(value), sort_keys=True)
+
+
+@pytest.mark.parametrize("value", [object(), np.array([1])[0:1].astype(object)[0:1][0:1],
+                                   np.str_("x"), __import__("collections").OrderedDict(a=1)])
+def test_tag_refuses_what_it_cant_hold(value):
+    if isinstance(value, np.ndarray):
+        value = np.array([object()], dtype=object)[0]
+    with pytest.raises(NotSaved):
+        tag(value)
+
+
+def test_a_value_that_isnt_a_table_is_kept_in_the_workflow_file(tmp_path):
+    k = Kernel(CAT)
+    k["when"] = dt.datetime(2026, 1, 1, 9, 30)
+    k["arr"] = np.array([1, 2, 3])
+    report = k.save(tmp_path / "session")
+    assert report["steps"]["when"]["file"] == "workflow.json"
+    assert "ndarray" in report["steps"]["arr"]["not_saved"]["*"]   # media: a later piece
+    loaded = Kernel.load(tmp_path / "session", CAT)
+    assert loaded.step("when").output.data.iloc[0, 0] == dt.datetime(2026, 1, 1, 9, 30)
+    assert loaded.step("arr").state == "invalid"
+
+
+@pytest.mark.parametrize("frame, why", [
+    (pd.DataFrame([[1, 2]], columns=pd.MultiIndex.from_tuples([("a", "x"), ("a", "y")])),
+     "several header"),
+    # repeated column names: core can't assign such a table yet (plan P1, R-cols)
+])
+def test_a_table_core_cant_save_is_reported(tmp_path, frame, why):
+    k = Kernel(CAT)
+    k["s"] = frame
+    report = k.save(tmp_path / "session")
+    assert why in report["steps"]["s"]["not_saved"]["*"]
+    assert Kernel.load(tmp_path / "session", CAT).step("s").state == "invalid"
+
+
+def test_reserved_and_case_colliding_names_get_files_of_their_own(tmp_path):
+    k = Kernel(CAT)
+    for name, n in [("con", 1), ("S", 2), ("s", 3)]:
+        k[name] = pd.DataFrame({"n": [n]})
+    report = k.save(tmp_path / "session")
+    files = {report["steps"][n]["file"] for n in ("con", "S", "s")}
+    assert len(files) == 3 and "data/con.parquet" not in files
+    loaded = Kernel.load(tmp_path / "session", CAT)
+    assert [loaded.step(n).output.data["n"].iloc[0] for n in ("con", "S", "s")] == [1, 2, 3]
+
+
+def test_a_removed_steps_data_file_goes_on_the_next_save(tmp_path):
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"n": [1]})
+    k["t"] = pd.DataFrame({"n": [2]})
+    k.save(tmp_path / "session")
+    k.remove("t")
+    k.save(tmp_path / "session")
+    assert sorted(p.name for p in (tmp_path / "session" / "data").iterdir()) == ["s.parquet"]
+
+
+def test_a_broken_workflow_file_isnt_a_reason_not_to_save(tmp_path):
+    (tmp_path / "session").mkdir()
+    (tmp_path / "session" / "workflow.json").write_text("{not json")
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"n": [1]})
+    assert k.save(tmp_path / "session")["exact"] is True

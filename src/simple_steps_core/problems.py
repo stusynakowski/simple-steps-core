@@ -45,6 +45,7 @@ CODES: dict[str, str] = {
     "read_stale": "the step read a step that is stale now: run(x) runs it first",
     "step_name_taken": "a step's output keeps 'value': its input already has a column of the step's name (D9)",
     "row_gone": "a picked row of a source is gone since its data was replaced (D-picks)",
+    "data_missing": "a step declared with data loaded without it: the file is missing, changed since the save, or the data wasn't saved exactly (P1c)",
     # arguments and columns
     "bad_argument": "an argument isn't a literal or a reference",
     "unknown_argument": "an argument isn't a parameter the tool takes",

@@ -114,6 +114,13 @@ quotes, "n"*. A step is `wf["s"]`, a resource `res["db"]`, and a resource may
 follow the input by position, as in Python. Settings are literals, or a step;
 never a resource.
 
+**15. A saved session is exact, or says where it isn't.** `k.save(folder)`
+writes the workflow and the data you gave its steps, each step's table as a
+Parquet file you can open anywhere; `Kernel.load(folder, catalog)` reads it
+back and runs nothing. Anything that couldn't be kept exactly is listed in
+the save's report, and a step whose data is missing or changed loads
+`invalid`, saying why.
+
 ## What core can't do, by design
 
 - See inside a tool, or inside a `table` tool's result.

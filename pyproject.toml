@@ -22,11 +22,13 @@ classifiers = [
   "Intended Audience :: Developers",
   "Topic :: Software Development :: Libraries"
 ]
-# One runtime dependency. pandas backs the grid model: its index is the stable
-# row id that references, lineage and per-row staleness rely on. Notebooks are
-# an extra, so importing this package pulls in nothing else.
+# Two runtime dependencies. pandas backs the grid model: its index is the stable
+# row id that references, lineage and per-row staleness rely on. pyarrow writes
+# a saved session's tables as Parquet, exactly (k.save; plan P-D15). Notebooks
+# are an extra, so importing this package pulls in nothing else.
 dependencies = [
   "pandas>=2.0",
+  "pyarrow>=14",
 ]
 
 [project.optional-dependencies]

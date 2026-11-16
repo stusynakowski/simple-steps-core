@@ -16,7 +16,8 @@ checked before they run and re-run a row at a time, in a Python session or
 behind the app's UI. Why it's built this way is the app's
 [why-we-are-building-this.md](https://github.com/stusynakowski/Simple_Steps/blob/main/docs/why-we-are-building-this.md).
 
-It is a **backend library — it ships no UI** and depends on `pandas` alone.
+It is a **backend library — it ships no UI** and depends on `pandas` and
+`pyarrow` (which saves a session's tables as Parquet) alone.
 
 ## Install
 

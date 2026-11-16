@@ -3208,7 +3208,8 @@ class Workflow:
     @classmethod
     def from_dict(cls, blob: dict, tools: dict[str, Callable] | None = None,
                   resource_types: dict[str, type] | None = None, *,
-                  catalog: "Catalog | None" = None, naming: Any = None) -> "Workflow":
+                  catalog: "Catalog | None" = None, naming: Any = None,
+                  data: dict | None = None, data_problems: dict | None = None) -> "Workflow":
         """Rebuild a Workflow from either export — all at once.
 
         Every step goes through the same :func:`check` and :func:`stage` the
@@ -3219,7 +3220,13 @@ class Workflow:
 
         With *catalog*, tools and resource types come from it alone, and every
         step is checked against it.
+
+        *data* gives the steps declared with data (a DataFrame) their data,
+        by name, as a session folder holds it (``Kernel.load``, saving.py). A
+        data step without it loads ``invalid``, saying why (*data_problems*,
+        or that the file doesn't hold its data); it never raises at run.
         """
+        data, data_problems = dict(data or {}), dict(data_problems or {})
         version = blob.get("version")
         if not isinstance(version, int) or version > FORMAT_VERSION:
             # 008 K17: an older core must refuse a newer file, never strip it.
@@ -3252,6 +3259,25 @@ class Workflow:
                     sid, _decode_argument(entry["literal"]["value"]),
                     dict(entry.get("extras") or {}))
                 continue
+            if sid in data:
+                workflow.steps[sid] = cls._literal_step(sid, data[sid],
+                                                        dict(entry.get("extras") or {}))
+                continue
+            if ("data" in entry or _holds_no_data(entry.get("operation"))) \
+                    and sid not in (blob.get("outputs") or {}):
+                # a step declared with data the file doesn't hold (P1c): invalid,
+                # saying where its data is, never a source that raises at run
+                why = data_problems.get(sid) or (
+                    f"{sid!r} was declared with data, which this file doesn't hold. "
+                    f"Save the session with k.save(folder) and load it with "
+                    f"Kernel.load(folder, catalog), or assign the data again: k[{sid!r}] = …")
+                source = Operation(tool="identity", fn=identity)[mod.source()]
+                problems = [Problem(why, "data_missing")]
+                workflow.steps[sid] = Step(sid, source, stage(source, workflow, problems, sid),
+                                           problems=tuple(problems),
+                                           extras=dict(entry.get("extras") or {}),
+                                           literal=MISSING_DATA)
+                continue
             operation = _attach_bound(
                 Operation.from_dict(entry["operation"], tools), workflow.resources)
             if catalog is not None:
@@ -3267,6 +3293,10 @@ class Workflow:
             encoded = (blob.get("outputs") or {}).get(sid)
             if encoded is not None:
                 workflow.steps[sid].output = _decode_output(encoded)
+                if "data" in entry:
+                    # a data step restored from its output: that is its data,
+                    # so it saves as a data step again
+                    workflow.steps[sid].literal = workflow.steps[sid].output.data.copy()
         for sid in (blob.get("outputs") or {}):
             workflow._restage_after(sid)
         return workflow
@@ -3284,6 +3314,17 @@ class Workflow:
 
     def __repr__(self) -> str:
         return f"<Workflow {len(self.steps)} step(s): {list(self.steps)}>"
+
+
+def _holds_no_data(operation: Any) -> bool:
+    """Is *operation* (a saved dict) what a step declared with a DataFrame
+    saves as, ``identity[mod.source()]()``, with no data behind it? Files
+    written before the data marker (P1c) save such a step this way."""
+    if not isinstance(operation, dict) or operation.get("tool") != "identity":
+        return False
+    kinds = [m.get("kind") for m in operation.get("modifiers") or []]
+    return kinds == ["source"] and operation.get("input") is None \
+        and not operation.get("arguments")
 
 
 def _short_hash(value: Any) -> str:
@@ -3428,6 +3469,7 @@ from .references import (  # noqa: E402
 from .run import _is_auto, _provisional, _resolve_auto  # noqa: E402
 from .specs import WorkflowSpec  # noqa: E402
 from .step import (  # noqa: E402
+    MISSING_DATA,
     NO_LITERAL,
     Step,
     _changes_text,

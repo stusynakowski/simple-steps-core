@@ -127,11 +127,13 @@ def test_a_literal_step_is_saved_with_its_value(value):
 def test_a_dataframe_assigned_in_python_is_data_and_isnt_saved():
     k = Kernel(Catalog())
     k["t"] = pd.DataFrame({"a": [1, 2]})
-    assert "literal" not in json.loads(k.to_json())["steps"][0]
+    entry = json.loads(k.to_json())["steps"][0]
+    assert "literal" not in entry and entry["data"] == {"in": None}
     loaded = Kernel.from_json(k.to_json(), Catalog())
-    assert loaded.step("t").state == "staged"       # a source with no data
-    with pytest.raises(ValueError, match="has no data"):
-        loaded.run("t")
+    # the light export doesn't hold the data: invalid, saying where it is (P1c)
+    assert loaded.step("t").state == "invalid"
+    assert any("k.save(folder)" in p.message for p in loaded.step("t").problems)
+    loaded.run_all()                                 # never raises
 
 
 def test_a_literal_keeps_its_extras_and_shows_its_value(k, cat):

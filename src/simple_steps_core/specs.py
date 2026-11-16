@@ -53,11 +53,17 @@ class StepSpec:
     #: every other step, and for values that aren't literals (a DataFrame is
     #: data, and isn't saved).
     literal: dict | None = None
+    #: For a step declared with data that isn't a literal (a DataFrame), where
+    #: that data is: ``{"in": None}`` in a light export (it isn't in the
+    #: file), else the session folder's manifest (``Kernel.save``, saving.py).
+    data: dict | None = None
 
     def to_dict(self) -> dict:
         out = {"name": self.name, "operation": _plain(self.operation)}
         if self.literal is not None:
             out["literal"] = _plain(self.literal)
+        if self.data is not None:
+            out["data"] = _plain(self.data)
         if self.extras:
             out["extras"] = _plain(self.extras)
         return out

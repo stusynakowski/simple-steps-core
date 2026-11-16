@@ -1328,9 +1328,11 @@ def test_light_round_trip_reproduces_structure_but_not_counts(ran):
     back = Workflow.from_json(ran.to_json(), {"score": score.fn})
     assert list(back.steps) == list(ran.steps)
     assert back.step("scored").operation == ran.step("scored").operation
-    # Cardinality came from the data, which a light export does not carry.
+    # Cardinality came from the data, which a light export does not carry;
+    # nor does it carry raw's data, so its reader says where that is (P1c).
     assert back.step("scored").output.meta["expected"] is None
-    assert back.step("scored").describe() == "map score · one cell per upstream row"
+    assert back.step("raw").state == "invalid"
+    assert "k.save(folder)" in back.step("scored").describe()
 
 
 def test_full_round_trip_restores_payloads_and_staging(ran):
@@ -1341,10 +1343,12 @@ def test_full_round_trip_restores_payloads_and_staging(ran):
 
 
 def test_a_light_reloaded_source_step_asks_for_its_data(ran):
-    """The light export carries no payloads, so the source step needs supplying."""
+    """The light export carries no payloads, so the source step needs supplying.
+    It loads invalid, saying so (P1c), and running never raises."""
     back = Workflow.from_json(ran.to_json(), {"score": score.fn})
-    with pytest.raises(ValueError, match="has no data"):
-        back.run("raw")
+    assert back.step("raw").state == "invalid"
+    assert any("assign the data again" in p.message for p in back.step("raw").problems)
+    back.run_all()
     back["raw"] = pd.DataFrame({"n": [1, 2, 3]})
     back.run_all()
     assert back.step("scored").output.values == [10, 20, 30]
