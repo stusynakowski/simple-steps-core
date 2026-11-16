@@ -194,3 +194,147 @@ columns stored on every derived step, and how far back; the hidden identity
 staying; a cell's expected structure (dtype, shape) before a run; what
 unpacking an array means (rows on its first axis, pixels, channels); a cell's recipe as
 `k.cell`'s answer (plan P7r); a `table` tool returning one value gives a 1×1 table.
+
+## 8. Table, grid, cell: the definitions
+
+*Proposed 2026-11-16, from the owner's model (§7). The words for model.md §2
+once agreed.*
+
+| Word | Is | Holds | Is never |
+|---|---|---|---|
+| **table** | what one step holds, titled by the step's name, `wf["s"]` | a **header**, **index columns** and a **grid**; a plan before it runs, a result after; one table per step | another kind of object when picked: any pick of a table (a cell, a row, a column, a block) is a smaller table |
+| **header** | the ordered names of the table's columns | one name per column: a string, unique, a column type (§9); `#` only for index columns | data |
+| **index columns** | the columns that say where rows are and where they came from. **`#`** divides the table | `#`: the row's number here, `0…n-1`, in current order. Left of it, **reference columns**: `#<step>` (the row number(s) in that step), `#<step>.idx` (the place in that row's list) | data: read-only, never passed to a tool; copied into data only with `mod.copy` |
+| **grid** | the table's data cells: its rows × its data columns, right of `#` | the cells | the index columns |
+| **row** | one **sample** of this step: tidy on the step's own terms. What a sample is can change between steps (§10); the reference columns record how | one cell per data column, and its index cells | a position that survives edits: core keeps a hidden identity underneath (rule 10) |
+| **column** | one **variable** of this step | one cell per row, a name, a column type | — |
+| **cell** | one row × one data column | a **value** (any Python value, or *absent*: no value at all, apart from `None`); a **state** (`pending`, `known`, `failed`, `blocked`, `absent`, `maybe`, `invalid`; `stale` a mark over `known`); its **type** (expected before the run, observed after); a failed cell's **error**; its **recipe** (§7, plan P7r): the tool, the literal arguments and defaults, and the input cells that produce it, **known from the moment the step is declared** (run: a staged cell's `k.cell` already names its input cells) | a formula of its own: a cell is produced by its step's one expression |
+
+## 9. Column types: what a tool, under its modifiers, is expected to produce
+
+The owner (2026-11-16): *"we need to define the datatype that specifies what
+is expected when we modify a tool."* A **column type** says what every cell of
+a column holds, and how sure core is.
+
+**Today (run):** a type is a plain name (`int`, `float`, `dict`, `ndarray`,
+`unknown`), or a union after a run (`int | list | str`); rows and columns each
+carry a certainty (`exact`, `stated`, `bounded`, `unknown`) with the reason
+and how to resolve it. `mod.expect` states rows and columns, not types;
+`mod.cast` converts to `str`, `int`, `float`, `bool`. Not expressible: an
+array's dtype and shape, a list's item type before the run (an expand's item
+type plans as `unknown`), a record's field types.
+
+**Proposed: one small type language**, used by plans, `mod.expect`, the view
+and saving (saving.md §4):
+
+| Type | Written | From |
+|---|---|---|
+| scalars | `int`, `float`, `bool`, `str`, `bytes`, `datetime`, `decimal` | the annotation |
+| none-able | `T \| None` | the annotation |
+| list | `list[T]` | `-> list[str]` |
+| tuple | `tuple[T1, T2]` (fixed length) | `-> tuple[int, int]` |
+| mapping | `dict[str, T]` (keys known by running) | `-> dict` |
+| record | `record{r: array, g: array, b: array}` (fields known) | a `NamedTuple`, `dataclass`, `TypedDict` |
+| array | `array[uint8, (64, 64, 3)]`; a `?` for a size not known | `Annotated[np.ndarray, …]`, `mod.expect`, or the first row that runs |
+| image | `image[RGB, 64×64]` | the same |
+| figure | `figure` | a Plotly figure |
+| table in a cell | `table{…}` | a `DataFrame` returned under `map` |
+| object | `object[Model]` | any other class |
+| union, unknown | `A \| B`; `unknown` | after a run of mixed values; no annotation |
+
+Each with a **certainty**: *declared* (the annotation), *stated*
+(`mod.expect`), *observed* (after a run, or the first rows of one), *unknown*.
+
+**How a move changes a type** (the "modify a tool" rule): the tool's return
+type, and the verb, give the step's column types before anything runs.
+
+| Move | In | Out |
+|---|---|---|
+| `map` | the tool returns `T` | a column of `T`; a record `T` spreads into its fields' columns |
+| `filter` | — | the input's columns and types, unchanged |
+| `expand` | `list[T]` / `tuple[T, …]` | a column of `T`, plus `#v`, `#v.idx`; a `dict[str, T]` gives `key: str`, `value: T` |
+| `collapse` | a column of `T` | `list[T]` per group (`gather`), or the tool's return per group |
+| `widen` | `record{…}` / `dict[str, T]` / `tuple[T1…Tn]` | one column per field / key (known by running) / `var0…` |
+| `pack` | columns `a: A, b: B` | `record{a: A, b: B}` |
+| `table` | the whole table | the `DataFrame` it returns: `unknown` columns unless declared |
+| `join`, `stack` | two tables | the union of columns; a gap is *absent* |
+| `sweep` | settings | the settings' columns, and the tool's `T` |
+
+## 10. Every move between steps
+
+*Run 2026-11-16 ([grid-probes/moves.py](grid-probes/moves.py)).* What changes,
+and in which direction. ✓ one step; ✓✓ two steps (one level each); ✗ a gap;
+⊘ outside core by design.
+
+| Acts on | Choose fewer | Reorder or rename | Split one into many | Merge many into one | Make new |
+|---|---|---|---|---|---|
+| **rows** (samples) | `filter`, `slice`, `distinct`, a condition `wf["s"][cols["x"] > 1]` ✓ | `sort` ✓ | `expand`: an item per row ✓ | `collapse(by=…)`: a row per group ✓ | `source`, a value, `sweep` ✓ |
+| **columns** (variables) | `select`, `drop` ✓ | `rename`, `mod.name`, `copy` ✓ | a tool returning a record (RGB → `r`, `g`, `b`) ✓; `widen` of a dict ✓ | a tool of several parameters (unite) ✓; `pack` into a dict ✓ | `map`, `group` ✓ |
+| **inside a cell** | — | — | a list → rows (`expand`), a dict → columns (`widen`) ✓; **an array ✗** (`expand` stops the run; `widen` drops it silently) | a row → a dict (`pack`), a group's rows → lists (`collapse`) ✓; a block → one cell, `pack` then `collapse` ✓✓ | — |
+| **between tables** | `join(how="inner")` keeps matches ✓ | — | — | `join` on a key or on lineage, `zip_` of aligned steps, `stack` ✓; **a cross product ✗** (`join` needs `on=`) | `sweep`: one row per combination of settings ✓ |
+
+**Analysis restructurings, as moves:**
+
+| You want | As moves | Status (run) |
+|---|---|---|
+| wide → long (melt, pivot_longer) | `pack(columns=["am", "pm"])`, then `expand(columns=["pk"])` | ✓✓ `key`, value rows |
+| long → wide (pivot, pivot_wider) | `gather_dict` under `collapse(by="name")`, then `widen` | ✓✓ when the columns are named `key` and `value`. **Bound explicitly, a silent wrong answer** (plan P1, B-collapse-arg) |
+| nest, unnest | `pack` + `collapse`; `expand` + `widen` | ✓✓ |
+| a group statistic beside each row (transform) | `collapse(by="ward")`, then `join(…, on="ward")` (or `expand(columns=["#v"])`) | ✓✓ by name; **wrong with an explicit column argument** (B-collapse-arg) |
+| separate a column into several | a tool returning a record | ✓ |
+| unite several columns | a tool of several parameters under `map` | ✓ |
+| a window over rows (running total, rank, lag, rolling mean) | `gather` under `collapse`, a tool on the list, then `expand` | ✓✓ computes, but **can't go back beside its rows**: a tool's list gets new identities (gap: a verb that hands a tool a whole column and keeps its rows, §12) |
+| transpose | a tool under `mod.table()` | ✓, opaque: no lineage through it |
+| a cross product | — | ✗ (`join` needs `on=`); `sweep` covers settings, not tables |
+| fill down, complete missing combinations | a tool under `mod.table()` | ✓, opaque |
+| sample rows at random | a tool with a seed | ✓ (S9 for its reproducibility) |
+| an array's pixels, channels or tiles as rows or columns | — | ✗ (decide what unpacking an array means) |
+
+## 11. Unknown sizes, unknown types, inconsistent rows
+
+*Run 2026-11-16 ([grid-probes/unknown_shapes.py](grid-probes/unknown_shapes.py)).*
+
+**What core knows before a run, and how to tighten it:**
+
+| Case | The plan says (run) | Tightened by |
+|---|---|---|
+| `filter` | rows *bounded*, 0…3: "keeps at most the 3 rows it reads" | running |
+| `expand` | rows *unknown*: "how many items … is only known by running"; item type `unknown` | `-> tuple[T, T]` (a fixed length); `mod.expect(rows=…)` or `min_rows`/`max_rows` (*stated*: run, 1…20) |
+| a `-> dict` under `map` | columns *unknown*: "its keys are its columns, known by running" | declaring a record (`TypedDict`, `dataclass`) |
+| no return annotation | type `unknown` | declaring it |
+| a record return | columns *exact* `r, g, b` | — |
+
+**When rows don't agree with each other** (after the run):
+
+| Case | Core does (run) | Rule |
+|---|---|---|
+| a tool returns different types per row | the column's type is the union, `int \| list \| str`; checks that need one type happen per cell | never coerced |
+| dicts with different keys, widened | the union of keys; a key a row lacks is *absent* (PK6) | never padded with `None` |
+| tuples of different lengths, widened | the step is refused, naming the lengths and rows | never padded |
+| a list that is `None`, expanded | no rows for it, and a warning: "1 row held None, not a list" | — |
+| two lists expanded together, lengths differ | that row fails: "the lists don't line up: a has 3 items, b has 2" | others run |
+| a tool raises on some rows | those cells `failed`, with the error; the others run | `mod.try_except` to let it through |
+
+**The rule underneath:** core never guesses a shape. What it can't know yet is
+*unknown* with the reason and how to resolve it; a reader is checked against
+the plan and waits (D18, plan P5); a row that doesn't fit fails on its own and
+the rest run; nothing is padded, truncated or coerced to make rows agree.
+
+## 12. Boundaries: what core does and doesn't do
+
+**Does:** one table per step; every pick a table; each step moves one level on
+one axis; rows meet only through recorded identity (aligned, lineage, a key);
+a tool sees only plain values; a cell's recipe is always known; every shape
+not known before a run says why; a failure stays in its cells.
+
+**Doesn't, by design** (model.md §12): see inside a tool or a `table` result;
+keep the identity of items in a list a tool rewrote; rebuild a lossy step's
+input (it traces back instead); pair unrelated tables without a key; flatten
+any depth in one step; decide whether a dict is a record or a mapping; know an
+undeclared tool's shape before it runs; trace across workflows.
+
+**Doesn't yet** (gaps, each a decision): unpack an array (pixels, channels,
+tiles); a window over rows that keeps its rows (a verb whose tool gets whole
+columns as lists and returns lists of the same length, rows kept); a cross
+product of two tables; an array's dtype and shape before a run; a `table`
+tool's one-value summary as a 1×1 table.

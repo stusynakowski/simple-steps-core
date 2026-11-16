@@ -103,6 +103,7 @@ earlier if the app is waiting on them (P-D1).
 
 | Shim | What the app works around | Core's fix | Checked |
 |---|---|---|---|
+| **B-collapse-arg** | **A silent wrong answer** (found 2026-11-16). Under `collapse(by=…)`, a column argument written explicitly passes the **whole column** to every group, not the group's rows: `mean[mod.collapse(by="ward")](wf["v"], temp=wf["v"]["am"])` gives ward A 38.23 (all three patients), where A's two average 37.6; a pivot with `value=wf["long"]["pk"]` gives every name the last values. Bound by name, both are right | an explicit column argument under `collapse` passes the group's values, as binding by name does; until then, refused (W14 says pairing inside a collapse isn't built) | **reproduced**; **first in P1** |
 | **C37** | `k.view` / `k.cell` crash on a cell holding an array (an image): `_plain` calls `.item()` on anything with a dtype | unwrap numpy scalars only | **reproduced**: `ValueError: can only convert an array of size 1 to a Python scalar` |
 | **C45** | `formula('wf["s"][1][2]')` raises `SelectionError`, not `FormulaError` | every refusal from `formula()` is a `FormulaError` | **reproduced** |
 | C33 | `inspect.signature(tool)` is `(*args, **kwargs)`, not the function's | a tool carries its function's signature | to run |
