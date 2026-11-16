@@ -184,10 +184,13 @@ artifact; its figures are this page's §1–§3 drawn). In the owner's words:
 | before a slow run, know what will come back ("numpy arrays in this structure") | the plan knows the rows, the columns and the type name (`ndarray`); every cell `pending`; not the dtype or shape. Rows appearing as they finish: P7d | gap: expected structure |
 | a row-wise map passes a grid of cells; modifiers run one function over a grid of arguments | the verb cuts: a row's cells (`map`), a group's lists (`collapse`), the settings' combinations (`sweep`) | matches |
 | cells hold Python objects: arrays, images, plots | yes; `k.view` crashes on arrays today (C37, plan P1) | matches, with a bug |
+| tables are **tidy**: rows are samples, columns are variables; but what a sample is can change between steps, and the user restructures (owner, 2026-11-16) | each step is tidy on its own terms; the reference columns record each change of sample; one level per step (rule 5) | matches |
+| an operation with **several outputs** gives several columns: an RGB image split into `r`, `g`, `b` | a tool returning a `NamedTuple`, `dataclass` or `TypedDict` gives one column per field, planned before the run; a `dict` the same after the run; a tuple stays one cell (run) | matches. Found: `step.plan` shows a re-assigned step's old columns (plan P1, S-plan) |
+| **group rows and columns into one cell** | `pack` (a row's columns into a dict), `collapse` with `gather` (a group's rows into lists); a block is both, two steps (run: ward A's cell holds its two patients as dicts) | matches. Gap: a `table` tool's one-value summary must be returned as a DataFrame |
 | unpack objects into a new grid to explore them | lists and dicts, one level per step (`expand`, then `widen`); arrays don't: `expand` stops the run and `widen` drops the column silently (plan P1, W-arr) | gap for arrays |
 
 **To decide:** the words (title, header, index columns, grid, cell; `#` as the divider); index
 columns stored on every derived step, and how far back; the hidden identity
 staying; a cell's expected structure (dtype, shape) before a run; what
 unpacking an array means (rows on its first axis, pixels, channels); a cell's recipe as
-`k.cell`'s answer (plan P7r).
+`k.cell`'s answer (plan P7r); a `table` tool returning one value gives a 1×1 table.
