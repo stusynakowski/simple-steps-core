@@ -22,6 +22,7 @@ done to a `Kernel` in a plain Python session**, with only core installed.
 | [decisions.md](decisions.md) | Every decision: the open ones first, then the decided ones |
 | [plan.md](plan.md) | **The dev plan**: what's next, in order, what core will and won't build, and the changes the app will see |
 | [observations.md](observations.md) | Key dev observations: what's good about the design, its biggest flaws, and what would help most |
+| [saving.md](saving.md) | Saving and loading a session: what a saved session holds, when you can save, and exactly when something can be lost |
 | [core-asks/](core-asks/) | **The app's requirements** of core: its model of references, picks and lineage (`model.md`), its plan and the probe (`probe.py`) that tests every ask |
 | [docs/old/](../old/) | Superseded pages: background only. Each says what replaced it. Includes phase 4's plan and the app's migration guide, both done |
 

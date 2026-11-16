@@ -20,6 +20,7 @@
 > | [model.md](model.md) | what core is, each rule marked built or not |
 > | [decisions.md](decisions.md) | every decision; the ids below (WR1, PL2, D43, …) are its rows |
 > | [observations.md](observations.md) | what working on core has shown, and why this plan leads with consolidation |
+> | [saving.md](saving.md) | saving and loading a session: what is kept, value by value, and when something can be lost |
 > | [core-asks/](core-asks/) | the app's requirements of core, and the probe that tests them |
 
 ## 1. Where core is (run 2026-11-15/16, at `dbaf4c7`)
@@ -79,7 +80,7 @@ test green as they are. **Behaviour changes** are confirmed first and run the
 | **P0** | **Docs refreshed** | old pages to [docs/old/](../old/); out-of-date claims fixed; this plan | docs | small | — | ✓ 2026-11-15 |
 | **P1** | **Close the app's shims** | each shim in the app's `core_bridge.py` fixed in core, as a patch release the app can pin (§3.1) | fixes | small | P-D5 | to do |
 | **P1b** | **The grid and its picks, written down** (136-A, 136-P0) | no new objects: a cell, a row, a column and a block are picks, and every pick is a grid. One section of model.md (and a line in rules.md) says what a grid holds and how header, row number, lineage and data differ, for the UI, formula text, the agent and a terminal (§3.4, P-D6). Runs alongside P1–P3 | docs | small | P-D6 | to do |
-| **P1c** | **Saving a session as a folder** | a session saves as one folder: the workflow in `workflow.json`, and each step's grid in its own Parquet file, checked to read back exactly. First the loss (data assigned to a step is saved, and a step whose data is missing is `invalid`, never a raise); then outputs, closing the C32 shim (§3.5) | behaviour | medium | P-D12, P-D13, P-D15, P-D16 | to do |
+| **P1c** | **Saving a session as a folder** | a session saves as one folder: the workflow in `workflow.json`, and each step's grid in its own Parquet file, checked to read back exactly. First the loss (data assigned to a step is saved, and a step whose data is missing is `invalid`, never a raise); then outputs, closing the C32 shim (§3.5) | behaviour | medium | P-D12, P-D13, P-D15, P-D16; [saving.md](saving.md) S-D1–S-D5 | to do |
 | **P2** | **States only from the store** | the old flags (`edited`, `stale`, `stale_reason`, `read_stale`) go; `stale` is read off the store like every other state (SM, ST5). The first piece of keeping results (136-P4) | restructure | medium | — (SM decided) | to do |
 | **P3** | **One row relation, and a smaller `workflow.py`** | each verb declares its row map in its plan (PL2); one function answers how two steps' rows relate (WR1); then `workflow.py` and `checks.py` split by concern; a speed test pins goal 5 (§3.2). Row maps are what incremental runs (136-P4) are built on | restructure | large | — (WR1, PL2 decided) | to do |
 | **P4** | **Picks kept by row identity** | a saved pick holds its row's identity and works out its row number each time. Fixes W18 and W9 | behaviour | medium | P3; P-D3 | to do |
@@ -183,64 +184,12 @@ after P3.
 ### 3.5 Saving (owner, 2026-11-16: "we need saving methods")
 
 **A session is a folder** (owner, 2026-11-16: "parquet files for each step,
-or some way that is organized"). A step maps grids to a grid, so what a step
-holds is one table, and each table is saved as its own file. A person can
-open any step's file in pandas, DuckDB, Excel or a notebook without core.
-
-```
-patients.simple-steps/          one session: one folder
-  workflow.json                 the workflow: steps in order, expressions, stages,
-                                resources (never a Secret), extras; per step, the
-                                files below and their data versions. Format 5
-  data/<step>.parquet           data typed, pasted or uploaded into a step (layer 1)
-  outputs/<step>/               a step's output (layer 2)
-    data.parquet                the grid: data columns and lineage, row ids as index
-    states.parquet              a state per cell, the same shape
-    meta.json                   run key, data version, verb, warnings, what it read,
-                                and how each column was written (below)
-  media/<hash>.<ext>            images, arrays, files: once each, by content (R7)
-```
-
-**What Parquet holds exactly** (run 2026-11-16, pyarrow 25.0.1). The first
-run went through pandas (`df.to_parquet`, `pd.read_parquet`) and lost data;
-the second wrote and read through pyarrow with a type core chose, back to
-Python values (`to_pylist`). **The losses were pandas' conversion, not
-Parquet's.**
-
-| Cells | Through pandas' default | Through pyarrow, typed by core |
-|---|---|---|
-| numbers, text, bools; an `expand`; an outer `join` | exact | exact |
-| lists (a `collapse`, a lineage list `#s` = `[0, 2]`), lists of dicts | numpy arrays: a silent change | exact (`list<…>`) |
-| an int column with a `None`; `None` beside `NaN` in floats | floats; `NaN` | exact (`int64` with a null; `None` and `nan` kept apart) |
-| dicts with different keys | each gets the other's keys as `None`, and `1` becomes `1.0` | exact as a `map<string, …>` when the values share one type |
-| datetimes with a time zone, `Decimal`, `bytes` | — | exact |
-| *absent* | — | a null in the data; *absent* is the cell's state in `states.parquet`, which core already keeps apart (run: a `join` gap is `absent` in `output.states`) |
-| a column of mixed types (`1`, `"a"`) | refused | refused: a union type has no Parquet form |
-| tuples; dict keys that aren't strings; ints past 64 bits | refused | no Arrow type (an int past 2⁶³ overflows) |
-| a 2-D array (an image); any other object | refused | refused |
-
-So each column is written the plainest way that **reads back exactly**, and
-core checks it:
-
-1. **Typed Parquet**, with the Arrow type core chose from the column's values
-   (or its plan), written and read through pyarrow, never through pandas'
-   inference.
-2. **Tagged**, as a Parquet text column of JSON that names each value's type
-   (a tuple apart from a list, an int apart from a float, `NaN` and `inf`,
-   big ints as text, non-string dict keys), for what Arrow has no type for:
-   mixed columns, tuples, odd keys, big ints.
-3. **Media**, a hash in the column and the bytes in `media/` (`.npy` for an
-   array, saved without pickle; the file itself for an image or file), for
-   large values (R7).
-4. **Its own encoding**, for an object whose class gives one (`to_saved()` /
-   `from_saved()`, beside `data_version()`).
-5. **Not saved**, for anything else: the step loads `stale`, saying which
-   column couldn't be saved and why, and a re-run fills it. Never pickle:
-   loading imports nothing and runs nothing (model.md §3).
-
-**The check:** after writing, core reads the step back and compares data
-versions. Equal, or the step is saved by the next way down, or marked as not
-saved. So a save is exact or says where it isn't, never silently different.
+or some way that is organized"): `workflow.json`, a Parquet file per step,
+and arrays, images and Plotly figures as media files by content hash. **What
+it holds, when you can save, and exactly when something can be lost is
+[saving.md](saving.md)**, with every claim run: each value is saved exactly or
+listed in the save's report, every save is checked by reading it back, and
+loading runs no code.
 
 Four layers, each its own piece. Today only the first half of layer 1 exists.
 
