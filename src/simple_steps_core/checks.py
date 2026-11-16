@@ -814,9 +814,17 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 if isinstance(value.columns, dict) else None
             cell = workflow._step_column_type(value.id, column) if column else None
             wanted = wanted_of.get(name)
+            verb_name = operation.shape_verb.kind if operation.shape_verb else "map"
+            if verb_name == "collapse":
+                # each call gets the group's values as a list (CA-D1)
+                if wanted == "scalar":
+                    problems.append(
+                        f"{name}: {_type_name(_signature(fn).parameters[name].annotation)}, but "
+                        f"under collapse each call gets a list of the group's values of "
+                        f"{value.id!r}[{column!r}]: declare {name}: list")
+                continue
             if (wanted == "list" and cell in (int, float, str, bool)) or \
                     (wanted == "scalar" and cell in (list, tuple, dict)):
-                verb_name = operation.shape_verb.kind if operation.shape_verb else "map"
                 problems.append(
                     f"{name}: {_type_name(_signature(fn).parameters[name].annotation)}, but under "
                     f"{verb_name} each call gets one cell of {value.id!r}[{column!r}], "
@@ -1381,7 +1389,7 @@ def _paired_arguments(operation: Operation, workflow: "Workflow | None") -> dict
     if _is_auto(op_) and len(op_.shape_verbs) == 1:
         op_, _, _ = _provisional(op_, workflow)
     verb = op_.shape_verb
-    if verb is None or verb.kind not in _ROW_BY_ROW:
+    if verb is None or verb.kind not in _ROW_BY_ROW | {"collapse"}:
         return {}
     fn = op_.fn or BUILTIN_TOOLS.get(op_.tool)
     if isinstance(fn, Tool):
@@ -1395,6 +1403,12 @@ def _paired_arguments(operation: Operation, workflow: "Workflow | None") -> dict
     paired = {name: value for name, value in op_.arguments.items()
               if isinstance(value, StepRef) and _selection_kind(value) == "column"
               and name in annotations and _wants(annotations[name]) != "frame"}
+    if verb.kind == "collapse":
+        # CA-D1, plan P1 B-collapse-arg: under a collapse a column passes each
+        # group's values. Paired, it joins the input row by row and is then
+        # gathered per group, as a column bound by name is; passed as it was,
+        # every group got the whole column.
+        return paired
     # A whole step with one data column is that column (core-asks L37), to a
     # parameter declared to take one value: `add[mod.map()](wf["r"], k=wf["d"])`.
     # Untyped, a whole step is passed whole, as written.

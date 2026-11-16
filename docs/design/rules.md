@@ -104,7 +104,7 @@ each ward's rows into lists, then calls `mean_temp(temp: list[float])` once
 per ward, keeping `ward` as a column. Every row lands in a group: a row
 with no `ward` (`None`) makes a group of its own, shown, never dropped. To
 leave it out, filter it first. Any value is a key: a list or dict groups by
-what it holds, `True` is never `1`, and `1` and `1.0` are one key.
+what it holds, `True` is never `1`, and `1` and `1.0` are one key. A column you bind yourself, `temp=wf["v"]["am"]`, gets each group's values too, never the whole column.
 
 **14. Formula text means what the Python means.** `formula(text)` reads the
 same line Python would and never runs it. Text goes in quotes: a bare name

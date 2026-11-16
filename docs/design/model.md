@@ -253,7 +253,9 @@ else to the one column whose type fits, written into the expression (S3,
 built 2026-11-04; an untyped parameter fits any column, so it binds only the
 only one); a parameter with a default takes a column only when bound;
 an argument is a literal, a pick or a resource. A cell pick is one value for
-every row. A column pick pairs row by row only from an aligned step (§5);
+every row. A column pick pairs row by row only from an aligned step (§5), and under
+`collapse` passes each group's values, as a column bound by name does (plan P1
+B-collapse-arg, 2026-11-16);
 passed to a `list`, `Series` or `DataFrame` parameter it is the whole column.
 A tool never receives a `#` column. Binding is decided at staging (by keyword,
 then by name for a parameter without a default, then the one column whose type

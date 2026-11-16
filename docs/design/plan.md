@@ -103,7 +103,7 @@ earlier if the app is waiting on them (P-D1).
 
 | Shim | What the app works around | Core's fix | Checked |
 |---|---|---|---|
-| **B-collapse-arg** | **A silent wrong answer** (found 2026-11-16). Under `collapse(by=…)`, a column argument written explicitly passes the **whole column** to every group, not the group's rows: `mean[mod.collapse(by="ward")](wf["v"], temp=wf["v"]["am"])` gives ward A 38.23 (all three patients), where A's two average 37.6; a pivot with `value=wf["long"]["pk"]` gives every name the last values. Bound by name, both are right | an explicit column argument under `collapse` passes the group's values, as binding by name does; until then, refused (W14 says pairing inside a collapse isn't built) | **reproduced**; **first in P1** |
+| **B-collapse-arg** | **A silent wrong answer** (found 2026-11-16). Under `collapse(by=…)`, a column argument written explicitly passes the **whole column** to every group, not the group's rows: `mean[mod.collapse(by="ward")](wf["v"], temp=wf["v"]["am"])` gives ward A 38.23 (all three patients), where A's two average 37.6; a pivot with `value=wf["long"]["pk"]` gives every name the last values. Bound by name, both are right | an explicit column argument under `collapse` passes the group's values, as binding by name does; one from rows that aren't the input's is refused, writing the join; a one-value parameter is refused, *declare temp: list* | **✓ done 2026-11-16** (`checks._paired_arguments` pairs a column under `collapse`; `tests/unit/test_collapse_arguments.py`, 8 tests) |
 | **C37** | `k.view` / `k.cell` crash on a cell holding an array (an image): `_plain` calls `.item()` on anything with a dtype | unwrap numpy scalars only | **reproduced**: `ValueError: can only convert an array of size 1 to a Python scalar` |
 | **C45** | `formula('wf["s"][1][2]')` raises `SelectionError`, not `FormulaError` | every refusal from `formula()` is a `FormulaError` | **reproduced** |
 | C33 | `inspect.signature(tool)` is `(*args, **kwargs)`, not the function's | a tool carries its function's signature | to run |
@@ -246,7 +246,7 @@ the release that carries it. (Phase 4's list is
 
 | Release | Piece | Change | What the app does |
 |---|---|---|---|
-| — | — | none yet | — |
+| 1.0.3 | P1 B-collapse-arg | a column argument written out under `collapse(by=…)` (`temp=wf["v"]["am"]`) gets **each group's values**, as binding by name does; it got the whole column. A column from rows that aren't the input's is refused (`bad_pairing`), writing the join; a parameter typed as one value is refused, *declare temp: list* | results of such steps change (they were wrong); show the refusals |
 
 ## 6. Where phase 4's open items went
 
