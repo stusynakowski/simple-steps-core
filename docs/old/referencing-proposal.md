@@ -1,6 +1,6 @@
 # Referencing and assignment: a proposal
 
-> **Superseded 2026-11-03** by [decisions.md](../decisions.md) and [core-asks/model.md](../core-asks/model.md). Kept as background: where it differs, the newer page holds.
+> **Superseded 2026-11-03** by [decisions.md](../design/decisions.md) and [core-asks/model.md](../design/core-asks/model.md). Kept as background: where it differs, the newer page holds.
 
 > **Consolidated into [syntax-review.md](syntax-review.md)** (2026-10-30): read that first; this page is background.
 

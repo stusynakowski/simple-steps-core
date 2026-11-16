@@ -247,7 +247,7 @@ def test_a_plain_call_with_a_resource_says_to_make_a_step():
         beds(res["ward"])
 
 
-# ── T2–T4 (app-migration.md §7): what the app reads from core ────────────
+# ── T2–T4 (docs/old/app-migration.md §7): what the app reads from core ────────────
 def test_the_app_imports_everything_from_the_package():
     import simple_steps_core as core
     for name in ("op", "StepFailed", "SelectionError", "ResourceNotLoaded",

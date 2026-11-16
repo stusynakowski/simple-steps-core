@@ -253,7 +253,7 @@ position. CA-11 (2026-11-02) made pairing by identity only: both are refused
 now, and the refusal writes the join or `match_ids=True`.
 
 **The probes as written don't run:** all six import `simple_steps_core.grid`,
-which is gone. [app-migration.md](../docs/design/app-migration.md) lists the
+which is gone. [app-migration.md](../docs/old/app-migration.md) lists the
 renames; part C is each probe on today's names.
 
 **The sweep corrected three things the docs said:** stages aren't built;

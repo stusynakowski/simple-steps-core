@@ -121,5 +121,7 @@ never a resource.
 - Rebuild the input of a lossy step. You can trace back to it.
 - Line up unrelated grids without being told.
 - Flatten JSON of any depth in one step: one level per step.
-- Follow a picked row when a source's own data is replaced underneath it
-  (open: [model.md §10](model.md#10-uncertain-operations-and-their-boundaries)).
+- Tell an edited row from a new one when rows are also added or deleted in the
+  same change to a source: core matches rows by their values, so that edited
+  row counts as gone (rule 10). A declared key column, to say which row is
+  which, is later ([model.md §10](model.md#10-uncertain-operations-and-their-boundaries)).

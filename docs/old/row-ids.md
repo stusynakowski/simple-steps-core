@@ -1,6 +1,6 @@
 # Row ids: the rules (K19)
 
-> **Superseded 2026-11-03** by [model.md §4.1 and §5](../model.md#41-row-ids-cores-never-shown). Kept as background: where it differs, the newer page holds.
+> **Superseded 2026-11-03** by [model.md §4.1 and §5](../design/model.md#41-row-ids-cores-never-shown). Kept as background: where it differs, the newer page holds.
 
 > Decided by the owner, 2026-10-27 (D1–D4).
 > Being built in phase 4, in pieces: **selections — done**; **column arguments — done**; **`zip_` — done**; **the ids new rows get — done** (2026-10-27). K19 is complete.

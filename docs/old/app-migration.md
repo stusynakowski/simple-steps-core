@@ -1,6 +1,13 @@
 # Moving Simple Steps onto the new core
 
-> Step G of [phase4-plan.md](plan.md), brought forward: what the app
+> **Done; superseded 2026-11-15.** The app moved onto core 1.0.1 and then
+> 1.0.2 (`dbaf4c7`) on 2026-11-09, recorded in the app's
+> `docs/dev_plan/core_migration.md`. It reads formulas with core's
+> `formula()`. Its remaining shims against core are tracked in
+> [plan.md](../design/plan.md) (P1). Changes the app sees from now on are
+> plan.md §5. Kept for §3.8, the record of every change the app saw in phase 4.
+
+> Step G of [phase4-plan.md](plan-phase4.md), brought forward: what the app
 > repo (`Simple_Steps`) changes to run on this core, in what order, and what
 > it adopts later. Derived 2026-10-27 at core `fdd3b62`, from the app at
 > `1139779` (pin `86170a3`, 69 core commits behind). The app's own maps of
@@ -162,7 +169,7 @@ Renames from phase 3:
 
 Behaviour from phase 4, which the UI and its tests will see:
 
-| Change | Rule ([rules.md](rules.md)) |
+| Change | Rule ([rules.md](../design/rules.md)) |
 |---|---|
 | a step's `.data` has its row id `#` as the index, and starts with the `#` columns that say where each row came from (`#v`, …); tools never see them | 2, 3 |
 | `k.view` rows carry the row id under `#`, the screen position under `position`; `k.cell` takes a row id. **Superseded by S5 (§3.8)**: `#` becomes the row number | 2 |
@@ -192,7 +199,7 @@ against the package API (they import `grid`), then rebuild
 
 One row per change, by phase4-plan step, **added as each step lands**
 (phase4-plan §3, "After S4, and S11"). The design is core's
-[core-asks/model.md](core-asks/model.md); its decisions are decisions.md §0
+[core-asks/model.md](../design/core-asks/model.md); its decisions are decisions.md §0
 and §4. Core's copy of `core-asks/` leads (N4): the app's `docs/core-asks/`
 is copied from it, not the other way round.
 
@@ -305,7 +312,7 @@ to §3.8 as it lands.
 
 ### After the move: the rest of phase 4
 
-In order, each as its step in [phase4-plan.md](plan.md), and each
+In order, each as its step in [phase4-plan.md](plan-phase4.md), and each
 followed by its small pass in the app (§5):
 
 | | Step | Needs first |

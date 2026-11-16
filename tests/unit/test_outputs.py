@@ -323,7 +323,7 @@ def test_G7_a_modifier_before_the_verb_says_it_covers_the_whole_step(k18):
     assert "retries the whole step" in str(k18.step("o").warnings[0])
 
 
-# ── T7, T8 (app-migration.md §7) ─────────────────────────────────────────
+# ── T7, T8 (docs/old/app-migration.md §7) ─────────────────────────────────────────
 from typing import NamedTuple as _NT, TypedDict as _TD
 
 

@@ -1,6 +1,6 @@
 # Reshaping: the decisions, with examples
 
-> **Superseded 2026-11-03** by [decisions.md](../decisions.md). Kept as background: where it differs, the newer page holds.
+> **Superseded 2026-11-03** by [decisions.md](../design/decisions.md). Kept as background: where it differs, the newer page holds.
 
 > For the owner. **Every decision here is made (2026-10-27).** Each decision in
 > [reshaping-plan.md §5](reshaping-plan.md#5-decisions), with what core does

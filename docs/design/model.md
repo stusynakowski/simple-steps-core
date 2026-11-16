@@ -3,7 +3,7 @@
 > **The one description of what core is.** Consolidated 2026-11-03 at
 > `d69b5f1` from object-model, grid-model, outputs-and-reshaping, reshaping,
 > row-ids, step-expressions, extensions, interactive-sessions and
-> session-states, which now sit in [history/](history/). Every *built* rule
+> session-states, which now sit in [docs/old/](../old/). Every *built* rule
 > was run at `d69b5f1`; every *planned* one names the work that builds it.
 > What the app needs from core is [core-asks/model.md](core-asks/model.md);
 > what's decided and what's open is [decisions.md](decisions.md); the order of
@@ -196,7 +196,7 @@ Rows of two steps are put side by side in four ways, and nowhere else.
 - **`match_ids=True`** is the user vouching that two steps number the same
   samples; core still requires equal id sets. *Built.*
 
-**Open (D-child, D-subset):** [reshaping.md §6](history/reshaping.md) let a child read
+**Open (D-child, D-subset):** [reshaping.md §6](../old/reshaping.md) let a child read
 its parent's column directly and let a column argument block unmatched rows
 and run the rest; CA-C and today's code refuse both, pointing to a join. Which
 holds is in [decisions.md](decisions.md).
@@ -242,8 +242,9 @@ unique, never start with `#`, and two that would collide are a problem.
 *Built.* Step names with a `.` or a leading `#` are refused (built
 2026-11-04). A map whose tool declares `-> dict` gives one column per key
 (L22, built 2026-11-04): keys are known by running, a key a row lacks is
-`absent`, and `mod.name` keeps the dict in one cell. **Planned (S4):**
-numeric names become `var<n>`.
+`absent`, and `mod.name` keeps the dict in one cell. A numeric or empty
+column name becomes `var<n>` (`0` → `var0`, `"2023"` → `var2023`; L21, run
+2026-11-15). *Built.*
 
 **Arguments and binding:** a parameter binds to the input column of its name,
 else to the one column whose type fits, written into the expression (S3,
@@ -252,10 +253,12 @@ only one); a parameter with a default takes a column only when bound;
 an argument is a literal, a pick or a resource. A cell pick is one value for
 every row. A column pick pairs row by row only from an aligned step (§5);
 passed to a `list`, `Series` or `DataFrame` parameter it is the whole column.
-A tool never receives a `#` column. *Built.* **Planned (S3):** binding decided
-at staging and written into the expression (by keyword, then by name for a
-parameter without a default, then the one column whose type fits, else
-`invalid` naming the candidates); `mod.cast`.
+A tool never receives a `#` column. Binding is decided at staging (by keyword,
+then by name for a parameter without a default, then the one column whose type
+fits, else `invalid` naming the candidates); a binding decided by type is
+written into the expression (W10). `mod.cast` converts a column first. *Built*
+(S3, 2026-11-04). **Not built:** D18 (a reference to a step whose shape
+isn't known yet) and D19 (`collapse(by=)` on one key of a step), plan.md P5.
 
 ## 7. Plans and going back
 
@@ -304,7 +307,7 @@ parameter without a default, then the one column whose type fits, else
   naming the reader.
 
 **Where it falls short** (each run 2026-11-03; detail in
-[history/session-states.md](history/session-states.md)):
+[session-states.md](../old/session-states.md)):
 
 | | Today | Decision |
 |---|---|---|
@@ -323,8 +326,11 @@ marks on the right steps, and a path that forgets leaves a wrong state behind.
 
 ### 8.1 The proposed session model (SM)
 
-*Proposed 2026-11-03; decision SM in [decisions.md](decisions.md). Planned,
-plan step S11.* The session is managed the way build tools manage a build:
+*Proposed 2026-11-03; decision SM in [decisions.md](decisions.md). Mostly
+built (2026-11-04): the store, run keys, `_settle()`, `run(x)` making `x`
+current, F1–F3 fixed. Not yet: the old flags (`edited`, `stale`,
+`stale_reason`, `read_stale`) still decide `stale` (ST5); removing them is
+plan.md P2.* The session is managed the way build tools manage a build:
 the workflow, plus a store of results, and every state read off the two.
 
 **Two things are kept, and nothing else:**

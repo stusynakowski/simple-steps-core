@@ -9,7 +9,7 @@ three parts, each line run against core:
     B. the requests K19–K29, R7–R9 (core-handover/requests.md) and the
        "Fix in core" table (plan.md); K1–K18 are scripts/core_asks.py's
     C. the six probes (core-handover/probes/), ported: as written they import
-       ``simple_steps_core.grid``, which is gone (docs/design/app-migration.md)
+       ``simple_steps_core.grid``, which is gone (docs/old/app-migration.md)
 
 Each line prints ✓ (core does what was asked), ✗ (it doesn't yet; the note
 names the decision or plan step) or ? (the ask was changed by a later

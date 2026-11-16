@@ -459,7 +459,7 @@ Rules for the session:
 
 Where core stands against these rules (run 2026-11-03), and the decisions
 that would make states computed rather than flagged:
-[session-states.md](../history/session-states.md).
+[session-states.md](../../old/session-states.md).
 
 ## M8. Notes for later
 

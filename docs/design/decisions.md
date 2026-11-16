@@ -7,11 +7,15 @@
 > [model.md](model.md); the app's requirements are
 > [core-asks/model.md](core-asks/model.md). When a decision is made, its row
 > moves to §3 with the date.
+>
+> **Step ids** (S1–S12, D, E, F, G, L1–L8) are phase 4's plan, now
+> [plan-phase4.md](../old/plan-phase4.md). The new [plan.md](plan.md) §6 says
+> where each open one went; its own decisions are P-D1–P-D5 (§7).
 
 ## 0. Needed from you now
 
 Opened by the 2026-11-03 review ([model.md §5, §8, §10](model.md#8-states-in-a-session);
-the evidence is in [history/session-states.md](history/session-states.md)).
+the evidence is in [history/session-states.md](../old/session-states.md)).
 Each was run; each has a recommendation.
 
 **States in a session.** Today a step's state is kept as flags, set by edits

@@ -1,11 +1,11 @@
 # Session states: where the object model stands
 
-> **Superseded 2026-11-03** by [model.md §8](../model.md#8-states-in-a-session); its decisions S1–S7 are SS1–SS7 in [decisions.md](../decisions.md). Kept as background: where it differs, the newer page holds.
+> **Superseded 2026-11-03** by [model.md §8](../design/model.md#8-states-in-a-session); its decisions S1–S7 are SS1–SS7 in [decisions.md](../design/decisions.md). Kept as background: where it differs, the newer page holds.
 
 > Review, 2026-11-03, at `d69b5f1`. Every "today" below was run, not read:
 > two scripts drove one workflow through each kind of edit and printed every
 > step's state, stale reason and values. The rules this is measured against
-> are [core-asks/model.md §M7](../core-asks/model.md#m7-an-interactive-session-editing-steps-and-what-changes-downstream).
+> are [core-asks/model.md §M7](../design/core-asks/model.md#m7-an-interactive-session-editing-steps-and-what-changes-downstream).
 > Nothing here is built yet: it lists what holds, what doesn't, and the
 > decisions to make before code changes.
 
