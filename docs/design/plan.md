@@ -79,7 +79,7 @@ test green as they are. **Behaviour changes** are confirmed first and run the
 | **P0** | **Docs refreshed** | old pages to [docs/old/](../old/); out-of-date claims fixed; this plan | docs | small | — | ✓ 2026-11-15 |
 | **P1** | **Close the app's shims** | each shim in the app's `core_bridge.py` fixed in core, as a patch release the app can pin (§3.1) | fixes | small | P-D5 | to do |
 | **P1b** | **The grid and its picks, written down** (136-A, 136-P0) | no new objects: a cell, a row, a column and a block are picks, and every pick is a grid. One section of model.md (and a line in rules.md) says what a grid holds and how header, row number, lineage and data differ, for the UI, formula text, the agent and a terminal (§3.4, P-D6). Runs alongside P1–P3 | docs | small | P-D6 | to do |
-| **P1c** | **Saving** | first the loss: data assigned to a step is saved with the workflow, and a step whose data is missing is `invalid` with a problem, never a raise; then public `k.save` / `Kernel.load`, with outputs when asked, closing the C32 shim (§3.5) | behaviour | medium | P-D12, P-D13 | to do |
+| **P1c** | **Saving a session as a folder** | a session saves as one folder: the workflow in `workflow.json`, and each step's grid in its own Parquet file, checked to read back exactly. First the loss (data assigned to a step is saved, and a step whose data is missing is `invalid`, never a raise); then outputs, closing the C32 shim (§3.5) | behaviour | medium | P-D12, P-D13, P-D15, P-D16 | to do |
 | **P2** | **States only from the store** | the old flags (`edited`, `stale`, `stale_reason`, `read_stale`) go; `stale` is read off the store like every other state (SM, ST5). The first piece of keeping results (136-P4) | restructure | medium | — (SM decided) | to do |
 | **P3** | **One row relation, and a smaller `workflow.py`** | each verb declares its row map in its plan (PL2); one function answers how two steps' rows relate (WR1); then `workflow.py` and `checks.py` split by concern; a speed test pins goal 5 (§3.2). Row maps are what incremental runs (136-P4) are built on | restructure | large | — (WR1, PL2 decided) | to do |
 | **P4** | **Picks kept by row identity** | a saved pick holds its row's identity and works out its row number each time. Fixes W18 and W9 | behaviour | medium | P3; P-D3 | to do |
@@ -165,7 +165,7 @@ and items that are the app's alone are in §4.
 
 | 136 | Asks core for | Core today (run) | Core's piece |
 |---|---|---|---|
-| **A** (I3, I4), 136-P0 | Grid, Column, Row, Cell and Selection as real objects | **Owner, 2026-11-16: likely not needed.** A cell, row, column and block are picks of a grid, and every pick is a grid (run: §1, *Picks*); a whole step is the pick of everything, `wf["s"]` | **P1b**: written down, no new types (P-D6). What 136-A wanted from the objects is answered in words: *a grid* holds data columns, each row's number `#` and lineage `#<step>`, a state per cell, and before it runs, its plan; *a header* names a column and is never data; *the row number* is a row's place, never data; *lineage* is read-only, copied into data with `mod.copy`; *a pick* is the one way to point at any part, and prints as formula text. `k.view` and `k.cell` stay the shown form, their keys documented |
+| **A** (I3, I4), 136-P0 | Grid, Column, Row, Cell and Selection as real objects | **Owner, 2026-11-16: likely not needed.** A cell, row, column and block are picks of a grid, and every pick is a grid (run: §1, *Picks*); a whole step is the pick of everything, `wf["s"]` | **P1b**: written down, no new types (P-D6). What 136-A wanted from the objects is answered in words: *a grid* holds data columns, each row's number `#` and lineage `#<step>`, a state per cell, and before it runs, its plan; *a header* names a column and is never data; *the row number* is a row's place, never data; *lineage* is read-only, copied into data with `mod.copy`; *a pick* is the one way to point at any part, and prints as formula text. `k.view` and `k.cell` stay the shown form, their keys documented. **Two levels** (owner, 2026-11-16): *a step maps grids to a grid*, its output; *a tool receives values*, the part of a pick its verb hands each call (P-D6) |
 | **C·I5**, 136-P4 | **Keeping results**: an output store keyed by data version (K22, C32); **incremental runs by row state** (owner: decided): keep each row's result as it completes, and on a re-run compute only rows not `known` or whose inputs changed; progress and cancel (K23) | one output per step on screen, `KEEP = 4` in the store; no resume (`run(x, fresh=False)` means "on what the inputs show", not "continue"); per-row states exist | **P7d**, after P2 and P3: (1) rows filed as they complete, and saved as a run goes (§3.5, layer 3); (2) re-run by row state (K15, D42, PL3, PL4: the old L6); (3) progress and `cancel()` as a callback (K23, K14). Each its own piece |
 | **C·I6**, 136-P1 | which input row a value came from | **already there**: `k.cell("t", 1)["inputs"]` → `[{step: "s", row: 1, values: {"n": 2}, …}]`; lineage on every view row | nothing new; further back is L4 (§3.3) |
 | **D·I7**, 136-P5 | **Stages**: a named group of consecutive steps, to organize the workflow; adds no inputs, outputs or computation; shown folded; a section in exported code (owner: decided) | none (R9; model.md §3 *planned*) | **P7a**: a stage in the workflow spec, kept valid by core through insert, move, rename and delete, and saved with it (P-D7) |
@@ -182,13 +182,65 @@ after P3.
 
 ### 3.5 Saving (owner, 2026-11-16: "we need saving methods")
 
+**A session is a folder** (owner, 2026-11-16: "parquet files for each step,
+or some way that is organized"). A step maps grids to a grid, so what a step
+holds is one table, and each table is saved as its own file. A person can
+open any step's file in pandas, DuckDB, Excel or a notebook without core.
+
+```
+patients.simple-steps/          one session: one folder
+  workflow.json                 the workflow: steps in order, expressions, stages,
+                                resources (never a Secret), extras; per step, the
+                                files below and their data versions. Format 5
+  data/<step>.parquet           data typed, pasted or uploaded into a step (layer 1)
+  outputs/<step>/               a step's output (layer 2)
+    data.parquet                the grid: data columns and lineage, row ids as index
+    states.parquet              a state per cell, the same shape
+    meta.json                   run key, data version, verb, warnings, what it read,
+                                and how each column was written (below)
+  media/<hash>.<ext>            images, arrays, files: once each, by content (R7)
+```
+
+**Parquet doesn't hold every grid exactly** (run 2026-11-16, pyarrow 25.0.1,
+core outputs and plain frames):
+
+| Cells | Through Parquet as is |
+|---|---|
+| numbers, text, bools; a dict a tool spread into columns; an `expand`; an outer `join` | exact |
+| lists (a `collapse`, a lineage list `#s` = `[0, 2]`) | come back as numpy arrays: a silent type change |
+| dicts with different keys in one column | each gets the other's keys as `None`, and `1` becomes `1.0`: *absent* lost, a silent change |
+| `None` in a float column; an int column with a `None` | `NaN`; the ints become floats |
+| a column of mixed types (`1`, `"a"`); tuples | refused (`ArrowInvalid`) |
+| a 2-D array (an image); any other object | refused |
+
+So each column is written the plainest way that **reads back exactly**, and
+core checks it:
+
+1. **Plain**, as a Parquet column, when its values are all of one Parquet
+   type and the column reads back equal.
+2. **Tagged**, as a Parquet text column of JSON with types kept (a tuple apart
+   from a list, an int apart from a float, *absent* apart from `None`), for
+   lists, dicts, tuples and mixed columns.
+3. **Media**, a hash in the column and the bytes in `media/` (`.npy` for an
+   array, saved without pickle; the file itself for an image or file), for
+   large values (R7).
+4. **Its own encoding**, for an object whose class gives one (`to_saved()` /
+   `from_saved()`, beside `data_version()`).
+5. **Not saved**, for anything else: the step loads `stale`, saying which
+   column couldn't be saved and why, and a re-run fills it. Never pickle:
+   loading imports nothing and runs nothing (model.md §3).
+
+**The check:** after writing, core reads the step back and compares data
+versions. Equal, or the step is saved by the next way down, or marked as not
+saved. So a save is exact or says where it isn't, never silently different.
+
 Four layers, each its own piece. Today only the first half of layer 1 exists.
 
 | Layer | What is saved | Today (run 2026-11-16) | After | Piece |
 |---|---|---|---|---|
-| **1. The workflow** | expressions, literals, resources' settings (never a `Secret`), stages, extras; **and the data typed, pasted or uploaded into a step**, since without it the workflow can't re-run | `to_json()` keeps expressions and literals; data assigned to a step is dropped, and a load then raises at `run_all()` | data assigned to a step is saved with it: small data inline in the spec, large data filed by content hash beside it (P-D12). A load whose data is missing makes that step `invalid`, naming what to supply, never a raise. Its data version is its hash, so a load of the same data is the same workflow | **P1c**, first |
-| **2. The workflow with its outputs** | layer 1, plus each step's current output, filed by run key | only the internal `Workflow.to_session_dict()`; the app's C32 shim calls it | public `k.save(path, outputs=True)` / `Kernel.load(path, catalog)`. A loaded step is `completed` only when its run key still matches (same tool code, same inputs); otherwise `stale`, saying why. One file format, versioned; older ones refused with core's message (D52) | **P1c**, second; closes C32 |
-| **3. Saving as a run goes** | each row's output as it completes, so a stopped run (a crash, a cancel, a closed laptop) keeps what it did and resumes where it stopped | nothing: a run's output exists only when the step finishes | the store writes rows as they complete, through a store interface with two backends in core, memory and a folder; the app may plug in others. A resume computes only rows not `known` (IR) | **P7d** (with incremental runs) |
+| **1. The workflow** | expressions, literals, resources' settings (never a `Secret`), stages, extras; **and the data typed, pasted or uploaded into a step**, since without it the workflow can't re-run | `to_json()` keeps expressions and literals; data assigned to a step is dropped, and a load then raises at `run_all()` | data assigned to a step is saved with it, in `data/<step>.parquet` (a small literal stays inline in `workflow.json`, P-D12). A load whose data is missing makes that step `invalid`, naming what to supply, never a raise. Its data version is its hash, so a load of the same data is the same workflow | **P1c**, first |
+| **2. The workflow with its outputs** | layer 1, plus each step's current output, filed by run key | only the internal `Workflow.to_session_dict()`; the app's C32 shim calls it | public `k.save(folder, outputs=True)` / `Kernel.load(folder, catalog)`, writing `outputs/<step>/` as above. A loaded step is `completed` only when its run key still matches (same tool code, same inputs); otherwise `stale`, saying why. One file format, versioned; older ones refused with core's message (D52) | **P1c**, second; closes C32 |
+| **3. Saving as a run goes** | each row's output as it completes, so a stopped run (a crash, a cancel, a closed laptop) keeps what it did and resumes where it stopped | nothing: a run's output exists only when the step finishes | the store writes rows as they complete, through a store interface with two backends in core, memory and the session folder (finished rows appended as Parquet parts under `outputs/<step>/`); the app may plug in others. A resume computes only rows not `known` (IR) | **P7d** (with incremental runs) |
 | **4. Data out** | a pick's grid as a file a person or another tool opens (CSV, Parquet, Excel); the workflow as code | `k.step(x).output.data` is a DataFrame, with core's `#` columns; no whole-workflow script | `k.data(pick)` gives plain data (S10), and pandas writes the format; `k.to_python()` writes the workflow as code (P7b). File formats are not core's (§4) | P8 (S10), P7b |
 
 ## 4. What core won't build
@@ -263,19 +315,22 @@ needed (P-D6); and core needs saving methods (§3.5).
 | | Decision | Recommended |
 |---|---|---|
 | **P-D1** | **Consolidation before features**: P1–P4 before P7d and P8 | **yes**: keeping results needs P2 and P3 anyway. P1b, P1c, P7a and P7b are independent and small, and go as soon as they're wanted |
-| **P-D2** | **The principles** (H5). A new case is settled by them, or the list changes. Draft: (1) core never guesses: two readings, refuse and write the fix; (2) what is saved is what runs: anything inferred is written into the expression; (3) rows meet only through an identity core recorded; (4) nothing is lost silently; (5) one way to write each thing; (6) states are derived from the workflow and the store, never remembered; (7) check when written, fail at run only on data, cell by cell; (8) core owns the facts about a workflow, the app owns text, people and pixels; (9) every part of a grid is a pick, and every pick is a grid | adopt, edited as you like, as a new first section of model.md |
+| **P-D2** | **The principles** (H5). A new case is settled by them, or the list changes. Draft: (1) core never guesses: two readings, refuse and write the fix; (2) what is saved is what runs: anything inferred is written into the expression; (3) rows meet only through an identity core recorded; (4) nothing is lost silently; (5) one way to write each thing; (6) states are derived from the workflow and the store, never remembered; (7) check when written, fail at run only on data, cell by cell; (8) core owns the facts about a workflow, the app owns text, people and pixels; (9) every part of a grid is a pick, and every pick is a grid; a step maps grids to a grid, and a tool receives only values | adopt, edited as you like, as a new first section of model.md |
 | **P-D3** | **A pick saves its row's identity** (P4), and its row number is worked out each time. Saved files keep writing the row number, with the identity beside it | yes: the only fix for W18 that doesn't add a rule |
 | **P-D4** | **The public API** is `simple_steps_core.__all__` plus the methods of `Kernel`, `Catalog`, `Step`, `Output` and `Problem`; anything else may change in a patch. A breaking change to the public API is a minor version before 2.0, with a §5 row | yes |
 | **P-D5** | **Who writes P1's asks.** The app files core asks (012 was the app's). For shims, core opens the ask itself (013), from the app's `core_bridge.py`, and tells the app each release | core writes 013 |
-| **P-D6** | **No new objects for the grid's parts** (amends GO). A cell, a row, a column and a block are picks, and every pick is a grid (run 2026-11-16). P1b writes that down in core's words: *pick*, not *selection* (retired); a row shows its row number and lineage, never core's row id (CA-B1), where 136 has "row id (the index)"; a cell's states are core's seven, and `stale` is a mark the view shows over `known` | **yes**: one object, one rule. Types only if a need shows that a pick can't meet |
+| **P-D6** | **No new objects for the grid's parts** (amends GO). A cell, a row, a column and a block are picks, and every pick is a grid (run 2026-11-16). **Two levels:** a step maps grids to a grid (its output, with row numbers, lineage and cell states); a tool receives values, the part of a pick its verb hands each call (a row's cells under `map`, `filter`, `expand`; a group's columns as lists under `collapse`; the whole grid's values under `table`), plain Python, never `#` columns, states or row ids. P1b writes that down in core's words: *pick*, not *selection* (retired); a row shows its row number and lineage, never core's row id (CA-B1), where 136 has "row id (the index)"; a cell's states are core's seven, and `stale` is a mark the view shows over `known` | **yes**: one object, one rule. Types only if a need shows that a pick can't meet |
 | **P-D7** | **Where a stage lives.** A stage changes no output, so it is outside every spec id. It is still core's, not `extras`, because keeping it valid is a fact about the workflow: an insert inside a stage joins it; a move out of it leaves; a rename follows; deleting its last step deletes it; two stages never overlap. `k.stage("clean", first="load", last="tidy")`; `k.run(stage="clean")` runs its steps | yes |
 | **P-D8** | **The workflow as a script in core.** `k.to_python()` writes the catalog's imports, the resources and one `k["s"] = …` line per step, stages as comment sections; a test runs it and gets the same spec ids. The app's 132 `export_script()` becomes a call to it | yes: "a workflow the app saved runs the same in plain Python" (model.md §11) is then tested, not assumed |
 | **P-D9** | **Spans from `formula()`.** Each part it reads (the tool, each modifier, the input, each argument, each pick) carries its place in the text, from the syntax tree it already reads. The shared corpus then checks the browser's spans against core, not against itself | yes |
 | **P-D10** | **The name of the literal table tool** (135 §4: `table[mod.source()](data={…})`). `table` is already a verb, `mod.table` (one call with the whole input), so one word would mean two things (model.md §2) | a core built-in under another name. The owner names it |
 | **P-D11** | **A function defined in a cell** (136-I1) | no core change: the app turns it into a tool and builds the kernel again with the larger catalog. A catalog that grows inside a kernel is a later decision, only if rebuilding proves too slow |
-| **P-D12** | **Data assigned to a step is part of the workflow, and is saved with it.** Small data (up to a limit, say 1 MB) inline in the spec, as a literal table; larger data filed by content hash beside the spec, the spec holding the hash. A load whose data can't be found makes the step `invalid`, naming the hash and what to supply | yes: today it's lost silently (principle 4) |
-| **P-D13** | **One save, one load.** `k.save(path, outputs=False)` writes layer 1 (one file, or a folder when there is large data); `outputs=True` adds layer 2. `Kernel.load(path, catalog)` reads either. `to_json()` / `from_json()` stay as the in-memory spec text. A loaded output is shown `completed` only when its run key still matches | yes |
-| **P-D14** | **Saving as a run goes** (layer 3) comes with incremental runs (P7d), through a store interface with memory and folder backends in core | yes |
+| **P-D12** | **Data assigned to a step is part of the workflow, and is saved with it**, as `data/<step>.parquet`; a literal small enough to read stays inline in `workflow.json`. The workflow records its data version, so a load checks it got the same data. A load whose file is missing or different makes the step `invalid`, naming the file, never a raise | yes: today it's lost silently (principle 4) |
+| **P-D13** | **A session is a folder** (§3.5). `k.save(folder, outputs=False)` writes layer 1; `outputs=True` adds layer 2, a folder per step. `Kernel.load(folder, catalog)` reads either. `to_json()` / `from_json()` stay as the in-memory spec text. A loaded output is `completed` only when its run key still matches. This replaces model.md §3's *saving writes specs, never output data*: specs are still never data, and data now has a file of its own | yes |
+| **P-D14** | **Saving as a run goes** (layer 3) comes with incremental runs (P7d): finished rows appended as Parquet parts in the session folder | yes |
+| **P-D15** | **pyarrow becomes a dependency of core** (today: pandas only; pyarrow 25.0.1 is in the dev environment). One way to save, so no second code path for when it's missing | yes. The other way is an extra, `simple-steps-core[save]`, with saving refused without it, naming the extra |
+| **P-D16** | **How a column is written**: plain Parquet when it reads back exactly; tagged JSON for lists, dicts, tuples and mixed columns; media files for large values; a class's own `to_saved()`; else not saved, the step loading `stale` and saying why. **Never pickle.** Every save checked by reading back and comparing data versions (§3.5) | yes: nothing lost silently, nothing run on load |
+| **P-D17** | **Step names in file names.** A step's name becomes its file's name, so a name that isn't a safe file name (`/`, `:`, a reserved name on Windows) is either refused when declared, as `.` is (W7), or written with an escape. The workflow.json maps names to files either way | escape in the file name, keep the name as written: no step name changes because of saving |
 
 ## 8. Done means
 
