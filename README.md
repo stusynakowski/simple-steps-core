@@ -1,15 +1,20 @@
 # simple-steps-core
 
-> **Redesigned (branch `core-handover`, phases 1–3 done).** Core is the grid
-> model alone, driven through a `Catalog` and a `Kernel`. The design and its
-> status are in [docs/design/](docs/design/README.md); the working guide is
+> **Redesigned on branch `core-handover`; released as 1.0.x, and the Simple
+> Steps app runs on it.** The design is in [docs/design/](docs/design/README.md),
+> the plan ahead in [plan.md](docs/design/plan.md); the working guide is
 > [kernel-session.md](docs/design/kernel-session.md).
 
-**The engine of Simple Steps: workflows of expensive, impure, failable Python
-functions, as tidy tables.** You write plain functions; a workflow applies them
-to grids, step by step, and keeps a state per cell, so a workflow of
-transcription, LLM or model-inference steps can be built, checked, run and
-re-run a row at a time, in a Python session or behind the app's UI.
+**The engine of Simple Steps: linear workflows of tidy tables, built from plain
+Python functions.** Each step is one line that applies a tool to earlier steps'
+data, and holds one table: rows are samples, columns are variables, and each
+cell holds whatever is meaningful there (a number, a document, an image, a
+chart). Every row traces back to the rows it came from, and every cell to the
+input cells it was computed from; core never guesses how rows match; and it keeps a state per
+cell, so slow, failable steps (transcription, LLMs, model inference) can be
+checked before they run and re-run a row at a time, in a Python session or
+behind the app's UI. Why it's built this way is the app's
+[why-we-are-building-this.md](https://github.com/stusynakowski/Simple_Steps/blob/main/docs/why-we-are-building-this.md).
 
 It is a **backend library — it ships no UI** and depends on `pandas` alone.
 
