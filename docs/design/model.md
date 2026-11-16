@@ -50,7 +50,7 @@ column.
 | **spec id** | a hash of a step's spec, its tool's code, its resources' settings and the spec ids of what it reads. Never data, never extras (K20) | — |
 | **output** | what a step produced: data, lineage, row numbers, a state per cell | *result*, *ledger* |
 | **data version** | a hash of an output's values | — |
-| **state** | a **step state** (`staged`, `completed`, `stale`, `failed`, `invalid`) or a **cell state** (`absent`, `known`, `maybe`, `pending`, `blocked`, `failed`, `invalid`) | step *status* |
+| **state** | a **step state** (`staged`, `completed`, `stale`, `failed`, `invalid`) or a **cell state** (`absent`, `known`, `maybe`, `pending`, `blocked`, `failed`, `invalid`). The view marks a `known` cell of a stale step `stale`: a mark, not a cell state | step *status* |
 | **problem**, **warning** | a structured reason a step can't run or ran badly (code, message, step, row or argument); a warning doesn't block | plain-string problems |
 | **row id** | core's identity for a row. **Never shown or written** | — |
 | **row number** | a row's position, `0…n-1`, in its step's current order, shown as `#<step>` | *placement* |
@@ -86,6 +86,8 @@ Kernel ── catalog (tools, resource types, modifiers, combines) ── resour
 - **Stages** group consecutive steps to run and show them as one; a stage is
   not a reference and changes no output. *Planned* (R9; marked built until
   2026-11-03, when the handover sweep found no stage in core or its tests).
+  Its meaning is decided (SG, owner 2026-11-15): a grouping of consecutive
+  steps, with no inputs, outputs or computation of its own; plan.md P7a.
 
 ## 4. Rows: identity, position, lineage
 

@@ -30,6 +30,16 @@ what the workflow is now.
 | SS6 | Core has no `running` state; it stays the app's | none in core | **yes**: owner, 2026-11-03 |
 | SS7 | A stale step's reason is among its warnings, where the app reads it (core-asks L42); delete-anyway, `k.remove(name, force=True)` (L43d, **CA-6**) | the reason is in output metadata only; no delete-anyway | **yes**: owner, 2026-11-03. **Done 2026-11-04**: a stale step warns `stale: <reason>` (code `stale`); a step that read a stale one warns `read 's', which is stale (…); run(x) runs it first` (`read_stale`, W6); `k.remove(name, force=True)` |
 
+**From the app's plan 136** (its `docs/dev_plan/136-consolidation-plan.md`,
+2026-11-15; [plan.md §3.4](plan.md#34-what-the-apps-plan-136-asks-of-core)).
+Decided by the owner in that plan; how core builds each is plan.md P-D6–P-D12.
+
+| | Decision | Owner, 2026-11-15 |
+|---|---|---|
+| **GO** | **The grid's objects are real in core**: Grid, Column, Row, Cell and a pick, each defined very clearly, saying how the UI, formula text, the agent and a terminal use it | **yes**. In core's words (plan.md P-D6); `.to_dict()` keeps today's view (P-D8) |
+| **SG** | **A stage is a grouping of consecutive steps**, to consolidate a part of the process and organize the workflow. Not a sub-workflow: no inputs, outputs or computation of its own. Shown folded; a section in exported code. Settles R9's meaning | **yes**. Where it lives: plan.md P-D7 |
+| **IR** | **Incremental runs go by row state**: each row's result is kept as it completes; a re-run computes only rows not `known`, or whose inputs changed. Settles the shape of K15, D42 and PL4 | **yes**. Built on P2 and P3 (plan.md P7e) |
+
 **Formula text** (core asks 012, 2026-11-09; plan.md S12).
 
 | | Decision | Today (run 2026-11-09) | Recommended |
