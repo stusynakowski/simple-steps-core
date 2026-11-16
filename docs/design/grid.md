@@ -208,7 +208,7 @@ once agreed.*
 | **grid** | the table's data cells: its rows × its data columns, right of `#` | the cells | the index columns |
 | **row** | one **sample** of this step: tidy on the step's own terms. What a sample is can change between steps (§10); the reference columns record how | one cell per data column, and its index cells | a position that survives edits: core keeps a hidden identity underneath (rule 10) |
 | **column** | one **variable** of this step | one cell per row, a name, a column type | — |
-| **cell** | one row × one data column | a **value** (any Python value, or *absent*: no value at all, apart from `None`); a **state** (`pending`, `known`, `failed`, `blocked`, `absent`, `maybe`, `invalid`; `stale` a mark over `known`); its **type** (expected before the run, observed after); a failed cell's **error**; its **recipe** (§7, plan P7r): the tool, the literal arguments and defaults, and the input cells that produce it, **known from the moment the step is declared** (run: a staged cell's `k.cell` already names its input cells) | a formula of its own: a cell is produced by its step's one expression |
+| **cell** | one row × one data column | a **value** (any Python value, or *absent*: no value at all, apart from `None`); a **state** (`pending`, `known`, `failed`, `blocked`, `absent`, `maybe`, `invalid`; `stale` a mark over `known`); its **type** (expected before the run, observed after); a failed cell's **error**; its **recipe** (§7, plan P7r): the tool, the literal arguments and defaults, and the input cells that produce it, **known from the moment the step is declared** (run: a staged cell's `k.cell` already names its input cells) | a formula or value of its own: a cell is produced by its step's one expression. **Editing a cell** is one of two things (decisions.md CE): changing *data* (a source's cell, or a cell of a copy made into a data step), or changing the *function* (what is typed in one cell becomes the step's expression, for every row) |
 
 ## 9. Column types: what a tool, under its modifiers, is expected to produce
 
@@ -270,7 +270,7 @@ and in which direction. ✓ one step; ✓✓ two steps (one level each); ✗ a g
 |---|---|---|---|---|---|
 | **rows** (samples) | `filter`, `slice`, `distinct`, a condition `wf["s"][cols["x"] > 1]` ✓ | `sort` ✓ | `expand`: an item per row ✓ | `collapse(by=…)`: a row per group ✓ | `source`, a value, `sweep` ✓ |
 | **columns** (variables) | `select`, `drop` ✓ | `rename`, `mod.name`, `copy` ✓ | a tool returning a record (RGB → `r`, `g`, `b`) ✓; `widen` of a dict ✓ | a tool of several parameters (unite) ✓; `pack` into a dict ✓ | `map`, `group` ✓ |
-| **inside a cell** | — | — | a list → rows (`expand`), a dict → columns (`widen`) ✓; **an array ✗** (`expand` stops the run; `widen` drops it silently) | a row → a dict (`pack`), a group's rows → lists (`collapse`) ✓; a block → one cell, `pack` then `collapse` ✓✓ | — |
+| **inside a cell** | — | — | a list → rows (`expand`), a dict → columns (`widen`) ✓; **an array: by a tool** (decisions.md AR: `split_channels -> RGB` ✓); `expand`/`widen` of an array to be refused (today one stops the run, the other drops it silently: plan P1 W-arr) | a row → a dict (`pack`), a group's rows → lists (`collapse`) ✓; a block → one cell, `pack` then `collapse` ✓✓ | — |
 | **between tables** | `join(how="inner")` keeps matches ✓ | — | — | `join` on a key or on lineage, `zip_` of aligned steps, `stack` ✓; **a cross product ✗** (`join` needs `on=`) | `sweep`: one row per combination of settings ✓ |
 
 **Analysis restructurings, as moves:**
@@ -288,7 +288,7 @@ and in which direction. ✓ one step; ✓✓ two steps (one level each); ✗ a g
 | a cross product | — | ✗ (`join` needs `on=`); `sweep` covers settings, not tables |
 | fill down, complete missing combinations | a tool under `mod.table()` | ✓, opaque |
 | sample rows at random | a tool with a seed | ✓ (S9 for its reproducibility) |
-| an array's pixels, channels or tiles as rows or columns | — | ✗ (decide what unpacking an array means) |
+| an array's pixels, channels or tiles as rows or columns | a tool returning a record (channels) or a list (tiles, pixels), then `expand` | ✓ by a tool (decisions.md AR) |
 
 ## 11. Unknown sizes, unknown types, inconsistent rows
 
@@ -333,8 +333,10 @@ input (it traces back instead); pair unrelated tables without a key; flatten
 any depth in one step; decide whether a dict is a record or a mapping; know an
 undeclared tool's shape before it runs; trace across workflows.
 
-**Doesn't yet** (gaps, each a decision): unpack an array (pixels, channels,
-tiles); a window over rows that keeps its rows (a verb whose tool gets whole
+**Doesn't, by decision:** unpack an array itself; a tool does (decisions.md
+AR).
+
+**Doesn't yet** (gaps, each a decision): a window over rows that keeps its rows (a verb whose tool gets whole
 columns as lists and returns lists of the same length, rows kept); a cross
 product of two tables; an array's dtype and shape before a run; a `table`
 tool's one-value summary as a 1×1 table.
