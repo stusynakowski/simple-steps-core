@@ -110,6 +110,7 @@ earlier if the app is waiting on them (P-D1).
 | C18 | a tool's description is its docstring's first line, not its first paragraph | the first paragraph | to run |
 | C36 | `describe()` lists a retired `name=` default | **already fixed in core** (`default_is: "the step's name"`): the app can drop this shim | run |
 | C32 | a kernel can't be saved with its outputs; the app calls the internal `to_session_dict()` | public `k.save(path, outputs=True)` (P1c) | **run**: only the internal export keeps outputs |
+| **W-arr** | (not a shim: found 2026-11-16) `mod.widen("img")` on a column of numpy arrays **completes with zero columns**: the arrays are gone, with no warning; `expand` of one stops the run (*not a list: ndarray*) | `widen` refuses an array cell (a row fails, naming it), as it refuses a list (PK7), until what unpacking an array means is decided ([grid.md](grid.md) §7) | **reproduced** |
 
 Each is one piece and one patch release (`1.0.3`, …), with a test that fails
 without it, and a row in §5.

@@ -165,3 +165,27 @@ row map and its states. Nothing else, since everything else is derived.
 | GQ4 | `group`'s key column takes the step's name | named `group` (G8) | yes, as D9 |
 | GQ5 | The row map's eight kinds: enough, and each verb's right? | — | your call; the property tests check each verb against its declared kind (PL2) |
 | GQ6 | Is this the order: the row map (P3) before stages, typed saving and incremental runs? | plan.md P-D1 | yes: they all read it |
+
+## 7. The owner's model (2026-11-16), against core
+
+Drawn, with the run behind each figure, in the page *The step table* (an
+artifact; its figures are this page's §1–§3 drawn). In the owner's words:
+
+| The owner's model | Against core | |
+|---|---|---|
+| every step holds a table; `wf["s"]` is its **title** | every pick of it is also a table | matches |
+| **column names** are strings, the variables; the **header** is the list of them | numeric names become `var<n>`; never starting with `#` | matches |
+| **`#`**, `0…n-1`, is every step's index column | it is what users see and type; core also keeps a hidden row identity, so a pick follows its row when a source is edited (rule 10) | matches; the hidden identity stays |
+| **`#<previous step>`** columns are stored on every step made from earlier ones | stored for expand, collapse, join, stack; derived for filter, sort, picks; none for map, group, select (G1, G4) | sharper than core: one form. To settle: every ancestor or the parent only; a collapse's list and an expand's `.idx` |
+| the `#` cells say how one cell produced another | they give the row; the column comes from the binding in the expression; `k.cell` answers both | sharper, plus the binding |
+| the **grid** is the cells within the table | core says *grid* for the whole table | clearer words: title, header, index columns, grid, cell (for model.md §2) |
+| a **cell** holds a value and its state | seven states plus the `stale` mark, and a failed cell's error | matches |
+| before a slow run, know what will come back ("numpy arrays in this structure") | the plan knows the rows, the columns and the type name (`ndarray`); every cell `pending`; not the dtype or shape. Rows appearing as they finish: P7d | gap: expected structure |
+| a row-wise map passes a grid of cells; modifiers run one function over a grid of arguments | the verb cuts: a row's cells (`map`), a group's lists (`collapse`), the settings' combinations (`sweep`) | matches |
+| cells hold Python objects: arrays, images, plots | yes; `k.view` crashes on arrays today (C37, plan P1) | matches, with a bug |
+| unpack objects into a new grid to explore them | lists and dicts, one level per step (`expand`, then `widen`); arrays don't: `expand` stops the run and `widen` drops the column silently (plan P1, W-arr) | gap for arrays |
+
+**To decide:** the words (title, header, index columns, grid, cell); index
+columns stored on every derived step, and how far back; the hidden identity
+staying; a cell's expected structure (dtype, shape) before a run; what
+unpacking an array means (rows on its first axis, pixels, channels).
