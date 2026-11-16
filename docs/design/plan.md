@@ -201,26 +201,34 @@ patients.simple-steps/          one session: one folder
   media/<hash>.<ext>            images, arrays, files: once each, by content (R7)
 ```
 
-**Parquet doesn't hold every grid exactly** (run 2026-11-16, pyarrow 25.0.1,
-core outputs and plain frames):
+**What Parquet holds exactly** (run 2026-11-16, pyarrow 25.0.1). The first
+run went through pandas (`df.to_parquet`, `pd.read_parquet`) and lost data;
+the second wrote and read through pyarrow with a type core chose, back to
+Python values (`to_pylist`). **The losses were pandas' conversion, not
+Parquet's.**
 
-| Cells | Through Parquet as is |
-|---|---|
-| numbers, text, bools; a dict a tool spread into columns; an `expand`; an outer `join` | exact |
-| lists (a `collapse`, a lineage list `#s` = `[0, 2]`) | come back as numpy arrays: a silent type change |
-| dicts with different keys in one column | each gets the other's keys as `None`, and `1` becomes `1.0`: *absent* lost, a silent change |
-| `None` in a float column; an int column with a `None` | `NaN`; the ints become floats |
-| a column of mixed types (`1`, `"a"`); tuples | refused (`ArrowInvalid`) |
-| a 2-D array (an image); any other object | refused |
+| Cells | Through pandas' default | Through pyarrow, typed by core |
+|---|---|---|
+| numbers, text, bools; an `expand`; an outer `join` | exact | exact |
+| lists (a `collapse`, a lineage list `#s` = `[0, 2]`), lists of dicts | numpy arrays: a silent change | exact (`list<…>`) |
+| an int column with a `None`; `None` beside `NaN` in floats | floats; `NaN` | exact (`int64` with a null; `None` and `nan` kept apart) |
+| dicts with different keys | each gets the other's keys as `None`, and `1` becomes `1.0` | exact as a `map<string, …>` when the values share one type |
+| datetimes with a time zone, `Decimal`, `bytes` | — | exact |
+| *absent* | — | a null in the data; *absent* is the cell's state in `states.parquet`, which core already keeps apart (run: a `join` gap is `absent` in `output.states`) |
+| a column of mixed types (`1`, `"a"`) | refused | refused: a union type has no Parquet form |
+| tuples; dict keys that aren't strings; ints past 64 bits | refused | no Arrow type (an int past 2⁶³ overflows) |
+| a 2-D array (an image); any other object | refused | refused |
 
 So each column is written the plainest way that **reads back exactly**, and
 core checks it:
 
-1. **Plain**, as a Parquet column, when its values are all of one Parquet
-   type and the column reads back equal.
-2. **Tagged**, as a Parquet text column of JSON with types kept (a tuple apart
-   from a list, an int apart from a float, *absent* apart from `None`), for
-   lists, dicts, tuples and mixed columns.
+1. **Typed Parquet**, with the Arrow type core chose from the column's values
+   (or its plan), written and read through pyarrow, never through pandas'
+   inference.
+2. **Tagged**, as a Parquet text column of JSON that names each value's type
+   (a tuple apart from a list, an int apart from a float, `NaN` and `inf`,
+   big ints as text, non-string dict keys), for what Arrow has no type for:
+   mixed columns, tuples, odd keys, big ints.
 3. **Media**, a hash in the column and the bytes in `media/` (`.npy` for an
    array, saved without pickle; the file itself for an image or file), for
    large values (R7).
