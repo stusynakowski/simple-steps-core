@@ -86,7 +86,7 @@ test green as they are. **Behaviour changes** are confirmed first and run the
 | **P4** | **Picks kept by row identity** | a saved pick holds its row's identity and works out its row number each time. Fixes W18 and W9 | behaviour | medium | P3; P-D3 | to do |
 | **P5** | **Grammar leftovers** | D18, D19; PK7 at staging; EX11's per-cell type checks at run | behaviour | small | D18, D19 | to do |
 | **P6** | **Principles, the public API, the round trip** | the principles list (H5); what is public and what versioning promises (P-D4); a property test that `formula(print(x)) == x` over generated expressions (EX7) | docs + test | small | P-D2, P-D4 | to do |
-| **P7** | **What the app's plan 136 needs** | in this order: **P7a** stages; **P7b** the workflow as a script; **P7c** formula spans and the shared corpus; **P7d** keeping results, with saving as a run goes (§3.4, §3.5) | additive | medium–large | P-D7–P-D10, P-D14 | after P1; see §3.4 |
+| **P7** | **What the app's plan 136 needs** | in this order: **P7r** a cell's recipe; **P7a** stages; **P7b** the workflow as a script; **P7c** formula spans and the shared corpus; **P7d** keeping results, with saving as a run goes (§3.4, §3.5) | additive | medium–large | P-D7–P-D10, P-D14 | after P1; see §3.4 |
 | **P8** | **The other features** | §3.3, in the order the app needs them | additive | — | each its own | after P7 |
 | **P9** | **The final docs** | README, writing tools, resources, modifiers, integrating, problems (the old T13) | docs | medium | after P7 | — |
 
@@ -110,6 +110,7 @@ earlier if the app is waiting on them (P-D1).
 | C18 | a tool's description is its docstring's first line, not its first paragraph | the first paragraph | to run |
 | C36 | `describe()` lists a retired `name=` default | **already fixed in core** (`default_is: "the step's name"`): the app can drop this shim | run |
 | C32 | a kernel can't be saved with its outputs; the app calls the internal `to_session_dict()` | public `k.save(path, outputs=True)` (P1c) | **run**: only the internal export keeps outputs |
+| **K-cell** | (not a shim: found 2026-11-16) `k.cell` on a `map` with a column argument (`add[mod.map()](wf["srt"], a=wf["srt"][cols["n"]])`) reports the argument's **whole column** (rows 0, 1, 2) as the cell's input, where the call used one cell; after a `collapse` it lists the input rows with empty `values` | the one cell used, and a group's values | **reproduced** |
 | **W-arr** | (not a shim: found 2026-11-16) `mod.widen("img")` on a column of numpy arrays **completes with zero columns**: the arrays are gone, with no warning; `expand` of one stops the run (*not a list: ndarray*) | `widen` refuses an array cell (a row fails, naming it), as it refuses a list (PK7), until what unpacking an array means is decided ([grid.md](grid.md) §7) | **reproduced** |
 
 Each is one piece and one patch release (`1.0.3`, …), with a test that fails
@@ -176,6 +177,8 @@ and items that are the app's alone are in §4.
 | **B** (I1, I2), 136-P2–P3 | a typed table typed into one step, `table[mod.source()](data={…})` (135 §4); uploading a table | `table` is already a verb (`mod.table`); **a DataFrame assigned to a step isn't saved** (§1) | the name clashes (P-D10); the literal table is a small built-in tool once named, saved in the spec like any literal. An upload too large to sit in the spec is data filed beside it (P1c, P-D12) |
 | **B** (I1) | "defining a function in a cell" | a kernel's catalog is fixed when it's made; a bare function is refused (EX9); formula text never runs code (EX13) | nothing in core: the app makes the function a tool and builds the kernel again with the new catalog (`Kernel.from_json(text, catalog)`), which works today (P-D11) |
 | **E** (I8), 136-P8 | a step agent scoped to one step | `k.check(name, op)`; refusals that write the fix | WR2, `Problem.fix` (§3.3), when the app wants it |
+
+**P7r, a cell's recipe** (owner, 2026-11-16: "click on a cell and say this cell was produced using this tool, these literal args and these previous cells"): `k.cell(step, row, column)` gives the call that made the cell: the tool and its code hash, the verb, and each argument with its value and its source (an earlier cell as a pick, `wf["v"][1]["n"]`; a literal written in the expression; a parameter's default; a resource), plus the wrappers that ran. Since every input is a pick, the recipe can be re-run as a one-row step; a test calls the tool again from the recipe and compares. It says when a cell can't be reproduced: the tool's code changed (its hash), the tool is volatile (S9), or the step is a `table` (its recipe is the whole input). It is what the app's 136-P1 (row lineage on screen, the cell's formula line) shows; it fixes K-cell with it. Small, needs neither P2 nor P3, so it goes first. Drawn in the page *The step table*, figure 3.
 
 **P7's order:** **P7a** stages and **P7b** the script are small, need neither
 P2 nor P3, and may go right after P1 if the app is waiting on them. **P7c**
