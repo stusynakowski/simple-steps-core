@@ -358,13 +358,37 @@ class Kernel:
         """The stage *step* is in, or None."""
         return self.workflow.stage_of(self._name(step))
 
-    def run_stage(self, name: str, *, force: bool = False) -> list[Step]:
-        """Bring stage *name*'s steps up to date, in order, each after what
-        it needs (as :meth:`run`); ``force=True`` runs each again."""
+    def stage_status(self, name: str) -> dict:
+        """Stage *name* as one big step: its steps, one state (its worst
+        step's: invalid, failed, stale, staged, else completed), what in it
+        needs a run and why, and the step whose table it ends with."""
+        steps = self._stage_steps(name)
+        needs = {s: why for s, why in self.needs_run().items() if s in steps}
+        states = {self.workflow.steps[s].state for s in steps}
+        state = next((s for s in ("invalid", "failed", "stale", "staged") if s in states),
+                     "completed")
+        if state == "completed" and needs:
+            state = "stale"                                   # a step read a stale one
+        return {"name": name, "steps": list(steps), "state": state,
+                "needs_run": needs, "output": steps[-1]}
+
+    def rename_stage(self, old: str, new: str) -> None:
+        """Rename stage *old* to *new*; its steps stay as they are."""
+        self._stage_steps(old)
+        if new in self.workflow.stages:
+            raise ValueError(f"a stage {new!r} exists already")
+        self.workflow.stages = {(new if n == old else n): s for n, s in self.workflow.stages.items()}
+
+    def _stage_steps(self, name: str) -> list[str]:
         if name not in self.workflow.stages:
             known = ", ".join(map(repr, self.workflow.stages)) or "none"
             raise KeyError(f"no stage {name!r}; the stages are {known}")
-        return [self.run(step, force=force) for step in list(self.workflow.stages[name])]
+        return self.workflow.stages[name]
+
+    def run_stage(self, name: str, *, force: bool = False) -> list[Step]:
+        """Bring stage *name*'s steps up to date, in order, each after what
+        it needs (as :meth:`run`); ``force=True`` runs each again."""
+        return [self.run(step, force=force) for step in list(self._stage_steps(name))]
 
     # ── resources ────────────────────────────────────────────────────────
     @_notifies("define")

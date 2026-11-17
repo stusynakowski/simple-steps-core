@@ -129,7 +129,8 @@ was made from has changed: a tool whose code changed shows `stale`.
 
 **16. Steps that do one part of the work can be a stage.**
 `k.stage("clean", first="a", last="c")` groups consecutive steps under a
-name, to show folded and run together (`k.run_stage("clean")`). A stage
+name, to show folded as one big step (`k.stage_status("clean")`) and run
+together (`k.run_stage("clean")`). You edit the steps inside it. A stage
 changes no result. A step you insert inside it joins it, one you move out
 leaves it, and a step is in one stage.
 

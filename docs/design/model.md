@@ -87,7 +87,11 @@ Kernel ── catalog (tools, resource types, modifiers, combines) ── resour
   and show them as one; a stage is not a reference and changes no output, so
   it is saved but in no id (SG, P-D7). `k.stage("clean", first="a",
   last="c")`, `k.stages`, `k.stage_of(step)`, `k.run_stage("clean")`,
-  `k.unstage(name)`. Core keeps it valid: a step inserted or moved inside
+  `k.unstage(name)`, `k.rename_stage(old, new)`; `k.stage_status(name)` reads it
+  as one big step (owner, 2026-11-17: *collapse multiple steps into one*): its
+  worst step's state, what in it needs a run, and the step whose table it
+  ends with. A stage manages running and showing its steps; they are edited
+  as steps. Core keeps it valid: a step inserted or moved inside
   joins it, one moved out leaves, a rename follows, a deleted step goes (and
   with its last step, the stage); a step is in one stage. *Built* 2026-11-17
   (`tests/unit/test_stages.py`).

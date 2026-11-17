@@ -112,3 +112,33 @@ def test_a_saved_stage_naming_steps_that_arent_there_loads_what_is(k):
     blob["steps"] = [s for s in blob["steps"] if s["name"] not in ("b", "c", "d")]
     loaded = Kernel.from_json(json.dumps(blob), CAT)
     assert loaded.stages == {"clean": ["a"]}
+
+
+# ── a stage as one big step (owner, 2026-11-17) ─────────────────────────
+def test_a_stage_reads_as_one_step(k):
+    k.stage("prep", first="a", last="c")
+    status = k.stage_status("prep")
+    assert status == {"name": "prep", "steps": ["a", "b", "c"], "state": "staged",
+                      "needs_run": {"a": "staged", "b": "staged", "c": "staged"},
+                      "output": "c"}
+    k.run_stage("prep")
+    assert k.stage_status("prep")["state"] == "completed"
+    assert k.stage_status("prep")["needs_run"] == {}
+
+
+def test_a_stages_state_is_its_worst_steps(k):
+    k.stage("prep", first="a", last="c")
+    k.run_all()
+    k["b"] = step_tool[mod.map(), mod.name("n"), mod.retry(times=2)](wf["a"])   # an edit inside
+    assert k.stage_status("prep")["state"] == "stale"
+    assert "b" in k.stage_status("prep")["needs_run"]
+    k["c"] = step_tool[mod.map()](wf["nowhere"])
+    assert k.stage_status("prep")["state"] == "invalid"
+
+
+def test_a_stage_can_be_renamed(k):
+    k.stage("prep", first="a", last="b")
+    k.rename_stage("prep", "preprocessing")
+    assert k.stages == {"preprocessing": ["a", "b"]}
+    with pytest.raises(KeyError, match="no stage 'prep'"):
+        k.stage_status("prep")
