@@ -38,25 +38,43 @@
 
 ## 2. What a session is on disk
 
+One folder for the session, one folder for each step in it (owner,
+2026-11-17), built 2026-11-17:
+
 ```
-patients.simple-steps/          one session: one folder
+patients.simple-steps/
   workflow.json                 steps in order, expressions, stages, resources'
                                 settings (never a Secret), extras, each tool's
-                                hash; per step, its files and data versions.
-                                Format 5
-  data/<step>.parquet           data typed, pasted or uploaded into a step
-  outputs/<step>/               a step's output, when saved with outputs
-    data.parquet                its grid: data columns and lineage, row ids
-    states.parquet              a state per cell, the same shape
-    meta.json                   run key, data version, verb, warnings, what it
-                                read, and how each column was written (§4)
-  media/<hash>.<ext>            arrays, images, figures: once each, by content
+                                hash; each step names its folder. Format 5
   report.json                   what the last save couldn't keep exactly (§7)
+  data/
+    load/                       one folder per step
+      table.parquet             its table: the data typed, pasted or uploaded
+                                into it, or, saved with outputs, its results
+                                (data columns, lineage, row ids)
+      states.parquet            with outputs: a state per cell, the same shape
+      meta.json                 with outputs: run key, data version, verb,
+                                warnings, what it read, how each column was
+                                written (§4)
+      files/<hash>.<ext>        the arrays (.npy), images (.png, .tiff) and
+                                Plotly figures (.json) its cells hold
+    clean/
+      …
 ```
 
-Any step's `data.parquet` opens in pandas, DuckDB, Polars or Excel without
-core. A cell holding an array, image or figure shows there as its hash; the
-file is in `media/`.
+- **A file is stored once**, in the folder of the first step that holds it: a
+  later step carrying the same image (a filtered copy) names that file.
+- **A kernel's store has the same layout** (`Kernel(catalog, spill_over=n,
+  store="patients.simple-steps")`): images land in `data/<step>/files/` as
+  each step runs, and `k.save()` into the same folder copies nothing.
+- **Core removes only its own files**, and only those nothing names any more:
+  a step's `table.parquet`, `states.parquet`, `meta.json` and `files/<hash>`;
+  never a file someone else put in the folder, and never a file a result the
+  kernel keeps for undo still names.
+
+Any step's `table.parquet` opens in pandas, DuckDB, Polars or Excel without
+core. A cell holding an array, image or figure shows there as the path of its
+file under `data/`.
 
 ## 3. When you can save
 

@@ -618,9 +618,9 @@ class Kernel:
         kernel.workflow.spill = kernel._spill
         if kernel._spill is not None:
             # what loaded as values (saved before handles) goes to disk too
-            for step in kernel.workflow.steps.values():
+            for name, step in kernel.workflow.steps.items():
                 if not step.output.meta.get("staged"):
-                    step.output.data = kernel._spill.spill(step.output.data)
+                    step.output.data = kernel._spill.spill(step.output.data, name)
         return kernel
 
     def value(self, step: str | int, row: int, column: str) -> Any:

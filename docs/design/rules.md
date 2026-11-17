@@ -119,9 +119,10 @@ follow the input by position, as in Python. Settings are literals, or a step;
 never a resource.
 
 **15. A saved session is exact, or says where it isn't.** `k.save(folder)`
-writes the workflow and the data you gave its steps, and with `outputs=True`
-every step's results, each table as a Parquet file you can open anywhere,
-and arrays, images and Plotly figures as their own files, once each; `Kernel.load(folder, catalog)` reads it
+writes the workflow and, in a folder for each step, the data you gave it or,
+with `outputs=True`, its results: its table as a Parquet file you can open
+anywhere, and the arrays, images and Plotly figures its cells hold as their
+own files, once each; `Kernel.load(folder, catalog)` reads it
 back and runs nothing. Anything that couldn't be kept exactly is listed in
 the save's report, and a step whose data is missing or changed loads
 `invalid`, saying why. A saved result shows as current only if nothing it

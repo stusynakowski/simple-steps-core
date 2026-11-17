@@ -1,16 +1,23 @@
 """Saving a session as a folder, and loading it back (plan P1c; docs/design/saving.md).
 
-A session is a folder::
+A session is a folder, one sub-folder per step::
 
     <folder>/
-      workflow.json          the kernel's spec; each data step names its file
-      data/<step>.parquet    the data assigned to a step (a DataFrame)
-      outputs/<step>/        with outputs=True: a step's output, data.parquet
-                             (its table, lineage and row ids), states.parquet
-                             (a state per cell), meta.json (its record)
-      media/<hash>.<ext>     arrays (.npy), images (.png, .tiff) and Plotly
-                             figures (.json), each once, named by its content
-      report.json            what the last save couldn't keep exactly
+      workflow.json            the workflow; each step names its folder
+      report.json              what the last save couldn't keep exactly
+      data/
+        <step>/
+          table.parquet        its table: the data given to it, or its output
+                               (lineage and row ids included)
+          states.parquet       with outputs: a state per cell
+          meta.json            with outputs: its record (run key, what it read…)
+          files/<hash>.<ext>   the arrays (.npy), images (.png, .tiff) and
+                               Plotly figures (.json) its cells hold, named by
+                               their content
+
+A file is stored once: a later step holding the same value (a filtered copy
+carrying an image) names the earlier step's file. A kernel's store
+(``Kernel(store=…)``) has the same layout, so saving into it copies nothing.
 
 **A save is exact, or says where it isn't.** Each column is written the
 plainest way that reads back exactly: a typed Parquet column when its values
@@ -183,54 +190,80 @@ _PNG_MODES = {"1", "L", "LA", "P", "RGB", "RGBA", "I;16"}
 
 
 class Media:
-    """``media/`` of a session folder: each array, Pillow image or Plotly
-    figure written once, as a file named by a hash of its bytes, so a value in
-    many cells or steps is stored once. Arrays as ``.npy`` (never pickled),
-    images as PNG (TIFF for the modes PNG can't hold: ``I``, ``F``, ``CMYK``,
-    …), figures as Plotly's JSON. Each is read back when written and must give
-    the value back, or it isn't saved. A library is used only when the value
-    is already one of its objects."""
+    """The files of a session folder (or a kernel's store) under *root*: each
+    array, Pillow image or Plotly figure written once, named by a hash of its
+    bytes, in the folder of the step that first holds it,
+    ``data/<step>/files/``; a later holder names that file. Arrays as ``.npy``
+    (never pickled), images as PNG (TIFF for the modes PNG can't hold: ``I``,
+    ``F``, ``CMYK``, …), figures as Plotly's JSON. An image is read back when
+    written and must give the value back, or it isn't saved. A library is used
+    only when the value is already one of its objects."""
 
-    def __init__(self, folder: Path, *, here: bool = False, lazy: bool = False):
-        # *here*: *folder* is the media folder itself (a kernel's store);
+    def __init__(self, root: Path, *, lazy: bool = False):
         # *lazy*: reading gives handles to the files, not the values (P7d)
-        self.folder = Path(folder) if here else Path(folder) / "media"
-        self.written: set[str] = set()
+        self.root = Path(root)
         self.lazy = lazy
+        self.step = "data/_"                 # where new files go: data/<step>
+        self.written: set[str] = set()       # files this save or store names
+        self.by_name: dict[str, str] = {}    # a file's name → where it is
+
+    def at(self, step_folder: str) -> None:
+        """New files go into *step_folder* (``data/<step>``) from now on."""
+        self.step = step_folder
+
+    def _place(self, name: str) -> str:
+        """Where the file *name* is, or goes: the first holder's folder."""
+        if name not in self.by_name:
+            self.by_name[name] = f"{self.step}/files/{name}"
+        return self.by_name[name]
 
     def put(self, value: Any) -> dict | None:
         """The reference to *value*'s file, or None if it isn't a media value.
-        A handle's file is copied as it is; its value isn't loaded."""
+        A handle's file is copied as it is, unless it is here already; its
+        value isn't loaded."""
         from .handles import MediaHandle
         if isinstance(value, MediaHandle):
-            self.folder.mkdir(parents=True, exist_ok=True)
-            target = self.folder / value.name
+            source = value.folder / value.name
+            name = Path(value.name).name
+            if value.folder.resolve() == self.root.resolve() and source.is_file() \
+                    and name not in self.by_name:
+                self.by_name[name] = value.name          # in place: nothing to copy
+            path = self._place(name)
+            target = self.root / path
             if not target.is_file():
                 import shutil
-                shutil.copyfile(value.folder / value.name, target)
-            self.written.add(value.name)
-            return {**value.ref, "token": tag(value.token), "summary": value.summary}
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, target)
+            self.written.add(path)
+            return {**value.ref, "$media": path, "token": tag(value.token), "summary": value.summary}
         encoded = _encode_media(value)
         if encoded is None:
             return None
         kind, ext, raw, extra = encoded
         import hashlib
-        name = f"{hashlib.sha256(raw).hexdigest()[:24]}.{ext}"
-        self.folder.mkdir(parents=True, exist_ok=True)
-        if not (self.folder / name).is_file():
-            (self.folder / name).write_bytes(raw)
-        self.written.add(name)
-        return {"$media": name, "kind": kind, **extra}
+        path = self._place(f"{hashlib.sha256(raw).hexdigest()[:24]}.{ext}")
+        target = self.root / path
+        if not target.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(raw)
+        self.written.add(path)
+        return {"$media": path, "kind": kind, **extra}
+
+    def path_of(self, ref: dict) -> Path:
+        where = ref["$media"]
+        # a bare name is a file of the earlier layout, media/<name>
+        return self.root / (where if "/" in where else f"media/{where}")
 
     def get(self, ref: dict) -> Any:
+        source = self.path_of(ref)
         if self.lazy and "token" in ref:
             from .handles import MediaHandle
-            if not (self.folder / ref["$media"]).is_file():
-                raise OSError(f"media/{ref['$media']} is missing")
+            if not source.is_file():
+                raise OSError(f"{ref['$media']} is missing")
             core = {k: v for k, v in ref.items() if k not in ("token", "summary")}
-            return MediaHandle(ref["$media"], core, ref.get("summary") or ref["kind"],
-                               untag(ref["token"]), self.folder)
-        return _decode_media(ref, (self.folder / ref["$media"]).read_bytes())
+            return MediaHandle(str(source.relative_to(self.root)), core,
+                               ref.get("summary") or ref["kind"], untag(ref["token"]), self.root)
+        return _decode_media(ref, source.read_bytes())
 
 
 def _encode_media(value: Any):
@@ -427,6 +460,14 @@ def _write_json(path: Path, blob: dict) -> None:
 
 
 # ── a kernel ──────────────────────────────────────────────────────────────
+#: The files this core writes in a session folder, and only these, are
+#: removed when nothing names them any more.
+_OWN_FILE = re.compile(r"data/[^/]+/(table\.parquet|states\.parquet|meta\.json|"
+                       r"files/[0-9a-f]{24}\.(npy|png|tiff|json))"
+                       r"|data/[^/]+\.parquet|outputs/[^/]+/(data|states)\.parquet"
+                       r"|outputs/[^/]+/meta\.json|media/[0-9a-f]{24}\.(npy|png|tiff|json)")
+
+
 def save(kernel, folder, *, outputs: bool = False) -> dict:
     """Save *kernel* as a session folder; the report of what wasn't exact."""
     from .output import _data_version
@@ -435,21 +476,18 @@ def save(kernel, folder, *, outputs: bool = False) -> dict:
 
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
-    previous = _previous_files(folder)
-    previous_outputs = _previous_outputs(folder)
     media = Media(folder)
     blob = kernel.spec.to_dict()
     entries = {entry["name"]: entry for entry in blob["steps"]}
     report: dict = {"exact": True, "steps": {}}
     taken: set[str] = set()
-    written: set[str] = set()
-    written_outputs: set[str] = set()
     for name, step in kernel.workflow.steps.items():
         value = step.literal
+        step_folder = f"data/{_file_stem(name, taken)}"
+        media.at(step_folder)
         if value is NO_LITERAL:
             if outputs:
-                _save_output(folder, name, step, entries[name], report, taken, written_outputs,
-                             media)
+                _save_output(folder, step_folder, name, step, entries[name], report, media)
             continue
         if value is None or _literal_problem(value) is None:
             continue
@@ -458,10 +496,10 @@ def save(kernel, folder, *, outputs: bool = False) -> dict:
             # loaded without its data: still a data step, still without it
             data = {"in": None, "not_saved": {"*": "its data wasn't loaded, so there was none to save"}}
         elif isinstance(value, pd.DataFrame):
-            relative = f"data/{_file_stem(name, taken)}.parquet"
+            relative = f"{step_folder}/table.parquet"
             manifest = write_frame(value, folder / relative, media)
             if "file_columns" in manifest:
-                written.add(relative)
+                media.written.add(relative)
                 back = read_frame(folder / relative, manifest, media)
                 if _data_version(back) != _data_version(value) and "not_saved" not in manifest:
                     manifest["not_saved"] = {"*": "the table didn't read back exactly"}
@@ -486,19 +524,50 @@ def save(kernel, folder, *, outputs: bool = False) -> dict:
             step_report["not_saved"] = data["not_saved"]
             report["exact"] = False
         report["steps"][name] = step_report
-    for relative in previous - written:
-        stale = folder / relative
-        if stale.is_file() and stale.parent == folder / "data":
-            stale.unlink()                     # a file this core wrote, no longer named
-    for relative in previous_outputs - written_outputs:
-        _remove_output(folder, relative)
-    _remove_unused_media(folder, media.written)
+    _remove_unnamed(folder, media.written | _alive(kernel, folder))
     _write_json(folder / "workflow.json", blob)
     _write_json(folder / "report.json", report)
     return report
 
 
-_OUTPUT_FILES = ("data.parquet", "states.parquet", "meta.json")
+def _alive(kernel, folder: Path) -> set[str]:
+    """The files under *folder* the kernel's own handles name: when the session
+    folder is its store, a result it keeps (for undo) names files too."""
+    from .handles import MediaHandle
+    root, alive = folder.resolve(), set()
+    outputs = [st.output for st in kernel.workflow.steps.values()]
+    outputs += list(kernel.workflow.store.values())
+    for output in outputs:
+        for position in range(output.data.shape[1]):
+            series = output.data.iloc[:, position]
+            if series.dtype != object:
+                continue
+            for value in series:
+                if isinstance(value, MediaHandle) and value.folder.resolve() == root:
+                    alive.add(value.name)
+    return alive
+
+
+def _remove_unnamed(folder: Path, named: set[str]) -> None:
+    """Remove the files this core wrote (:data:`_OWN_FILE`) that nothing names
+    now, then the folders they leave empty. Nothing else is touched."""
+    for sub in ("data", "outputs", "media"):
+        top = folder / sub
+        if not top.is_dir():
+            continue
+        for file in sorted(top.rglob("*")):
+            relative = file.relative_to(folder).as_posix()
+            if file.is_file() and relative not in named and _OWN_FILE.fullmatch(relative):
+                file.unlink()
+        for directory in sorted((d for d in top.rglob("*") if d.is_dir()), reverse=True):
+            try:
+                directory.rmdir()                       # only when empty
+            except OSError:
+                pass
+        try:
+            top.rmdir()
+        except OSError:
+            pass
 
 
 def _meta_blob(output) -> dict:
@@ -526,62 +595,37 @@ def _meta_from(blob: dict) -> dict:
     return meta
 
 
-def _save_output(folder: Path, name: str, step, entry: dict, report: dict,
-                 taken: set, written: set, media: "Media | None" = None) -> None:
-    """Write *step*'s output to ``outputs/<step>/``, checked; else report why not."""
+def _save_output(folder: Path, step_folder: str, name: str, step, entry: dict,
+                 report: dict, media: "Media") -> None:
+    """Write *step*'s output to its folder, checked; else report why not."""
     from .output import _data_version
 
     output = step.output
     if output.meta.get("staged") or output.meta.get("empty"):
         return
-    relative = f"outputs/{_file_stem(name, taken)}"
-    where = folder / relative
+    where = folder / step_folder
     why = None
     try:
         meta = _meta_blob(output)
     except NotSaved as exc:
         why = {"*": f"its record holds a {exc}, which can't be saved"}
     if why is None:
-        data = write_frame(output.data, where / "data.parquet", media)
+        data = write_frame(output.data, where / "table.parquet", media)
         states = write_frame(output.states.astype(str), where / "states.parquet")
         why = data.get("not_saved") or states.get("not_saved")
         if why is None:
-            back = read_frame(where / "data.parquet", data, media)
+            back = read_frame(where / "table.parquet", data, media)
             if _data_version(back) != _data_version(output.data):
                 why = {"*": "its table didn't read back exactly"}
     if why:
-        _remove_output(folder, relative)
         report["steps"].setdefault(name, {})["output"] = {"file": None, "not_saved": why}
         report["exact"] = False
-        return
+        return                                  # its files, unnamed, go at the end
     _write_json(where / "meta.json", meta)
-    entry["output"] = {"in": relative, "version": _data_version(output.data),
+    media.written.update(f"{step_folder}/{f}" for f in ("table.parquet", "states.parquet", "meta.json"))
+    entry["output"] = {"in": step_folder, "version": _data_version(output.data),
                        "data": data, "states": states}
-    written.add(relative)
-    report["steps"].setdefault(name, {})["output"] = {"file": relative}
-
-
-def _remove_output(folder: Path, relative: str) -> None:
-    """Remove an output folder this core wrote: only its own files."""
-    where = folder / relative
-    if where.parent != folder / "outputs" or not where.is_dir():
-        return
-    for file in _OUTPUT_FILES:
-        if (where / file).is_file():
-            (where / file).unlink()
-    try:
-        where.rmdir()
-    except OSError:
-        pass                                   # something else is in it: leave it
-
-
-def _previous_outputs(folder: Path) -> set[str]:
-    try:
-        blob = json.loads((folder / "workflow.json").read_text())
-    except (OSError, ValueError):
-        return set()
-    return {(e.get("output") or {}).get("in") for e in blob.get("steps", [])
-            if str((e.get("output") or {}).get("in") or "").startswith("outputs/")}
+    report["steps"].setdefault(name, {})["output"] = {"file": step_folder}
 
 
 def _load_output(folder: Path, saved: dict, media: "Media | None" = None):
@@ -589,8 +633,11 @@ def _load_output(folder: Path, saved: dict, media: "Media | None" = None):
     from .output import Output, _data_version, _state_column
 
     where = folder / saved["in"]
+    table = where / "table.parquet"
+    if not table.is_file() and (where / "data.parquet").is_file():
+        table = where / "data.parquet"          # the earlier layout, outputs/<step>/
     try:
-        data = read_frame(where / "data.parquet", saved["data"], media)
+        data = read_frame(table, saved["data"], media)
         plain = read_frame(where / "states.parquet", saved["states"])
         # a state column is core's own type, built as core builds it
         states = pd.DataFrame({c: _state_column(plain[c].tolist(), data.index)
@@ -601,26 +648,6 @@ def _load_output(folder: Path, saved: dict, media: "Media | None" = None):
     if _data_version(data) != saved.get("version"):
         return None                            # changed since it was saved: it runs again
     return Output(data, states, meta)
-
-
-def _remove_unused_media(folder: Path, kept: set[str]) -> None:
-    """Remove the media files this core wrote that no saved value names now."""
-    where = folder / "media"
-    if not where.is_dir():
-        return
-    for file in where.iterdir():
-        if file.is_file() and file.name not in kept and \
-                re.fullmatch(r"[0-9a-f]{24}\.(npy|png|tiff|json)", file.name):
-            file.unlink()
-
-
-def _previous_files(folder: Path) -> set[str]:
-    try:
-        blob = json.loads((folder / "workflow.json").read_text())
-    except (OSError, ValueError):
-        return set()
-    return {(e.get("data") or {}).get("in") for e in blob.get("steps", [])
-            if str((e.get("data") or {}).get("in") or "").startswith("data/")}
 
 
 def load(cls, folder, catalog, *, spill_over=None, store=None):
@@ -653,8 +680,8 @@ def load(cls, folder, catalog, *, spill_over=None, store=None):
             try:
                 values[name] = untag(data["value"], media)
             except (OSError, ValueError):
-                problems[name] = (f"{name!r}'s data names a file in media/ that is missing "
-                                  f"from {folder}; put it back, or assign it again: k[{name!r}] = …")
+                problems[name] = (f"{name!r}'s data names a file that is missing from "
+                                  f"{folder}; put it back, or assign it again: k[{name!r}] = …")
             continue
         if where is None or not (folder / where).is_file():
             problems[name] = (f"{name!r}'s data, {where}, is missing from {folder}; "
@@ -663,8 +690,8 @@ def load(cls, folder, catalog, *, spill_over=None, store=None):
         try:
             frame = read_frame(folder / where, data, media)
         except (OSError, ValueError):
-            problems[name] = (f"{name!r}'s data, {where}, names a file in media/ that is "
-                              f"missing from {folder}; put it back, or assign it again: "
+            problems[name] = (f"{name!r}'s data, {where}, names a file that is missing "
+                              f"from {folder}; put it back, or assign it again: "
                               f"k[{name!r}] = …")
             continue
         if _data_version(frame) != data.get("version"):

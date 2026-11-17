@@ -44,7 +44,7 @@ def test_a_dataframe_step_is_saved_and_loads_back_the_same(tmp_path):
     report = k.save(tmp_path / "session")
     assert report["exact"] is True
     assert (tmp_path / "session" / "workflow.json").exists()
-    assert (tmp_path / "session" / "data" / "s.parquet").exists()
+    assert (tmp_path / "session" / "data" / "s" / "table.parquet").exists()
 
     loaded = Kernel.load(tmp_path / "session", CAT)
     assert loaded.step("s").state == "completed"
@@ -94,7 +94,7 @@ def test_dtypes_column_names_and_the_index_are_kept(tmp_path):
 def test_a_typed_column_opens_without_core(tmp_path):
     frame = pd.DataFrame({"n": [1, 2, 3], "name": ["Ada", "Ben", "Cy"]})
     _roundtrip(tmp_path, frame)
-    plain = pd.read_parquet(tmp_path / "session" / "data" / "s.parquet")
+    plain = pd.read_parquet(tmp_path / "session" / "data" / "s" / "table.parquet")
     assert plain["n"].tolist() == [1, 2, 3]
     assert plain["name"].tolist() == ["Ada", "Ben", "Cy"]
 
@@ -125,11 +125,11 @@ def test_a_missing_data_file_loads_invalid_and_runs_the_rest(tmp_path):
     k["t"] = dbl[mod.map()](wf["s"])
     k["u"] = [1, 2]
     k.save(tmp_path / "session")
-    (tmp_path / "session" / "data" / "s.parquet").unlink()
+    (tmp_path / "session" / "data" / "s" / "table.parquet").unlink()
 
     loaded = Kernel.load(tmp_path / "session", CAT)
     assert loaded.step("s").state == "invalid"
-    assert any("data/s.parquet" in p.message for p in loaded.step("s").problems)
+    assert any("data/s/table.parquet" in p.message for p in loaded.step("s").problems)
     assert loaded.step("t").state == "invalid"
     loaded.run_all()
     assert loaded.step("u").state == "completed"
@@ -142,7 +142,7 @@ def test_a_changed_data_file_loads_invalid_naming_it(tmp_path):
     other = Kernel(CAT)
     other["s"] = pd.DataFrame({"n": [5, 6]})
     other.save(tmp_path / "other")
-    (tmp_path / "other" / "data" / "s.parquet").replace(tmp_path / "session" / "data" / "s.parquet")
+    (tmp_path / "other" / "data" / "s" / "table.parquet").replace(tmp_path / "session" / "data" / "s" / "table.parquet")
 
     loaded = Kernel.load(tmp_path / "session", CAT)
     assert loaded.step("s").state == "invalid"
@@ -203,7 +203,7 @@ def test_resaving_a_session_whose_data_didnt_load_says_so(tmp_path):
     k = Kernel(CAT)
     k["s"] = pd.DataFrame({"n": [1, 2]})
     k.save(tmp_path / "a")
-    (tmp_path / "a" / "data" / "s.parquet").unlink()
+    (tmp_path / "a" / "data" / "s" / "table.parquet").unlink()
     loaded = Kernel.load(tmp_path / "a", CAT)
     assert loaded.step("s").formula == "<data not loaded>"
     report = loaded.save(tmp_path / "b")
@@ -271,7 +271,7 @@ def test_reserved_and_case_colliding_names_get_files_of_their_own(tmp_path):
         k[name] = pd.DataFrame({"n": [n]})
     report = k.save(tmp_path / "session")
     files = {report["steps"][n]["file"] for n in ("con", "S", "s")}
-    assert len(files) == 3 and "data/con.parquet" not in files
+    assert len(files) == 3 and "data/con/table.parquet" not in files
     loaded = Kernel.load(tmp_path / "session", CAT)
     assert [loaded.step(n).output.data["n"].iloc[0] for n in ("con", "S", "s")] == [1, 2, 3]
 
@@ -283,7 +283,7 @@ def test_a_removed_steps_data_file_goes_on_the_next_save(tmp_path):
     k.save(tmp_path / "session")
     k.remove("t")
     k.save(tmp_path / "session")
-    assert sorted(p.name for p in (tmp_path / "session" / "data").iterdir()) == ["s.parquet"]
+    assert sorted(p.name for p in (tmp_path / "session" / "data").iterdir()) == ["s"]
 
 
 def test_a_broken_workflow_file_isnt_a_reason_not_to_save(tmp_path):
@@ -341,7 +341,7 @@ def test_outputs_load_completed_and_shown_as_they_were(tmp_path):
     k, cat = _session()
     report = k.save(tmp_path / "session", outputs=True)
     assert report["exact"] is True
-    assert (tmp_path / "session" / "outputs" / "e" / "data.parquet").exists()
+    assert (tmp_path / "session" / "data" / "e" / "table.parquet").exists()
     CALLS.clear()
     loaded = Kernel.load(tmp_path / "session", cat)
     assert {n: loaded.step(n).state for n in loaded.workflow.steps} == \
@@ -413,9 +413,9 @@ def test_an_output_that_cant_be_saved_is_reported_and_runs_again(tmp_path):
 def test_a_missing_or_changed_output_file_means_a_rerun_not_a_crash(tmp_path):
     k, cat = _session()
     k.save(tmp_path / "session", outputs=True)
-    (tmp_path / "session" / "outputs" / "d" / "data.parquet").unlink()
-    (tmp_path / "session" / "outputs" / "c" / "data.parquet").replace(
-        tmp_path / "session" / "outputs" / "e" / "data.parquet")
+    (tmp_path / "session" / "data" / "d" / "table.parquet").unlink()
+    (tmp_path / "session" / "data" / "c" / "table.parquet").replace(
+        tmp_path / "session" / "data" / "e" / "table.parquet")
     loaded = Kernel.load(tmp_path / "session", cat)
     assert loaded.step("d").state == "staged"
     assert loaded.step("e").state == "staged"
@@ -427,8 +427,7 @@ def test_without_outputs_nothing_is_written_and_old_outputs_go(tmp_path):
     k, cat = _session()
     k.save(tmp_path / "session", outputs=True)
     k.save(tmp_path / "session")
-    assert not (tmp_path / "session" / "outputs").exists() or \
-        not any((tmp_path / "session" / "outputs").iterdir())
+    assert not (tmp_path / "session" / "data" / "d").exists()   # its output's files went
     assert Kernel.load(tmp_path / "session", cat).step("d").state == "staged"
 
 
@@ -470,7 +469,7 @@ def test_arrays_are_saved_exactly(tmp_path, array):
     assert back.dtype == array.dtype and back.shape == array.shape
     assert back.flags.f_contiguous == array.flags.f_contiguous
     assert np.array_equal(back, array, equal_nan=array.dtype.kind in "fc")
-    assert len(list((tmp_path / "session" / "media").iterdir())) == 1   # stored once
+    assert len([f for f in (tmp_path / "session" / "data").rglob("*") if f.parent.name == "files"]) == 1  # once
 
 
 @pytest.mark.parametrize("mode", ["1", "L", "LA", "P", "RGB", "RGBA", "I;16", "I", "F", "CMYK"])
@@ -481,7 +480,7 @@ def test_images_are_saved_exactly_in_every_mode(tmp_path, mode):
     back = loaded.step("s").output.data["img"].iloc[0]
     assert (back.mode, back.size, back.tobytes()) == (image.mode, image.size, image.tobytes())
     ext = "png" if mode in ("1", "L", "LA", "P", "RGB", "RGBA", "I;16") else "tiff"
-    assert [p.suffix for p in (tmp_path / "session" / "media").iterdir()] == [f".{ext}"]
+    assert [p.suffix for p in (tmp_path / "session" / "data" / "s" / "files").iterdir()] == [f".{ext}"]
 
 
 def test_an_image_opened_from_a_jpeg_keeps_its_pixels_format_and_info(tmp_path):
@@ -552,7 +551,7 @@ def test_media_no_value_names_any_more_is_removed(tmp_path):
     k.save(tmp_path / "session")
     k["s"] = pd.DataFrame({"a": [np.ones(3)]})
     k.save(tmp_path / "session")
-    assert len(list((tmp_path / "session" / "media").iterdir())) == 1
+    assert len(list((tmp_path / "session" / "data" / "s" / "files").iterdir())) == 1
     loaded = Kernel.load(tmp_path / "session", CAT)
     assert np.array_equal(loaded.step("s").output.data["a"].iloc[0], np.ones(3))
 
@@ -561,8 +560,8 @@ def test_a_missing_media_file_loads_invalid_naming_it(tmp_path):
     k = Kernel(CAT)
     k["s"] = pd.DataFrame({"a": [np.zeros(3)]})
     k.save(tmp_path / "session")
-    for f in (tmp_path / "session" / "media").iterdir():
+    for f in (tmp_path / "session" / "data" / "s" / "files").iterdir():
         f.unlink()
     loaded = Kernel.load(tmp_path / "session", CAT)
     assert loaded.step("s").state == "invalid"
-    assert any("media/" in p.message for p in loaded.step("s").problems)
+    assert any("missing" in p.message for p in loaded.step("s").problems)

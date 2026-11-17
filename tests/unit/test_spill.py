@@ -79,7 +79,10 @@ def test_bulky_cells_are_kept_on_disk_and_tools_get_the_values(tmp_path):
     assert isinstance(k.step("chart").output.data["chart"].iloc[0], MediaHandle)
     assert SEEN == ["Image", "Image", "ndarray", "ndarray"]   # tools never see a handle
     assert k.step("brightness").output.data["brightness"].tolist() == [10.0, 200.0]
-    assert len(list((tmp_path / "store").iterdir())) == 6     # 2 images, 2 arrays, 2 figures
+    files = sorted(f.relative_to(tmp_path / "store").parent.as_posix()
+                   for f in (tmp_path / "store").rglob("*") if f.is_file())
+    assert files == ["data/channel/files"] * 2 + ["data/chart/files"] * 2 + \
+        ["data/load_image/files"] * 2                         # each in its step's folder
 
 
 def test_small_values_stay_in_memory(tmp_path):
@@ -188,3 +191,77 @@ def test_a_kernels_own_store_goes_with_it():
     del k
     gc.collect()
     assert not store.exists()
+
+
+# ── the session folder: one folder per step (owner, 2026-11-17) ──────────
+@tool
+def bright(load_image: object) -> bool:
+    return np.asarray(load_image).mean() > 100
+
+
+def _tree(root):
+    return sorted(f.relative_to(root).as_posix().split("/files/")[0] + ("/files/…" if "/files/" in
+                  f.relative_to(root).as_posix() else "") for f in root.rglob("*") if f.is_file())
+
+
+def test_a_session_folder_has_a_folder_per_step(tmp_path):
+    cat = Catalog(tools=[load_image, bright])
+    k = Kernel(cat)
+    k["s"] = pd.DataFrame({"n": [10, 200]})
+    k["load_image"] = load_image[mod.map()](wf["s"])
+    k["kept"] = bright[mod.filter()](wf["load_image"])        # carries one image
+    k.run_all()
+    k.save(tmp_path / "session", outputs=True)
+    assert sorted(set(_tree(tmp_path / "session"))) == [
+        "data/kept/meta.json", "data/kept/states.parquet", "data/kept/table.parquet",
+        "data/load_image/files/…", "data/load_image/meta.json",
+        "data/load_image/states.parquet", "data/load_image/table.parquet",
+        "data/s/table.parquet", "report.json", "workflow.json"]
+    # the image the filter carries is stored once, in the step that made it
+    assert len(list((tmp_path / "session" / "data" / "load_image" / "files").iterdir())) == 2
+    loaded = Kernel.load(tmp_path / "session", cat)
+    assert loaded.value("kept", 0, "load_image").getpixel((0, 0)) == (200, 200, 200)
+
+
+def test_a_store_that_is_the_session_folder_saves_without_copying(tmp_path):
+    session = tmp_path / "session"
+    k = Kernel(CAT, spill_over=1000, store=session)
+    k["s"] = pd.DataFrame({"n": [10, 200]})
+    k["load_image"] = load_image[mod.map()](wf["s"])
+    k.run_all()
+    before = {f: f.stat().st_mtime_ns for f in session.rglob("*") if f.is_file()}
+    assert all("/data/load_image/files/" in f.as_posix() for f in before)
+    k.save(session, outputs=True)
+    after = {f: f.stat().st_mtime_ns for f in session.rglob("*") if f.parent.name == "files"}
+    assert after == before                                   # the same files, untouched
+    lazy = Kernel.load(session, CAT, spill_over=1000)
+    assert lazy.needs_run() == {}
+    assert lazy.value("load_image", 1, "load_image").getpixel((0, 0)) == (200, 200, 200)
+
+
+def test_a_result_kept_for_undo_keeps_its_files(tmp_path):
+    session = tmp_path / "session"
+    k = Kernel(CAT, spill_over=1000, store=session)
+    k["s"] = pd.DataFrame({"n": [10, 200]})
+    k["load_image"] = load_image[mod.map()](wf["s"])
+    k.run_all()
+    k["s"] = pd.DataFrame({"n": [10, 50]})
+    k.run_all()
+    k.save(session, outputs=True)            # saves the new images; the old ones stay
+    k["s"] = pd.DataFrame({"n": [10, 200]})  # undo: its result is in the store
+    assert k.step("load_image").state == "completed"
+    assert k.value("load_image", 1, "load_image").getpixel((0, 0)) == (200, 200, 200)
+
+
+def test_files_a_person_put_in_the_session_folder_are_never_removed(tmp_path):
+    session = tmp_path / "session"
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"n": [1]})
+    k.save(session)
+    (session / "data" / "s" / "notes.txt").write_text("mine")
+    (session / "README.md").write_text("mine")
+    k.remove("s")
+    k.save(session)
+    assert (session / "data" / "s" / "notes.txt").read_text() == "mine"
+    assert (session / "README.md").exists()
+    assert not (session / "data" / "s" / "table.parquet").exists()

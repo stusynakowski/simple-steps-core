@@ -23,7 +23,9 @@ import pandas as pd
 
 
 class MediaHandle:
-    """A cell's value kept on disk: what the cell holds instead of it."""
+    """A cell's value kept on disk: what the cell holds instead of it. *name*
+    is its file's path under *folder*, the store's (or session's) root:
+    ``data/<step>/files/<hash>.<ext>``."""
 
     __slots__ = ("name", "ref", "summary", "token", "folder")
 
@@ -51,36 +53,48 @@ class MediaHandle:
 
 
 class Spill:
-    """A kernel's store and its threshold: values of *over* bytes or more go to
-    *folder*. One per kernel (no state at module level)."""
+    """A kernel's store and its threshold: values of *over* bytes or more go
+    under *folder*, laid out as a session folder (``data/<step>/files/``), so
+    a session saved into it copies nothing. One per kernel (no state at module
+    level)."""
 
     def __init__(self, folder: Path, over: int):
         from .saving import Media
         self.over = int(over)
-        self.media = Media(Path(folder), here=True)
+        self.media = Media(Path(folder))
+        self._folders: dict[str, str] = {}       # step → data/<its folder>
+        self._taken: set[str] = set()
 
     @property
     def folder(self) -> Path:
-        return self.media.folder
+        return self.media.root
 
-    def handle(self, value: Any) -> Any:
-        """*value*, or a handle to it when it is bulky media."""
+    def _step_folder(self, step: str) -> str:
+        if step not in self._folders:
+            from .saving import _file_stem
+            self._folders[step] = f"data/{_file_stem(step, self._taken)}"
+        return self._folders[step]
+
+    def handle(self, value: Any, step: str = "_") -> Any:
+        """*value*, or a handle to it when it is bulky media; a new file goes
+        into *step*'s folder."""
         size = _size(value)
         if size is None or size < self.over:
             return value
         from .output import _stable
         token = _stable(value)
+        self.media.at(self._step_folder(step))
         ref = self.media.put(value)
         return MediaHandle(ref["$media"], ref, _summary(value), token, self.folder)
 
-    def spill(self, frame: pd.DataFrame) -> pd.DataFrame:
+    def spill(self, frame: pd.DataFrame, step: str = "_") -> pd.DataFrame:
         """*frame* with its bulky cells as handles: the same frame when none are."""
         out = None
         for position, column in enumerate(frame.columns):
             series = frame.iloc[:, position]
             if series.dtype != object:
                 continue
-            values = [self.handle(v) for v in series]
+            values = [self.handle(v, step) for v in series]
             if any(a is not b for a, b in zip(values, series)):
                 out = frame.copy() if out is None else out
                 out.isetitem(position, pd.Series(values, index=frame.index, dtype=object))

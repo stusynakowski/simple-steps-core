@@ -2779,7 +2779,7 @@ class Workflow:
             out.meta["version"] = _data_version(out.data)
             if self.spill is not None:
                 # bulky cells to disk, a handle in each (P7d): same version
-                out.data = self.spill.spill(out.data)
+                out.data = self.spill.spill(out.data, step_id)
             out.meta["run_key"] = self.run_key(step_id, read)
             self._file(step_id)
             unversioned = _unversioned(out.data)
