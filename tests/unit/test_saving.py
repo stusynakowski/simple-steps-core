@@ -292,3 +292,154 @@ def test_a_broken_workflow_file_isnt_a_reason_not_to_save(tmp_path):
     k = Kernel(CAT)
     k["s"] = pd.DataFrame({"n": [1]})
     assert k.save(tmp_path / "session")["exact"] is True
+
+
+# ── layer 2: outputs, so a reopened session shows its results unrun ──────
+CALLS: list = []
+
+
+@tool(id="split")
+def split_two(name: str) -> list:
+    CALLS.append(name)
+    return list(name[:2])
+
+
+@tool(id="split")
+def split_three(name: str) -> list:                  # the same tool, its code changed
+    return list(name[:3])
+
+
+@tool
+def mean(n: list) -> float:
+    return sum(n) / len(n)
+
+
+@tool
+def risky(n: int) -> int:
+    if n == 2:
+        raise ValueError("two")
+    return n
+
+
+def _session(split=split_two):
+    cat = Catalog(tools=[dbl, split, mean, risky])
+    k = Kernel(cat)
+    k["v"] = pd.DataFrame({"name": ["Ada", "Ben", "Cy"], "ward": ["A", "B", "A"], "n": [1, 2, 3]})
+    k["d"] = dbl[mod.map()](wf["v"])
+    k["e"] = split[mod.expand()](wf["v"])
+    k["c"] = mean[mod.collapse(by="ward")](wf["v"])
+    k["r"] = risky[mod.map(), mod.try_except()](wf["v"])
+    k.run_all()
+    return k, cat
+
+
+def _views(k):
+    return {name: k.view(name) for name in k.workflow.steps}
+
+
+def test_outputs_load_completed_and_shown_as_they_were(tmp_path):
+    k, cat = _session()
+    report = k.save(tmp_path / "session", outputs=True)
+    assert report["exact"] is True
+    assert (tmp_path / "session" / "outputs" / "e" / "data.parquet").exists()
+    CALLS.clear()
+    loaded = Kernel.load(tmp_path / "session", cat)
+    assert {n: loaded.step(n).state for n in loaded.workflow.steps} == \
+        {n: k.step(n).state for n in k.workflow.steps}
+    assert _views(loaded) == _views(k)                # values, lineage, row numbers, states
+    for name in ("d", "e", "c", "r"):
+        assert _data_version(loaded.step(name).output.data) == _data_version(k.step(name).output.data)
+    assert CALLS == []                                # loading ran nothing
+    assert loaded.needs_run() == {}                   # and nothing needs a run
+    assert loaded.cell("e", 1)["inputs"] == k.cell("e", 1)["inputs"]
+
+
+def test_failed_cells_and_their_errors_come_back(tmp_path):
+    k, cat = _session()
+    k.save(tmp_path / "session", outputs=True)
+    loaded = Kernel.load(tmp_path / "session", cat)
+    assert loaded.step("r").state == k.step("r").state
+    assert loaded.cell("r", 1)["state"] == "failed" == k.cell("r", 1)["state"]
+    assert loaded.step("r").output.notes == k.step("r").output.notes
+
+
+def test_a_changed_tool_makes_its_steps_stale_on_load(tmp_path):
+    k, _ = _session()
+    k.save(tmp_path / "session", outputs=True)
+    loaded = Kernel.load(tmp_path / "session", Catalog(tools=[dbl, split_three, mean, risky]))
+    assert loaded.step("e").state == "stale"
+    assert loaded.step("e").output.meta.get("stale_reason") == "tool changed"
+    assert loaded.step("d").state == "completed"
+
+
+def test_the_session_export_marks_a_changed_tool_stale_too():
+    from simple_steps_core.workflow import Workflow
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"n": [1, 2]})
+    k["t"] = dbl[mod.map()](wf["s"])
+    k.run_all()
+
+    @tool(id="dbl")
+    def tripled(n: int) -> int:
+        return 3 * n
+    back = Workflow.from_json(k.workflow.to_session_json(), catalog=Catalog(tools=[tripled]))
+    assert back.step("t").state == "stale"           # was "completed": an old result shown as current
+
+
+def test_an_output_that_cant_be_saved_is_reported_and_runs_again(tmp_path):
+    class Model:
+        pass
+
+    @tool
+    def model(n: int) -> object:
+        return Model()
+
+    cat = Catalog(tools=[dbl, model])
+    k = Kernel(cat)
+    k["s"] = pd.DataFrame({"n": [1, 2]})
+    k["m"] = model[mod.map()](wf["s"])
+    k["d"] = dbl[mod.map()](wf["s"])
+    k.run_all()
+    report = k.save(tmp_path / "session", outputs=True)
+    assert report["exact"] is False
+    assert "Model" in report["steps"]["m"]["output"]["not_saved"]["m"]
+    loaded = Kernel.load(tmp_path / "session", cat)
+    assert loaded.step("m").state == "staged"         # needs a run; nothing wrong shown
+    assert loaded.step("d").state == "completed"
+    loaded.run_all()
+    assert loaded.step("m").state == "completed"
+
+
+def test_a_missing_or_changed_output_file_means_a_rerun_not_a_crash(tmp_path):
+    k, cat = _session()
+    k.save(tmp_path / "session", outputs=True)
+    (tmp_path / "session" / "outputs" / "d" / "data.parquet").unlink()
+    (tmp_path / "session" / "outputs" / "c" / "data.parquet").replace(
+        tmp_path / "session" / "outputs" / "e" / "data.parquet")
+    loaded = Kernel.load(tmp_path / "session", cat)
+    assert loaded.step("d").state == "staged"
+    assert loaded.step("e").state == "staged"
+    loaded.run_all()
+    assert loaded.step("d").output.data["d"].tolist() == [2, 4, 6]
+
+
+def test_without_outputs_nothing_is_written_and_old_outputs_go(tmp_path):
+    k, cat = _session()
+    k.save(tmp_path / "session", outputs=True)
+    k.save(tmp_path / "session")
+    assert not (tmp_path / "session" / "outputs").exists() or \
+        not any((tmp_path / "session" / "outputs").iterdir())
+    assert Kernel.load(tmp_path / "session", cat).step("d").state == "staged"
+
+
+def test_a_data_steps_row_ids_survive_so_its_readers_outputs_still_match(tmp_path):
+    k, cat = _session()
+    k["v"] = pd.DataFrame({"name": ["Zed", "Ada", "Ben", "Cy"], "ward": ["C", "A", "B", "A"],
+                           "n": [9, 1, 2, 3]})      # a row inserted above: ids follow (D-picks)
+    k.run_all()
+    k.save(tmp_path / "session", outputs=True)
+    loaded = Kernel.load(tmp_path / "session", cat)
+    assert list(loaded.step("v").output.data.index) == list(k.step("v").output.data.index)
+    assert _views(loaded) == _views(k)
+    assert {n: loaded.step(n).state for n in loaded.workflow.steps} == \
+        {n: k.step(n).state for n in k.workflow.steps}

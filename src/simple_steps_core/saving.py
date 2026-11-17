@@ -5,6 +5,9 @@ A session is a folder::
     <folder>/
       workflow.json          the kernel's spec; each data step names its file
       data/<step>.parquet    the data assigned to a step (a DataFrame)
+      outputs/<step>/        with outputs=True: a step's output, data.parquet
+                             (its table, lineage and row ids), states.parquet
+                             (a state per cell), meta.json (its record)
       report.json            what the last save couldn't keep exactly
 
 **A save is exact, or says where it isn't.** Each column is written the
@@ -288,7 +291,7 @@ def _write_json(path: Path, blob: dict) -> None:
 
 
 # ── a kernel ──────────────────────────────────────────────────────────────
-def save(kernel, folder) -> dict:
+def save(kernel, folder, *, outputs: bool = False) -> dict:
     """Save *kernel* as a session folder; the report of what wasn't exact."""
     from .output import _data_version
     from .step import MISSING_DATA, NO_LITERAL
@@ -297,14 +300,20 @@ def save(kernel, folder) -> dict:
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     previous = _previous_files(folder)
+    previous_outputs = _previous_outputs(folder)
     blob = kernel.spec.to_dict()
     entries = {entry["name"]: entry for entry in blob["steps"]}
     report: dict = {"exact": True, "steps": {}}
     taken: set[str] = set()
     written: set[str] = set()
+    written_outputs: set[str] = set()
     for name, step in kernel.workflow.steps.items():
         value = step.literal
-        if value is NO_LITERAL or value is None or _literal_problem(value) is None:
+        if value is NO_LITERAL:
+            if outputs:
+                _save_output(folder, name, step, entries[name], report, taken, written_outputs)
+            continue
+        if value is None or _literal_problem(value) is None:
             continue
         entry, step_report = entries[name], {}
         if value is MISSING_DATA:
@@ -320,6 +329,14 @@ def save(kernel, folder) -> dict:
                     manifest["not_saved"] = {"*": "the table didn't read back exactly"}
             data = {"in": relative if "file_columns" in manifest else None,
                     "version": _data_version(value), **manifest}
+            ids = list(step.output.data.index)
+            if not step.output.meta.get("staged") and ids != list(value.index):
+                # its rows' ids moved when its data was replaced (D-picks):
+                # its readers' saved outputs and lineage name those ids
+                try:
+                    data["row_ids"] = tag(ids)
+                except NotSaved:
+                    pass
         else:
             try:
                 data = {"in": "workflow.json", "value": tag(value)}
@@ -335,9 +352,116 @@ def save(kernel, folder) -> dict:
         stale = folder / relative
         if stale.is_file() and stale.parent == folder / "data":
             stale.unlink()                     # a file this core wrote, no longer named
+    for relative in previous_outputs - written_outputs:
+        _remove_output(folder, relative)
     _write_json(folder / "workflow.json", blob)
     _write_json(folder / "report.json", report)
     return report
+
+
+_OUTPUT_FILES = ("data.parquet", "states.parquet", "meta.json")
+
+
+def _meta_blob(output) -> dict:
+    """An output's record, tagged: exact, or :class:`NotSaved`."""
+    meta = {k: v for k, v in output.meta.items()
+            if k not in ("problems", "notes", "column_types")}
+    reads = meta.get("row_reads")
+    if isinstance(reads, dict) and isinstance(reads.get("fp"), pd.Series):
+        fp = reads["fp"]                            # a uint64 per row id: as pairs
+        meta["row_reads"] = {**reads, "fp": [[i, int(h)] for i, h in zip(fp.index, fp.to_numpy())]}
+    return {"meta": tag(meta), "notes": tag(dict(output.notes or {}))}
+
+
+def _meta_from(blob: dict) -> dict:
+    meta = untag(blob["meta"])
+    reads = meta.get("row_reads")
+    if isinstance(reads, dict) and isinstance(reads.get("fp"), list):
+        pairs = reads["fp"]
+        meta["row_reads"] = {**reads, "fp": pd.Series(
+            [h for _, h in pairs], index=pd.Index([i for i, _ in pairs], dtype=object if any(
+                isinstance(i, str) for i, _ in pairs) else None), dtype="uint64")}
+    notes = untag(blob.get("notes") or {"$dict": []})
+    if notes:
+        meta["notes"] = notes
+    return meta
+
+
+def _save_output(folder: Path, name: str, step, entry: dict, report: dict,
+                 taken: set, written: set) -> None:
+    """Write *step*'s output to ``outputs/<step>/``, checked; else report why not."""
+    from .output import _data_version
+
+    output = step.output
+    if output.meta.get("staged") or output.meta.get("empty"):
+        return
+    relative = f"outputs/{_file_stem(name, taken)}"
+    where = folder / relative
+    why = None
+    try:
+        meta = _meta_blob(output)
+    except NotSaved as exc:
+        why = {"*": f"its record holds a {exc}, which can't be saved"}
+    if why is None:
+        data = write_frame(output.data, where / "data.parquet")
+        states = write_frame(output.states.astype(str), where / "states.parquet")
+        why = data.get("not_saved") or states.get("not_saved")
+        if why is None:
+            back = read_frame(where / "data.parquet", data)
+            if _data_version(back) != _data_version(output.data):
+                why = {"*": "its table didn't read back exactly"}
+    if why:
+        _remove_output(folder, relative)
+        report["steps"].setdefault(name, {})["output"] = {"file": None, "not_saved": why}
+        report["exact"] = False
+        return
+    _write_json(where / "meta.json", meta)
+    entry["output"] = {"in": relative, "version": _data_version(output.data),
+                       "data": data, "states": states}
+    written.add(relative)
+    report["steps"].setdefault(name, {})["output"] = {"file": relative}
+
+
+def _remove_output(folder: Path, relative: str) -> None:
+    """Remove an output folder this core wrote: only its own files."""
+    where = folder / relative
+    if where.parent != folder / "outputs" or not where.is_dir():
+        return
+    for file in _OUTPUT_FILES:
+        if (where / file).is_file():
+            (where / file).unlink()
+    try:
+        where.rmdir()
+    except OSError:
+        pass                                   # something else is in it: leave it
+
+
+def _previous_outputs(folder: Path) -> set[str]:
+    try:
+        blob = json.loads((folder / "workflow.json").read_text())
+    except (OSError, ValueError):
+        return set()
+    return {(e.get("output") or {}).get("in") for e in blob.get("steps", [])
+            if str((e.get("output") or {}).get("in") or "").startswith("outputs/")}
+
+
+def _load_output(folder: Path, saved: dict):
+    """The output a save wrote, or None when it's missing or changed."""
+    from .output import Output, _data_version, _state_column
+
+    where = folder / saved["in"]
+    try:
+        data = read_frame(where / "data.parquet", saved["data"])
+        plain = read_frame(where / "states.parquet", saved["states"])
+        # a state column is core's own type, built as core builds it
+        states = pd.DataFrame({c: _state_column(plain[c].tolist(), data.index)
+                               for c in plain.columns}, index=data.index)
+        meta = _meta_from(json.loads((where / "meta.json").read_text()))
+    except Exception:
+        return None                            # missing or unreadable: it runs again
+    if _data_version(data) != saved.get("version"):
+        return None                            # changed since it was saved: it runs again
+    return Output(data, states, meta)
 
 
 def _previous_files(folder: Path) -> set[str]:
@@ -355,11 +479,17 @@ def load(cls, folder, catalog):
 
     folder = Path(folder)
     blob = json.loads((folder / "workflow.json").read_text())
-    values, problems = {}, {}
+    values, problems, ids, outputs = {}, {}, {}, {}
     for entry in blob.get("steps", []):
         data, name = entry.get("data"), entry["name"]
+        if entry.get("output"):
+            loaded = _load_output(folder, entry["output"])
+            if loaded is not None:
+                outputs[name] = loaded
         if not data:
             continue
+        if data.get("row_ids") is not None:
+            ids[name] = untag(data["row_ids"])
         if data.get("not_saved"):
             what = "; ".join(f"{c}: {why}" if c != "*" else why
                              for c, why in data["not_saved"].items())
@@ -381,4 +511,5 @@ def load(cls, folder, catalog):
                               f"k[{name!r}] = …")
             continue
         values[name] = frame
-    return cls._load(blob, catalog, data=values, data_problems=problems)
+    return cls._load(blob, catalog, data=values, data_problems=problems,
+                     data_ids=ids, outputs=outputs)

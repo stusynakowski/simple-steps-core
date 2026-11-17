@@ -481,15 +481,18 @@ class Kernel:
         """A kernel from :meth:`to_json`, checked against *catalog*."""
         return cls._load(json.loads(text), catalog)
 
-    def save(self, folder) -> dict:
+    def save(self, folder, *, outputs: bool = False) -> dict:
         """Save this session as a folder (plan P1c, docs/design/saving.md):
         ``workflow.json``, and ``data/<step>.parquet`` for each step declared
-        with data. Every column is written the plainest way that reads back
-        exactly, and checked; the report (also ``report.json``) lists what
-        couldn't be kept exactly, and ``report["exact"]`` is True when nothing
-        was. Saving again into the same folder replaces it."""
+        with data. With *outputs*, also each step's output, ``outputs/<step>/``
+        (its table, a state per cell, its record), so the session reopens
+        with its results and nothing re-runs. Every table is written the
+        plainest way that reads back exactly, and checked; the report (also
+        ``report.json``) lists what couldn't be kept exactly, and
+        ``report["exact"]`` is True when nothing was. Saving again into the
+        same folder replaces it."""
         from . import saving
-        return saving.save(self, folder)
+        return saving.save(self, folder, outputs=outputs)
 
     @classmethod
     def load(cls, folder, catalog: Catalog) -> "Kernel":
@@ -501,12 +504,14 @@ class Kernel:
 
     @classmethod
     def _load(cls, blob: dict, catalog: Catalog, *, data: dict | None = None,
-              data_problems: dict | None = None) -> "Kernel":
+              data_problems: dict | None = None, data_ids: dict | None = None,
+              outputs: dict | None = None) -> "Kernel":
         naming = Naming.from_dict(blob.get("naming"))
         kernel = cls(catalog, naming)
         blob = {k: v for k, v in blob.items() if k not in ("catalog", "naming")}
         kernel.workflow = Workflow.from_dict(blob, catalog=catalog, naming=naming,
-                                             data=data, data_problems=data_problems)
+                                             data=data, data_problems=data_problems,
+                                             data_ids=data_ids, outputs=outputs)
         return kernel
 
     # ── display ──────────────────────────────────────────────────────────

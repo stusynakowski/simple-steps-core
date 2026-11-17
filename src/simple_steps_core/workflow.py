@@ -3209,7 +3209,8 @@ class Workflow:
     def from_dict(cls, blob: dict, tools: dict[str, Callable] | None = None,
                   resource_types: dict[str, type] | None = None, *,
                   catalog: "Catalog | None" = None, naming: Any = None,
-                  data: dict | None = None, data_problems: dict | None = None) -> "Workflow":
+                  data: dict | None = None, data_problems: dict | None = None,
+                  data_ids: dict | None = None, outputs: dict | None = None) -> "Workflow":
         """Rebuild a Workflow from either export — all at once.
 
         Every step goes through the same :func:`check` and :func:`stage` the
@@ -3225,8 +3226,14 @@ class Workflow:
         by name, as a session folder holds it (``Kernel.load``, saving.py). A
         data step without it loads ``invalid``, saying why (*data_problems*,
         or that the file doesn't hold its data); it never raises at run.
+        *data_ids* gives a data step back the row ids its output had (they
+        follow rows when data is replaced, D-picks). *outputs* gives steps
+        back the outputs a session folder saved (layer 2): each is filed and
+        checked as it is now, so a changed tool shows ``stale``.
         """
         data, data_problems = dict(data or {}), dict(data_problems or {})
+        data_ids, outputs = dict(data_ids or {}), dict(outputs or {})
+        restored = list(blob.get("outputs") or {})
         version = blob.get("version")
         if not isinstance(version, int) or version > FORMAT_VERSION:
             # 008 K17: an older core must refuse a newer file, never strip it.
@@ -3260,8 +3267,13 @@ class Workflow:
                     dict(entry.get("extras") or {}))
                 continue
             if sid in data:
-                workflow.steps[sid] = cls._literal_step(sid, data[sid],
-                                                        dict(entry.get("extras") or {}))
+                step = cls._literal_step(sid, data[sid], dict(entry.get("extras") or {}))
+                if sid in data_ids and len(data_ids[sid]) == len(step.output.data):
+                    ids = pd.Index(data_ids[sid])
+                    step.output.data.index = ids
+                    step.output.states.index = ids
+                    step.output.meta["version"] = _data_version(step.output.data)
+                workflow.steps[sid] = step
                 continue
             if ("data" in entry or _holds_no_data(entry.get("operation"))) \
                     and sid not in (blob.get("outputs") or {}):
@@ -3297,8 +3309,18 @@ class Workflow:
                     # a data step restored from its output: that is its data,
                     # so it saves as a data step again
                     workflow.steps[sid].literal = workflow.steps[sid].output.data.copy()
-        for sid in (blob.get("outputs") or {}):
+            elif sid in outputs and workflow.steps[sid].valid:
+                workflow.steps[sid].output = outputs[sid]
+                restored.append(sid)
+        for sid in restored:
             workflow._restage_after(sid)
+        if restored:
+            # checked as they are now: a tool whose code changed, or data that
+            # did, shows stale, never an old result as current (P1c)
+            workflow._refresh_staleness()
+            for sid in restored:
+                if sid in workflow.steps and not workflow.steps[sid].output.meta.get("stale"):
+                    workflow._file(sid)
         return workflow
 
     @classmethod

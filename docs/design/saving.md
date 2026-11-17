@@ -1,9 +1,10 @@
 # Saving and loading a session
 
-> **Draft, 2026-11-16, for the owner. Layer 1 built the same day** (`k.save`,
-> `Kernel.load`, `saving.py`, `tests/unit/test_saving.py`): §2's `workflow.json`,
-> `data/` and `report.json`, §4's typed and tagged columns, §5 and §6. Not yet:
-> `outputs/` (layer 2), `media/` (arrays, images, figures), layer 3. What a saved session holds, when
+> **Draft, 2026-11-16, for the owner. Layers 1 and 2 built the same day**
+> (`k.save(folder, outputs=True)`, `Kernel.load`, `saving.py`,
+> `tests/unit/test_saving.py`): §2's `workflow.json`, `data/`, `outputs/` and
+> `report.json`, §4's typed and tagged columns, §5 and §6. A data step keeps its
+> rows' ids. Not yet: `media/` (arrays, images, figures), layer 3. What a saved session holds, when
 > something can be saved, and exactly when something can be lost. Every claim
 > marked *run* was run on 2026-11-16 with pyarrow 25.0.1, numpy 2.5.3,
 > Pillow 12.3.0 and plotly 7.1.0; the scripts are in
