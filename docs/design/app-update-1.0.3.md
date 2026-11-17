@@ -1,10 +1,11 @@
 # Moving the app to core 1.0.3
 
-> For the Simple Steps app, written 2026-11-17 at core `5dcdac2` (branch
-> `core-handover`, 24 commits after 1.0.2 `dbaf4c7`; 1.0.3 is to be tagged
-> from here). Every change was run in core, with tests; what the app sees is
-> also kept, row by row, in [plan.md §5](plan.md#5-changes-the-app-will-see).
-> The app's own plan for the move is its `docs/dev_plan/137-core-1.0.3.md`.
+> For the Simple Steps app, written 2026-11-17. **Core 1.0.3 is tagged
+> `v1.0.3`** (branch `core-handover`, after 1.0.2 `dbaf4c7`); every property
+> test passed at 2,000 examples on its code. Every change was run in core, with
+> tests; what the app sees is also kept, row by row, in
+> [plan.md §5](plan.md#5-changes-the-app-will-see). The app's own plan for the
+> move is its `docs/dev_plan/137-core-1.0.3.md`.
 
 ## 1. In one paragraph
 
@@ -20,13 +21,13 @@ longer crashes on arrays, so the C37 shim goes. pyarrow is a dependency.
 ## 2. Pin
 
 ```toml
-"simple-steps-core @ git+https://github.com/stusynakowski/simple-steps-core.git@5dcdac2f5db6cdcbee273b0ffca6ae8035bb6a51",
+"simple-steps-core @ git+https://github.com/stusynakowski/simple-steps-core.git@v1.0.3",
 ```
 
-and the submodule to the same commit; the tag `v1.0.3` when it's cut. **pyarrow
-comes with it** (`pyarrow>=14`, a dependency of core now): the app's
-environment doesn't have it today (checked 2026-11-17), so reinstall after
-moving the pin, and `scripts/smoke_install.py` should see it installed.
+(or the tag's commit hash, as the app pins today), and the submodule to the
+same commit. **pyarrow comes with it** (`pyarrow>=14`, a dependency of core
+now): the app's environment doesn't have it today (checked 2026-11-17), so
+reinstall after moving the pin, and `scripts/smoke_install.py` should see it.
 
 ## 3. What changes for what the app already does
 
