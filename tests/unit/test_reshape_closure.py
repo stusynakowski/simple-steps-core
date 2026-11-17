@@ -727,7 +727,7 @@ def test_L39_the_invariant_check_catches_each_break(k):
     assert broken("e", pd.DataFrame({"#v": [0, 9], "value": [1, 2]}, index=["0.0", "0.1"])).startswith("A3")
     assert broken("e", pd.DataFrame({"#nosuch": [0], "value": [1]}, index=["0.0"])).startswith("A3")
     assert broken("srt", pd.DataFrame({"temp": [1.0]}, index=[7])).startswith("A4")
-    k.run_all()
+    k.run_all(force=True)          # recompute what was broken by hand; core didn't see it
     plan = {"columns": {"certainty": "exact", "names": ["temp"]}}
     assert wf_.check_invariants("srt", plan)[0].startswith("A6")
 

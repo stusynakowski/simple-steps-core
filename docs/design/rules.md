@@ -81,7 +81,11 @@ re-checks everything after it straight away: a step that can't run is
 will produce, never against the old values they still show: after
 `k["s"] = label[mod.map()](wf["p"])`, a `sort(by="s")` on `s` is fine
 before `s` runs. Steps that ran keep their values, marked `stale`, until you
-run them again. A step is stale only when its own inputs changed; a step
+run them again. **Running brings steps up to date**: `run_all()` and `run(x)`
+run only what has never run or is stale, and leave a current step as it is,
+so nothing slow is redone; `force=True` runs it again. A tool with no input
+(a source) reads the outside world, so running it by name reads it again. A
+failure nothing handles still stops `run_all()`, saying so. A step is stale only when its own inputs changed; a step
 reading a stale one says so (*read stale 's'*), and `run(x)` runs what `x` needs. Runs go in workflow order.
 
 **12. A step's output is named after it.** `k["temp_f"] = to_f[mod.map()](wf["v"])`

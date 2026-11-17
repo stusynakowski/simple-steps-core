@@ -344,9 +344,15 @@ class Kernel:
         return self.workflow.check(name, operation)
 
     @_notifies("run")
-    def run(self, step: str | int, *, fresh: bool = True) -> Step:
+    def run(self, step: str | int, *, fresh: bool = True, force: bool = False) -> Step:
         """Make one step current (C9): first every step it depends on that
-        has never run or is stale, in workflow order, then the step itself.
+        has never run or is stale, in workflow order, then the step itself,
+        **if it isn't current already**: a completed or failed step whose
+        inputs, tool and expression haven't changed is left as it is (owner,
+        2026-11-16), so slow work isn't redone. ``force=True`` runs it anyway,
+        a retry. A tool with no input (a source, a sweep) reads the outside
+        world, so naming it always runs it again: a reload. ``run_all`` leaves
+        it as it is unless forced.
 
         ``fresh=False`` runs it on what its inputs show now, on purpose:
         inputs that have never run still run first, since they have nothing
@@ -364,13 +370,23 @@ class Kernel:
         else:
             for before in dict.fromkeys(self.workflow.pending(name)):
                 self.workflow.run(before, resources=self.resources)
+        current = self.workflow.steps[name]
+        # A tool with no input (a source, a sweep) reads the outside world,
+        # which core can't see change: naming it is asking it to read again.
+        reads_outside = current.operation.input is None and current.literal is NO_LITERAL
+        if not force and not reads_outside and current.valid \
+                and current.state in ("completed", "failed"):
+            return current
         return self.workflow.run(name, resources=self.resources)
 
     @_notifies("run_all")
-    def run_all(self) -> "Kernel":
-        """Run every valid step, in order. Stops at a failure nothing handles."""
+    def run_all(self, *, force: bool = False) -> "Kernel":
+        """Bring every valid step up to date, in order: run each that has
+        never run or is stale when it is reached, and leave current ones as
+        they are (owner, 2026-11-16). ``force=True`` runs every step again.
+        Stops at a failure nothing handles."""
         self._ask_data_versions()
-        self.workflow.run_all(resources=self.resources)
+        self.workflow.run_all(resources=self.resources, only_needed=not force)
         return self
 
     # ── what needs running, and who to tell ──────────────────────────────

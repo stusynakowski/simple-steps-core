@@ -1114,6 +1114,16 @@ class Workflow:
             columns = self._columns_bound(op_, source, kind)
             if step.output.meta.get("by"):
                 columns = list(dict.fromkeys([*columns, step.output.meta["by"]]))
+        # A column argument of the input itself is read too, written out as it
+        # is when binding by type writes it (S3, W10): `slow=wf["a"]["a"]`.
+        # Left out, a change to that column left the step completed (found
+        # 2026-11-16).
+        for value in op_.arguments.values():
+            if isinstance(value, StepRef) and value.id == source:
+                names = (value.columns or {}).get("names") if isinstance(value.columns, dict) else None
+                picked = list(names) if names else [
+                    c for c in upstream.output.data.columns if not is_id_column(c)]
+                columns = list(dict.fromkeys([*columns, *picked]))
         columns = [c for c in columns if c in upstream.output.data.columns]
         return {"step": source, "columns": columns,
                 "fp": _row_fps(upstream.output.data, columns)}
@@ -3028,11 +3038,15 @@ class Workflow:
         return step
 
     def run_all(self, tools: dict[str, Callable] | None = None,
-                resources: Mapping[str, Any] | None = None) -> "Workflow":
+                resources: Mapping[str, Any] | None = None, *,
+                only_needed: bool = False) -> "Workflow":
         """Run every valid step, each after the steps it reads.
 
         Still explicit — nothing recomputes on its own (§7's push/pull rule).
-        This only saves you from ordering the calls by hand.
+        This only saves you from ordering the calls by hand. With
+        *only_needed*, a step that is current when it is reached (completed
+        or failed, nothing it was made from changed) isn't run again: its
+        state is asked then, after the steps before it ran.
 
         **Stops at the first failure a step didn't catch**, raising
         :class:`StepFailed`; what already ran keeps its results. A step with
@@ -3065,7 +3079,10 @@ class Workflow:
                 # input runs; a step that fails it is left reporting the
                 # problem, not run, and does not stop the rest.
                 if self.steps[step_id].valid:
-                    self.run(step_id, tools, resources)
+                    if not only_needed or self.steps[step_id].state in ("staged", "stale"):
+                        self.run(step_id, tools, resources)
+                    # a failure nothing handles stops the run, one from this
+                    # run or one left standing: never a run that looks clean
                     failure = _uncaught_failure(self.steps[step_id].output)
                     if failure is not None:
                         # A failure the step didn't catch stops the run.
