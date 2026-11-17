@@ -6,8 +6,14 @@
 > `report.json`, §4's typed and tagged columns, §5 and §6. A data step keeps its
 > rows' ids. **Media built too** (S-D1, S-D2, S-D3 as recommended): arrays,
 > images in every mode and Plotly figures, exact, by content, the versions of
-> images and figures taken from their content. Not yet: layer 3, and big steps
-> kept on disk while you work (plan P7d). What a saved session holds, when
+> images and figures taken from their content. **Bulky cells on disk while you
+> work built 2026-11-17** (S-D6, opt-in: `Kernel(catalog, spill_over=n)`,
+> `handles.py`, `tests/unit/test_spill.py`; owner: *"writing to disk for big
+> outputs and having a ledger in memory is the best strategy"*): 200 images of
+> 256×256 held 39 MB in step cells and 39 MB in the result store; spilled, 0 MB
+> in memory, 39 MB on disk, 0.7 s more to write them. Not yet: layer 3 (rows
+> written as they finish, so a step's peak memory falls too), a memory budget
+> across steps. What a saved session holds, when
 > something can be saved, and exactly when something can be lost. Every claim
 > marked *run* was run on 2026-11-16 with pyarrow 25.0.1, numpy 2.5.3,
 > Pillow 12.3.0 and plotly 7.1.0; the scripts are in

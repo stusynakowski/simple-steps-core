@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 import hashlib
+import json
 import pandas as pd
 
 
@@ -42,11 +43,18 @@ def _row_fps(frame: pd.DataFrame, columns: list) -> pd.Series:
     Python list (ST, decisions.md §0)."""
     if not columns:
         return pd.Series(0, index=frame.index, dtype="uint64")
+    from .output import _stable_cells
     try:
-        hashes = pd.util.hash_pandas_object(frame[columns], index=False)
+        # objects by their content token, as a data version is (D57): pandas
+        # would hash their text, an address or a summary, not their content
+        hashes = pd.util.hash_pandas_object(_stable_cells(frame[columns]), index=False)
         return pd.Series(hashes.to_numpy(), index=frame.index, dtype="uint64")
     except TypeError:
-        return pd.Series([int(hashlib.sha1(repr(row).encode()).hexdigest()[:16], 16)
+        # each cell by its content token (D57), not its repr, which shortens a
+        # big array to its edges: a change in its middle was missed
+        from .output import _stable
+        return pd.Series([int(hashlib.sha1(json.dumps([_stable(v) for v in row], sort_keys=True,
+                                                      default=repr).encode()).hexdigest()[:16], 16)
                           for row in frame[columns].itertuples(index=False)],
                          index=frame.index, dtype="uint64")
 

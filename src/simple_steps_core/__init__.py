@@ -38,6 +38,7 @@ from .combines import join, stack, zip_  # noqa: E402
 from .kernel import Kernel  # noqa: E402
 from .errors import PayloadError, ResourceNotLoaded, SelectionError, StepFailed  # noqa: E402
 from .formula import FormulaError, formula  # noqa: E402
+from .handles import MediaHandle  # noqa: E402
 from .modifiers import mod  # noqa: E402
 from .operation import Operation, op  # noqa: E402
 from .output import Output  # noqa: E402
@@ -50,7 +51,7 @@ from .values import Secret  # noqa: E402
 __all__ = [
     "Catalog", "Kernel", "Tool", "tool", "resource", "bound_tool", "Secret",
     "mod", "wf", "res", "rows", "cols", "row", "join", "stack", "zip_", "formula", "FormulaError",
-    "Operation", "op", "Step", "StepStatus", "Output", "Problem",
+    "Operation", "op", "Step", "StepStatus", "Output", "Problem", "MediaHandle",
     "StepFailed", "SelectionError", "ResourceNotLoaded", "PayloadError",
     "ResourceSpec", "StepSpec", "WorkflowSpec", "CatalogSpec", "KernelSpec", "Naming",
     "__version__",

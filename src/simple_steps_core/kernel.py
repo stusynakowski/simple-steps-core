@@ -121,7 +121,12 @@ def _formula(step: Step) -> str:
 class Kernel:
     """A workflow, the catalog it may use, and the resources it has loaded."""
 
-    def __init__(self, catalog: Catalog, naming: "Naming | None" = None):
+    def __init__(self, catalog: Catalog, naming: "Naming | None" = None, *,
+                 spill_over: int | None = None, store: Any = None):
+        """*spill_over*: keep each array, image or figure of that many bytes
+        or more on disk when its step runs, its cell holding a handle (P7d);
+        None keeps every value in memory. *store*: the folder for them; by
+        default a temporary one, removed with the kernel."""
         if not isinstance(catalog, Catalog):
             raise TypeError("Kernel(catalog): pass a Catalog, e.g. "
                             "Kernel(Catalog(tools=[...]))")
@@ -132,6 +137,17 @@ class Kernel:
         self.workflow = Workflow(catalog=catalog, naming=naming)
         self.resources = Resources(self)
         self._listeners: list[Callable[[dict], Any]] = []
+        self._spill = None
+        if spill_over is not None:
+            from .handles import Spill
+            if store is None:
+                import shutil
+                import tempfile
+                import weakref
+                store = tempfile.mkdtemp(prefix="simple-steps-store-")
+                weakref.finalize(self, shutil.rmtree, store, True)
+            self._spill = Spill(store, spill_over)
+        self.workflow.spill = self._spill
 
     # ── steps ────────────────────────────────────────────────────────────
     def _name(self, step: str | int) -> str:
@@ -578,24 +594,43 @@ class Kernel:
         return saving.save(self, folder, outputs=outputs)
 
     @classmethod
-    def load(cls, folder, catalog: Catalog) -> "Kernel":
+    def load(cls, folder, catalog: Catalog, *, spill_over: int | None = None,
+             store: Any = None) -> "Kernel":
         """A kernel from a session folder :meth:`save` wrote, checked against
         *catalog*. Runs no code: a step whose data is missing, changed since
-        the save or wasn't saved loads ``invalid``, saying why."""
+        the save or wasn't saved loads ``invalid``, saying why. With
+        *spill_over*, saved arrays, images and figures stay on disk, their
+        cells holding handles to the session's files, loaded when read."""
         from . import saving
-        return saving.load(cls, folder, catalog)
+        return saving.load(cls, folder, catalog, spill_over=spill_over, store=store)
 
     @classmethod
     def _load(cls, blob: dict, catalog: Catalog, *, data: dict | None = None,
               data_problems: dict | None = None, data_ids: dict | None = None,
-              outputs: dict | None = None) -> "Kernel":
+              outputs: dict | None = None, spill_over: int | None = None,
+              store: Any = None) -> "Kernel":
         naming = Naming.from_dict(blob.get("naming"))
-        kernel = cls(catalog, naming)
+        kernel = cls(catalog, naming, spill_over=spill_over, store=store)
         blob = {k: v for k, v in blob.items() if k not in ("catalog", "naming")}
         kernel.workflow = Workflow.from_dict(blob, catalog=catalog, naming=naming,
                                              data=data, data_problems=data_problems,
                                              data_ids=data_ids, outputs=outputs)
+        kernel.workflow.spill = kernel._spill
+        if kernel._spill is not None:
+            # what loaded as values (saved before handles) goes to disk too
+            for step in kernel.workflow.steps.values():
+                if not step.output.meta.get("staged"):
+                    step.output.data = kernel._spill.spill(step.output.data)
         return kernel
+
+    def value(self, step: str | int, row: int, column: str) -> Any:
+        """The value in a cell, itself: one kept on disk is loaded (P7d).
+        *row* is a row number, as the view shows it."""
+        from .handles import values_of
+        data = self.workflow.steps[self._name(step)].output.data
+        if not -len(data) <= row < len(data):
+            raise IndexError(f"{self._name(step)!r} has rows 0…{len(data) - 1}; no row {row}")
+        return values_of(data[column].iloc[row])
 
     # ── display ──────────────────────────────────────────────────────────
     def _rows(self) -> list[tuple[str, ...]]:

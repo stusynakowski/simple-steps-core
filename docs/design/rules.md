@@ -134,6 +134,12 @@ together (`k.run_stage("clean")`). You edit the steps inside it. A stage
 changes no result. A step you insert inside it joins it, one you move out
 leaves it, and a step is in one stage.
 
+**17. Bulky cells can live on disk.** `Kernel(catalog, spill_over=1_000_000)`
+keeps each array, image or figure of a megabyte or more on disk when its step
+runs; the cell holds a small handle with a summary ("RGB image 256×256"). A
+tool still gets the image itself, and `k.value(step, row, column)` gives it
+to you. Results and staleness are the same either way.
+
 ## What core can't do, by design
 
 - See inside a tool, or inside a `table` tool's result.

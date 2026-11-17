@@ -14,6 +14,8 @@ from typing import Sequence
 import itertools
 import numpy as np
 import pandas as pd
+
+from .handles import MediaHandle, values_of
 import time
 import traceback
 
@@ -78,8 +80,10 @@ def _units(frame: pd.DataFrame, absent: Any = ()):
     """
     for index, record in zip(frame.index, frame.to_dict("records")):
         # A tool gets variables only, never a `#` column (reshaping.md §5.1);
-        # an absent cell arrives as ABSENT (§9.1).
-        yield index, {k: (ABSENT if (index, k) in absent else None if _is_missing(v) else v)
+        # an absent cell arrives as ABSENT (§9.1); a value kept on disk
+        # arrives as itself, loaded now (P7d).
+        yield index, {k: (ABSENT if (index, k) in absent else None if _is_missing(v)
+                          else v.load() if isinstance(v, MediaHandle) else v)
                       for k, v in record.items() if not is_id_column(k)}
 
 
@@ -697,7 +701,7 @@ def table_(source: Any, fn: Callable) -> Output:
         record = _blocked(*next(iter(blocked.values())))
         return Output(data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
                       records=[record], index=[0], meta=meta)
-    value, record = _call(fn, frame[variables(frame.columns)])
+    value, record = _call(fn, values_of(frame[variables(frame.columns)]))
     if record["status"] != "completed":
         return Output(data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
                       records=[record], index=[0], meta=meta)

@@ -60,6 +60,9 @@ class Workflow:
         self.steps: dict[str, Step] = {}
         #: Stages (P7a, decision SG): name → its steps, consecutive, in order.
         self.stages: dict[str, list[str]] = {}
+        #: Where bulky cells go when a step runs (P7d): a Spill, or None to
+        #: keep every value in memory. Set by the kernel.
+        self.spill = None
         #: Declared resources, by name — the declarations, never the objects.
         self.resources: dict[str, Resource] = {}
         #: What this workflow may use. With a catalog, every step is checked
@@ -2774,6 +2777,9 @@ class Workflow:
             self._keep_row_ids(step_id, before)           # its tool gave new rows: D-picks
         if not out.meta.get("staged"):
             out.meta["version"] = _data_version(out.data)
+            if self.spill is not None:
+                # bulky cells to disk, a handle in each (P7d): same version
+                out.data = self.spill.spill(out.data)
             out.meta["run_key"] = self.run_key(step_id, read)
             self._file(step_id)
             unversioned = _unversioned(out.data)

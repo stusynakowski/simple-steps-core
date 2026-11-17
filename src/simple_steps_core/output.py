@@ -517,6 +517,9 @@ def _stable(value: Any, depth: int = 0, unversioned: set | None = None) -> Any:
     if isinstance(value, (list, tuple, set, frozenset)):
         items = [_stable(v, depth + 1, unversioned) for v in value]
         return sorted(items, key=repr) if isinstance(value, (set, frozenset)) else items
+    from .handles import MediaHandle
+    if isinstance(value, MediaHandle):
+        return value.token                  # its value's, read when it was written
     token = _media_token(value, depth, unversioned)
     if token is not None:
         return token

@@ -235,6 +235,8 @@ def _ref_value(frame: pd.DataFrame, annotation: Any, step_id: str) -> Any:
     """
     kind = _shape_kind(frame)
     frame = frame[variables(frame.columns)]       # ids aren't data: never a tool's (B9, rule 15)
+    from .handles import values_of
+    frame = values_of(frame)                      # a value kept on disk, loaded now (P7d)
     problem = _shape_problem(kind, annotation, "argument", step_id)
     if problem:
         raise TypeError(problem)
@@ -482,10 +484,15 @@ def _payload_type(kind: str | None, fn: Any) -> Any:
 
 
 def _plain(value: Any) -> Any:
-    """A cell value as plain Python: numpy scalars unwrapped, missing as None."""
+    """A cell value as plain Python: numpy scalars unwrapped, missing as None.
+    An array stays an array (C37: ``.item()`` on one raised), and a value
+    kept on disk shows as its handle, unloaded."""
+    import numpy as np
+    if isinstance(value, np.ndarray):
+        return value
     if _is_missing(value) if not isinstance(value, (list, dict, tuple, set)) else False:
         return None
-    if hasattr(value, "item") and hasattr(value, "dtype"):
+    if isinstance(value, np.generic):
         return value.item()
     return value
 

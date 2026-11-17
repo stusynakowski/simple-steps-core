@@ -191,12 +191,25 @@ class Media:
     the value back, or it isn't saved. A library is used only when the value
     is already one of its objects."""
 
-    def __init__(self, folder: Path):
-        self.folder = Path(folder) / "media"
+    def __init__(self, folder: Path, *, here: bool = False, lazy: bool = False):
+        # *here*: *folder* is the media folder itself (a kernel's store);
+        # *lazy*: reading gives handles to the files, not the values (P7d)
+        self.folder = Path(folder) if here else Path(folder) / "media"
         self.written: set[str] = set()
+        self.lazy = lazy
 
     def put(self, value: Any) -> dict | None:
-        """The reference to *value*'s file, or None if it isn't a media value."""
+        """The reference to *value*'s file, or None if it isn't a media value.
+        A handle's file is copied as it is; its value isn't loaded."""
+        from .handles import MediaHandle
+        if isinstance(value, MediaHandle):
+            self.folder.mkdir(parents=True, exist_ok=True)
+            target = self.folder / value.name
+            if not target.is_file():
+                import shutil
+                shutil.copyfile(value.folder / value.name, target)
+            self.written.add(value.name)
+            return {**value.ref, "token": tag(value.token), "summary": value.summary}
         encoded = _encode_media(value)
         if encoded is None:
             return None
@@ -210,6 +223,13 @@ class Media:
         return {"$media": name, "kind": kind, **extra}
 
     def get(self, ref: dict) -> Any:
+        if self.lazy and "token" in ref:
+            from .handles import MediaHandle
+            if not (self.folder / ref["$media"]).is_file():
+                raise OSError(f"media/{ref['$media']} is missing")
+            core = {k: v for k, v in ref.items() if k not in ("token", "summary")}
+            return MediaHandle(ref["$media"], core, ref.get("summary") or ref["kind"],
+                               untag(ref["token"]), self.folder)
         return _decode_media(ref, (self.folder / ref["$media"]).read_bytes())
 
 
@@ -603,14 +623,15 @@ def _previous_files(folder: Path) -> set[str]:
             if str((e.get("data") or {}).get("in") or "").startswith("data/")}
 
 
-def load(cls, folder, catalog):
-    """A kernel from the session folder *folder*, checked against *catalog*."""
+def load(cls, folder, catalog, *, spill_over=None, store=None):
+    """A kernel from the session folder *folder*, checked against *catalog*.
+    With *spill_over*, media stay in the folder, as handles (P7d)."""
     from .output import _data_version
 
     folder = Path(folder)
     blob = json.loads((folder / "workflow.json").read_text())
     values, problems, ids, outputs = {}, {}, {}, {}
-    media = Media(folder)
+    media = Media(folder, lazy=spill_over is not None)
     for entry in blob.get("steps", []):
         data, name = entry.get("data"), entry["name"]
         if entry.get("output"):
@@ -653,4 +674,4 @@ def load(cls, folder, catalog):
             continue
         values[name] = frame
     return cls._load(blob, catalog, data=values, data_problems=problems,
-                     data_ids=ids, outputs=outputs)
+                     data_ids=ids, outputs=outputs, spill_over=spill_over, store=store)
