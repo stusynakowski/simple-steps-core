@@ -76,11 +76,16 @@ class WorkflowSpec:
     steps: tuple[StepSpec, ...]
     resources: tuple[ResourceSpec, ...] = ()
     extras: dict = field(default_factory=dict)
+    #: Stages (P7a): ``((name, (step, …)), …)`` in order. In no id: a stage
+    #: changes no output.
+    stages: tuple = ()
 
     def to_dict(self) -> dict:
         from .values import FORMAT_VERSION
         out: dict = {"version": FORMAT_VERSION,
                      "steps": [s.to_dict() for s in self.steps]}
+        if self.stages:
+            out["stages"] = [{"name": name, "steps": list(steps)} for name, steps in self.stages]
         if self.resources:
             out["resources"] = {r.name: r.to_dict() for r in self.resources}
         if self.extras:

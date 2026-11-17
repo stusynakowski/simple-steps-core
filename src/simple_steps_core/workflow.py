@@ -58,6 +58,8 @@ class Workflow:
 
     def __init__(self, catalog: "Catalog | None" = None, naming: Any = None) -> None:
         self.steps: dict[str, Step] = {}
+        #: Stages (P7a, decision SG): name → its steps, consecutive, in order.
+        self.stages: dict[str, list[str]] = {}
         #: Declared resources, by name — the declarations, never the objects.
         self.resources: dict[str, Resource] = {}
         #: What this workflow may use. With a catalog, every step is checked
@@ -3162,6 +3164,55 @@ class Workflow:
                     wave.add(other.name)
             changed = wave
 
+    # ── stages (P7a): a named group of consecutive steps ─────────────────
+    def define_stage(self, name: str, first: str, last: str) -> list[str]:
+        """Group the steps from *first* to *last* as stage *name*, replacing a
+        stage of that name. Refused when a step is in another stage."""
+        if not isinstance(name, str) or not name:
+            raise ValueError("a stage's name is a non-empty string")
+        for step in (first, last):
+            if step not in self.steps:
+                raise KeyError(f"no step {step!r}")
+        order = list(self.steps)
+        start, end = order.index(first), order.index(last)
+        if start > end:
+            raise ValueError(f"stage {name!r}: {first!r} comes after {last!r}; "
+                             f"a stage runs from its first step to its last")
+        members = order[start:end + 1]
+        for other, steps in self.stages.items():
+            taken = [s for s in members if s in steps]
+            if other != name and taken:
+                raise ValueError(f"stage {name!r}: {taken[0]!r} is already in stage "
+                                 f"{other!r}; a step is in one stage. Change {other!r} "
+                                 f"first, or remove it: k.unstage({other!r})")
+        self.stages[name] = members
+        return list(members)
+
+    def stage_of(self, step_id: str) -> str | None:
+        return next((name for name, steps in self.stages.items() if step_id in steps), None)
+
+    def _stage_join(self, step_id: str) -> None:
+        """*step_id* joins the stage both its neighbours are in: inserted or
+        moved inside a stage, it's part of it; at its edge, it isn't."""
+        order = list(self.steps)
+        i = order.index(step_id)
+        if 0 < i < len(order) - 1:
+            name = self.stage_of(order[i - 1])
+            if name is not None and name == self.stage_of(order[i + 1]):
+                self.stages[name] = [s for s in order if s in self.stages[name] or s == step_id]
+
+    def _stage_leave(self, step_id: str) -> None:
+        name = self.stage_of(step_id)
+        if name is not None:
+            self.stages[name].remove(step_id)
+            if not self.stages[name]:
+                del self.stages[name]                # its last step gone, so is it
+
+    def _stage_rename(self, old: str, new: str) -> None:
+        for steps in self.stages.values():
+            if old in steps:
+                steps[steps.index(old)] = new
+
     def _upstream_ids(self, step_id: str, _seen: set[str] | None = None) -> set[str]:
         """Every step *step_id* transitively reads. Used to refuse cycles."""
         seen = set() if _seen is None else _seen
@@ -3192,7 +3243,8 @@ class Workflow:
         extras. The declarations, never the objects or the outputs."""
         return WorkflowSpec(tuple(st.spec for st in self.steps.values()),
                             tuple(decl.spec for decl in self.resources.values()),
-                            _checked_extras(self.extras))
+                            _checked_extras(self.extras),
+                            tuple((name, tuple(steps)) for name, steps in self.stages.items()))
 
     @classmethod
     def from_spec(cls, spec: "WorkflowSpec", catalog: "Catalog | None" = None) -> "Workflow":
@@ -3329,6 +3381,14 @@ class Workflow:
             elif sid in outputs and workflow.steps[sid].valid:
                 workflow.steps[sid].output = outputs[sid]
                 restored.append(sid)
+        for entry in blob.get("stages") or []:
+            # a stage keeps the steps it names that are here, if they are
+            # still consecutive; a file changed by hand never stops a load
+            members = [s for s in entry.get("steps") or [] if s in workflow.steps]
+            order = list(workflow.steps)
+            if members and [order.index(s) for s in members] == list(range(
+                    order.index(members[0]), order.index(members[0]) + len(members))):
+                workflow.stages[str(entry["name"])] = members
         for sid in restored:
             workflow._restage_after(sid)
         if restored:

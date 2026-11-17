@@ -159,14 +159,18 @@ class Kernel:
 
     @_notifies("remove")
     def __delitem__(self, step: str | int) -> None:
-        self.workflow.remove(self._name(step))
+        name = self._name(step)
+        self.workflow.remove(name)
+        self.workflow._stage_leave(name)
 
     @_notifies("remove")
     def remove(self, step: str | int, *, force: bool = False) -> None:
         """Delete a step. Refused while later steps read it, naming them;
         ``force=True`` deletes it anyway, and each reader is ``invalid``,
         naming the deleted step (SS7, core-asks L43d)."""
-        self.workflow.remove(self._name(step), force=force)
+        name = self._name(step)
+        self.workflow.remove(name, force=force)
+        self.workflow._stage_leave(name)
 
     def __contains__(self, name: object) -> bool:
         return name in self.workflow.steps
@@ -308,20 +312,59 @@ class Kernel:
 
     @_notifies("rename")
     def rename(self, old: str, new: str) -> None:
-        """Rename a step; later references follow."""
-        self.workflow.rename(self._name(old), new)
+        """Rename a step; later references follow, and so does its stage."""
+        name = self._name(old)
+        self.workflow.rename(name, new)
+        self.workflow._stage_rename(name, new)
 
     @_notifies("insert")
     def insert(self, index: int, name: str, operation: Any) -> None:
         """Declare a new step *name* at position *index*. Refused when it would
-        read a step that comes after that position."""
+        read a step that comes after that position. Inserted inside a stage,
+        it joins it."""
         self.workflow.insert(index, name, operation)
+        self.workflow._stage_join(name)
 
     @_notifies("move")
     def move(self, step: str | int, index: int) -> None:
         """Move a step to position *index*. Refused when a valid step would then
-        read a step after it."""
-        self.workflow.move(self._name(step), index)
+        read a step after it. Moved out of its stage, it leaves it; moved
+        inside one, it joins it."""
+        name = self._name(step)
+        self.workflow.move(name, index)
+        self.workflow._stage_leave(name)
+        self.workflow._stage_join(name)
+
+    # ── stages (P7a, decision SG) ───────────────────────────────────────
+    def stage(self, name: str, *, first: str, last: str) -> list[str]:
+        """Group the consecutive steps from *first* to *last* as stage *name*
+        (loading, cleaning, analysis…): the steps it holds. Redefining a name
+        replaces it; a step is in one stage. A stage changes no output, so it
+        is saved but in no id; core keeps it valid through every edit."""
+        return self.workflow.define_stage(name, first, last)
+
+    def unstage(self, name: str) -> None:
+        """Remove stage *name*; its steps stay as they are."""
+        if name not in self.workflow.stages:
+            raise KeyError(f"no stage {name!r}")
+        del self.workflow.stages[name]
+
+    @property
+    def stages(self) -> dict[str, list[str]]:
+        """Each stage and its steps, in workflow order."""
+        return {name: list(steps) for name, steps in self.workflow.stages.items()}
+
+    def stage_of(self, step: str | int) -> str | None:
+        """The stage *step* is in, or None."""
+        return self.workflow.stage_of(self._name(step))
+
+    def run_stage(self, name: str, *, force: bool = False) -> list[Step]:
+        """Bring stage *name*'s steps up to date, in order, each after what
+        it needs (as :meth:`run`); ``force=True`` runs each again."""
+        if name not in self.workflow.stages:
+            known = ", ".join(map(repr, self.workflow.stages)) or "none"
+            raise KeyError(f"no stage {name!r}; the stages are {known}")
+        return [self.run(step, force=force) for step in list(self.workflow.stages[name])]
 
     # ── resources ────────────────────────────────────────────────────────
     @_notifies("define")

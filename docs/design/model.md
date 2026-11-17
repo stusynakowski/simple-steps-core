@@ -83,11 +83,14 @@ Kernel ── catalog (tools, resource types, modifiers, combines) ── resour
 - **Saving writes specs, never output data.** Loading builds objects from a
   spec and a catalog, imports nothing and runs nothing. A tool whose code
   changed makes its steps `stale` ("tool changed"). *Built.*
-- **Stages** group consecutive steps to run and show them as one; a stage is
-  not a reference and changes no output. *Planned* (R9; marked built until
-  2026-11-03, when the handover sweep found no stage in core or its tests).
-  Its meaning is decided (SG, owner 2026-11-15): a grouping of consecutive
-  steps, with no inputs, outputs or computation of its own; plan.md P7a.
+- **Stages** group consecutive steps that do one part of the work, to run
+  and show them as one; a stage is not a reference and changes no output, so
+  it is saved but in no id (SG, P-D7). `k.stage("clean", first="a",
+  last="c")`, `k.stages`, `k.stage_of(step)`, `k.run_stage("clean")`,
+  `k.unstage(name)`. Core keeps it valid: a step inserted or moved inside
+  joins it, one moved out leaves, a rename follows, a deleted step goes (and
+  with its last step, the stage); a step is in one stage. *Built* 2026-11-17
+  (`tests/unit/test_stages.py`).
 
 ## 4. Rows: identity, position, lineage
 

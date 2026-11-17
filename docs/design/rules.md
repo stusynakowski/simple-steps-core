@@ -127,6 +127,12 @@ the save's report, and a step whose data is missing or changed loads
 `invalid`, saying why. A saved result shows as current only if nothing it
 was made from has changed: a tool whose code changed shows `stale`.
 
+**16. Steps that do one part of the work can be a stage.**
+`k.stage("clean", first="a", last="c")` groups consecutive steps under a
+name, to show folded and run together (`k.run_stage("clean")`). A stage
+changes no result. A step you insert inside it joins it, one you move out
+leaves it, and a step is in one stage.
+
 ## What core can't do, by design
 
 - See inside a tool, or inside a `table` tool's result.
