@@ -246,10 +246,10 @@ def test_a_value_that_isnt_a_table_is_kept_in_the_workflow_file(tmp_path):
     k["arr"] = np.array([1, 2, 3])
     report = k.save(tmp_path / "session")
     assert report["steps"]["when"]["file"] == "workflow.json"
-    assert "ndarray" in report["steps"]["arr"]["not_saved"]["*"]   # media: a later piece
+    assert report["exact"] is True                                  # the array is media
     loaded = Kernel.load(tmp_path / "session", CAT)
     assert loaded.step("when").output.data.iloc[0, 0] == dt.datetime(2026, 1, 1, 9, 30)
-    assert loaded.step("arr").state == "invalid"
+    assert np.array_equal(loaded.step("arr").literal, np.array([1, 2, 3]))
 
 
 @pytest.mark.parametrize("frame, why", [
@@ -443,3 +443,126 @@ def test_a_data_steps_row_ids_survive_so_its_readers_outputs_still_match(tmp_pat
     assert _views(loaded) == _views(k)
     assert {n: loaded.step(n).state for n in loaded.workflow.steps} == \
         {n: k.step(n).state for n in k.workflow.steps}
+
+
+# ── media: arrays, images and figures, exactly ───────────────────────────
+from PIL import Image  # noqa: E402
+import plotly.graph_objects as go  # noqa: E402
+
+
+def _image(mode):
+    base = Image.fromarray(np.arange(48, dtype=np.uint8).reshape(4, 4, 3))
+    return base.convert(mode) if mode != "I;16" else \
+        Image.fromarray(np.arange(16, dtype=np.uint16).reshape(4, 4))
+
+
+@pytest.mark.parametrize("array", [
+    np.arange(48, dtype=np.uint8).reshape(4, 4, 3), np.array([1.5, np.nan], dtype=np.float32),
+    np.array([0.1], dtype=np.float16), np.array([True, False]), np.array([1 + 2j]),
+    np.array(["2026-01-01"], dtype="datetime64[D]"), np.asfortranarray(np.arange(6).reshape(2, 3)),
+    np.array(5), np.array([1, 2], dtype=">i4"),
+    np.array([(1, 2.0)], dtype=[("a", "i4"), ("b", "f8")]),
+], ids=lambda a: f"{a.dtype}{a.shape}")
+def test_arrays_are_saved_exactly(tmp_path, array):
+    k, loaded, report = _roundtrip(tmp_path, pd.DataFrame({"a": [array, array], "n": [1, 2]}))
+    assert report["exact"] is True
+    back = loaded.step("s").output.data["a"].iloc[0]
+    assert back.dtype == array.dtype and back.shape == array.shape
+    assert back.flags.f_contiguous == array.flags.f_contiguous
+    assert np.array_equal(back, array, equal_nan=array.dtype.kind in "fc")
+    assert len(list((tmp_path / "session" / "media").iterdir())) == 1   # stored once
+
+
+@pytest.mark.parametrize("mode", ["1", "L", "LA", "P", "RGB", "RGBA", "I;16", "I", "F", "CMYK"])
+def test_images_are_saved_exactly_in_every_mode(tmp_path, mode):
+    image = _image(mode)
+    k, loaded, report = _roundtrip(tmp_path, pd.DataFrame({"img": [image]}))
+    assert report["exact"] is True
+    back = loaded.step("s").output.data["img"].iloc[0]
+    assert (back.mode, back.size, back.tobytes()) == (image.mode, image.size, image.tobytes())
+    ext = "png" if mode in ("1", "L", "LA", "P", "RGB", "RGBA", "I;16") else "tiff"
+    assert [p.suffix for p in (tmp_path / "session" / "media").iterdir()] == [f".{ext}"]
+
+
+def test_an_image_opened_from_a_jpeg_keeps_its_pixels_format_and_info(tmp_path):
+    import io
+    buffer = io.BytesIO()
+    _image("RGB").save(buffer, format="JPEG", quality=80)
+    jpeg = Image.open(io.BytesIO(buffer.getvalue()))
+    jpeg.load()
+    k, loaded, report = _roundtrip(tmp_path, pd.DataFrame({"img": [jpeg]}))
+    assert report["exact"] is True
+    back = loaded.step("s").output.data["img"].iloc[0]
+    assert back.tobytes() == jpeg.tobytes()
+    assert back.format == "JPEG" and back.info == jpeg.info
+
+
+def test_a_figure_is_saved_exactly_with_its_arrays_as_arrays(tmp_path):
+    x = np.array([1.5, 2.5], dtype=np.float32)
+    figure = go.Figure(go.Scatter(x=x, y=x * 2), layout={"title": "temps"})
+    k, loaded, report = _roundtrip(tmp_path, pd.DataFrame({"fig": [figure]}))
+    assert report["exact"] is True
+    back = loaded.step("s").output.data["fig"].iloc[0]
+    assert isinstance(back, go.Figure)
+    assert isinstance(back.data[0].x, np.ndarray) and back.data[0].x.dtype == np.float32
+    assert back.to_json() == figure.to_json() or \
+        json.loads(back.to_json()) == json.loads(figure.to_json())
+
+
+def test_tool_outputs_of_arrays_images_and_figures_reload_unrun(tmp_path):
+    @tool
+    def load_image(n: int) -> object:
+        return Image.fromarray(np.full((2, 2, 3), n, dtype=np.uint8))
+
+    @tool
+    def channels(n: int) -> np.ndarray:
+        return np.full((2, 2), n, dtype=np.uint8)
+
+    @tool
+    def chart(n: int) -> object:
+        return go.Figure(go.Bar(y=[n, n * 2]))
+
+    cat = Catalog(tools=[load_image, channels, chart])
+    k = Kernel(cat)
+    k["s"] = pd.DataFrame({"n": [1, 2]})
+    k["img"] = load_image[mod.map()](wf["s"])
+    k["arr"] = channels[mod.map()](wf["s"])
+    k["fig"] = chart[mod.map()](wf["s"])
+    k.run_all()
+    report = k.save(tmp_path / "session", outputs=True)
+    assert report["exact"] is True
+    loaded = Kernel.load(tmp_path / "session", cat)
+    assert {n: loaded.step(n).state for n in ("img", "arr", "fig")} == \
+        {"img": "completed", "arr": "completed", "fig": "completed"}
+    assert loaded.needs_run() == {}
+    for name in ("img", "arr", "fig"):
+        assert _data_version(loaded.step(name).output.data) == _data_version(k.step(name).output.data)
+
+
+def test_an_array_of_objects_is_reported_not_saved(tmp_path):
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"a": [np.array([object()], dtype=object)], "n": [1]})
+    report = k.save(tmp_path / "session")
+    assert "objects" in report["steps"]["s"]["not_saved"]["a"]
+
+
+def test_media_no_value_names_any_more_is_removed(tmp_path):
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"a": [np.zeros(3)]})
+    k.save(tmp_path / "session")
+    k["s"] = pd.DataFrame({"a": [np.ones(3)]})
+    k.save(tmp_path / "session")
+    assert len(list((tmp_path / "session" / "media").iterdir())) == 1
+    loaded = Kernel.load(tmp_path / "session", CAT)
+    assert np.array_equal(loaded.step("s").output.data["a"].iloc[0], np.ones(3))
+
+
+def test_a_missing_media_file_loads_invalid_naming_it(tmp_path):
+    k = Kernel(CAT)
+    k["s"] = pd.DataFrame({"a": [np.zeros(3)]})
+    k.save(tmp_path / "session")
+    for f in (tmp_path / "session" / "media").iterdir():
+        f.unlink()
+    loaded = Kernel.load(tmp_path / "session", CAT)
+    assert loaded.step("s").state == "invalid"
+    assert any("media/" in p.message for p in loaded.step("s").problems)

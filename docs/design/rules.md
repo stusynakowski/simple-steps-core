@@ -116,7 +116,8 @@ never a resource.
 
 **15. A saved session is exact, or says where it isn't.** `k.save(folder)`
 writes the workflow and the data you gave its steps, and with `outputs=True`
-every step's results, each table as a Parquet file you can open anywhere; `Kernel.load(folder, catalog)` reads it
+every step's results, each table as a Parquet file you can open anywhere,
+and arrays, images and Plotly figures as their own files, once each; `Kernel.load(folder, catalog)` reads it
 back and runs nothing. Anything that couldn't be kept exactly is listed in
 the save's report, and a step whose data is missing or changed loads
 `invalid`, saying why. A saved result shows as current only if nothing it

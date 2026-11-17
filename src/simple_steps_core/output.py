@@ -517,6 +517,9 @@ def _stable(value: Any, depth: int = 0, unversioned: set | None = None) -> Any:
     if isinstance(value, (list, tuple, set, frozenset)):
         items = [_stable(v, depth + 1, unversioned) for v in value]
         return sorted(items, key=repr) if isinstance(value, (set, frozenset)) else items
+    token = _media_token(value, depth, unversioned)
+    if token is not None:
+        return token
     from .catalog import data_version       # catalog imports output: not at the top
     version = data_version(value)
     if version is not None:
@@ -528,6 +531,27 @@ def _stable(value: Any, depth: int = 0, unversioned: set | None = None) -> Any:
         return {"type": kind, **{k: _stable(v, depth + 1, unversioned)
                                  for k, v in vars(value).items()}}
     return _pickled(value, kind, unversioned)
+
+
+def _media_token(value: Any, depth: int, unversioned: set | None) -> dict | None:
+    """A Pillow image's or a Plotly figure's version, from its content (S-D3):
+    an image is its mode, size, pixels, palette and info, whatever class
+    opened it (a JPEG file's image and the same pixels reloaded match); a
+    figure is its canonical JSON. None for anything else. Neither library is
+    imported here: a value can only be one if its library is already loaded."""
+    import sys
+    pil = sys.modules.get("PIL.Image")
+    if pil is not None and isinstance(value, pil.Image):
+        palette = value.getpalette() if value.mode in ("P", "PA") else None
+        return {"type": "image", "mode": value.mode, "size": list(value.size),
+                "pixels": hashlib.sha1(value.tobytes()).hexdigest(),
+                "palette": palette,
+                "info": _stable(dict(value.info), depth + 1, unversioned)}
+    figures = sys.modules.get("plotly.basedatatypes")
+    if figures is not None and isinstance(value, figures.BaseFigure):
+        canonical = json.dumps(json.loads(value.to_json()), sort_keys=True)
+        return {"type": "figure", "json": hashlib.sha1(canonical.encode()).hexdigest()}
+    return None
 
 
 def _pickled(value: Any, kind: str, unversioned: set | None) -> dict:

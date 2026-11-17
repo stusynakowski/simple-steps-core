@@ -8,6 +8,8 @@ A session is a folder::
       outputs/<step>/        with outputs=True: a step's output, data.parquet
                              (its table, lineage and row ids), states.parquet
                              (a state per cell), meta.json (its record)
+      media/<hash>.<ext>     arrays (.npy), images (.png, .tiff) and Plotly
+                             figures (.json), each once, named by its content
       report.json            what the last save couldn't keep exactly
 
 **A save is exact, or says where it isn't.** Each column is written the
@@ -46,9 +48,14 @@ class NotSaved(Exception):
 
 
 # ── values: tagged JSON, exact for every type core can name ──────────────
-def tag(value: Any) -> Any:
+def tag(value: Any, media: "Media | None" = None) -> Any:
     """*value* as JSON that names its type, so :func:`untag` gives it back
-    exactly. Raises :class:`NotSaved` for a value it can't hold."""
+    exactly. An array, an image or a figure goes to *media*, the JSON naming
+    its file. Raises :class:`NotSaved` for a value it can't hold."""
+    if media is not None:
+        ref = media.put(value)
+        if ref is not None:
+            return ref
     if value is None:
         return None
     if value is pd.NA:
@@ -61,7 +68,7 @@ def tag(value: Any) -> Any:
             return {"$np": value.dtype.str, "v": int(value.view("int64"))}
         if isinstance(value, np.void) or value.dtype.kind in "OSUV":
             raise NotSaved(f"numpy {value.dtype}")
-        return {"$np": value.dtype.str, "v": tag(value.item())}
+        return {"$np": value.dtype.str, "v": tag(value.item(), media)}
     if isinstance(value, bool):
         return value
     if isinstance(value, int):
@@ -74,7 +81,7 @@ def tag(value: Any) -> Any:
         out = {"$bytes": base64.b64encode(bytes(value)).decode("ascii")}
         return {**out, "mutable": 1} if isinstance(value, bytearray) else out
     if isinstance(value, complex):
-        return {"$complex": [tag(value.real), tag(value.imag)]}
+        return {"$complex": [tag(value.real, media), tag(value.imag, media)]}
     if isinstance(value, decimal.Decimal):
         return {"$decimal": str(value)}
     if isinstance(value, pd.Timestamp):
@@ -91,23 +98,27 @@ def tag(value: Any) -> Any:
     if isinstance(value, dt.timedelta):
         return {"$timedelta": [value.days, value.seconds, value.microseconds]}
     if type(value) is tuple:
-        return {"$tuple": [tag(v) for v in value]}
+        return {"$tuple": [tag(v, media) for v in value]}
     if type(value) is list:
-        return [tag(v) for v in value]
+        return [tag(v, media) for v in value]
     if type(value) is dict:
-        return {"$dict": [[tag(k), tag(v)] for k, v in value.items()]}
+        return {"$dict": [[tag(k, media), tag(v, media)] for k, v in value.items()]}
     if type(value) in (set, frozenset):
-        return {f"${type(value).__name__}": [tag(v) for v in value]}
+        return {f"${type(value).__name__}": [tag(v, media) for v in value]}
     raise NotSaved(type(value).__name__)
 
 
-def untag(obj: Any) -> Any:
-    """The value :func:`tag` wrote."""
+def untag(obj: Any, media: "Media | None" = None) -> Any:
+    """The value :func:`tag` wrote; files from *media*."""
     if isinstance(obj, list):
-        return [untag(v) for v in obj]
+        return [untag(v, media) for v in obj]
     if not isinstance(obj, dict):
         return obj
     (key, payload), = [(k, v) for k, v in obj.items() if k.startswith("$")]
+    if key == "$media":
+        if media is None:
+            raise ValueError("a saved value names a media file, but no session folder was given")
+        return media.get(obj)
     if key == "$na":
         return pd.NA
     if key == "$nat":
@@ -116,7 +127,7 @@ def untag(obj: Any) -> Any:
         dtype = np.dtype(payload)
         if dtype.kind in "mM":
             return np.array(obj["v"], dtype="int64").view(dtype)[()]
-        return dtype.type(untag(obj["v"]))
+        return dtype.type(untag(obj["v"], media))
     if key == "$int":
         return int(payload)
     if key == "$float":
@@ -125,7 +136,7 @@ def untag(obj: Any) -> Any:
         raw = base64.b64decode(payload)
         return bytearray(raw) if obj.get("mutable") else raw
     if key == "$complex":
-        return complex(untag(payload[0]), untag(payload[1]))
+        return complex(untag(payload[0], media), untag(payload[1], media))
     if key == "$decimal":
         return decimal.Decimal(payload)
     if key == "$timestamp":
@@ -148,13 +159,13 @@ def untag(obj: Any) -> Any:
     if key == "$timedelta":
         return dt.timedelta(days=payload[0], seconds=payload[1], microseconds=payload[2])
     if key == "$tuple":
-        return tuple(untag(v) for v in payload)
+        return tuple(untag(v, media) for v in payload)
     if key == "$dict":
-        return {untag(k): untag(v) for k, v in payload}
+        return {untag(k, media): untag(v, media) for k, v in payload}
     if key == "$set":
-        return {untag(v) for v in payload}
+        return {untag(v, media) for v in payload}
     if key == "$frozenset":
-        return frozenset(untag(v) for v in payload)
+        return frozenset(untag(v, media) for v in payload)
     raise ValueError(f"unknown tag {key!r} in a saved value")
 
 
@@ -167,6 +178,110 @@ def _same(a: list, b: list) -> bool:
         return False
 
 
+# ── media: arrays, images and figures, each a file named by its content ──
+_PNG_MODES = {"1", "L", "LA", "P", "RGB", "RGBA", "I;16"}
+
+
+class Media:
+    """``media/`` of a session folder: each array, Pillow image or Plotly
+    figure written once, as a file named by a hash of its bytes, so a value in
+    many cells or steps is stored once. Arrays as ``.npy`` (never pickled),
+    images as PNG (TIFF for the modes PNG can't hold: ``I``, ``F``, ``CMYK``,
+    …), figures as Plotly's JSON. Each is read back when written and must give
+    the value back, or it isn't saved. A library is used only when the value
+    is already one of its objects."""
+
+    def __init__(self, folder: Path):
+        self.folder = Path(folder) / "media"
+        self.written: set[str] = set()
+
+    def put(self, value: Any) -> dict | None:
+        """The reference to *value*'s file, or None if it isn't a media value."""
+        encoded = _encode_media(value)
+        if encoded is None:
+            return None
+        kind, ext, raw, extra = encoded
+        import hashlib
+        name = f"{hashlib.sha256(raw).hexdigest()[:24]}.{ext}"
+        self.folder.mkdir(parents=True, exist_ok=True)
+        if not (self.folder / name).is_file():
+            (self.folder / name).write_bytes(raw)
+        self.written.add(name)
+        return {"$media": name, "kind": kind, **extra}
+
+    def get(self, ref: dict) -> Any:
+        return _decode_media(ref, (self.folder / ref["$media"]).read_bytes())
+
+
+def _encode_media(value: Any):
+    """``(kind, extension, bytes, extra)`` for a media value, else None."""
+    import io
+    import sys
+    if isinstance(value, np.ndarray):
+        if value.dtype.kind == "O":
+            raise NotSaved("ndarray of Python objects")
+        buffer = io.BytesIO()
+        np.save(buffer, value, allow_pickle=False)
+        return "array", "npy", buffer.getvalue(), {}
+    pil = sys.modules.get("PIL.Image")
+    if pil is not None and isinstance(value, pil.Image):
+        image_format = "PNG" if value.mode in _PNG_MODES else "TIFF"
+        buffer = io.BytesIO()
+        try:
+            value.save(buffer, format=image_format)
+        except (OSError, ValueError, KeyError):
+            raise NotSaved(f"image of mode {value.mode}") from None
+        extra = {"format": value.format, "info": tag(dict(value.info))}
+        back = _decode_media({"kind": "image", **extra}, buffer.getvalue())
+        if back.mode != value.mode or back.size != value.size or back.tobytes() != value.tobytes():
+            raise NotSaved(f"image of mode {value.mode}")
+        return "image", image_format.lower(), buffer.getvalue(), extra
+    figures = sys.modules.get("plotly.basedatatypes")
+    if figures is not None and isinstance(value, figures.BaseFigure):
+        return "figure", "json", value.to_json().encode("utf-8"), {"class": type(value).__name__}
+    return None
+
+
+def _decode_media(ref: dict, raw: bytes) -> Any:
+    import io
+    kind = ref["kind"]
+    if kind == "array":
+        return np.load(io.BytesIO(raw), allow_pickle=False)
+    if kind == "image":
+        from PIL import Image
+        opened = Image.open(io.BytesIO(raw))
+        opened.load()
+        image = opened.copy()                   # a plain Image, as a tool makes one
+        image.info = untag(ref.get("info") or {"$dict": []})
+        image.format = ref.get("format")
+        return image
+    if kind == "figure":
+        import plotly.graph_objects as go
+        blob = _arrays_back(json.loads(raw.decode("utf-8")))
+        cls = go.FigureWidget if ref.get("class") == "FigureWidget" else go.Figure
+        try:
+            return cls(blob)
+        except ImportError:                     # a widget needs ipywidgets
+            return go.Figure(blob)
+    raise ValueError(f"unknown media kind {kind!r}")
+
+
+def _arrays_back(obj: Any) -> Any:
+    """A figure's JSON with Plotly's encoded arrays (``{dtype, bdata}``) back
+    as numpy arrays, as the figure held them (S-D3)."""
+    if isinstance(obj, dict):
+        if set(obj) <= {"dtype", "bdata", "shape"} and {"dtype", "bdata"} <= set(obj):
+            array = np.frombuffer(base64.b64decode(obj["bdata"]), dtype=obj["dtype"]).copy()
+            shape = obj.get("shape")
+            if shape:
+                array = array.reshape([int(s) for s in str(shape).split(",")])
+            return array
+        return {k: _arrays_back(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_arrays_back(v) for v in obj]
+    return obj
+
+
 # ── a table: one Parquet file, each column the plainest exact way ────────
 def _pyarrow():
     try:
@@ -177,9 +292,10 @@ def _pyarrow():
     return pyarrow, pyarrow.parquet
 
 
-def _write_column(values: list):
+def _write_column(values: list, media: "Media | None" = None):
     """``(array, how, why)``: typed when Arrow gives *values* back unchanged,
-    else tagged JSON text; ``"not_saved"`` with the reason if neither can."""
+    else tagged JSON text (media values as files); ``"not_saved"`` with the
+    reason if neither can."""
     pa, _ = _pyarrow()
     try:
         array = pa.array(values)
@@ -188,15 +304,15 @@ def _write_column(values: list):
     except Exception:
         pass
     try:
-        return pa.array([json.dumps(tag(v)) for v in values], pa.string()), "tagged", None
+        return pa.array([json.dumps(tag(v, media)) for v in values], pa.string()), "tagged", None
     except NotSaved as exc:
         return pa.nulls(len(values), pa.string()), "not_saved", f"a {exc} can't be saved"
 
 
-def _read_column(array, how: str) -> list:
+def _read_column(array, how: str, media: "Media | None" = None) -> list:
     values = array.to_pylist()
     if how == "tagged":
-        return [untag(json.loads(v)) for v in values]
+        return [untag(json.loads(v), media) for v in values]
     return values
 
 
@@ -207,7 +323,7 @@ def _restore(values: list, dtype: str, index=None) -> pd.Series:
         return pd.Series(values, index=index, dtype=object)
 
 
-def write_frame(frame: pd.DataFrame, path: Path) -> dict:
+def write_frame(frame: pd.DataFrame, path: Path, media: "Media | None" = None) -> dict:
     """Write *frame* to *path*; the manifest that reads it back. Column names
     and the index travel in the manifest, tagged, so any name round-trips."""
     pa, pq = _pyarrow()
@@ -218,7 +334,7 @@ def write_frame(frame: pd.DataFrame, path: Path) -> dict:
     arrays, names, columns, not_saved = [], [], [], {}
     for position, name in enumerate(frame.columns):
         series = frame.iloc[:, position]
-        array, how, why = _write_column(series.tolist())
+        array, how, why = _write_column(series.tolist(), media)
         arrays.append(array)
         names.append(str(name) if isinstance(name, str) and how == "typed"
                      and not str(name).startswith("__") else f"__c{position}")
@@ -229,7 +345,7 @@ def write_frame(frame: pd.DataFrame, path: Path) -> dict:
     range_index = isinstance(index, pd.RangeIndex) and index.start == 0 and index.step == 1
     entry = {"range": len(index)} if range_index else None
     if entry is None:
-        array, how, why = _write_column(index.tolist())
+        array, how, why = _write_column(index.tolist(), media)
         arrays.append(array)
         names.append("__index__")
         entry = {"dtype": str(index.dtype), "how": how}
@@ -247,7 +363,7 @@ def write_frame(frame: pd.DataFrame, path: Path) -> dict:
     return manifest
 
 
-def read_frame(path: Path, manifest: dict) -> pd.DataFrame:
+def read_frame(path: Path, manifest: dict, media: "Media | None" = None) -> pd.DataFrame:
     """The table :func:`write_frame` wrote."""
     _, pq = _pyarrow()
     table = pq.read_table(path)
@@ -256,12 +372,12 @@ def read_frame(path: Path, manifest: dict) -> pd.DataFrame:
     if "range" in index_entry:
         index = pd.RangeIndex(index_entry["range"])
     else:
-        values = _read_column(table.column(len(columns)), index_entry["how"])
+        values = _read_column(table.column(len(columns)), index_entry["how"], media)
         index = pd.Index(_restore(values, index_entry["dtype"]))
     index.name = untag(index_entry.get("name"))
     data = {}
     for position, column in enumerate(columns):
-        values = _read_column(table.column(position), column["how"])
+        values = _read_column(table.column(position), column["how"], media)
         data[position] = _restore(values, column["dtype"], index)
     frame = pd.DataFrame(data, index=index)
     frame.columns = [untag(c["name"]) for c in columns]
@@ -301,6 +417,7 @@ def save(kernel, folder, *, outputs: bool = False) -> dict:
     folder.mkdir(parents=True, exist_ok=True)
     previous = _previous_files(folder)
     previous_outputs = _previous_outputs(folder)
+    media = Media(folder)
     blob = kernel.spec.to_dict()
     entries = {entry["name"]: entry for entry in blob["steps"]}
     report: dict = {"exact": True, "steps": {}}
@@ -311,7 +428,8 @@ def save(kernel, folder, *, outputs: bool = False) -> dict:
         value = step.literal
         if value is NO_LITERAL:
             if outputs:
-                _save_output(folder, name, step, entries[name], report, taken, written_outputs)
+                _save_output(folder, name, step, entries[name], report, taken, written_outputs,
+                             media)
             continue
         if value is None or _literal_problem(value) is None:
             continue
@@ -321,10 +439,10 @@ def save(kernel, folder, *, outputs: bool = False) -> dict:
             data = {"in": None, "not_saved": {"*": "its data wasn't loaded, so there was none to save"}}
         elif isinstance(value, pd.DataFrame):
             relative = f"data/{_file_stem(name, taken)}.parquet"
-            manifest = write_frame(value, folder / relative)
+            manifest = write_frame(value, folder / relative, media)
             if "file_columns" in manifest:
                 written.add(relative)
-                back = read_frame(folder / relative, manifest)
+                back = read_frame(folder / relative, manifest, media)
                 if _data_version(back) != _data_version(value) and "not_saved" not in manifest:
                     manifest["not_saved"] = {"*": "the table didn't read back exactly"}
             data = {"in": relative if "file_columns" in manifest else None,
@@ -339,7 +457,7 @@ def save(kernel, folder, *, outputs: bool = False) -> dict:
                     pass
         else:
             try:
-                data = {"in": "workflow.json", "value": tag(value)}
+                data = {"in": "workflow.json", "value": tag(value, media)}
             except NotSaved as exc:
                 data = {"in": None, "not_saved": {"*": f"a {exc} can't be saved"}}
         entry["data"] = data
@@ -354,6 +472,7 @@ def save(kernel, folder, *, outputs: bool = False) -> dict:
             stale.unlink()                     # a file this core wrote, no longer named
     for relative in previous_outputs - written_outputs:
         _remove_output(folder, relative)
+    _remove_unused_media(folder, media.written)
     _write_json(folder / "workflow.json", blob)
     _write_json(folder / "report.json", report)
     return report
@@ -388,7 +507,7 @@ def _meta_from(blob: dict) -> dict:
 
 
 def _save_output(folder: Path, name: str, step, entry: dict, report: dict,
-                 taken: set, written: set) -> None:
+                 taken: set, written: set, media: "Media | None" = None) -> None:
     """Write *step*'s output to ``outputs/<step>/``, checked; else report why not."""
     from .output import _data_version
 
@@ -403,11 +522,11 @@ def _save_output(folder: Path, name: str, step, entry: dict, report: dict,
     except NotSaved as exc:
         why = {"*": f"its record holds a {exc}, which can't be saved"}
     if why is None:
-        data = write_frame(output.data, where / "data.parquet")
+        data = write_frame(output.data, where / "data.parquet", media)
         states = write_frame(output.states.astype(str), where / "states.parquet")
         why = data.get("not_saved") or states.get("not_saved")
         if why is None:
-            back = read_frame(where / "data.parquet", data)
+            back = read_frame(where / "data.parquet", data, media)
             if _data_version(back) != _data_version(output.data):
                 why = {"*": "its table didn't read back exactly"}
     if why:
@@ -445,13 +564,13 @@ def _previous_outputs(folder: Path) -> set[str]:
             if str((e.get("output") or {}).get("in") or "").startswith("outputs/")}
 
 
-def _load_output(folder: Path, saved: dict):
+def _load_output(folder: Path, saved: dict, media: "Media | None" = None):
     """The output a save wrote, or None when it's missing or changed."""
     from .output import Output, _data_version, _state_column
 
     where = folder / saved["in"]
     try:
-        data = read_frame(where / "data.parquet", saved["data"])
+        data = read_frame(where / "data.parquet", saved["data"], media)
         plain = read_frame(where / "states.parquet", saved["states"])
         # a state column is core's own type, built as core builds it
         states = pd.DataFrame({c: _state_column(plain[c].tolist(), data.index)
@@ -462,6 +581,17 @@ def _load_output(folder: Path, saved: dict):
     if _data_version(data) != saved.get("version"):
         return None                            # changed since it was saved: it runs again
     return Output(data, states, meta)
+
+
+def _remove_unused_media(folder: Path, kept: set[str]) -> None:
+    """Remove the media files this core wrote that no saved value names now."""
+    where = folder / "media"
+    if not where.is_dir():
+        return
+    for file in where.iterdir():
+        if file.is_file() and file.name not in kept and \
+                re.fullmatch(r"[0-9a-f]{24}\.(npy|png|tiff|json)", file.name):
+            file.unlink()
 
 
 def _previous_files(folder: Path) -> set[str]:
@@ -480,10 +610,11 @@ def load(cls, folder, catalog):
     folder = Path(folder)
     blob = json.loads((folder / "workflow.json").read_text())
     values, problems, ids, outputs = {}, {}, {}, {}
+    media = Media(folder)
     for entry in blob.get("steps", []):
         data, name = entry.get("data"), entry["name"]
         if entry.get("output"):
-            loaded = _load_output(folder, entry["output"])
+            loaded = _load_output(folder, entry["output"], media)
             if loaded is not None:
                 outputs[name] = loaded
         if not data:
@@ -498,13 +629,23 @@ def load(cls, folder, catalog):
             continue
         where = data.get("in")
         if where == "workflow.json":
-            values[name] = untag(data["value"])
+            try:
+                values[name] = untag(data["value"], media)
+            except (OSError, ValueError):
+                problems[name] = (f"{name!r}'s data names a file in media/ that is missing "
+                                  f"from {folder}; put it back, or assign it again: k[{name!r}] = …")
             continue
         if where is None or not (folder / where).is_file():
             problems[name] = (f"{name!r}'s data, {where}, is missing from {folder}; "
                               f"put the file back, or assign the data again: k[{name!r}] = …")
             continue
-        frame = read_frame(folder / where, data)
+        try:
+            frame = read_frame(folder / where, data, media)
+        except (OSError, ValueError):
+            problems[name] = (f"{name!r}'s data, {where}, names a file in media/ that is "
+                              f"missing from {folder}; put it back, or assign it again: "
+                              f"k[{name!r}] = …")
+            continue
         if _data_version(frame) != data.get("version"):
             problems[name] = (f"{where} changed since it was saved, so {name!r} isn't "
                               f"the data the workflow was saved with; assign it again: "

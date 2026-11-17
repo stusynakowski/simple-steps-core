@@ -4,7 +4,10 @@
 > (`k.save(folder, outputs=True)`, `Kernel.load`, `saving.py`,
 > `tests/unit/test_saving.py`): §2's `workflow.json`, `data/`, `outputs/` and
 > `report.json`, §4's typed and tagged columns, §5 and §6. A data step keeps its
-> rows' ids. Not yet: `media/` (arrays, images, figures), layer 3. What a saved session holds, when
+> rows' ids. **Media built too** (S-D1, S-D2, S-D3 as recommended): arrays,
+> images in every mode and Plotly figures, exact, by content, the versions of
+> images and figures taken from their content. Not yet: layer 3, and big steps
+> kept on disk while you work (plan P7d). What a saved session holds, when
 > something can be saved, and exactly when something can be lost. Every claim
 > marked *run* was run on 2026-11-16 with pyarrow 25.0.1, numpy 2.5.3,
 > Pillow 12.3.0 and plotly 7.1.0; the scripts are in
