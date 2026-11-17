@@ -798,3 +798,27 @@ which=2,
 other=0,
 )
 ```
+
+## 2026-11-17 · `test_S1_a_saved_session_loads_showing_the_same` · at `375fc70`
+
+- **Broke:** `pyarrow.lib.ArrowNotImplementedError: Cannot write struct type 'rec' with no child field to Parquet`: a column of `{}` passed the Arrow round trip, typed as a struct of no fields, which Parquet can't write; the whole save raised
+- **Status:** fixed (a typed column is checked through Parquet itself, in memory, else written tagged), example pinned
+
+## 2026-11-17 · `test_S4_every_value_comes_back_exactly`, `test_S5_every_table_is_written_and_read_back_exactly` · at `375fc70`
+
+- **Broke:** `datetime(2000, 1, 1, fold=1)` came back with `fold=0`: `isoformat()` drops `fold` (which of a repeated hour); in a table, the data version differed
+- **Status:** fixed (the tagged form keeps `fold` for `datetime` and `time`), examples pinned
+
+## 2026-11-17 · `test_S6_on_disk_or_in_memory_the_same` · at `375fc70`
+
+- **Broke:** `level: ('completed', …) == ('invalid', None)`: loaded with its arrays on disk (`spill_over=0`, through a save), a reader's type check saw a `MediaHandle` where its parameter declares `ndarray`, and refused the step; a live run hadn't, as it checked before spilling
+- **Status:** fixed (a handle reports its value's type: `_column_fits` and `_dtype_type` see through it), example pinned
+
+```
+test_S6_on_disk_or_in_memory_the_same(numbers=[0], spill_over=0, through_a_save=True)
+```
+
+## 2026-11-17 · `test_S5_every_table_is_written_and_read_back_exactly` · at `375fc70`
+
+- **Broke:** `UnicodeDecodeError: 'ascii' codec can't decode byte 0x80`: **the data version of any output** holding bytes that aren't text beside another type (`[False, b"\x80"]`) raised: pandas' hash refuses the mix, and the JSON fallback couldn't write the bytes. Not a saving bug: such a step couldn't be versioned at all
+- **Status:** fixed (`_stable_cells` gives bytes a token, as other objects), example pinned

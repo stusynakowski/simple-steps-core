@@ -295,7 +295,9 @@ def _dtype_type(series: pd.Series) -> Any:
     if kind == "f":
         return float
     present = series.dropna() if kind == "O" else series
-    types_ = {type(v) for v in present}
+    from .handles import MediaHandle
+    # a value kept on disk is of its value's type (P7d)
+    types_ = {v.value_type if isinstance(v, MediaHandle) else type(v) for v in present}
     if len(types_) > 1:                       # observed, mixed: the union (K27)
         return typing.Union[tuple(sorted(types_, key=lambda t: t.__name__))]
     return types_.pop() if len(types_) == 1 else None
@@ -538,7 +540,11 @@ def _column_fits(series: pd.Series, annotation: Any) -> bool | None:
     present = series.dropna()
     if present.empty:
         return None
-    return isinstance(present.iloc[0], origin)
+    first = present.iloc[0]
+    from .handles import MediaHandle
+    if isinstance(first, MediaHandle):               # on disk: its value's type (P7d)
+        return issubclass(first.value_type, origin)
+    return isinstance(first, origin)
 
 
 #: Version of the saved format. Every version back to 1 still loads (008 K17);

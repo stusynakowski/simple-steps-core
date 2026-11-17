@@ -42,6 +42,20 @@ class MediaHandle:
     def kind(self) -> str:
         return self.ref["kind"]
 
+    @property
+    def value_type(self) -> type:
+        """The type of the value it stands for, without loading it: what a
+        column's observed type and a tool's type check see (an array is an
+        ``ndarray``, never a handle)."""
+        if self.kind == "array":
+            import numpy as np
+            return np.ndarray
+        if self.kind == "image":
+            from PIL import Image
+            return Image.Image
+        import plotly.graph_objects as go
+        return go.FigureWidget if self.ref.get("class") == "FigureWidget" else go.Figure
+
     def __repr__(self) -> str:
         return f"<{self.summary}, on disk>"
 

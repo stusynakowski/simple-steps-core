@@ -97,11 +97,13 @@ def tag(value: Any, media: "Media | None" = None) -> Any:
     if isinstance(value, pd.Timedelta):
         return {"$pdtimedelta": int(value.value), "unit": value.unit}
     if isinstance(value, dt.datetime):
-        return {"$datetime": value.isoformat(), "tz": getattr(value.tzinfo, "key", None)}
+        # fold: which of a repeated hour (a clock set back); isoformat drops it
+        return {"$datetime": value.isoformat(), "tz": getattr(value.tzinfo, "key", None),
+                "fold": value.fold}
     if isinstance(value, dt.date):
         return {"$date": value.isoformat()}
     if isinstance(value, dt.time):
-        return {"$time": value.isoformat()}
+        return {"$time": value.isoformat(), "fold": value.fold}
     if isinstance(value, dt.timedelta):
         return {"$timedelta": [value.days, value.seconds, value.microseconds]}
     if type(value) is tuple:
@@ -158,11 +160,11 @@ def untag(obj: Any, media: "Media | None" = None) -> Any:
         if obj.get("tz"):
             from zoneinfo import ZoneInfo
             when = when.replace(tzinfo=ZoneInfo(obj["tz"]))
-        return when
+        return when.replace(fold=obj.get("fold", 0))
     if key == "$date":
         return dt.date.fromisoformat(payload)
     if key == "$time":
-        return dt.time.fromisoformat(payload)
+        return dt.time.fromisoformat(payload).replace(fold=obj.get("fold", 0))
     if key == "$timedelta":
         return dt.timedelta(days=payload[0], seconds=payload[1], microseconds=payload[2])
     if key == "$tuple":
@@ -349,10 +351,16 @@ def _write_column(values: list, media: "Media | None" = None):
     """``(array, how, why)``: typed when Arrow gives *values* back unchanged,
     else tagged JSON text (media values as files); ``"not_saved"`` with the
     reason if neither can."""
-    pa, _ = _pyarrow()
+    pa, pq = _pyarrow()
     try:
         array = pa.array(values)
-        if _same(array.to_pylist(), values):
+        # through Parquet itself, not only Arrow: a type Parquet can't write
+        # (a struct of no fields: a column of {}) or would change goes tagged
+        import io
+        buffer = io.BytesIO()
+        pq.write_table(pa.table({"c": array}), buffer)
+        back = pq.read_table(io.BytesIO(buffer.getvalue())).column(0)
+        if _same(back.to_pylist(), values):
             return array, "typed", None
     except Exception:
         pass

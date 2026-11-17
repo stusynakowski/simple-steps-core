@@ -471,6 +471,8 @@ def _data_version(data: pd.DataFrame) -> str:
 
 
 _PLAIN = (str, numbers.Number, bytes, type(None))
+#: The cells hashed as they are; anything else, bytes included, by its token.
+_PLAIN_CELL = (str, numbers.Number, type(None))
 
 
 def _stable_cells(data: pd.DataFrame, unversioned: set | None = None) -> pd.DataFrame:
@@ -480,10 +482,12 @@ def _stable_cells(data: pd.DataFrame, unversioned: set | None = None) -> pd.Data
     out = None
     for column in data.columns:
         series = data[column]
-        if series.dtype != object or all(isinstance(v, _PLAIN) for v in series):
+        if series.dtype != object or all(isinstance(v, _PLAIN_CELL) for v in series):
             continue
         out = data.copy() if out is None else out
-        out[column] = [v if isinstance(v, _PLAIN) else
+        # bytes as a token too: hashed beside other types, or written as JSON
+        # text, bytes that aren't text raised (found by S5, 2026-11-17)
+        out[column] = [v if isinstance(v, _PLAIN_CELL) else
                        json.dumps(_stable(v, unversioned=unversioned), sort_keys=True,
                                   default=repr) for v in series]
     return data if out is None else out
