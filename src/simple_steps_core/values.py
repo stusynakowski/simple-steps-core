@@ -294,6 +294,8 @@ def _dtype_type(series: pd.Series) -> Any:
         return int
     if kind == "f":
         return float
+    if isinstance(series.dtype, pd.StringDtype):    # holds text only: no scan (C50)
+        return str if bool(series.notna().any()) else None
     present = series.dropna() if kind == "O" else series
     from .handles import MediaHandle
     # a value kept on disk is of its value's type (P7d)

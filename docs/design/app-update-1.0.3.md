@@ -5,7 +5,7 @@
 > test passed at 2,000 examples on its code. Every change was run in core, with
 > tests; what the app sees is also kept, row by row, in
 > [plan.md §5](plan.md#5-changes-the-app-will-see). The app's own plan for the
-> move is its `docs/dev_plan/137-core-1.0.3.md`.
+> move is in its `docs/dev_plan/` (its number is the app's to give).
 
 ## 1. In one paragraph
 

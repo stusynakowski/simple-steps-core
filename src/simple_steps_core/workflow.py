@@ -1525,47 +1525,59 @@ class Workflow:
                 summary["changed"] = changes
             markers.insert(0, {"kind": "stale", "text": label,
                                "because": label, "resolve": [f"run {step_id!r}"]})
-        all_rows = self._preview_rows(step, staged, names, types)
-        lo, hi = (rows if rows is not None else (0, len(all_rows)))
+        # only the rows asked for are built: a page costs the page (C50)
+        total = len(out.data) if not staged else None
+        page, total = self._preview_rows(step, staged, names, types, rows, total)
+        lo, hi = (rows if rows is not None else (0, total))
+        start = slice(lo, hi).indices(total)[0]
         lineage = {} if staged else self.lineage(step_id)
-        for n, row in enumerate(all_rows):
-            row["lineage"] = {name: cells[n] for name, cells in lineage.items()}
-        return {**summary, "columns": columns, "lineage": list(lineage), "rows": all_rows[lo:hi],
+        for n, row in enumerate(page):
+            row["lineage"] = {name: cells[start + n] for name, cells in lineage.items()}
+        return {**summary, "columns": columns, "lineage": list(lineage), "rows": page,
                 "row_count": plan.get("rows"), "markers": markers,
-                "window": {"start": lo, "stop": min(hi, len(all_rows)),
-                           "of": len(all_rows)}}
+                "window": {"start": lo, "stop": min(hi, total), "of": total}}
 
-    def _preview_rows(self, step: Step, staged: bool, names: list, types: dict) -> list[dict]:
+    def _preview_rows(self, step: Step, staged: bool, names: list, types: dict,
+                      rows: tuple[int, int] | None = None,
+                      total: int | None = None) -> tuple[list[dict], int]:
+        """The rows of the window *rows* (all when None), and how many there
+        are in all. Only the window's rows are read (C50)."""
         out = step.output
         if not staged:
+            window = slice(*(rows if rows is not None else (0, total)))
+            first = window.indices(total)[0]
+            data, states = out.data.iloc[window], out.states.iloc[window]
             step_stale = bool(out.meta.get("stale"))
             stale_rows = out.meta.get("stale_rows")
             stale_set = set(map(str, stale_rows)) if stale_rows is not None else None
-            row_states = out.row_states
+            row_states = _row_states_of(states, data.index).astype(str).tolist()
+            shown = [c for c in data.columns if not is_id_column(c)]   # lineage: apart
+            values = {c: data[c].tolist() for c in shown}
+            cell_states = {c: states[c].astype(str).tolist() for c in shown}
+            notes = out.notes
             result = []
-            for position, row_id in enumerate(out.data.index):
+            for n, row_id in enumerate(data.index):
+                position = first + n
                 stale = step_stale and (stale_set is None or str(row_id) in stale_set)
-                note = out.notes.get(row_id, {})
+                note = notes.get(row_id, {}) if notes else {}
                 cells = {}
-                for c in out.data.columns:
-                    if is_id_column(c):
-                        continue                    # lineage: listed apart
-                    state = str(out.states.at[row_id, c])
+                for c in shown:
+                    state = cell_states[c][n]
                     if state == "known" and stale:
                         state = "stale"
                     cell = {"state": state, "type": types.get(c, "any")}
                     if state in ("known", "stale"):
-                        cell["value"] = _plain(out.data.at[row_id, c])
+                        cell["value"] = _plain(values[c][n])
                     if state in ("failed", "blocked"):
                         cell.update({k: v for k, v in note.items() if k in ("error", "cause")})
                         if str(c) in (note.get("cells") or {}):
                             cell["error"] = note["cells"][str(c)]
                     cells[str(c)] = cell
-                row_state = str(row_states[row_id])
+                row_state = row_states[n]
                 result.append({ROW_ID: position, "position": position,
                                "state": "stale" if stale and row_state == "known" else row_state,
                                "cells": cells})
-            return result
+            return result, total
         # Staged: rows exist only where staging knows them. A 1:1 verb over a
         # known input has its ids; a filter may drop any of its input's rows.
         verb = step.operation.shape_verb.kind if step.operation.shape_verb else None
@@ -1573,9 +1585,11 @@ class Workflow:
         if not index and ROWS_RULE.get(verb) == "at_most":
             known = self._known_index(step.operation)
             index, state = (list(known) if known is not None else []), "maybe"
+        total = len(index)
+        first, stop, _ = slice(*(rows if rows is not None else (0, total))).indices(total)
         return [{ROW_ID: i, "position": i, "state": state,
                  "cells": {c: {"state": state, "type": types.get(c, "any")} for c in names}}
-                for i, _row_id in enumerate(index)]
+                for i in range(first, stop)], total
 
     def cell(self, step_id: str, row: int, column: str) -> dict:
         """One cell, for a click: its value or what is expected there (009 §4).
@@ -1588,13 +1602,16 @@ class Workflow:
         it exists"), or ``missing`` (no such row or column). Anything short of
         known carries ``because`` (and ``resolve`` where there is a way).
         """
-        view = self.preview(step_id)
         base = {"step": step_id, "row": row, "column": column}
         if not isinstance(row, int) or isinstance(row, bool):
             return {**base, "state": "missing",
                     "because": f"a row is a row number, as shown in #: {row!r} isn't one"}
+        view = self.preview(step_id, (0, 0))        # its columns and its size, no rows
         if view["state"] == "invalid":
             return {**base, "state": "missing", "because": view["problems"][0]}
+        n = view["window"]["of"]
+        if -n <= row < n:                            # then just that row (C50)
+            view = self.preview(step_id, (row % n, row % n + 1))
         names = [c["name"] for c in view["columns"]]
         plan = self.steps[step_id].plan
         col_plan = plan.get("columns", {})
@@ -1609,11 +1626,12 @@ class Workflow:
         type_ = next(c["type"] for c in view["columns"] if c["name"] == column)
         base["column_number"] = names.index(column)
         rows_ = view["rows"]
-        n = len(rows_)
         if -n <= row < n:
-            entry = rows_[row]
-            row_id = self.steps[step_id].output.data.index[row] \
-                if row < len(self.steps[step_id].output.data.index) else None
+            entry = rows_[0]
+            index = self.steps[step_id].output.data.index
+            # a negative row counts from the end of what is shown; a step that
+            # hasn't run may show rows its data doesn't have yet
+            row_id = index[row % n] if row % n < len(index) else None
             cell = {**base, **entry["cells"].get(column, {"state": entry["state"]}),
                     "type": type_, "lineage": entry.get("lineage", {})}
             cell["inputs"] = [self._shown_input(e) for e in self._cell_inputs(step_id, row_id, column)]
@@ -1867,6 +1885,15 @@ class Workflow:
         step = self.steps.get(step_id)
         if step is None or step.output.meta.get("staged"):
             return {}
+        # kept while this step and every step it comes from hold the same
+        # results and row ids: worked out per row, it is asked for each page
+        key = tuple((name, id(self.steps[name].output), id(self.steps[name].output.data.index),
+                     self.steps[name].output.meta.get("version"))
+                    for name in [step_id, *sorted(self._upstream_ids(step_id))]
+                    if name in self.steps)
+        cache = self.__dict__.setdefault("_lineage_cache", {})
+        if step_id in cache and cache[step_id][0] == key:
+            return {name: list(cells) for name, cells in cache[step_id][1].items()}
         positions: dict = {}
 
         def number(ancestor: str, value: Any) -> Any:
@@ -1882,7 +1909,8 @@ class Workflow:
         shown = {}
         for name, (ancestor, kind, cells) in self._lineage_ids(step_id, {}).items():
             shown[name] = list(cells) if kind == "idx" else [number(ancestor, v) for v in cells]
-        return shown
+        cache[step_id] = (key, shown)
+        return {name: list(cells) for name, cells in shown.items()}
 
     def _lineage_ids(self, step_id: str, memo: dict) -> dict:
         """``{name: (ancestor, "rows" | "idx", [cell per row])}``, cells in the
@@ -2455,11 +2483,10 @@ class Workflow:
                       if c in out.states.columns}
             return {**entry, "rows": [_plain(i) for i in ids],
                     "state": _worst(states, out.meta.get("stale")), "values": {}}
-        lookup = _row_lookup(out.data)           # exact: 1 is not "1"
-        match = row_id if row_id is not None and row_id in lookup else None
-        if match is None:
+        # the row itself, looked up in the index: exact, 1 is not "1"
+        if row_id is None or not _in_index(row_id, out.data.index):
             return {**entry, "state": "missing", "values": {}}
-        input_id = lookup[match]
+        input_id = row_id
         entry["row"] = int(out.data.index.get_loc(input_id))   # its "#" in that step
         cols_ = [c for c in entry["columns"] if c in out.data.columns]
         states = {str(out.states.at[input_id, c]) for c in cols_} or {str(out.row_states[input_id])}
@@ -3421,6 +3448,15 @@ class Workflow:
         return f"<Workflow {len(self.steps)} step(s): {list(self.steps)}>"
 
 
+def _in_index(row_id: Any, index: pd.Index) -> bool:
+    """Is *row_id* a row id of *index*? As the dict of ids this replaced
+    said, by hash and equality, without building one per call (C50)."""
+    try:
+        return bool(row_id in index)
+    except TypeError:
+        return False
+
+
 def _holds_no_data(operation: Any) -> bool:
     """Is *operation* (a saved dict) what a step declared with a DataFrame
     saves as, ``identity[mod.source()]()``, with no data behind it? Files
@@ -3546,6 +3582,7 @@ from .modifiers import (  # noqa: E402
 )
 from .operation import Operation, _src, as_typed  # noqa: E402
 from .output import (  # noqa: E402
+    _row_states_of,
     _state_column,
     Output,
     ROW_ID,

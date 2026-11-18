@@ -75,6 +75,27 @@ def _state_column(values: Sequence[str], index: Any) -> pd.Series:
     return pd.Series(pd.Categorical(values, categories=STATES, ordered=True), index=index)
 
 
+def _row_codes(states: pd.DataFrame) -> "np.ndarray":
+    """Each row's worst cell, as a state code, for a frame of cell states:
+    vectorised (C50, C52), never a Python call per cell. A row whose cells
+    hold no code reads as the last state, as it always has."""
+    import numpy as np
+    if not len(states):
+        return np.zeros(0, dtype=np.int8)
+    codes = np.column_stack([states[c].cat.codes.to_numpy() for c in states.columns])
+    worst = codes.max(axis=1)
+    worst[worst < 0] = len(STATES) - 1
+    return worst.astype(np.int8)
+
+
+def _row_states_of(states: pd.DataFrame, index: Any) -> pd.Series:
+    """Each row's state, its worst cell's, for *states* (a window or all)."""
+    if not len(states.columns):
+        return _state_column(["known"] * len(index), index)
+    return pd.Series(pd.Categorical.from_codes(_row_codes(states), categories=STATES,
+                                               ordered=True), index=index)
+
+
 def _states_frame(row_states: Sequence[str], data: pd.DataFrame) -> pd.DataFrame:
     """One state per cell, same shape as *data*: each row's state in every column."""
     return pd.DataFrame({c: _state_column(row_states, data.index) for c in data.columns},
@@ -235,10 +256,17 @@ class Output:
     @property
     def row_states(self) -> pd.Series:
         """Each row's state: its worst cell's (a row with one failed cell is failed)."""
+        return _row_states_of(self.states, self.data.index)
+
+    def present_states(self) -> set[str]:
+        """The states its rows are in, without building a state per row: what
+        a step's state is decided from (C52)."""
+        if not len(self.data):
+            return set()
         if not len(self.states.columns):
-            return _state_column(["known"] * len(self.data), self.data.index)
-        codes = self.states.apply(lambda col: col.cat.codes).max(axis=1)
-        return _state_column([STATES[c] for c in codes], self.data.index)
+            return {"known"}
+        import numpy as np
+        return {STATES[c] for c in np.unique(_row_codes(self.states))}
 
     def ids_in(self, *states: str) -> list:
         """Row ids whose state is one of *states*."""

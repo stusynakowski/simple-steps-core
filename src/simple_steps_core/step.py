@@ -179,7 +179,7 @@ class Step:
             return "invalid"
         if self.output.meta.get("staged"):
             return "staged"
-        states = set(self.output.row_states.astype(str))
+        states = self.output.present_states()
         if "invalid" in states:
             return "invalid"
         # Ran, but an upstream changed (or re-ran) since: the data — failed
@@ -203,6 +203,11 @@ class Step:
         inverse = self.output.meta.get("inverse")
         if not self.output.meta.get("staged"):
             data = self.output.data
+            # worked out once per result: it reads every value (C50)
+            key = (id(data), id(data.index), self.output.meta.get("version"), inverse is None)
+            cached = getattr(self.output, "_plan_cache", None)
+            if cached is not None and cached[0] == key:
+                return {k: (dict(v) if isinstance(v, dict) else v) for k, v in cached[1].items()}
             plan = {"rows": {"certainty": "exact", "count": len(data)},
                     "columns": {"certainty": "exact", "names": list(data.columns)},
                     # what was observed; a mix is the union (K27)
@@ -216,6 +221,9 @@ class Step:
                                      "resolve": [f"run {self.name!r}"]})
         if inverse is not None:
             plan["inverse"] = inverse             # how to go back (reshaping.md §7)
+        if not self.output.meta.get("staged"):
+            self.output._plan_cache = (key, plan)
+            return {k: (dict(v) if isinstance(v, dict) else v) for k, v in plan.items()}
         return plan
 
     def describe(self) -> str:

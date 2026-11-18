@@ -356,3 +356,28 @@ def test_S7_stages_stay_consecutive_and_apart_through_any_edits(length, edits):
         _check_stages(k)
     back = Kernel.from_json(k.to_json(), k.catalog)
     assert back.stages == k.stages
+
+
+# ── S8: a page is the full view, cut (the app's 014 C50) ────────────────────
+@pytest.mark.no_invariants
+@SETTINGS
+@given(grids(), chains(), st.integers(-8, 8), st.integers(-2, 10), st.integers(-6, 6))
+@_timed
+def test_S8_a_page_and_a_cell_are_the_full_view_cut(frame, chain, start, size, row):
+    k, names = _build(_catalog(frame), chain)
+    _run(k)
+    for name in names:
+        if name not in k.workflow.steps:
+            continue
+        full = k.view(name, None)
+        page = k.view(name, (start, start + size))
+        assert page["rows"] == full["rows"][start:start + size], (name, start, size)
+        if full["state"] == "invalid" or not full["columns"]:
+            continue
+        column = full["columns"][0]["name"]
+        cell = k.cell(name, row, column)
+        if -len(full["rows"]) <= row < len(full["rows"]):
+            entry = full["rows"][row]
+            expected = entry["cells"].get(column, {"state": entry["state"]})
+            assert {key: cell[key] for key in expected} == expected, (name, row)
+            assert cell["lineage"] == entry["lineage"], (name, row)
