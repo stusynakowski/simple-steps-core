@@ -1635,6 +1635,7 @@ class Workflow:
             cell = {**base, **entry["cells"].get(column, {"state": entry["state"]}),
                     "type": type_, "lineage": entry.get("lineage", {})}
             cell["inputs"] = [self._shown_input(e) for e in self._cell_inputs(step_id, row_id, column)]
+            cell["recipe"] = self.recipe(step_id, row_id)
             if cell["state"] == "stale":
                 out_meta = self.steps[step_id].output.meta
                 changes = self.arg_changes(step_id)
@@ -1655,7 +1656,8 @@ class Workflow:
                     "because": f"row {row} of {step_id!r}, which has {n} rows{last}"}
         return {**base, "state": "unknown", "type": type_,
                 "because": row_plan.get("because", "its row count isn't known yet"),
-                "resolve": row_plan.get("resolve", [])}
+                "resolve": row_plan.get("resolve", []),
+                "recipe": self.recipe(step_id, None)}     # what is intended, for the step
 
     def arg_changes(self, step_id: str) -> list[dict]:
         """How a step's arguments differ from the ones its output was computed with.
@@ -1789,6 +1791,71 @@ class Workflow:
                 if isinstance(value, StepRef):
                     entries.append(self._reference_entry(value, f"{m.kind}.{name}"))
         return entries
+
+    def recipe(self, step_id: str, row_id: Any) -> dict:
+        """The expression that makes one row's cells (plan P7r): the step's own
+        formula, its input picked down to the row(s) the cell came from, and
+        every argument paired row by row with the input picked to the same row.
+
+        ``{"formula": text, "of": "row" | "rows" | "step"}``: ``row``, one input
+        row; ``rows``, a group (a collapse); ``step``, a cell no smaller call
+        makes (a value, data, a source, ``table``, a combine), so the formula is
+        the step's. Rows are row numbers, as ``#`` shows them now. Worked out from
+        row ids and the formula: it reads no cells and stores nothing.
+        """
+        step = self.steps[step_id]
+        whole = {"formula": step.formula, "of": "step"}
+        op_ = step.operation
+        if step.literal is not NO_LITERAL or op_ is None or is_combine(op_) \
+                or op_.input is None or row_id is None:
+            return whole
+        whole["formula"] = as_typed(op_)
+        kind = self._kind(step_id)
+        source = str(op_.input)
+        data = step.output.data
+        if kind == "table":
+            return whole                          # its recipe is its whole input
+        if kind in ("collapse", "distinct"):
+            listed = data.at[row_id, f"{ROW_ID}{source}"] \
+                if f"{ROW_ID}{source}" in data.columns and _in_index(row_id, data.index) else None
+            if not isinstance(listed, list):
+                listed = (step.output.notes.get(row_id) or {}).get("unit")
+            if not isinstance(listed, list):
+                return whole
+            members, of = list(listed), "rows"
+        else:                                     # one row: a tool per row, or a copy
+            members, of = [self._trace_one(step_id, row_id, source)], "row"
+
+        def numbers(target: str, ids: list) -> Any:
+            """*ids* (rows of *source*) as row numbers of *target*, or None."""
+            if target != source:
+                ids = self.trace(source, ids, target) or [None]
+            index = self.steps[target].output.data.index
+            if any(i is None or not _in_index(i, index) for i in ids):
+                return None
+            found = [int(index.get_loc(i)) for i in ids]
+            return found[0] if of == "row" else found
+
+        at = numbers(source, members)
+        if at is None:
+            return whole
+        pickers = op_.pickers
+        verb = op_.shape_verb
+        if not pickers and verb is not None and verb.kind == "select" and len(op_.modifiers) == 1:
+            pickers = op_.modifiers           # a pick: its own select is narrowed
+        columns = next((m.settings["columns"] for m in reversed(pickers)
+                        if m.kind == "select" and m.settings.get("columns") is not None), None)
+        pick = Modifier("select", {"rows": at, **({"columns": columns} if columns is not None else {})})
+        modifiers = tuple(m for m in op_.modifiers if not any(m is p for p in pickers)) + (pick,)
+        arguments = dict(op_.arguments)
+        for name, ref in _paired_arguments(op_, self).items():
+            given = arguments[name]
+            paired_at = numbers(ref.id, members)
+            if paired_at is None:
+                return whole
+            arguments[name] = replace(given, rows=paired_at)
+        return {"formula": as_typed(replace(op_, modifiers=modifiers, arguments=arguments)),
+                "of": of}
 
     # ── following a row back (reshaping.md §5.1: ids are never parsed) ────
     def _same_ids(self, step_id: str) -> set[str]:
