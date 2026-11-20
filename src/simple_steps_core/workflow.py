@@ -1635,7 +1635,7 @@ class Workflow:
             cell = {**base, **entry["cells"].get(column, {"state": entry["state"]}),
                     "type": type_, "lineage": entry.get("lineage", {})}
             cell["inputs"] = [self._shown_input(e) for e in self._cell_inputs(step_id, row_id, column)]
-            cell["recipe"] = self.recipe(step_id, row_id)
+            cell["recipe"] = self.recipe(step_id, row_id, column)
             if cell["state"] == "stale":
                 out_meta = self.steps[step_id].output.meta
                 changes = self.arg_changes(step_id)
@@ -1728,6 +1728,7 @@ class Workflow:
         if kind == "auto":
             kind = (step.output.meta.get("auto") or {}).get("verb", "map")
         entries: list[dict] = []
+        group_ids = None                      # a collapse's rows of its input
 
         if is_combine(op_):
             if op_.tool == "zip":
@@ -1764,7 +1765,7 @@ class Workflow:
             elif kind == "collapse":
                 members = listed if isinstance(listed, list) else \
                     (step.output.notes.get(row_id) or {}).get("unit")
-                rows_ = members if isinstance(members, list) else None
+                rows_ = group_ids = members if isinstance(members, list) else None
                 for param in self._columns_bound(op_, source, kind):
                     entries.append(self._input_entry(source, None, [param], param, rows_=rows_))
             elif kind == "table":
@@ -1780,8 +1781,25 @@ class Workflow:
                 entries.append(self._input_entry(source, self._trace_one(step_id, row_id, source),
                                                  [_source_column(op_, column)], None))
 
+        # K-cell (owner, 2026-11-20: "a map should show the paired references"):
+        # an argument paired row by row is the one cell of this row, or under
+        # a collapse the group's rows, not its whole column.
+        paired = _paired_arguments(op_, self) \
+            if op_.input is not None and (kind == "collapse" or _is_tool_verb(kind, op_)) else {}
         for name, value in op_.arguments.items():
-            if isinstance(value, StepRef):
+            ref = paired.get(name)
+            names = (ref.columns or {}).get("names") if ref is not None \
+                and isinstance(ref.columns, dict) else None
+            if names:
+                source = str(op_.input)
+                if kind == "collapse":
+                    group = None if group_ids is None else self.trace(source, group_ids, ref.id)
+                    entries.append(self._input_entry(ref.id, None, list(names), name,
+                                                     rows_=group or []))
+                else:
+                    entries.append(self._input_entry(
+                        ref.id, self._trace_one(step_id, row_id, ref.id), list(names), name))
+            elif isinstance(value, StepRef):
                 entries.append(self._reference_entry(value, name))
             elif isinstance(value, ResRef):
                 entries.append({"resource": value.name, "argument": name,
@@ -1792,17 +1810,89 @@ class Workflow:
                     entries.append(self._reference_entry(value, f"{m.kind}.{name}"))
         return entries
 
-    def recipe(self, step_id: str, row_id: Any) -> dict:
-        """The expression that makes one row's cells (plan P7r): the step's own
-        formula, its input picked down to the row(s) the cell came from, and
-        every argument paired row by row with the input picked to the same row.
+    def recipe(self, step_id: str, row_id: Any, column: Any = None) -> dict:
+        """The expression that makes one cell (plan P7r): the tool called on
+        the cells it read, each parameter with its pick, and the part of what
+        it returned that the cell holds (owner, 2026-11-20).
 
-        ``{"formula": text, "of": "row" | "rows" | "step"}``: ``row``, one input
-        row; ``rows``, a group (a collapse); ``step``, a cell no smaller call
-        makes (a value, data, a source, ``table``, a combine), so the formula is
-        the step's. Rows are row numbers, as ``#`` shows them now. Worked out from
-        row ids and the formula: it reads no cells and stores nothing.
+        ``{"formula", "of", "as_step"}``. ``formula``, the cell's call:
+        ``add(x=wf["src"][2][cols["x"]], y=wf["src"][2][cols["y"]])``; a
+        group's rows as a range where they run on (``wf["src"][0:3]``); one of
+        several outputs indexed, ``rgb(x=…)["g"]`` (a record's field) or
+        ``[1]`` (a position, or an expand's item); a cell copied from the input
+        (a filter's, a pick's, a collapse key) is the pick of that cell, and a
+        filter adds ``kept_by``, its call. ``of``: ``row`` (one input row),
+        ``rows`` (a group), ``step`` (data, a value, a source, ``table``, a
+        combine, a row not known yet: ``formula`` is the step's). ``as_step``,
+        the step's own formula picked to those rows: declared, it runs that
+        call. Rows are row numbers as ``#`` shows them now, found from row ids;
+        it reads no cells and stores nothing.
         """
+        narrowed = self._recipe_step(step_id, row_id)
+        if narrowed["of"] == "step" or column is None:
+            return {"formula": narrowed["formula"], "of": "step"}
+        call = self._recipe_call(step_id, column, narrowed)
+        if call is None:
+            return {"formula": narrowed["formula"], "of": "step"}
+        return {**call, "of": narrowed["of"], "as_step": narrowed["formula"]}
+
+    def _recipe_call(self, step_id: str, column: Any, narrowed: dict) -> dict | None:
+        """The cell's call, from the rows :meth:`_recipe_step` found."""
+        step = self.steps[step_id]
+        op_, kind = step.operation, self._kind(step_id)
+        source, at, paired = str(op_.input), narrowed["at"], narrowed["paired"]
+
+        pick = _pick_text
+        by =(op_.shape_verb.settings.get("by") if op_.shape_verb is not None else None) \
+            if kind == "collapse" else None
+        keys = [by] if isinstance(by, str) else list(by or [])
+        data = step.output.data
+        made = [c for c in data.columns if not is_id_column(c) and c not in keys]
+        tool_made = _is_tool_verb(kind, op_) or kind == "collapse"
+        if kind == "filter" or not tool_made or column not in made:
+            copied = column if kind in ("filter", "collapse") or tool_made \
+                else _source_column(op_, column)
+            found = {"formula": pick(source, at, [copied])}
+            if kind == "filter":
+                found["kept_by"] = self._call_text(op_, kind, source, at, paired, pick)
+            return found
+        text = self._call_text(op_, kind, source, at, paired, pick)
+        if kind == "expand":
+            row = int(data.index.get_loc(narrowed["row_id"]))
+            parents = data[f"{ROW_ID}{source}"] if f"{ROW_ID}{source}" in data.columns else None
+            first = row
+            while parents is not None and first > 0 and parents.iat[first - 1] == parents.iat[row]:
+                first -= 1
+            text += f"[{row - first}]"                  # its item of the call's list
+        if len(made) > 1:
+            found = record_return(kind, op_.fn or BUILTIN_TOOLS.get(op_.tool))
+            fields = list(_record_fields(found[0]) or {}) if found else []
+            i = made.index(column)
+            text += f'["{fields[i]}"]' if len(fields) == len(made) else f"[{i}]"
+        return {"formula": text}
+
+    def _call_text(self, op_: Operation, kind: Any, source: str, at: Any,
+                   paired: dict, pick: Callable) -> str:
+        """``tool(param=pick, …, literal=…)``: one call, its parameters in the
+        tool's order, each read cell as its pick."""
+        if op_.bound_to is not None:
+            head = f"res[{_src(op_.bound_to.name)}].{op_.tool.rsplit('.', 1)[-1]}"
+        else:
+            head = op_.tool if op_.tool.isidentifier() else f"op({_src(op_.tool)})"
+        given = {p: pick(source, at, [p]) for p in self._columns_bound(op_, source, kind)}
+        for name, value in op_.arguments.items():
+            given[name] = pick(*paired[name]) if name in paired else _src(value)
+        fn = op_.fn or BUILTIN_TOOLS.get(op_.tool)
+        try:
+            order = list(_signature(fn).parameters) if fn else []
+        except (TypeError, ValueError):
+            order = []
+        ranked = sorted(given, key=lambda n: order.index(n) if n in order else len(order))
+        return f"{head}({', '.join(f'{n}={given[n]}' for n in ranked)})"
+
+    def _recipe_step(self, step_id: str, row_id: Any) -> dict:
+        """The step's formula picked to the rows *row_id* came from, with
+        those rows (``at``), the paired arguments' picks and ``of``."""
         step = self.steps[step_id]
         whole = {"formula": step.formula, "of": "step"}
         op_ = step.operation
@@ -1847,15 +1937,16 @@ class Workflow:
                         if m.kind == "select" and m.settings.get("columns") is not None), None)
         pick = Modifier("select", {"rows": at, **({"columns": columns} if columns is not None else {})})
         modifiers = tuple(m for m in op_.modifiers if not any(m is p for p in pickers)) + (pick,)
-        arguments = dict(op_.arguments)
+        arguments, paired = dict(op_.arguments), {}
         for name, ref in _paired_arguments(op_, self).items():
             given = arguments[name]
             paired_at = numbers(ref.id, members)
             if paired_at is None:
                 return whole
             arguments[name] = replace(given, rows=paired_at)
+            paired[name] = (ref.id, paired_at, ref.columns)
         return {"formula": as_typed(replace(op_, modifiers=modifiers, arguments=arguments)),
-                "of": of}
+                "of": of, "at": at, "paired": paired, "row_id": row_id}
 
     # ── following a row back (reshaping.md §5.1: ids are never parsed) ────
     def _same_ids(self, step_id: str) -> set[str]:
@@ -3524,6 +3615,19 @@ def _in_index(row_id: Any, index: pd.Index) -> bool:
         return False
 
 
+def _pick_text(target: str, rows_: Any, names: Any = None) -> str:
+    """A pick as written (P7r): *rows_* a row number or a list of them (a run
+    of rows as a range, ``[0:3]``); *names* a list of columns or a saved
+    column part."""
+    if isinstance(rows_, list) and len(rows_) > 1 \
+            and rows_ == list(range(rows_[0], rows_[-1] + 1)):
+        rows_ = slice(rows_[0], rows_[-1] + 1)
+    columns = {"names": list(names)} if isinstance(names, list) and names else \
+        (names or None)
+    return _src(StepRef(target, rows=None if rows_ is None else _row_part(rows_),
+                        columns=columns))
+
+
 def _holds_no_data(operation: Any) -> bool:
     """Is *operation* (a saved dict) what a step declared with a DataFrame
     saves as, ``identity[mod.source()]()``, with no data behind it? Files
@@ -3671,6 +3775,7 @@ from .references import (  # noqa: E402
     _UNKNOWN,
     _apply_selection,
     _check_caller_scope,
+    _row_part,
     _uses_lineage,
     _where,
     rows,
