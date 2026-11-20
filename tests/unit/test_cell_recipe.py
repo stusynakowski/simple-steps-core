@@ -85,19 +85,19 @@ def _run_back(k: Kernel, text: str) -> list:
 
 @pytest.mark.parametrize("name, row, column, text", [
     # a map: each parameter with the cell it read, a paired argument's too
-    ("s", 1, "s", 'scale(x=wf["f"][1][cols["x"]], by=3.0)'),
-    ("p", 2, "p", 'add(x=wf["src"][2][cols["x"]], y=wf["src"][2][cols["y"]])'),
+    ("s", 1, "s", 'scale(x=wf["f"][1]["x"], by=3.0)'),
+    ("p", 2, "p", 'add(x=wf["src"][2]["x"], y=wf["src"][2]["y"])'),
     # a collapse: the column, over the group's rows
-    ("t", 0, "t", 'sumup(x=wf["src"][[0, 2]][cols["x"]])'),
-    ("t", 1, "t", 'sumup(x=wf["src"][[1]][cols["x"]])'),
+    ("t", 0, "t", 'sumup(x=wf["src"][[0, 2]]["x"])'),
+    ("t", 1, "t", 'sumup(x=wf["src"][[1]]["x"])'),
     # several outputs: the call, then the part the cell holds
-    ("e", 3, "e", 'split(x=wf["src"][1][cols["x"]])[1]'),
-    ("ch", 2, "g", 'channels(x=wf["src"][2][cols["x"]])["g"]'),
-    ("c", 2, "c", 'rgb(x=wf["src"][2][cols["x"]])'),
+    ("e", 3, "e", 'split(x=wf["src"][1]["x"])[1]'),
+    ("ch", 2, "g", 'channels(x=wf["src"][2]["x"])["g"]'),
+    ("c", 2, "c", 'rgb(x=wf["src"][2]["x"])'),
     # a copied cell is its pick
-    ("cp", 1, "x", 'wf["f"][1][cols["x"]]'),
-    ("f", 0, "y", 'wf["src"][1][cols["y"]]'),
-    ("t", 0, "g", 'wf["src"][[0, 2]][cols["g"]]'),
+    ("cp", 1, "x", 'wf["f"][1]["x"]'),
+    ("f", 0, "y", 'wf["src"][1]["y"]'),
+    ("t", 0, "g", 'wf["src"][[0, 2]]["g"]'),
 ])
 def test_a_cells_formula_is_its_call(name, row, column, text):
     k = kernel()
@@ -109,7 +109,7 @@ def test_a_filters_cell_says_what_kept_it():
     k = kernel()
     k.run_all()
     recipe = k.cell("f", 0, "y")["recipe"]
-    assert recipe["kept_by"] == 'big(x=wf["src"][1][cols["x"]])'
+    assert recipe["kept_by"] == 'big(x=wf["src"][1]["x"])'
     assert recipe["as_step"] == 'big[mod.filter()](wf["src"][1])'
 
 
@@ -121,7 +121,7 @@ def test_a_group_that_runs_on_is_a_range():
     k.run_all()
     cell = k.cell("t", 0, "t")
     assert cell["value"] == 18.0
-    assert cell["recipe"]["formula"] == 'sumup(x=wf["v"][0:3][cols["am"]])'
+    assert cell["recipe"]["formula"] == 'sumup(x=wf["v"][0:3]["am"])'
     assert cell["recipe"]["of"] == "rows"
 
 
@@ -130,7 +130,7 @@ def test_a_binding_core_wrote_by_type_shows_its_cell():
     k["src"] = pd.DataFrame({"temp": [1.0, 2.0]})
     k["s"] = scale[mod.map()](wf["src"]["temp"])
     k.run_all()
-    assert k.cell("s", 1, "s")["recipe"]["formula"] == 'scale(x=wf["src"][1][cols["temp"]])'
+    assert k.cell("s", 1, "s")["recipe"]["formula"] == 'scale(x=wf["src"][1]["temp"])'
 
 
 @pytest.mark.parametrize("name", ["f", "s", "p", "t", "e", "c", "ch", "cp"])
@@ -152,13 +152,13 @@ def test_a_recipe_follows_row_ids_through_a_filter():
     """Row 0 of s is row 0 of f, which is row 1 of src."""
     k = kernel()
     k.run_all()
-    assert k.cell("s", 0, "s")["recipe"]["formula"] == 'scale(x=wf["f"][0][cols["x"]], by=3.0)'
-    assert k.cell("f", 0, "x")["recipe"]["formula"] == 'wf["src"][1][cols["x"]]'
+    assert k.cell("s", 0, "s")["recipe"]["formula"] == 'scale(x=wf["f"][0]["x"], by=3.0)'
+    assert k.cell("f", 0, "x")["recipe"]["formula"] == 'wf["src"][1]["x"]'
 
 
 def test_a_staged_cell_knows_its_recipe():
     k = kernel()                                    # nothing run
-    assert k.cell("c", 1, "c")["recipe"]["formula"] == 'rgb(x=wf["src"][1][cols["x"]])'
+    assert k.cell("c", 1, "c")["recipe"]["formula"] == 'rgb(x=wf["src"][1]["x"])'
 
 
 def test_a_cell_whose_row_is_not_known_yet_gives_the_steps_formula():
@@ -220,4 +220,4 @@ def test_a_recipe_costs_no_more_on_a_big_step():
     started = time.perf_counter()
     recipe = wf_.recipe("d", row_id, "d")
     assert time.perf_counter() - started < 0.05
-    assert recipe["formula"] == 'scale(x=wf["src"][150000][cols["x"]])'
+    assert recipe["formula"] == 'scale(x=wf["src"][150000]["x"])'

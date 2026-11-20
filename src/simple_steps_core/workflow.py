@@ -3622,10 +3622,14 @@ def _pick_text(target: str, rows_: Any, names: Any = None) -> str:
     if isinstance(rows_, list) and len(rows_) > 1 \
             and rows_ == list(range(rows_[0], rows_[-1] + 1)):
         rows_ = slice(rows_[0], rows_[-1] + 1)
-    columns = {"names": list(names)} if isinstance(names, list) and names else \
-        (names or None)
-    return _src(StepRef(target, rows=None if rows_ is None else _row_part(rows_),
-                        columns=columns))
+    rows_part = None if rows_ is None else _row_part(rows_)
+    if isinstance(names, dict) and set(names) == {"names"}:
+        names = list(names["names"])
+    if isinstance(names, list) and names and all(isinstance(n, str) for n in names):
+        # rows are integers, columns strings (D2; owner, 2026-11-20)
+        shown = ", ".join(json.dumps(n) for n in names)
+        return _src(StepRef(target, rows=rows_part)) + f"[{shown}]"
+    return _src(StepRef(target, rows=rows_part, columns=names or None))
 
 
 def _holds_no_data(operation: Any) -> bool:
