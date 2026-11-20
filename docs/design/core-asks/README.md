@@ -15,6 +15,7 @@ work. It's the source; the app's docs link here rather than copy it.
 | [CLAUDE.md](CLAUDE.md) | Rules for an agent working on this in core | how to work |
 | [012-formula-text.md](012-formula-text.md) | The app's asks of 2026-11-09 (C40–C44, C39/C36): `formula(text)` meaning what the Python means, and readable refusals. Core's plan step S12 | what the app needs before it drops its parser |
 | [014-big-sessions.md](014-big-sessions.md) | The app's asks of 2026-11-17 at v1.0.3: big sessions (C48–C52) and housekeeping, with core's answers at the top. C50 and C52 done for 1.0.4 | what the app needs for large files |
+| [015-editing-cells.md](015-editing-cells.md) | The app's asks of 2026-11-20 at v1.0.3: editing cells and runs (C53, C55–C59, K23), with core's answers at the top. C55's by-reference form and C57 done with P7r | what the app needs for cell editing |
 
 Read in that order: model, then plan, then run the probe.
 
