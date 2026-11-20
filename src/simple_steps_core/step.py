@@ -128,6 +128,10 @@ class Step:
     #: Its id (K20): a hash of its recipe, its tool's code, the resources it
     #: uses and its inputs' ids. Set by ``k.step`` and ``k.steps``.
     id: str | None = field(default=None, repr=False, compare=False)
+    #: Cells run in place on a staged step (``k.run_cell``, P7r): row id →
+    #: ``{"values", "states", "notes", "formula", "reads"}``, shown over the
+    #: plan while the step is staged; a full run replaces them.
+    cells_run: dict = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def spec(self) -> "StepSpec":

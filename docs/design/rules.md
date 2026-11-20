@@ -141,6 +141,18 @@ runs; the cell holds a small handle with a summary ("RGB image 256×256"). A
 tool still gets the image itself, and `k.value(step, row, column)` gives it
 to you. Results and staleness are the same either way.
 
+**18. Every cell has its recipe, and a staged map's cell can run on its own.**
+`k.cell(step, row, column)["recipe"]["formula"]` is the call that makes the
+cell, on the cells it read: `add(x=wf["src"][2]["x"], y=wf["src"][2]["y"])`.
+Rows are integers, columns strings. A group is its rows (`wf["v"][0:3]["am"]`)
+and one of several outputs is indexed (`channels(x=…)["g"]`, an expand's item
+`[1]`). `recipe["as_step"]` is the same call written as a step you can
+declare. `k.run_cell(step, row)` runs one row of a staged `map`: that row
+fills in, the rest stay pending, and the step stays staged. The cell keeps to
+its row if rows are added or removed above it. It goes stale if a cell it read
+changes, and is dropped if the step's formula changes. A full run replaces
+it, and a saved session keeps it.
+
 ## What core can't do, by design
 
 - See inside a tool, or inside a `table` tool's result.

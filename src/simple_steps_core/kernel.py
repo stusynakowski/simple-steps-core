@@ -462,6 +462,17 @@ class Kernel:
             return current
         return self.workflow.run(name, resources=self.resources)
 
+    @_notifies("run_cell")
+    def run_cell(self, step: str | int, row: int) -> dict:
+        """Run one row of a staged ``map`` in place, from a click on its cell
+        (P7r): that row's cells show their values, every other cell stays
+        pending and the step stays ``staged``. *row* is a row number, as shown
+        (``#``). The cell keeps to its row by id; it shows ``stale`` when a
+        cell it read changes, and a full run replaces it. Returns the row."""
+        name = self._name(step)
+        self._ask_data_versions()
+        return self.workflow.run_cell(name, row, resources=self.resources)
+
     @_notifies("run_all")
     def run_all(self, *, force: bool = False) -> "Kernel":
         """Bring every valid step up to date, in order: run each that has
@@ -516,7 +527,7 @@ class Kernel:
         return {name: (json.dumps(st.operation.to_dict(), sort_keys=True, default=str),
                        st.state, tuple(map(str, st.problems)), repr(st.output.plan),
                        st.output.version, st.output.stale_reason,
-                       tuple(self._read_stale(name)))
+                       tuple(self._read_stale(name)), len(st.cells_run))
                 for name, st in self.workflow.steps.items()}
 
     def _tell(self, action: str, before: dict[str, tuple]) -> None:

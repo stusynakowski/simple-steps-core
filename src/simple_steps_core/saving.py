@@ -470,7 +470,7 @@ def _write_json(path: Path, blob: dict) -> None:
 # ── a kernel ──────────────────────────────────────────────────────────────
 #: The files this core writes in a session folder, and only these, are
 #: removed when nothing names them any more.
-_OWN_FILE = re.compile(r"data/[^/]+/(table\.parquet|states\.parquet|meta\.json|"
+_OWN_FILE = re.compile(r"data/[^/]+/(table\.parquet|states\.parquet|meta\.json|cells\.json|"
                        r"files/[0-9a-f]{24}\.(npy|png|tiff|json))"
                        r"|data/[^/]+\.parquet|outputs/[^/]+/(data|states)\.parquet"
                        r"|outputs/[^/]+/meta\.json|media/[0-9a-f]{24}\.(npy|png|tiff|json)")
@@ -496,6 +496,8 @@ def save(kernel, folder, *, outputs: bool = False) -> dict:
         if value is NO_LITERAL:
             if outputs:
                 _save_output(folder, step_folder, name, step, entries[name], report, media)
+                if step.cells_run and step.output.meta.get("staged"):
+                    _save_cells(folder, step_folder, name, step, entries[name], report, media)
             continue
         if value is None or _literal_problem(value) is None:
             continue
@@ -636,6 +638,34 @@ def _save_output(folder: Path, step_folder: str, name: str, step, entry: dict,
     report["steps"].setdefault(name, {})["output"] = {"file": step_folder}
 
 
+def _save_cells(folder: Path, step_folder: str, name: str, step, entry: dict,
+                report: dict, media: "Media") -> None:
+    """A staged step's cells run in place (P7r), as ``cells.json``: each
+    with its row id, values, states, formula and what it read."""
+    relative = f"{step_folder}/cells.json"
+    try:
+        blob = tag([[row_id, record] for row_id, record in step.cells_run.items()], media)
+    except NotSaved as exc:
+        report["steps"].setdefault(name, {})["cells_run"] = {
+            "file": None, "not_saved": {"*": f"a cell run in place holds a {exc}"}}
+        report["exact"] = False
+        return
+    (folder / step_folder).mkdir(parents=True, exist_ok=True)
+    _write_json(folder / relative, {"cells": blob})
+    media.written.add(relative)
+    entry["cells_run"] = relative
+    report["steps"].setdefault(name, {})["cells_run"] = {"file": relative}
+
+
+def _load_cells(folder: Path, relative: str, media: "Media | None" = None) -> dict:
+    """The cells run in place a save wrote, by row id; empty when missing."""
+    try:
+        pairs = untag(json.loads((folder / relative).read_text())["cells"], media)
+    except Exception:
+        return {}
+    return {row_id: record for row_id, record in pairs}
+
+
 def _load_output(folder: Path, saved: dict, media: "Media | None" = None):
     """The output a save wrote, or None when it's missing or changed."""
     from .output import Output, _data_version, _state_column
@@ -665,10 +695,12 @@ def load(cls, folder, catalog, *, spill_over=None, store=None):
 
     folder = Path(folder)
     blob = json.loads((folder / "workflow.json").read_text())
-    values, problems, ids, outputs = {}, {}, {}, {}
+    values, problems, ids, outputs, cells = {}, {}, {}, {}, {}
     media = Media(folder, lazy=spill_over is not None)
     for entry in blob.get("steps", []):
         data, name = entry.get("data"), entry["name"]
+        if entry.get("cells_run"):
+            cells[name] = _load_cells(folder, entry["cells_run"], media)
         if entry.get("output"):
             loaded = _load_output(folder, entry["output"], media)
             if loaded is not None:
@@ -708,5 +740,9 @@ def load(cls, folder, catalog, *, spill_over=None, store=None):
                               f"k[{name!r}] = …")
             continue
         values[name] = frame
-    return cls._load(blob, catalog, data=values, data_problems=problems,
-                     data_ids=ids, outputs=outputs, spill_over=spill_over, store=store)
+    kernel = cls._load(blob, catalog, data=values, data_problems=problems,
+                       data_ids=ids, outputs=outputs, spill_over=spill_over, store=store)
+    for name, found in cells.items():          # checked when shown, as always
+        if name in kernel.workflow.steps:
+            kernel.workflow.steps[name].cells_run.update(found)
+    return kernel

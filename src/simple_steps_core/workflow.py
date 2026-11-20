@@ -1587,9 +1587,30 @@ class Workflow:
             index, state = (list(known) if known is not None else []), "maybe"
         total = len(index)
         first, stop, _ = slice(*(rows if rows is not None else (0, total))).indices(total)
-        return [{ROW_ID: i, "position": i, "state": state,
+        page = [{ROW_ID: i, "position": i, "state": state,
                  "cells": {c: {"state": state, "type": types.get(c, "any")} for c in names}}
-                for i in range(first, stop)], total
+                for i in range(first, stop)]
+        if step.cells_run:                     # cells run in place (P7r), by row id
+            for entry in page:
+                found = self._cell_run(step, index[entry["position"]])
+                if found is None:
+                    continue
+                record, now = found
+                for c, cell_state in record["states"].items():
+                    shown = now if cell_state == "known" else cell_state
+                    cell = {"state": shown, "type": types.get(c, "any")}
+                    if shown in ("known", "stale"):
+                        cell["value"] = _plain(record["values"].get(c))
+                    if shown == "stale":
+                        cell["because"] = "run in place; a cell it read has changed since"
+                    if shown in ("failed", "blocked"):
+                        cell.update({k: v for k, v in record["notes"].items()
+                                     if k in ("error", "cause")})
+                    entry["cells"][str(c)] = cell
+                states_ = {cell["state"] for cell in entry["cells"].values()}
+                entry["state"] = next((s for s in ("failed", "blocked", "stale", "pending")
+                                       if s in states_), "known")
+        return page, total
 
     def cell(self, step_id: str, row: int, column: str) -> dict:
         """One cell, for a click: its value or what is expected there (009 §4).
@@ -1636,7 +1657,7 @@ class Workflow:
                     "type": type_, "lineage": entry.get("lineage", {})}
             cell["inputs"] = [self._shown_input(e) for e in self._cell_inputs(step_id, row_id, column)]
             cell["recipe"] = self.recipe(step_id, row_id, column)
-            if cell["state"] == "stale":
+            if cell["state"] == "stale" and "because" not in cell:
                 out_meta = self.steps[step_id].output.meta
                 changes = self.arg_changes(step_id)
                 if changes:
@@ -1945,8 +1966,113 @@ class Workflow:
                 return whole
             arguments[name] = replace(given, rows=paired_at)
             paired[name] = (ref.id, paired_at, ref.columns)
-        return {"formula": as_typed(replace(op_, modifiers=modifiers, arguments=arguments)),
-                "of": of, "at": at, "paired": paired, "row_id": row_id}
+        narrowed = replace(op_, modifiers=modifiers, arguments=arguments)
+        return {"formula": as_typed(narrowed), "of": of, "at": at, "paired": paired,
+                "row_id": row_id, "operation": narrowed}
+
+    # ── a cell run in place (P7r; owner, 2026-11-20) ──────────────────────
+    def run_cell(self, step_id: str, row: int, tools: dict[str, Callable] | None = None,
+                 resources: Mapping[str, Any] | None = None) -> dict:
+        """Run one row of a staged ``map`` in place: its call, on the cells it
+        reads, as the step would run it. That row's cells show their values;
+        every other cell stays pending, and the step stays ``staged``.
+
+        Kept by row id, so the cell stays with its row when rows are added or
+        removed above it, and is dropped if its row goes. A cell it read that
+        changes since shows it ``stale``; a change to the step's formula drops
+        it; a full run replaces it. Returns the row, as a page shows it.
+        """
+        step = self.steps[step_id]
+        if not step.valid:
+            raise ValueError(f"step {step_id!r} is invalid and cannot run: {step.problems[0]}")
+        if not step.output.meta.get("staged"):
+            raise ValueError(f"{step_id!r} has run: its cells are its results. "
+                             f"Run it again with force=True")
+        kind = self._kind(step_id)
+        if kind != "map" or not _is_tool_verb(kind, step.operation):
+            raise ValueError(
+                f"a cell is run in place on a map, one value per row; {step_id!r} is "
+                f"{'a ' + kind if kind else 'not one'}. Run the step, or declare a "
+                f"cell's recipe (its \"as_step\") as a step of its own")
+        waiting = self.pending(step_id)
+        if waiting:
+            raise ValueError(f"step {step_id!r} reads {waiting[-1]!r}, which has not run. "
+                             f"Run {' then '.join(repr(w) for w in dict.fromkeys(waiting))} first")
+        index = step.output.data.index
+        n = len(index)
+        if not isinstance(row, int) or isinstance(row, bool) or not -n <= row < n:
+            raise IndexError(f"row {row!r} of {step_id!r}, which has {n} rows")
+        row_id = index[row % n]
+        narrowed = self._recipe_step(step_id, row_id)
+        if narrowed["of"] != "row":
+            raise ValueError(f"row {row} of {step_id!r} doesn't come from one input row")
+        output, _, _ = self._compute(step_id, narrowed["operation"], tools, resources)
+        columns = [c for c in output.data.columns if not is_id_column(c)]
+        if _in_index(row_id, output.data.index):
+            values = {c: output.data.at[row_id, c] for c in columns}
+            states = {c: str(output.states.at[row_id, c]) if c in output.states.columns
+                      else "known" for c in columns}
+            notes = dict(output.notes.get(row_id) or {})
+        else:                                  # the call failed as a whole: said
+            why = (output.meta.get("error") or output.meta.get("failed")
+                   or "the row didn't come back from its call")
+            values, notes = {}, {"error": str(why)}
+            states = {c: "failed" for c in predicted_columns(step.output) if not is_id_column(c)}
+        step.cells_run[row_id] = {"values": values, "states": states, "notes": notes,
+                                  "formula": as_typed(step.operation),
+                                  "reads": self._cell_reads(step_id, row_id)}
+        return self.preview(step_id, (row % n, row % n + 1))["rows"][0]
+
+    def _cell_reads(self, step_id: str, row_id: Any) -> list[dict]:
+        """What one row of a map read, each with a fingerprint: the input's
+        row (the columns the tool takes), a paired argument's row, a whole
+        step passed as a value (its data version)."""
+        op_ = self.steps[step_id].operation
+        source = str(op_.input)
+        paired = _paired_arguments(op_, self)
+
+        def names(ref: StepRef) -> list:
+            found = (ref.columns or {}).get("names") if isinstance(ref.columns, dict) else None
+            return list(found or [])
+        own = list(self._columns_bound(op_, source, "map"))
+        reads = []
+        for name, value in op_.arguments.items():
+            if not isinstance(value, StepRef):
+                continue
+            ref = paired.get(name, value)
+            if ref.id == source:
+                own += names(ref)
+            elif name in paired:
+                reads.append((ref.id, self._trace_one(step_id, row_id, ref.id), names(ref)))
+            else:
+                reads.append((value.id, None, None))
+        reads.insert(0, (source, self._trace_one(step_id, row_id, source), own))
+        return [{"step": s, "id": i, "columns": c, "fp": self._read_fp(s, i, c)}
+                for s, i, c in reads]
+
+    def _read_fp(self, step_id: str, row_id: Any, columns: list | None) -> Any:
+        """A fingerprint of what a cell read: one row's columns, or a whole
+        step's data version (*row_id* None). None when it isn't there."""
+        step = self.steps.get(step_id)
+        if step is None or step.output.meta.get("staged"):
+            return None
+        out = step.output
+        if row_id is None:
+            return f"v{out.version}"
+        if not _in_index(row_id, out.data.index):
+            return None
+        present = [c for c in columns or [] if c in out.data.columns]
+        return int(_row_fps(out.data.loc[[row_id]], present).iloc[0])
+
+    def _cell_run(self, step: Step, row_id: Any) -> tuple[dict, str] | None:
+        """A cell run in place on *step*'s row, and whether it is ``known``
+        or ``stale`` now; None when there is none, or the formula changed."""
+        found = step.cells_run.get(row_id)
+        if found is None or found["formula"] != as_typed(step.operation):
+            return None
+        changed = any(self._read_fp(r["step"], r["id"], r["columns"]) != r["fp"]
+                      for r in found["reads"])
+        return found, "stale" if changed else "known"
 
     # ── following a row back (reshaping.md §5.1: ids are never parsed) ────
     def _same_ids(self, step_id: str) -> set[str]:
@@ -3120,13 +3246,33 @@ class Workflow:
                 step.output = _failed_output(step.operation, why)
             self._restage_after(step_id)
             return step
+        output, found, chosen = self._compute(step_id, step.operation, tools, resources)
+        step.output = output
+        step.cells_run.clear()                    # a full run replaces cells run in place
+        if found:                                 # said while running (J-D3)
+            step.warnings = tuple(dict.fromkeys(
+                [*step.warnings, *(Problem(w, "run_warning", step=step_id, severity="warning")
+                                    for w in found)]))
+        if chosen is not None:
+            step.output.meta["auto"] = chosen
+        self._restage_after(step_id)
+        # 008 C10.5 / 009 §6: what already read this step is re-checked for
+        # staleness by `run`, from the versions it read.
+        return step
+
+    def _compute(self, step_id: str, operation: Operation,
+                 tools: dict[str, Callable] | None = None,
+                 resources: Mapping[str, Any] | None = None) -> tuple:
+        """Run *operation* as step *step_id* runs, over its inputs as they are:
+        ``(output, warnings found, the verb auto chose or None)``. Changes
+        nothing: :meth:`_run_step_body` keeps the output, ``run_cell`` one row."""
         # K19: a column argument a row-wise verb takes one value from is
         # paired with the input by row id: it joins the input as a column.
-        paired = _paired_arguments(step.operation, self)
-        to_resolve = step.operation
+        paired = _paired_arguments(operation, self)
+        to_resolve = operation
         if paired:
-            to_resolve = replace(step.operation, arguments={
-                k: v for k, v in step.operation.arguments.items() if k not in paired})
+            to_resolve = replace(operation, arguments={
+                k: v for k, v in operation.arguments.items() if k not in paired})
         try:
             resolved = self._resolve_arguments(to_resolve, resources)
             source = self._input_for(resolved)
@@ -3137,21 +3283,19 @@ class Workflow:
             if paired and source is not None:
                 source = self._with_paired_columns(source, paired)
         except SelectionError as exc:
-            step.output = _failed_output(step.operation, str(exc))
-            self._restage_after(step_id)
-            return step
-        chosen = None
+            return _failed_output(operation, str(exc)), [], None
+        chosen, found = None, []
         if _is_auto(resolved):
             # 008 N: the verb is picked from the data the step really gets.
             resolved, kind, why = _resolve_auto(resolved, source)
             chosen = {"verb": kind, "reason": why, "provisional": False}
-        bad_argument = self._failed_argument(step.operation, paired)
+        bad_argument = self._failed_argument(operation, paired)
         if bad_argument is not None and source is not None:
             # Every row is blocked: hand the verb an input that says so.
             source = Output(source.data, source.states,
                             {**source.meta, "blocked_all": bad_argument})
-        declared = self._declared_fields(step.operation) if not (
-            step.operation.shape_verb and step.operation.shape_verb.settings.get("columns")) else None
+        declared = self._declared_fields(operation) if not (
+            operation.shape_verb and operation.shape_verb.settings.get("columns")) else None
         if declared and source is not None:                # G9: widen the declared fields
             resolved = replace(resolved, modifiers=tuple(
                 Modifier(m.kind, {**m.settings, "columns": declared}) if m.kind == "widen" else m
@@ -3162,7 +3306,7 @@ class Workflow:
         group_by = self._groups_by_step(step_id)
         if group_by is not None and source is not None:
             by, s = group_by
-            keys = self.trace(str(step.operation.input), list(source.data.index), s) or []
+            keys = self.trace(str(operation.input), list(source.data.index), s) or []
             source = Output(source.data, source.states, {**source.meta, "group": {
                 "by": by, "keys": keys, "all": list(self.steps[s].output.data.index)}})
         if paired:
@@ -3174,41 +3318,37 @@ class Workflow:
             resolved = replace(resolved, modifiers=tuple(
                 Modifier("cast", {**m.settings, **{
                     name: m.settings[ref.columns["names"][0]] for name, ref in paired.items()
-                    if ref.id == str(step.operation.input) and isinstance(ref.columns, dict)
+                    if ref.id == str(operation.input) and isinstance(ref.columns, dict)
                     and (ref.columns.get("names") or [None])[0] in m.settings}})
                 if m.kind == "cast" else m for m in resolved.modifiers))
         unnamed = resolved
         resolved = named_after_step(resolved, self, step_id)            # D9
         try:
-            step.output = resolved.run(source, tools)
+            output = resolved.run(source, tools)
             if resolved is not unnamed:
-                _mapping_keeps_value(step.output, step_id, source)
+                _mapping_keeps_value(output, step_id, source)
             if paired and unpaired is not None:
-                _unpair(step.output, unpaired, paired)
-            step.output.data = _str_columns(step.output.data, step_id)
-            _spread_record(resolved, step.output)
-            _spread_dict(resolved, step.output)
-            _apply_naming(resolved, step.output, step_id, self.default_name_rule(resolved))
-            _carry_id_columns(resolved, source, step.output)
-            found = step.output.meta.pop("warnings", None) or []
-            for read in dict.fromkeys(str(g) for g in step.operation.reads):
+                _unpair(output, unpaired, paired)
+            output.data = _str_columns(output.data, step_id)
+            _spread_record(resolved, output)
+            _spread_dict(resolved, output)
+            _apply_naming(resolved, output, step_id, self.default_name_rule(resolved))
+            _carry_id_columns(resolved, source, output)
+            found = output.meta.pop("warnings", None) or []
+            for read in dict.fromkeys(str(g) for g in operation.reads):
                 upstream = self.steps.get(read)
                 if upstream is not None and upstream.output.meta.get("stale"):
                     found.append(f"read {read!r} while it's stale (version "
                                  f"{upstream.output.version}): an earlier step changed since "
                                  f"{read!r} ran; run it first for current values")
-            if step.output.meta.get("matched_nothing"):     # CA-5: zero rows, said
-                found.append(step.output.meta["matched_nothing"])
-            defaulted = [i for i, n in step.output.notes.items()
-                         if n.get("caught") and str(step.output.row_states.get(i)) == "known"]
+            if output.meta.get("matched_nothing"):     # CA-5: zero rows, said
+                found.append(output.meta["matched_nothing"])
+            defaulted = [i for i, n in output.notes.items()
+                         if n.get("caught") and str(output.row_states.get(i)) == "known"]
             if defaulted:                         # G7: a default stood in for a result
                 found.append(f"{len(defaulted)} row{'s' if len(defaulted) != 1 else ''} "
                              f"used try_except's default; the notes keep the errors")
-            if found:                             # said while running (J-D3)
-                step.warnings = tuple(dict.fromkeys(
-                    [*step.warnings, *(Problem(w, "run_warning", step=step_id, severity="warning")
-                                        for w in found)]))
-            mismatch = _output_mismatch(step.operation, step.output.data)
+            mismatch = _output_mismatch(operation, output.data)
             if mismatch:
                 raise _PlanBroken(mismatch)
         except (SelectionError, KeyError, TypeError, ValueError) as exc:
@@ -3219,16 +3359,11 @@ class Workflow:
             # group or match key holding lists or dicts (V6).
             why = str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else str(exc)
             if isinstance(exc, TypeError):
-                why = (f"{step.operation.shape_verb.kind if step.operation.shape_verb else 'step'}: "
+                why = (f"{operation.shape_verb.kind if operation.shape_verb else 'step'}: "
                        f"{why}. A column used to sort, group or match must hold single "
                        f"values, not lists or dicts (V6)")
-            step.output = _failed_output(step.operation, why, where)
-        if chosen is not None:
-            step.output.meta["auto"] = chosen
-        self._restage_after(step_id)
-        # 008 C10.5 / 009 §6: what already read this step is re-checked for
-        # staleness by `run`, from the versions it read.
-        return step
+            output = _failed_output(operation, why, where)
+        return output, found, chosen
 
     def run_all(self, tools: dict[str, Callable] | None = None,
                 resources: Mapping[str, Any] | None = None, *,
