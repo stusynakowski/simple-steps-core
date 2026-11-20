@@ -1931,8 +1931,8 @@ class Workflow:
                 if f"{ROW_ID}{source}" in data.columns and _in_index(row_id, data.index) else None
             if not isinstance(listed, list):
                 listed = (step.output.notes.get(row_id) or {}).get("unit")
-            if not isinstance(listed, list):
-                return whole
+            if not isinstance(listed, list) or not listed:
+                return whole                      # no rows (an empty group): the step's
             members, of = list(listed), "rows"
         else:                                     # one row: a tool per row, or a copy
             members, of = [self._trace_one(step_id, row_id, source)], "row"

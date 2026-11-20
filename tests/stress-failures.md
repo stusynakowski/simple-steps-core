@@ -822,3 +822,12 @@ test_S6_on_disk_or_in_memory_the_same(numbers=[0], spill_over=0, through_a_save=
 
 - **Broke:** `UnicodeDecodeError: 'ascii' codec can't decode byte 0x80`: **the data version of any output** holding bytes that aren't text beside another type (`[False, b"\x80"]`) raised: pandas' hash refuses the mix, and the JSON fallback couldn't write the bytes. Not a saving bug: such a step couldn't be versioned at all
 - **Status:** fixed (`_stable_cells` gives bytes a token, as other objects), example pinned
+
+## 2026-11-20 · `test_S8_a_page_and_a_cell_are_the_full_view_cut` · at `f67e52d`
+
+- **Broke:** `SelectionError: an empty row selection selects nothing`: `k.cell` on a collapse whose group has no rows (keys all `<NA>`) built the cell's recipe (P7r, `c5c866d`) with an empty row pick, and raised
+- **Status:** fixed (a group with no rows has no smaller call: its recipe is the step's formula), example pinned
+
+```
+test_S8_a_page_and_a_cell_are_the_full_view_cut(frame=<k: A×3, n: <NA>×3, tags: None×3, rec: {}×3>, chain=[(0, 0, 0, 0), (1, 0, 0, 0), (272, 2, 0, 0)], start=0, size=0, row=0)
+```

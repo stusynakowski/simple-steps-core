@@ -362,6 +362,11 @@ def test_S7_stages_stay_consecutive_and_apart_through_any_edits(length, edits):
 @pytest.mark.no_invariants
 @SETTINGS
 @given(grids(), chains(), st.integers(-8, 8), st.integers(-2, 10), st.integers(-6, 6))
+# a collapse group with no rows: its cell's recipe wrote an empty row pick,
+# which raised (found 2026-11-20 at 500 examples, with run_cell)
+@example(frame=pd.DataFrame({"k": ["A"] * 3, "n": pd.array([pd.NA] * 3, dtype="Int64"),
+                             "tags": [None] * 3, "rec": [{}] * 3}),
+         chain=[(0, 0, 0, 0), (1, 0, 0, 0), (272, 2, 0, 0)], start=0, size=0, row=0)
 @_timed
 def test_S8_a_page_and_a_cell_are_the_full_view_cut(frame, chain, start, size, row):
     k, names = _build(_catalog(frame), chain)
