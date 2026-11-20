@@ -722,6 +722,29 @@ class Workflow:
         for key in self.kept.pop(step_id, []):
             self.store.pop(key, None)
 
+    def clear(self, step_id: str) -> None:
+        """Drop *step_id*'s output and keep its formula (015 C53): it is
+        ``staged`` again, the steps that read it go ``stale``, and the results
+        kept for it go too, so the next run calls the tool again rather than
+        putting a kept result back. A data step's values are its formula:
+        refused, saying how to empty it."""
+        if step_id not in self.steps:
+            raise KeyError(f"no step {step_id!r}; have {list(self.steps)}")
+        step = self.steps[step_id]
+        if step.literal is not NO_LITERAL:
+            raise ValueError(
+                f"{step_id!r} is a data step: its values are its formula, so there "
+                f"is no output to clear. k[{step_id!r}] = None makes it the empty step")
+        for key in self.kept.pop(step_id, []):
+            self.store.pop(key, None)
+        step.cells_run.clear()
+        if not step.output.meta.get("staged"):
+            staged = stage(step.operation, self, step.problems, step_id)
+            staged.meta["inverse"] = step.output.meta.get("inverse")
+            step.output = staged
+        self._restage_after(step_id)
+        self._refresh_staleness()
+
     def rename(self, old: str, new: str) -> None:
         """Rename a step, rewriting every reference that pointed at it.
 

@@ -473,6 +473,14 @@ class Kernel:
         self._ask_data_versions()
         return self.workflow.run_cell(name, row, resources=self.resources)
 
+    @_notifies("clear")
+    def clear(self, step: str | int) -> None:
+        """Drop a step's output and keep its formula (015 C53): it is
+        ``staged`` again, its readers ``stale``, and no result kept for it
+        comes back, so the next run calls its tool again. ``k[name] = None``
+        is the other move, to the empty step. A data step is refused."""
+        self.workflow.clear(self._name(step))
+
     @_notifies("run_all")
     def run_all(self, *, force: bool = False) -> "Kernel":
         """Bring every valid step up to date, in order: run each that has

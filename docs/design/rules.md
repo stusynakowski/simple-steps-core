@@ -153,6 +153,13 @@ its row if rows are added or removed above it. It goes stale if a cell it read
 changes, and is dropped if the step's formula changes. A full run replaces
 it, and a saved session keeps it.
 
+**19. Clearing a step drops its output and keeps its formula.** After
+`k.clear(step)` the step is staged again and the steps that read it are stale.
+Results core kept for it are dropped too, so its next run calls the tool
+again, even if you put the same formula back. `k[step] = None` is different:
+it makes the step the empty step, formula and all. A data step's values are
+its formula, so clearing one is refused.
+
 ## What core can't do, by design
 
 - See inside a tool, or inside a `table` tool's result.
