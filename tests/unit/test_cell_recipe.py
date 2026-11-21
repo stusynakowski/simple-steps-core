@@ -15,6 +15,7 @@ import pandas as pd
 import pytest
 
 from simple_steps_core import Catalog, Kernel, mod, tool, wf
+from simple_steps_core.errors import StepFailed
 from simple_steps_core.formula import formula
 
 
@@ -221,3 +222,102 @@ def test_a_recipe_costs_no_more_on_a_big_step():
     recipe = wf_.recipe("d", row_id, "d")
     assert time.perf_counter() - started < 0.05
     assert recipe["formula"] == 'scale(x=wf["src"][150000]["x"])'
+
+
+# ── 015 C55: the by-value form, the call on the values it read ─────────────
+@pytest.mark.parametrize("name, row, column, text", [
+    ("s", 1, "s", "scale(x=3.0, by=3.0)"),
+    ("p", 2, "p", "add(x=3.0, y=30.0)"),
+    ("t", 0, "t", "sumup(x=[1.0, 3.0])"),
+    ("e", 3, "e", "split(x=2.0)[1]"),
+    ("ch", 2, "g", 'channels(x=3.0)["g"]'),
+    ("c", 2, "c", "rgb(x=3.0)"),
+    # a copied cell is its value
+    ("cp", 1, "x", "3.0"),
+    ("f", 0, "y", "20.0"),
+    ("t", 0, "g", '"a"'),
+])
+def test_a_cells_by_value_is_its_call_on_the_values(name, row, column, text):
+    k = kernel()
+    k.run_all()
+    assert k.cell(name, row, column)["recipe"]["by_value"] == text
+
+
+@pytest.mark.parametrize("name", ["s", "p", "t", "e", "c", "ch", "cp", "f"])
+def test_every_by_value_evaluates_to_its_cell(name):
+    """First, middle and last row, every column a tool made or copied."""
+    k = kernel()
+    k.run_all()
+    tools = {t.__name__: t for t in (scale, big, add, sumup, split, rgb)}
+    # a record's field is written ["g"] (owner, 2026-11-20); read it by name
+    tools["channels"] = lambda **kw: channels(**kw)._asdict()
+    view = k.view(name)
+    for r in sorted({0, len(view["rows"]) // 2, len(view["rows"]) - 1}):
+        for column, shown in view["rows"][r]["cells"].items():
+            cell = k.cell(name, r, column)
+            got = eval(cell["recipe"]["by_value"], dict(tools))
+            assert (list(got) if isinstance(got, tuple) else got) == \
+                (list(cell["value"]) if isinstance(cell["value"], tuple) else cell["value"])
+
+
+def test_a_failed_rows_by_value_is_what_it_ran_on():
+    @tool
+    def inverse(x: float) -> float:
+        return 1 / x
+    k = Kernel(Catalog(tools=[inverse]))
+    k["src"] = pd.DataFrame({"x": [2.0, 0.0]})
+    k["i"] = inverse[mod.map()](wf["src"])
+    with pytest.raises(StepFailed):
+        k.run_all()
+    cell = k.cell("i", 1, "i")
+    assert cell["state"] == "failed"
+    assert cell["recipe"]["by_value"] == "inverse(x=0.0)"
+    with pytest.raises(ZeroDivisionError):
+        eval(cell["recipe"]["by_value"], {"inverse": inverse})
+
+
+def test_a_staged_cell_on_known_inputs_has_one():
+    k = kernel()
+    k.run("src")
+    assert k.cell("c", 1, "c")["recipe"]["by_value"] == "rgb(x=2.0)"
+
+
+def test_a_cell_whose_inputs_are_pending_says_why_it_has_none():
+    k = kernel()
+    k["src2"] = scale[mod.map()](wf["src"]["x"])
+    k["w"] = add[mod.map()](wf["src"]["x"], y=wf["src2"]["src2"])   # src2 not run
+    k.run("src")
+    recipe = k.cell("w", 0, "w")["recipe"]
+    assert "by_value" not in recipe
+    assert "src2" in recipe["by_value_because"]
+
+
+def test_a_stale_cell_says_it_ran_on_earlier_values():
+    k = kernel()
+    k.run_all()
+    k["src"] = pd.DataFrame({"g": ["a", "b", "a"], "x": [1.0, 2.0, 9.0], "y": [10.0, 20.0, 30.0]})
+    recipe = k.cell("c", 2, "c")["recipe"]
+    assert "by_value" not in recipe
+    assert "earlier" in recipe["by_value_because"]
+
+
+def test_a_value_with_no_literal_form_says_so():
+    import numpy as np
+
+    @tool
+    def msum(m: np.ndarray) -> float:
+        return float(m.sum())
+    k = Kernel(Catalog(tools=[msum]))
+    k["src"] = pd.DataFrame({"m": [np.ones(2), np.zeros(2)]})
+    k["t"] = msum[mod.map()](wf["src"])
+    k.run_all()
+    recipe = k.cell("t", 0, "t")["recipe"]
+    assert recipe["formula"] == 'msum(m=wf["src"][0]["m"])'
+    assert "by_value" not in recipe
+    assert "ndarray" in recipe["by_value_because"]
+
+
+def test_data_has_no_by_value():
+    k = kernel()
+    k.run_all()
+    assert "by_value" not in k.cell("src", 0, "x")["recipe"]

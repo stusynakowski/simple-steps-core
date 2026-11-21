@@ -831,3 +831,22 @@ test_S6_on_disk_or_in_memory_the_same(numbers=[0], spill_over=0, through_a_save=
 ```
 test_S8_a_page_and_a_cell_are_the_full_view_cut(frame=<k: A×3, n: <NA>×3, tags: None×3, rec: {}×3>, chain=[(0, 0, 0, 0), (1, 0, 0, 0), (272, 2, 0, 0)], start=0, size=0, row=0)
 ```
+
+## 2026-11-20 · `test_L40_reshaping_is_closed` and `test_S8_a_page_and_a_cell_are_the_full_view_cut` · at `93c2d59` plus the by-value form (015 C55)
+
+- **Broke:** `KeyError: 'a'` / `'key'`: in `sweep.py` (100 examples), before the by-value form was committed. A copied cell's `by_value` read its column from the input, and a record unpacked into columns has a column (`a`) its input doesn't
+- **Status:** fixed (a copied cell's value is read from the cell once its step has run; before, from the input only when the input has the column, otherwise `by_value_because`), both examples pinned. S8's example:
+
+```
+test_S8_a_page_and_a_cell_are_the_full_view_cut(frame=<k: A, n: <NA>, tags: None, rec: {'a': None}>, chain=[(68, 0, 0, 0)], start=0, size=0, row=0)
+```
+
+L40's:
+
+```
+test_L40_reshaping_is_closed(
+frame=   k     n  tags rec
+0  A  <NA>  None  {},
+chain=[(961, 0, 0, 0)],
+)
+```

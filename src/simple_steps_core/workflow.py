@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import Any
 from typing import Callable
 from typing import Sequence
+import ast
 import functools
 import hashlib
 import inspect
@@ -1680,6 +1681,11 @@ class Workflow:
                     "type": type_, "lineage": entry.get("lineage", {})}
             cell["inputs"] = [self._shown_input(e) for e in self._cell_inputs(step_id, row_id, column)]
             cell["recipe"] = self.recipe(step_id, row_id, column)
+            if cell["state"] == "stale" and "by_value" in cell["recipe"]:
+                # the values there now aren't the ones it ran on (015 C55)
+                del cell["recipe"]["by_value"]
+                cell["recipe"]["by_value_because"] = \
+                    "it is stale: it ran on earlier values than its inputs hold now"
             if cell["state"] == "stale" and "because" not in cell:
                 out_meta = self.steps[step_id].output.meta
                 changes = self.arg_changes(step_id)
@@ -1878,15 +1884,48 @@ class Workflow:
         call = self._recipe_call(step_id, column, narrowed)
         if call is None:
             return {"formula": narrowed["formula"], "of": "step"}
-        return {**call, "of": narrowed["of"], "as_step": narrowed["formula"]}
+        found = {**call, "of": narrowed["of"], "as_step": narrowed["formula"]}
+        # 015 C55: the same call on the values it read, while they can be written
+        try:
+            found["by_value"] = self._recipe_call(step_id, column, narrowed,
+                                                  self._value_pick)["formula"]
+        except _NoValue as why:
+            found["by_value_because"] = str(why)
+        return found
 
-    def _recipe_call(self, step_id: str, column: Any, narrowed: dict) -> dict | None:
-        """The cell's call, from the rows :meth:`_recipe_step` found."""
+    def _value_pick(self, target: str, rows_: Any, names: Any = None) -> str:
+        """What :func:`_pick_text` picks, as the values there now, written as
+        Python literals (015 C55): one cell's value, or a group's as a list.
+        Raises :class:`_NoValue`, saying why, when one can't be written."""
+        if isinstance(names, dict) and set(names) == {"names"}:
+            names = list(names["names"])
+        if not (isinstance(names, list) and len(names) == 1):
+            raise _NoValue(f"it reads several columns of {target!r} as one argument")
+        upstream = self.steps.get(target)
+        if upstream is None or upstream.output.meta.get("staged"):
+            raise _NoValue(f"{target!r} hasn't run, so the values it reads aren't known")
+        out, column = upstream.output, names[0]
+        if out.meta.get("stale"):
+            raise _NoValue(f"{target!r} is stale: the values it reads may change")
+        index = out.data.index
+        ids = [index[n] for n in (rows_ if isinstance(rows_, list) else [rows_])]
+        values = []
+        for i in ids:
+            if column in out.states.columns and str(out.states.at[i, column]) != "known":
+                raise _NoValue(f"{target}[{index.get_loc(i)}][{column!r}] is "
+                               f"{out.states.at[i, column]}, not a value")
+            values.append(_as_literal(out.data.at[i, column], target, int(index.get_loc(i)), column))
+        return _src(values if isinstance(rows_, list) else values[0])
+
+    def _recipe_call(self, step_id: str, column: Any, narrowed: dict,
+                     pick: Callable | None = None) -> dict | None:
+        """The cell's call, from the rows :meth:`_recipe_step` found, each read
+        cell written by *pick*: its pick (the formula, by default), or its value."""
+        pick = pick or _pick_text
         step = self.steps[step_id]
         op_, kind = step.operation, self._kind(step_id)
         source, at, paired = str(op_.input), narrowed["at"], narrowed["paired"]
 
-        pick = _pick_text
         by =(op_.shape_verb.settings.get("by") if op_.shape_verb is not None else None) \
             if kind == "collapse" else None
         keys = [by] if isinstance(by, str) else list(by or [])
@@ -1896,6 +1935,15 @@ class Workflow:
         if kind == "filter" or not tool_made or column not in made:
             copied = column if kind in ("filter", "collapse") or tool_made \
                 else _source_column(op_, column)
+            if pick != _pick_text:
+                # a copied cell's value is the one it holds, or before the step
+                # runs the one it will copy (a group's key: the same in its rows)
+                if not step.output.meta.get("staged"):
+                    return {"formula": self._value_pick(
+                        step_id, int(data.index.get_loc(narrowed["row_id"])), [column])}
+                if copied not in self._predicted_of(source):
+                    raise _NoValue(f"its value comes from {source!r} when {step_id!r} runs")
+                return {"formula": pick(source, at[0] if isinstance(at, list) else at, [copied])}
             found = {"formula": pick(source, at, [copied])}
             if kind == "filter":
                 found["kept_by"] = self._call_text(op_, kind, source, at, paired, pick)
@@ -1925,6 +1973,9 @@ class Workflow:
             head = op_.tool if op_.tool.isidentifier() else f"op({_src(op_.tool)})"
         given = {p: pick(source, at, [p]) for p in self._columns_bound(op_, source, kind)}
         for name, value in op_.arguments.items():
+            if name not in paired and isinstance(value, StepRef) and pick != _pick_text:
+                raise _NoValue(f"its argument {name} is {_src(value)}, cells of a step, "
+                               f"not one value")
             given[name] = pick(*paired[name]) if name in paired else _src(value)
         fn = op_.fn or BUILTIN_TOOLS.get(op_.tool)
         try:
@@ -3788,6 +3839,32 @@ def _pick_text(target: str, rows_: Any, names: Any = None) -> str:
         shown = ", ".join(json.dumps(n) for n in names)
         return _src(StepRef(target, rows=rows_part)) + f"[{shown}]"
     return _src(StepRef(target, rows=rows_part, columns=names or None))
+
+
+class _NoValue(Exception):
+    """A cell's by-value form can't be written: why (015 C55)."""
+
+
+def _as_literal(value: Any, target: str, row: int, column: str) -> Any:
+    """*value* as a plain Python value whose literal reads back equal to it,
+    or :class:`_NoValue` naming the cell (an array, an image, a handle)."""
+    def plain(v: Any) -> Any:
+        if isinstance(v, (list, tuple)):
+            return type(v)(plain(x) for x in v)
+        if isinstance(v, dict):
+            return {plain(a): plain(b) for a, b in v.items()}
+        if type(v).__module__ == "numpy" and getattr(v, "ndim", None) == 0:
+            return v.item()                       # a numpy scalar is a number
+        return v
+    found = plain(value)
+    try:
+        ok = ast.literal_eval(_src(found)) == found
+    except (ValueError, SyntaxError, TypeError):
+        ok = False
+    if ok is not True:
+        raise _NoValue(f"{target}[{row}][{column!r}] holds a {type(value).__name__}, "
+                       f"which has no literal form")
+    return found
 
 
 def _holds_no_data(operation: Any) -> bool:

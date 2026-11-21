@@ -367,6 +367,11 @@ def test_S7_stages_stay_consecutive_and_apart_through_any_edits(length, edits):
 @example(frame=pd.DataFrame({"k": ["A"] * 3, "n": pd.array([pd.NA] * 3, dtype="Int64"),
                              "tags": [None] * 3, "rec": [{}] * 3}),
          chain=[(0, 0, 0, 0), (1, 0, 0, 0), (272, 2, 0, 0)], start=0, size=0, row=0)
+# a record unpacked into columns: a copied cell's by-value form read its
+# column from the input, which doesn't have it (found 2026-11-20, 015 C55)
+@example(frame=pd.DataFrame({"k": ["A"], "n": pd.array([pd.NA], dtype="Int64"),
+                             "tags": [None], "rec": [{"a": None}]}),
+         chain=[(68, 0, 0, 0)], start=0, size=0, row=0)
 @_timed
 def test_S8_a_page_and_a_cell_are_the_full_view_cut(frame, chain, start, size, row):
     k, names = _build(_catalog(frame), chain)

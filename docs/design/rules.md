@@ -147,7 +147,10 @@ cell, on the cells it read: `add(x=wf["src"][2]["x"], y=wf["src"][2]["y"])`.
 Rows are integers, columns strings. A group is its rows (`wf["v"][0:3]["am"]`)
 and one of several outputs is indexed (`channels(x=…)["g"]`, an expand's item
 `[1]`). `recipe["as_step"]` is the same call written as a step you can
-declare. `k.run_cell(step, row)` runs one row of a staged `map`: that row
+declare. `recipe["by_value"]` is the same call on the values it
+read, `add(x=3.0, y=30.0)`: run it and you get the cell. There is none, and
+`by_value_because` says why, while a value it reads isn't known, can't be
+written (an array, an image), or has changed since the cell ran. `k.run_cell(step, row)` runs one row of a staged `map`: that row
 fills in, the rest stay pending, and the step stays staged. The cell keeps to
 its row if rows are added or removed above it. It goes stale if a cell it read
 changes, and is dropped if the step's formula changes. A full run replaces

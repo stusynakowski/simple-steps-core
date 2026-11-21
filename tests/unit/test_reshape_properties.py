@@ -344,6 +344,11 @@ def _same(a: Kernel, b: Kernel, names: list[str], why: str) -> None:
 @example(frame=pd.DataFrame(columns=["k", "n", "tags", "rec"]),
          chain=[(42, 0, 0, 0), (139, 1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0),
                 (44, 2, 0, 2)])
+# a record unpacked into columns: a copied cell's by-value form read its
+# column from the input, which doesn't have it (found 2026-11-20, 015 C55)
+@example(frame=pd.DataFrame({"k": ["A"], "n": pd.array([pd.NA], dtype="Int64"),
+                             "tags": [None], "rec": [{}]}),
+         chain=[(961, 0, 0, 0)])
 @_timed
 def test_L40_reshaping_is_closed(frame, chain):
     k, names = _build(_catalog(frame), chain)
