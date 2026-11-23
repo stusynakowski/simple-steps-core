@@ -11,6 +11,13 @@ one reading, core writes the most likely and says so. The system is
 **closed**: every expression is either a sentence of the grammar, or refused
 when declared, naming the rule it breaks.
 
+**The principle** (owner, 2026-11-23): **the same primitives, which need
+to be tried and true and need to work; different spellings and syntaxes,
+which mean different combinations of valid primitives in a valid syntax.**
+All behaviour lives in the primitives; a spelling has none of its own. So
+the testing goes into the primitives and the conditions between them, and
+a spelling is tested only for opening into the right combination.
+
 | Page | What it holds | Read it for |
 |---|---|---|
 | [grammar.md](grammar.md) | §0 top down: what the user sees, the inputs, the plain questions · §1–§4 the components every expression must resolve, and what core resolves today · §5 the owner's heuristics, H1–H9 · §6 **the five components and the classes each can be** · §8 open questions | the grammar itself |
