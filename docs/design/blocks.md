@@ -79,24 +79,60 @@ cell's list into many cells (§4).
 | `map`, a whole cell holding a list | `[7, 8]` | the cell's value ✓ |
 | `map`, a whole cell holding a number | `[9.0]` | **the block wrapped into a list (A7)**: the parameter's type chose the level |
 
-**Proposed rule:**
+**The convention: cell or block, it depends, by a fixed rule** (owner,
+2026-11-22: "cell and the block, the answer is it depends"; "a default
+convention on how to handle the grid based on the type, but the user can
+also specify if they know exactly what they want": what `auto` was made for).
 
-1. **A cell passes its value**, never wrapped. A 1×1 block is a cell.
-2. **The structure comes from the block and the verb, never from the
-   parameter's type.** Under `map` a paired argument gives one cell; under
-   `collapse`, the group's cells as a list. A whole block gives its shape's
-   container: a column → a list of its values, in row order; a row → a dict,
-   name → value; rows × columns → a table. A parameter may ask for another
-   spelling of the same structure (a `Series` for a column or a row; a
-   `DataFrame` for any block), never for another structure.
-3. **The parameter's type then checks the units**: `list[float]` takes a
-   column of floats, or a cell holding a list of floats; `float` takes one
-   cell holding a float.
+Each argument is delivered one of two ways:
 
-Under this rule, a column whose cells are lists, passed whole, is
-`list[list[int]]`: a list made by the block, of lists held by the cells.
-The UI can show both levels: the block's structure, and the type of its
-cells.
+| Delivery | Each call gets | Like Excel's |
+|---|---|---|
+| **cell** | one cell: its row's (a paired argument), or one fixed cell of another step, the same every call | `B2` dragged down; `$B$1` |
+| **block** | the whole block, the same every call, nested into the parameter's form: a column → a list, a row → a dict, rows × columns → a table | `SUM($B$2:$B$4)` |
+
+1. **A cell's value is never changed**: a cell holding a list is that list,
+   delivered as it is.
+2. **The modifier decides what a call's share is**: under `map`, a row;
+   under `collapse`, a group (its cells nested into a list); under `table`,
+   everything.
+3. **`auto` picks each argument's delivery from the types**, when the step is
+   declared:
+
+   | Parameter's type | `auto` writes |
+   |---|---|
+   | no type, `Any`, or a type one cell of the argument fits | **cell** |
+   | a type one cell can't fit but the block does (`list[float]` on a float column; `pd.DataFrame` on cells that aren't tables) | **block** |
+   | neither | refused when declared, naming both |
+   | the argument's types not known yet | **cell**, shown as assumed |
+
+   It picks the verb the same way (today's rules, `checks.infer_verb`), plus
+   one it lacks: a tool whose input parameter takes a list of what the
+   column's cells hold is a `collapse` (run: `auto` on `sumup(xs: list)`
+   over a float column picks `map`, and the step is invalid).
+4. **What `auto` picks is written into the expression**, as `auto` already
+   does for the verb: shown, never re-guessed after a run, changed with one
+   edit. **Writing it yourself overrides it**, and is never second-guessed.
+5. **A block can be made in place or as its own step.** In place, the
+   argument is marked as a block. As a step, a `collapse` (or `pack`) makes
+   one cell, which is then delivered as a cell. It's the same nest move
+   (§4); the in-place form is shorthand. (Run: `all = op("gather")
+   [mod.collapse()](wf["p"][["x"]])`, then `z[mod.map()](wf["p"]["x"],
+   ys=wf["all"][0]["x"])`, gives each row against the whole column.)
+
+**How a block is marked in an expression is open** (§7): candidates are a
+modifier on the argument, `ys=wf["p"]["y"][mod.collapse()]`, which says it
+is the nest move, or a mark of its own.
+
+Before anything runs, the UI can show each argument's delivery and whether
+its type fits:
+
+```
+zs = z[mod.map()](wf["p"]["x"], ys=<block> wf["p"]["y"])     staged · 3 rows
+
+  x   ← one cell per row of p         float ✓
+  ys  ← all of p["y"], every row      list[float] ✓   (auto: one float isn't a list)
+```
 
 ## 2. The block, as an object
 
@@ -141,9 +177,13 @@ a pick declared as a step, `k["cp"] = wf["f"]["x"]`.)
 |---|---|
 | `known` | its value, exactly, with its type |
 | **absent** (a `stack` or `join` gap) | absent, not `None` (needs F1) |
-| `pending` (its step hasn't run) | refused: run it first |
-| `failed` or `blocked` | refused, naming the rows: a failure isn't data |
-| in a `stale` step | refused, saying so; `stale=True` freezes it as it is, on purpose |
+| `pending` (its step hasn't run) | absent: it holds no value yet (run: stored as `None`) |
+| `failed` or `blocked` | absent: a failed cell holds no value (run: `<NA>`; its error is kept beside the cell, not in it) |
+| in a `stale` step | its value, as it is |
+
+**Whatever is there** (owner, 2026-11-22): nothing is refused. A cell with
+no value is copied as a cell with no value, so a failure never becomes data
+that looks real.
 
 **Saving already holds it** (run 2026-11-22,
 [grid-probes/freezing.py](grid-probes/freezing.py)): a data step of floats
@@ -197,12 +237,13 @@ with itself**, each found by running:
 | **A3** | The same number arrives in two forms: paired as `float`, from a whole cell as `numpy.float64` | one form, plain Python |
 | **A4** | A pick narrower than its step is checked against **the step's** columns: `h(x: float)` on `wf["d"]["s"]`, when `d` also has a column `x`, is accepted, then every row fails with a raw `TypeError: h() missing … 'x'`. On its own the same pick is refused with a clear message | checked against the block: the pick's columns |
 | **A5** | Under `mod.table()` the parameter's type isn't checked at all (the app's 015 C58: `np.ndarray` gets a `DataFrame`) | the same rule, block → the parameter's form |
-| **A6** | `paired → list` is refused ("the verb decides what a column passes"), but `paired → DataFrame` passes the whole 3-row column, though each call should get one cell | one answer for both: a paired column passes one cell under `map` (§1, rule 2: the verb decides the structure) |
-| **A7** | A whole cell holding a number, into `y: list`, arrives as `[9.0]`: the block is wrapped because of the parameter's type; a cell holding a list arrives as the list (§1, *Two levels*) | a cell passes its value: refused, since a number isn't a list (§1, rule 1) |
+| **A6** | `paired → list` is refused ("the verb decides what a column passes"), but `paired → DataFrame` passes the whole 3-row column, though each call should get one cell | one rule for both (§1, the convention): `auto` writes **block** for both, since one float fits neither; written, so it shows |
+| **A7** | A whole cell holding a number, into `y: list`, arrives as `[9.0]`; a cell holding a list arrives as the list | the same choice, made visible: `auto` writes **block** (a 1-cell block as a list), shown in the expression, instead of being decided silently at the call |
 
-**Proposed: the table above is the contract**, with one row per verb. The
-delivery rule (a block or literal × the verb × the parameter's form →
-passed as is, converted, or refused with a reason) lives in one function.
+**Proposed: the table above is the contract**, with one row per verb,
+redone under §1's convention: each cell becomes what `auto` writes (cell,
+block, or refused). The delivery rule (a literal, cell or block × the verb ×
+the parameter's type → delivered, or refused with a reason) lives in one function.
 `k.accepts` is that function's table read by parameter, and a test pins
 every cell, the way this probe prints them.
 
@@ -348,22 +389,28 @@ app needs a window or a pivot.
 
 ## 7. To settle with the owner
 
-1. **Block** as the general word, with cell, row and column as its cases;
-   and the n×m case renamed (`rows × columns`?). **The two levels** (§1):
-   the block's structure from the pick and the verb, the cell's value never
-   wrapped; the parameter's type checks the units. Does that rule hold?
-2. **A tool never receives a block**, only its values in the parameter's
-   form. Or should a parameter typed `Block` receive one?
-3. **A2**: refuse a paired cell whose type doesn't fit, or convert where
-   `mod.cast` would (str → float)?
-4. **A6**: does a paired column ever pass whole, as a `DataFrame` or a list,
-   under `map`? Proposed: no, it passes one cell; a whole column is a whole
-   block from a step whose rows aren't the input's.
-5. **R2**: which of pivot, window and cross product first?
-6. **Freezing** (§2): refuse pending, failed and stale cells (stale allowed
-   with `stale=True`); cut loose, no link back. Should the frozen step note
-   where it came from, for display only (never hashed)?
-7. **The four kinds of iterable** (§5): a list opens as a tuple does; an
-   array is a unit, opened only by a tool; set, range and generators refused.
-8. **I2**: an empty list or `None` under `expand` keeps its row, the item
-   absent?
+**Decided, 2026-11-22:**
+
+- **Block** is the general word; cell, row and column are its cases. The
+  code's n×m case is renamed (`rows × columns`).
+- **Cell or block, it depends, by a fixed convention** (§1): `auto` picks
+  from the types and writes it into the expression; writing it yourself
+  overrides. Both the in-place and the separate-step forms of a block exist.
+- **A paired cell of the wrong type** is refused when declared (A2).
+- **Freezing** copies whatever is there (§2).
+- **The four kinds of iterable** (§5).
+- **I2**: an empty list or `None` under `expand` keeps its row, the item
+  absent.
+
+**Open:**
+
+1. **How a block is marked** in an expression: a modifier on the argument
+   (`ys=wf["p"]["y"][mod.collapse()]`), or a mark of its own?
+2. **A tool's parameter typed `Block`** receives a block (owner). Without
+   row numbers and lineage, so recipes, single-cell runs and staleness keep
+   working, or with them, relaxing core-asks' "lineage never reaches a
+   tool"? Wait until a tool needs it?
+3. **R2**: which of pivot, window and cross product first? (When the app
+   needs one.)
+4. **Freezing**: should a frozen step note where it came from, for display
+   only?
