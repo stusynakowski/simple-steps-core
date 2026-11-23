@@ -14,7 +14,10 @@ when declared, naming the rule it breaks.
 **The principle** (owner, 2026-11-23): **the same primitives, which need
 to be tried and true and need to work; different spellings and syntaxes,
 which mean different combinations of valid primitives in a valid syntax.**
-All behaviour lives in the primitives; a spelling has none of its own. So
+All behaviour lives in the primitives; a spelling has none of its own.
+And **an error handled within the system is better than not knowing**
+(owner, 2026-11-23): where no convention fits, the case is a visible error
+(a failed cell, or a refusal, with its reason), never silence. So
 the testing goes into the primitives and the conditions between them, and
 a spelling is tested only for opening into the right combination.
 

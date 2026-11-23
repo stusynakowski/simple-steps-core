@@ -103,14 +103,14 @@ per row, and nothing more.** An input modifier on one argument
 
 | # | Condition | |
 |---|---|---|
-| **U30** | **Keywords**: a **mapping** cell's (or a record's) keys bind to the tool's parameters **by name**, as `f(**cell)` | proposed |
-| **U31** | **Positions**: a **sequence** cell's items bind to the tool's parameters **by position**, as `f(*cell)` | proposed |
-| **U32** | **At most one spread of each kind** per step, on one argument; **one level**; a mapping's keys are strings | proposed |
-| **U33** | **A key that names no parameter**: that row fails, naming the key, unless the tool takes `**kwargs` (then it is passed). As Python | proposed |
-| **U34** | **A required parameter the cell doesn't supply**, and nothing else binds: that row fails, naming it. As Python | proposed |
-| **U35** | **A parameter given by the spread and also written**: refused when declared, if the fields are known (declared, or typed); else that row fails, "got multiple values". As Python (conditions.md R8) | proposed |
-| **U36** | **Each value is checked against its parameter's type**, as any argument is (conditions.md R11: said when declared if known, the cells that don't fit fail) | proposed |
-| **U37** | **A cell that isn't a mapping** (for keywords) **or a sequence** (for positions): that row fails, naming the kind | proposed |
+| **U30** | **Keywords**: a **mapping** cell's (or a record's) keys bind to the tool's parameters **by name**, as `f(**cell)` | decided |
+| **U31** | **Positions**: a **sequence** cell's items bind to the tool's parameters **by position**, as `f(*cell)` | decided |
+| **U32** | **At most one spread of each kind** per step, on one argument; **one level**; a mapping's keys are strings | decided |
+| **U33** | **A key that names no parameter**: that row fails, naming the key, unless the tool takes `**kwargs` (then it is passed). As Python | decided |
+| **U34** | **A required parameter the cell doesn't supply**, and nothing else binds: that row fails, naming it. As Python | decided |
+| **U35** | **A parameter given by the spread and also written**: refused when declared, if the fields are known (declared, or typed); else that row fails, "got multiple values". As Python (conditions.md R8) | decided |
+| **U36** | **Each value is checked against its parameter's type**, as any argument is (conditions.md R11: said when declared if known, the cells that don't fit fail) | decided |
+| **U37** | **A cell that isn't a mapping** (for keywords) **or a sequence** (for positions): that row fails, naming the kind | decided |
 
 **Out of scope for now:** spreading more than one argument, nested
 mappings, renaming keys on the way in, defaults supplied by the spread.
@@ -122,8 +122,19 @@ applied; refuse or an error saying what happened where no convention
 fits), U20 (suffixed), U22 (one level; recursive expansion an extension),
 U29 (50), the input place (the spread, §J, limited).
 
-## Still to settle
+**Settled after, 2026-11-23:**
 
-1. **U15**: the owner's sentence was cut off ("refuse or put an error with
-   w…"): read as "with what happened". Right?
-2. **§J**: the spread's conditions U30–U37, and its name.
+- **U15**: the cut-off sentence meant: **an error handled within the system
+  is better than not knowing** (owner). Where no convention fits, the case
+  becomes a visible error, a failed cell or a refusal with its reason;
+  never silence.
+- **§J, the spread**: U30–U37 accepted ("that makes sense"); its name is
+  not settled, with the others (roadmap phase 1).
+
+## Later
+
+- **Recursive expansion**: opening nested mappings every level down, names
+  joined by an underscore (U22, U23), **added later as a layer** on top of
+  the one-level primitive (owner, 2026-11-23: "we can add features to widen
+  recursively, but we can do that layer; just make a note"). Roadmap
+  phase 5.
