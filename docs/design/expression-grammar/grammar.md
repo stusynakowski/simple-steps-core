@@ -1,7 +1,7 @@
 # The step grammar
 
 > **Draft, 2026-11-23, for the owner.** The start of the grammar that closes
-> the system ([blocks.md](blocks.md) §0, plan piece G0). It begins **top
+> the system ([blocks.md](../blocks.md) §0, plan piece G0). It begins **top
 > down**, with how a user should see an expression (§0); then **what must
 > be resolved for any expression** (§1–§4), then **the owner's heuristics**
 > for resolving it (§5), and **the classes each of the five components can
@@ -168,7 +168,7 @@ part of this, in this order:
 
 | Component | Today | Findings |
 |---|---|---|
-| C4 preparation | implied by the verb and the parameter's type, at the call, not written; four separate checks | A1–A7 ([blocks.md](blocks.md) §3) |
+| C4 preparation | implied by the verb and the parameter's type, at the call, not written; four separate checks | A1–A7 ([blocks.md](../blocks.md) §3) |
 | C6 and C5's order | the written order, which can change what a step does | O1 (blocks.md §0) |
 | C7 landing | implied by the verb; "on every row of its scope" missing | §4's window and transform gaps |
 | C2's block | checked against the input **step's** columns, not the pick's | A4; and H3's last row (two columns, two readings, accepted) |
@@ -309,11 +309,19 @@ a kind of thing, never a particular tool.
 
 | Axis | Classes |
 |---|---|
+| **T-k. Whose function** | `T-k.none` nothing is applied (data, the empty step) · `T-k.core` core's own, **its classes declared** (`drop`, `sort`, `join`, a pick; `identity`, `gather`, `total`) · `T-k.user` the user's tool, **its classes inferred** from its type hints |
+| **T-u. What it works on** | `T-u.table` a whole table, or tables (`drop`, `sort`, `join`, a pick; a user's tool under `table`; a source) · `T-u.cell` cells (`identity`, `gather`, `total`; a user's tool under `map` or `collapse`) |
 | **T-a. How many parameters need a value** (no default) | `T-a0` none (it makes data) · `T-a1` one · `T-an` several |
 | **T-p. What each parameter takes**, from its type | `T-p.unit` one value (`float`, `str`, `ndarray`, a class) · `T-p.seq` many values as one (`list[T]`, `tuple[T, …]`) · `T-p.map` named values (`dict`, a record) · `T-p.table` a table (`DataFrame`) · `T-p.acc` an accumulator (a first parameter named `acc`, `memo`, `carry`: a reducer) · `T-p.any` untyped, `Any` |
 | **T-r. What it returns** | `T-r.unit` one value · `T-r.bool` a yes or no · `T-r.seq` many values · `T-r.rec` named fields (a record) · `T-r.map` a `dict` · `T-r.table` a table · `T-r.any` untyped |
 
-Fixed by **the tool**, before any data is seen.
+Fixed by **the tool**, before any data is seen. **`T-k` decides whether
+anything is inferred**: a core function's classes are declared, so core
+never guesses about it; only a user's tool is converged on (owner,
+2026-11-23: "yes this seems aligned"). Core's cell tools are called like a
+user's (run 2026-11-23: `op("total")[mod.collapse(by="k")]` makes one call
+per group, `op("identity")[mod.map()]` one per row), so `T-k` says nothing
+about how many calls: `T-u` and the call modifier do.
 
 ### 6.2 Input: what goes in, and how it is handed over
 
@@ -339,13 +347,14 @@ Per argument:
 | **K-n. How many** | `K-n.zero` no tool is called · `K-n.one` a single call · `K-n.many` multiple calls |
 | **K-o. Over what** (only for `K-n.many`) | `K-o.row` each row · `K-o.group` each group, by a key · `K-o.combo` each combination of settings |
 
-**Zero calls is every expression that calls no tool**: the empty step,
-data, a pick, a combine (`join`, `zip_`, `stack`), and the rearrangements
-without a tool (`drop`, `sort`, `rename`, …; core runs a built-in
-`identity` underneath, but no tool of the user's). These are §3's "other
-kinds of expression": with zero calls there is no tool and nothing to
-execute, so only **input** and **output** apply. (This bears on §8's
-question 5, one kind of expression.)
+**Zero calls is only when nothing is applied**: a data step and the empty
+step (`T-k.none`). A combine, a pick and the rearrangements (`drop`,
+`sort`, `rename`, …) do apply a function, core's own (`T-k.core`): a whole
+table's function makes **one** call (`T-u.table`), its classes declared, so
+nothing about it is converged on (owner, 2026-11-23: "I look at a combine
+or a drop requiring a call"). The converging (§1, H9) is for the user's
+tools. The UI can show a core table function as what it does ("drop columns
+x, y") rather than as calls.
 
 Today: a single call is `source` (with `I-s.none`), `table`, or `collapse()`
 with no `by`; multiple calls are `map`, `filter`, `expand`, `group` (each

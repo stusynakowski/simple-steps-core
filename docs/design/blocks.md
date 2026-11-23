@@ -618,7 +618,7 @@ Each piece is small, and each behaviour change is confirmed first.
 
 | # | Piece | Kind | Needs |
 |---|---|---|---|
-| **G0** | **The step grammar** ([grammar.md](grammar.md), started 2026-11-23): the ordered components as a grammar (each component a slot, its modifiers the words that fill it), and the dependencies as numbered rules, each with the problem it gives. A probe that parses and prints back every expression in the tests, and a property test that generates sentences from the grammar: each one is accepted and runs, or is refused when declared, naming its rule; never a crash, never a silent output | docs, then a test | the owner's yes on §0 |
+| **G0** | **The step grammar** ([expression-grammar/grammar.md](expression-grammar/grammar.md), started 2026-11-23): the ordered components as a grammar (each component a slot, its modifiers the words that fill it), and the dependencies as numbered rules, each with the problem it gives. A probe that parses and prints back every expression in the tests, and a property test that generates sentences from the grammar: each one is accepted and runs, or is refused when declared, naming its rule; never a crash, never a silent output | docs, then a test | the owner's yes on §0 |
 | **O1** | Modifiers kept in component order, so `[retry, map]` retries each call | behaviour | G0 |
 | **E0** | **§0 into model.md and rules.md**: the four questions, the six rules, the verbs as presets | docs | the owner's yes on §0's open points |
 | **B0** | The words into model.md §2: pick (the address), block (what it holds; cell, row, column its cases), table, grid (the data cells only). Rename `_shape_kind`'s n×m case | docs, one rename | the owner's yes |

@@ -1,0 +1,25 @@
+# The expression grammar
+
+*Owner, 2026-11-23: "I think this has been the key problem in this project,
+and it impacts everything else, so if I get this right everything else will
+be much easier."*
+
+**The goal:** a user writes a really simple expression. Core converges, from
+what is written, the data and the tool's types, on **exactly** what will run,
+writes down every part it filled in, and shows it. Where there is more than
+one reading, core writes the most likely and says so. The system is
+**closed**: every expression is either a sentence of the grammar, or refused
+when declared, naming the rule it breaks.
+
+| Page | What it holds | Read it for |
+|---|---|---|
+| [grammar.md](grammar.md) | §0 top down: what the user sees, the inputs, the plain questions · §1–§4 the components every expression must resolve, and what core resolves today · §5 the owner's heuristics, H1–H9 · §6 **the five components and the classes each can be** · §8 open questions | the grammar itself |
+| [influences.md](influences.md) | what could blur the distinctions in §6 (whose function, what it works on, how many calls, how sure core can be), each run or reasoned | deciding each edge case on purpose |
+
+**Background** (one level up): [blocks.md](../blocks.md) §0, the ordered
+components and how they depend on each other, where this grammar came from;
+[grid.md](../grid.md), the grid and its moves.
+
+**Status:** drafts, nothing built. Next on grammar.md: the numbered rules
+(given these classes, those are impossible or implied), from §6's worked
+examples; then the conventions, as one table.
