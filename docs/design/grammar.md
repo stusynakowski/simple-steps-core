@@ -331,13 +331,21 @@ Per argument:
 
 ### 6.3 Call: how many times the tool runs
 
-*Owner, 2026-11-23: break calls into two groups, a single call or
-multiple.*
+*Owner, 2026-11-23: break calls into a single call or multiple; then
+"calls have multiple states (zero, one or multiple)".*
 
 | Axis | Classes |
 |---|---|
-| **K-n. How many** | `K-n.one` a single call · `K-n.many` multiple calls |
+| **K-n. How many** | `K-n.zero` no tool is called · `K-n.one` a single call · `K-n.many` multiple calls |
 | **K-o. Over what** (only for `K-n.many`) | `K-o.row` each row · `K-o.group` each group, by a key · `K-o.combo` each combination of settings |
+
+**Zero calls is every expression that calls no tool**: the empty step,
+data, a pick, a combine (`join`, `zip_`, `stack`), and the rearrangements
+without a tool (`drop`, `sort`, `rename`, …; core runs a built-in
+`identity` underneath, but no tool of the user's). These are §3's "other
+kinds of expression": with zero calls there is no tool and nothing to
+execute, so only **input** and **output** apply. (This bears on §8's
+question 5, one kind of expression.)
 
 Today: a single call is `source` (with `I-s.none`), `table`, or `collapse()`
 with no `by`; multiple calls are `map`, `filter`, `expand`, `group` (each
@@ -345,8 +353,8 @@ row), `collapse(by=…)` (each group), `sweep` (each combination). Fixed by
 **a call modifier**, or converged on from the tool and the input. (Each
 column is a gap: blocks.md §5.)
 
-**Zero calls is never written.** It happens at run time: multiple calls
-over zero rows make none (the data: the step completes, with no rows); a
+**Zero calls at run time** is a count, apart from the class written:
+multiple calls over zero rows make none (the data: the step completes, with no rows); a
 step already current isn't run again, its kept output reused; a cancelled
 run stops part way. The last two are execution's outcomes (§6.4).
 
