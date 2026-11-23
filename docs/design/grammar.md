@@ -321,7 +321,7 @@ Per argument:
 
 | Axis | Classes | Fixed by |
 |---|---|---|
-| **I-s. Source** | `I-s.lit` a literal · `I-s.res` a resource (a literal, to the expression) · `I-s.ref` a reference | what is written |
+| **I-s. Source** | `I-s.lit` a literal · `I-s.res` a resource (a literal, to the expression) · `I-s.ref` a reference · `I-s.none` no step is read (a tool that makes data, such as one that loads a file) | what is written |
 | **I-g. What a reference gives** (its block's shape) | `I-g.cell` · `I-g.row` · `I-g.col` · `I-g.block` (rows × columns) | the pick |
 | **I-c. What its cells hold** | `I-c.unit` · `I-c.seq` · `I-c.map` · `I-c.table` · `I-c.unknown` (types not known before the run) | the data, through the plan |
 | **I-r. Whose rows** | `I-r.input` the input's own rows (it can go row by row with them) · `I-r.other` another step's rows (it can only be given whole, or as one fixed cell) | the data's lineage |
@@ -331,12 +331,24 @@ Per argument:
 
 ### 6.3 Call: how many times the tool runs
 
+*Owner, 2026-11-23: break calls into two groups, a single call or
+multiple.*
+
 | Axis | Classes |
 |---|---|
-| **K. The calls** | `K.none` once, with no input (a source) · `K.all` once, over everything · `K.row` once per row · `K.group` once per group (and its key) · `K.combo` once per combination of settings (a sweep) |
+| **K-n. How many** | `K-n.one` a single call · `K-n.many` multiple calls |
+| **K-o. Over what** (only for `K-n.many`) | `K-o.row` each row · `K-o.group` each group, by a key · `K-o.combo` each combination of settings |
 
-Fixed by **a call modifier**, or converged on from the tool and the input.
-(One call per column is a gap: blocks.md §5.)
+Today: a single call is `source` (with `I-s.none`), `table`, or `collapse()`
+with no `by`; multiple calls are `map`, `filter`, `expand`, `group` (each
+row), `collapse(by=…)` (each group), `sweep` (each combination). Fixed by
+**a call modifier**, or converged on from the tool and the input. (Each
+column is a gap: blocks.md §5.)
+
+**Zero calls is never written.** It happens at run time: multiple calls
+over zero rows make none (the data: the step completes, with no rows); a
+step already current isn't run again, its kept output reused; a cancelled
+run stops part way. The last two are execution's outcomes (§6.4).
 
 ### 6.4 Execution: how each call runs
 
@@ -352,6 +364,10 @@ one place where the written order means something (blocks.md §0):
 
 Fixed by **execution modifiers** only. The data and the tool never imply
 them.
+
+**Outcomes of a run**, not classes of the expression (nothing written
+chooses them): run · **skipped**, already current (its kept output reused,
+no calls) · **cancelled**, part way.
 
 ### 6.5 Output: what comes out, and where it goes
 
@@ -378,9 +394,9 @@ has a float column `temp_c`:
 | tool | `T-a1`, `T-p.unit`, `T-r.unit` | — |
 | I-b | `p` has a column named `temp_c` | `I-b.name` |
 | I-g, I-c, I-r | a column, floats, the input's rows | — |
-| K | a one-value parameter and a column of single values, row by row: `K.row`. `K.all` or `K.group` would need packing, and nothing packs a single value | **`K.row`**, the only reading |
-| I-h | `K.row` and `T-p.unit` | `I-h.cell` |
-| O-w, O-s, O-n | `K.row`, and `T-r.unit` | `O-w.own`, `O-s.cell`, `O-n.step` |
+| K | a one-value parameter and a column of single values, row by row: `K-n.many`, `K-o.row`. A single call, or one per group, would need packing, and nothing packs a single value | **each row**, the only reading |
+| I-h | each row, and `T-p.unit` | `I-h.cell` |
+| O-w, O-s, O-n | each row, and `T-r.unit` | `O-w.own`, `O-s.cell`, `O-n.step` |
 
 Written down: `to_f[mod.map()](wf["p"])`.
 
@@ -391,8 +407,8 @@ float`, given `wf["p"]["x"]`, a float column:
 |---|---|---|
 | tool | `T-a1`, `T-p.seq`, `T-r.unit` | — |
 | I-h | a list of floats, from single floats: it must be packed (H6) | `I-h.pack`, form list |
-| K, and the scope | `K.all` (one sum of the whole column); `K.group` (needs a key, and none is given); `K.row` with the whole column packed for every row (the same sum on every row: valid, unlikely) | `K.all` **most likely**; `K.row` possible |
-| O-w | from `K.all` | `O-w.new`: one row |
+| K, and the scope | `K-n.one` (one sum of the whole column); `K-o.group` (needs a key, and none is given); `K-o.row` with the whole column packed for every row (the same sum on every row: valid, unlikely) | `K-n.one` **most likely**; each row possible |
+| O-w | from `K-n.one` | `O-w.new`: one row |
 
 Written down, with the reason shown: `sumup[mod.collapse()](wf["p"],
 xs=wf["p"]["x"])`: *"xs takes a list of floats; x holds single floats; so x
