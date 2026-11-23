@@ -15,6 +15,7 @@ when declared, naming the rule it breaks.
 |---|---|---|
 | [grammar.md](grammar.md) | §0 top down: what the user sees, the inputs, the plain questions · §1–§4 the components every expression must resolve, and what core resolves today · §5 the owner's heuristics, H1–H9 · §6 **the five components and the classes each can be** · §8 open questions | the grammar itself |
 | [primitives.md](primitives.md) | **one primitive, three places**: take, nest, unnest, join together, convert, name; each as a step, on a tool's input, or on its output; today's modifiers placed in that table, the gaps, and today's verbs as presets | organizing the modifiers, before naming them |
+| [canonical.md](canonical.md) | **a proposed canonical form**: `tool[input…, call, execution…, output…](param=source, …)`, the class in each modifier's name, bindings always by keyword; the words by class; every kind of expression; surface examples opened into it; what it fixes | what is parsed, saved, run and shown |
 | [conditions.md](conditions.md) | **L3, the conditions between components**: the two layers (canonical primitives, and the surface that maps to them), each component's own primitives, and R1–R26 (when, then, decided or proposed) | checking an expression is valid |
 | [influences.md](influences.md) | what could blur the distinctions in §6 (whose function, what it works on, how many calls, how sure core can be), each run or reasoned | deciding each edge case on purpose |
 
