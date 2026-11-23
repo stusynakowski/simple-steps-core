@@ -92,12 +92,13 @@ doesn't have it yet.
 | Class | What it decides | Members |
 |---|---|---|
 | **call** | how many times the tool runs: zero, one, many; over what (grammar.md §6.3) | one call; one per row; one per group; one per combination of settings |
-| **execution** | how each call runs (grammar.md §6.4) | retry, time limit, on failure, progress and cancel |
+| **call execution** | how each call runs (grammar.md §6.4) | retry, time limit, on failure, its own progress |
+| **step execution** | how the step runs, across its calls (grammar.md §6.4) | progress, cancel, stop after n failures, a time limit, how many at once, a rate |
 | **output's landing** | where each output goes: its row, a new row per call, every row of its scope (grammar.md §6.5) | — |
 
-So a tool's modifiers are of four kinds (grammar.md H7): **input**
-(primitives on the input), **call**, **execution**, **output** (primitives
-on the output, and the landing).
+So a tool's modifiers are of five kinds (grammar.md H7): **input**
+(primitives on the input), **call**, **call execution**, **step
+execution**, **output** (primitives on the output, and the landing).
 
 ## 5. The presets, as cells of the table
 

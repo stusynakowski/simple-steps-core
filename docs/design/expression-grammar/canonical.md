@@ -26,11 +26,12 @@ tool[ input modifiers , call modifier , execution modifiers , output modifiers ]
 - **Brackets: how. Parentheses: what.** (model.md §3, "brackets decorate,
   parens apply".)
 - **Inside the brackets, the classes come in this order**: input, call,
-  execution (each call, then the step), output. The order a step works in (blocks.md §0, the ordered
+  call execution, step execution, output. The order a step works in (blocks.md §0, the ordered
   components). Core keeps them in this order whatever order they are typed
   in (fixes O1).
 - **The class is in the modifier's name**: `mod.input.…`, `mod.call.…`,
-  `mod.exec.…`, `mod.output.…`. The UI's widgets are these four groups.
+  `mod.call_exec.…`, `mod.step_exec.…`, `mod.output.…`. The UI's widgets
+  are these five groups.
 - **Bindings are always by keyword**: `parameter=source`. A source is an
   address (a pick), a literal, or a resource. Never by position, never by a
   column's name or type left to be worked out (R2–R6 become one rule: what is
@@ -51,8 +52,8 @@ Placeholders, to show the shape. One modifier, one job.
 | | `mod.call.each_row()` | one call per row |
 | | `mod.call.each_group(by=wf["p"]["k"])` | one call per group of that key |
 | | `mod.call.each_combination()` | one call per combination of settings (a sweep) |
-| **execution, each call** | `mod.exec.each_call.retry(times=3)` · `mod.exec.each_call.timeout(seconds=30)` · `mod.exec.each_call.on_failure(default=None)` · `mod.exec.each_call.progress()` (the tool reports its own) | wraps each call; **within the level, left to right, outside in**: `retry(3), timeout(30)` is three attempts, each with thirty seconds |
-| **execution, the step** | `mod.exec.step.progress()` · `mod.exec.step.cancel()` · `mod.exec.step.stop_after(failures=5)` · `mod.exec.step.timeout(minutes=10)` · `mod.exec.step.at_once(8)` · `mod.exec.step.rate(per_second=2)` | wraps all the calls together (grammar.md §6.4) |
+| **call execution** | `mod.call_exec.retry(times=3)` · `mod.call_exec.timeout(seconds=30)` · `mod.call_exec.on_failure(default=None)` · `mod.call_exec.progress()` (the tool reports its own) | wraps each call; **within the level, left to right, outside in**: `retry(3), timeout(30)` is three attempts, each with thirty seconds |
+| **step execution** | `mod.step_exec.progress()` · `mod.step_exec.cancel()` · `mod.step_exec.stop_after(failures=5)` · `mod.step_exec.timeout(minutes=10)` · `mod.step_exec.at_once(8)` · `mod.step_exec.rate(per_second=2)` | wraps all the calls together (grammar.md §6.4) |
 | **output** | `mod.output.land("own_row" \| "new_row" \| "each_row_of_group")` | where each output goes |
 | | `mod.output.keep_rows()` | the tool's `bool` keeps or drops its row |
 | | `mod.output.unnest(into="rows" \| "columns")` | a returned list into rows, or a record into columns |
@@ -142,9 +143,9 @@ and the progress of each call")
 
 ```python
 fetch[mod.call.each_row(),
-      mod.exec.each_call.retry(times=3), mod.exec.each_call.timeout(seconds=30),
-      mod.exec.step.progress(), mod.exec.step.stop_after(failures=5),
-      mod.exec.step.at_once(8),
+      mod.call_exec.retry(times=3), mod.call_exec.timeout(seconds=30),
+      mod.step_exec.progress(), mod.step_exec.stop_after(failures=5),
+      mod.step_exec.at_once(8),
       mod.output.land("own_row")](url=wf["p"]["url"])
 ```
 
@@ -152,7 +153,7 @@ fetch[mod.call.each_row(),
 
 ```python
 flaky[mod.retry(times=2), mod.map()](wf["p"])                  # retries nothing today
-flaky[mod.call.each_row(), mod.exec.each_call.retry(times=2),
+flaky[mod.call.each_row(), mod.call_exec.retry(times=2),
       mod.output.land("own_row")](x=wf["p"]["x"])               # each call retried
 ```
 
@@ -193,8 +194,8 @@ core.take[mod.call.once()](table=wf["p"][["x", "y"]])
 
 **Open:**
 
-6. **Execution, two levels** (owner, 2026-11-23): **decided**, each call
-   and the step; the step wraps the calls, each call wraps the tool. Open:
+6. **Execution, two classes** (owner, 2026-11-23): **decided**, call
+   execution and step execution, each its own class of modifier; the step wraps the calls, each call wraps the tool. Open:
    within a level, written left to right from the outside in?
 7. **Core's tools as `core.<name>`**, and data as the value itself: the two
    exceptions to `tool[…](…)` being data and the empty step.

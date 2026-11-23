@@ -4,7 +4,7 @@
 > the system ([blocks.md](../blocks.md) §0, plan piece G0). It begins **top
 > down**, with how a user should see an expression (§0); then **what must
 > be resolved for any expression** (§1–§4), then **the owner's heuristics**
-> for resolving it (§5), and **the classes each of the five components can
+> for resolving it (§5), and **the classes each of the six components can
 > be** (§6), which the rules will narrow. The shape (which words
 > fill which component) and the numbered rules (how the components depend
 > on each other) come next, on this page.
@@ -79,7 +79,8 @@ They are the same as §5's classes of modifier (H7), in words:
 | **What does it do?** | the tool | the tool's name | C1 |
 | **How is each input handed over?** | input | input modifiers, or the types | C3, C4 |
 | **How many times is it run?** | call | a call modifier, or the types | C5 |
-| **What if a call goes wrong?** | execution | execution modifiers | C6 |
+| **What if a call goes wrong?** | call execution | call execution modifiers | C6 |
+| **How is the whole step run?** (progress, cancel, how many at once) | step execution | step execution modifiers | C6 |
 | **What comes out, and where does it go?** | output | output modifiers, or the return type | C7, C8, C9 |
 
 *To check with the owner:* are these the questions a user would ask, in
@@ -99,7 +100,7 @@ in blocks.md are not rivals: each belongs to one level.
 | Level | Asks | Here | Its parts |
 |---|---|---|---|
 | **L0. The expression** | what did the user write? | §0, §1 | a tool, its modifiers, its data: in full, **`tool[modifiers](data)`** (§5, H7), or a shorthand of it |
-| **L1. The components** | what must be resolved? | §2, §6 | the **five**: tool, input, call, execution, output. Their contents are C1–C9 (§2); they are resolved **in a fixed order** (blocks.md §0, *The ordered components*); the user meets them as the **plain questions** above |
+| **L1. The components** | what must be resolved? | §2, §6 | the **six**: tool, input, call, call execution, step execution, output. Their contents are C1–C9 (§2); they are resolved **in a fixed order** (blocks.md §0, *The ordered components*); the user meets them as the **plain questions** above |
 | **L2. The states** | what can each component be? | §6 | each component's axes, and the classes on each axis (`T-k.core`, `K-n.many`, …) |
 | **L3. The rules** | how does one component's state limit the others', so the expression is valid? | §7 (next) | numbered rules: given these classes, those are impossible, or implied. Where more than one reading is left, the most likely is written and shown (H2) |
 
@@ -284,7 +285,8 @@ organized into classes, as orthogonal as possible**:
 |---|---|---|---|
 | **input** | how each argument's data is **prepared** and **bound** | C3 binding, C4 preparation | `select`, `slice` (pickers); `cast`; packing (to a list, per group, per window: to come) |
 | **call** | **whether the call happens more than once**, and over what | C5 calls | `map`, `collapse`, `table`, `sweep`, `source`; `auto` writes one |
-| **execution** | how each call **runs** | C6 each call's run | `retry`, `timeout`, `breaker`, `try_except`; progress and cancel (K23) |
+| **call execution** | how **each call** runs | C6 | `retry`, `timeout`, `try_except`; a call's own progress |
+| **step execution** | how **the step** runs, across its calls | C6 | `breaker`; progress, cancel (K23); how many at once, a rate: to come |
 | **output** | the output's **structure** and **names** | C7 landing, C8 names | `expand`, `widen`, `filter`, `group`, `name`; and `expect` (C9) |
 
 The rearrangements with no tool (`drop`, `rename`, `copy`, `sort`,
@@ -328,7 +330,7 @@ or asks.
                                                                            no:  explicit (shown, or asked)
 ```
 
-## 6. The five components, and the classes each can be
+## 6. The six components, and the classes each can be
 
 *Owner, 2026-11-23: "Given the 5 components of any tool expression, can we
 start listing out some generic, isolated (orthogonal) classes each
@@ -339,8 +341,10 @@ interpretation, we use the most likely interpretation based on that
 information, and state that selection in the expression." And: "rules about
 the data that help condition what is stated", "generic to any tool".*
 
-The five components are **the tool** and §5's four classes of modifier
-(H7): **input, call, execution, output**. Each has a few **axes**; each
+The six components are **the tool** and §5's five classes of modifier
+(H7): **input, call, call execution, step execution, output** (owner,
+2026-11-23: execution broken up "into execution modifiers with respect to
+calls and execution modifiers with respect to the step"). Each has a few **axes**; each
 axis has a few **classes**. A class has a short id, so the rules can name
 it. Each axis says which source fixes it (§0): **the data**, **the tool**'s
 types, or **the modifiers** written. Every class here is generic: it names
@@ -408,7 +412,7 @@ multiple calls over zero rows make none (the data: the step completes, with no r
 step already current isn't run again, its kept output reused; a cancelled
 run stops part way. The last two are execution's outcomes (§6.4).
 
-### 6.4 Execution: at two levels, each call and the step
+### 6.4 Call execution and step execution: two classes
 
 *Owner, 2026-11-23: "I would do inner, corresponding to each call, then
 executional components to each step … think a long process where we might
@@ -418,7 +422,7 @@ want to know the progress of the step and the progress of each call."*
 optional and independent; within a level, the written order means
 something (blocks.md §0).
 
-**Each call** (what happens to one run of the tool):
+**Call execution** (what happens to one run of the tool):
 
 | Axis | Classes |
 |---|---|
@@ -427,7 +431,7 @@ something (blocks.md §0).
 | **E-f. On failure** | `E-f.cell` the cell fails, with its reason (the default) · `E-f.default` a default value instead |
 | **E-p. Its own progress** | `E-p.none` · `E-p.reported`: the tool reports how far it is through its call. Needs the tool to report it (a callable core passes in): core can't see inside a call |
 
-**The step** (what happens across all its calls):
+**Step execution** (what happens across all its calls):
 
 | Axis | Classes |
 |---|---|
