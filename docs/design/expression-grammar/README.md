@@ -23,6 +23,7 @@ a spelling is tested only for opening into the right combination.
 
 | Page | What it holds | Read it for |
 |---|---|---|
+| [closure.md](closure.md) | **closed within the goals of the tool**: the goals (proposed), seven criteria each with its check, the coverage table (each kind of cell under each primitive), the catalogue of tasks, and where each part stands | whether the system is closed, and what's left |
 | [grammar.md](grammar.md) | §0 top down: what the user sees, the inputs, the plain questions · §1–§4 the components every expression must resolve, and what core resolves today · §5 the owner's heuristics, H1–H9 · §6 **the five components and the classes each can be** · §8 open questions | the grammar itself |
 | [primitives.md](primitives.md) | **one primitive, three places**: take, nest, unnest, join together, convert, name; each as a step, on a tool's input, or on its output; today's modifiers placed in that table, the gaps, and today's verbs as presets | organizing the modifiers, before naming them |
 | [canonical.md](canonical.md) | **a proposed canonical form**: `tool[input…, call, execution…, output…](param=source, …)`, the class in each modifier's name, bindings always by keyword; the words by class; every kind of expression; surface examples opened into it; what it fixes | what is parsed, saved, run and shown |
