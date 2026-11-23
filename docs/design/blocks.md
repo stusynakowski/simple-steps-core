@@ -389,6 +389,18 @@ app needs a window or a pivot.
 
 ## 7. To settle with the owner
 
+**Where we left off (2026-11-22, late):** the owner's latest direction
+simplifies §1's convention. **Every argument gets one cell per call.** When
+a tool needs many cells as one value (a list, a table), **a collapse
+modifier reduces them first**, so a reduction is always a visible modifier,
+never implied by a parameter's type, and the UI shows every reduction the
+same way. **A call** is one run of the tool's function; a step is the set
+of calls its modifier makes (one per row under `map`, one per group under
+`collapse`, one under `table`). Still to settle: when a tool's type says
+`list` and the cells aren't lists, does `auto` **add** the collapse
+modifier (written, removable) or **refuse and suggest it**? §1 is to be
+rewritten once that is settled.
+
 **Decided, 2026-11-22:**
 
 - **Block** is the general word; cell, row and column are its cases. The
