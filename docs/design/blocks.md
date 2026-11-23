@@ -32,6 +32,53 @@ values in the parameter's form (a value, a list, a dict, a `Series`, a
 `DataFrame`). Tools stay plain Python. No `#` columns, states or row ids
 reach a tool.
 
+### Two levels: the block's structure, the cell's value
+
+*Owner, 2026-11-22: "you can have a block making a list or a block where
+each cell is a list … cells contain the unit of data that is useful to the
+user; they are using the block to help organize it."*
+
+| Level | Is | Who decides it |
+|---|---|---|
+| **the cell's value** | the unit of data: a number, a string, a list, an image. Core never wraps or unwraps it | the data |
+| **the block's structure** | how the user has organized those units: one cell, a column of them, a row, rows × columns | the pick, and the verb |
+
+A list can live at either level: **a block made into a list** (a column of
+numbers handed over as `[5.0, 6.0]`) or **a cell whose value is a list**
+(`[1, 2]` in one cell). Moving between the levels is a move of its own:
+**nest** puts many cells into one cell's list; **unnest** spreads one
+cell's list into many cells (§4).
+
+**Run 2026-11-22**, parameter `y: list`:
+
+| `y=` | The tool got | Level |
+|---|---|---|
+| `map`, a paired column whose cells are lists | `[1, 2]`, then `[3, 4, 5]` | the cell's value ✓ |
+| `map`, a paired column of numbers | refused: "the verb decides what a column passes" | ✓ a number isn't a list |
+| `collapse`, a group of number cells | `[5.0, 6.0]` | the block, as a list, by the verb ✓ |
+| `collapse`, a group of list cells | `[[1, 2], [3, 4, 5]]` | the block as a list; each cell's list kept ✓ |
+| `map`, a whole cell holding a list | `[7, 8]` | the cell's value ✓ |
+| `map`, a whole cell holding a number | `[9.0]` | **the block wrapped into a list (A7)**: the parameter's type chose the level |
+
+**Proposed rule:**
+
+1. **A cell passes its value**, never wrapped. A 1×1 block is a cell.
+2. **The structure comes from the block and the verb, never from the
+   parameter's type.** Under `map` a paired argument gives one cell; under
+   `collapse`, the group's cells as a list. A whole block gives its shape's
+   container: a column → a list of its values, in row order; a row → a dict,
+   name → value; rows × columns → a table. A parameter may ask for another
+   spelling of the same structure (a `Series` for a column or a row; a
+   `DataFrame` for any block), never for another structure.
+3. **The parameter's type then checks the units**: `list[float]` takes a
+   column of floats, or a cell holding a list of floats; `float` takes one
+   cell holding a float.
+
+Under this rule, a column whose cells are lists, passed whole, is
+`list[list[int]]`: a list made by the block, of lists held by the cells.
+The UI can show both levels: the block's structure, and the type of its
+cells.
+
 ## 2. The block, as an object
 
 **Proposed:** `k.block(pick)` gives the block a pick holds now. It is
@@ -98,7 +145,8 @@ with itself**, each found by running:
 | **A3** | The same number arrives in two forms: paired as `float`, from a whole cell as `numpy.float64` | one form, plain Python |
 | **A4** | A pick narrower than its step is checked against **the step's** columns: `h(x: float)` on `wf["d"]["s"]`, when `d` also has a column `x`, is accepted, then every row fails with a raw `TypeError: h() missing … 'x'`. On its own the same pick is refused with a clear message | checked against the block: the pick's columns |
 | **A5** | Under `mod.table()` the parameter's type isn't checked at all (the app's 015 C58: `np.ndarray` gets a `DataFrame`) | the same rule, block → the parameter's form |
-| **A6** | `paired → list` is refused ("the verb decides what a column passes"), but `paired → DataFrame` passes the whole 3-row column, though each call should get one cell | one answer for both: a paired column passes one cell under `map` |
+| **A6** | `paired → list` is refused ("the verb decides what a column passes"), but `paired → DataFrame` passes the whole 3-row column, though each call should get one cell | one answer for both: a paired column passes one cell under `map` (§1, rule 2: the verb decides the structure) |
+| **A7** | A whole cell holding a number, into `y: list`, arrives as `[9.0]`: the block is wrapped because of the parameter's type; a cell holding a list arrives as the list (§1, *Two levels*) | a cell passes its value: refused, since a number isn't a list (§1, rule 1) |
 
 **Proposed: the table above is the contract**, with one row per verb. The
 delivery rule (a block or literal × the verb × the parameter's form →
@@ -172,9 +220,9 @@ Each piece is small, and each behaviour change is confirmed first.
 | # | Piece | Kind | Needs |
 |---|---|---|---|
 | **B0** | The words into model.md §2: pick (the address), block (what it holds; cell, row, column its cases), table, grid (the data cells only). Rename `_shape_kind`'s n×m case | docs, one rename | the owner's yes |
-| **B1** | The delivery contract: §3's table as rules.md text, and a test that runs the whole matrix and pins every cell (today's answers, A1–A6 marked expected-to-change) | test, no behaviour change | B0 |
+| **B1** | The delivery contract: §3's table as rules.md text, and a test that runs the whole matrix and pins every cell (today's answers, A1–A7 marked expected-to-change) | test, no behaviour change | B0 |
 | **B2** | `k.block(pick)`: read-only, from today's parts (§2) | additive | B0 |
-| **B3** | One delivery rule, fixing A1–A6 one at a time (A1 and A4 first: a crash and a raw error) | behaviour, one piece each | B1 |
+| **B3** | One delivery rule, fixing A1–A7 one at a time (A1 and A4 first: a crash and a raw error) | behaviour, one piece each | B1 |
 | **B4** | `k.accepts(operation, parameter)` and `k.fits(…)` for the UI: what a parameter takes under its modifiers, and how a pick would reach it | additive | B2, B3 |
 | **R1** | The primitives (§4) in rules.md, every modifier and combine listed as one; the restructurings as recipes | docs | B0 |
 | **R2** | The three missing options: match all, aligned unnest, nest by a column's values | behaviour, one piece each | R1, the owner's choice of which |
@@ -187,7 +235,9 @@ needs a window or a pivot.
 ## 6. To settle with the owner
 
 1. **Block** as the general word, with cell, row and column as its cases;
-   and the n×m case renamed (`rows × columns`?).
+   and the n×m case renamed (`rows × columns`?). **The two levels** (§1):
+   the block's structure from the pick and the verb, the cell's value never
+   wrapped; the parameter's type checks the units. Does that rule hold?
 2. **A tool never receives a block**, only its values in the parameter's
    form. Or should a parameter typed `Block` receive one?
 3. **A2**: refuse a paired cell whose type doesn't fit, or convert where
