@@ -41,6 +41,19 @@ plain values as settings are the norm (dplyr `select(df, x, y)`, pandas
 
 The UI shows the canonical form whichever was written.
 
+**Run 2026-11-23: `select` already works this way; `slice` doesn't.**
+
+| Written | Stored as | Output |
+|---|---|---|
+| `mod.select(columns=["x", "y"])(wf["p"])` | `wf["p"][cols[["x", "y"]]]`: rewritten into the pick | the same as the pick |
+| `mod.select(rows=slice(1, 3))(wf["p"])` | `wf["p"][1:3]`: rewritten into the pick | the same, lineage `#p` 1, 2 |
+| `mod.slice(start=1, stop=3)(wf["p"])` | `mod.slice(start=1, stop=3)(wf["p"])`: **its own form, its own code** | the same today, but free to drift |
+
+`select` is the model for every spelling: a verb, saved as the one
+canonical form. `slice` should be rewritten into the pick the same way.
+(The word `select` echoes "selection", which model.md retired for "pick": a
+question for the naming, phase 1.)
+
 **Layers** (owner: "primitives are valid expressions; we can consolidate
 them, or define functions and modifiers built off of them"):
 
