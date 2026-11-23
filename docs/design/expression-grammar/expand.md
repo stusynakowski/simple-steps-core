@@ -25,7 +25,7 @@ observation holding several becomes several observations (tidy.md T7).
 | **V4** | **Empty or missing** (`[]`, `()`, `{}`, `None`, an absent cell): **the row is kept, its item absent**, so a row is never lost by unnesting | **the row is dropped**; only `None` is warned (**E1**) | the row kept, `NaN` | **decided** (owner, I2) |
 | **V5** | **Not openable as it is** (a `set`: no order; `range`, a generator: lazy): its row fails, naming the fix (sort it, or make a list) | the row fails ✓ | opened | decided (blocks.md §5) |
 | **V6** | **A unit** (a string, a number): **passed through as one item**, as pandas does; the column is then **mixed** (lists' items beside the unit), so its type is a union and the mix is said (N1) | the row fails | passed through | **decided** (owner, 2026-11-23: "pass through, but it will be mixed") |
-| **V7** | **A 1-D array**: a unit (its row fails; a tool says what its parts are), **or** opened like a list | the row fails | opened | **to decide** (blocks.md §5 made arrays units) |
+| **V7** | **A 1-D array: a unit, for now** (blocks.md §5): under V6 it **passes through as one item**, whole; a tool says what its parts are. **Opening it like a list is a later method** (*Later*, below) | the row fails | opened | **decided** (owner, 2026-11-23: "assume unit for now, but methods to open like a list later; make a note") |
 | **V8** | **A failed or blocked input cell**: one blocked row, naming the failure it comes from | ✓ (one placeholder row) | — | decided |
 
 ## B. The rows
@@ -79,7 +79,12 @@ through as one item (V6), but under widen a unit **fails its row**
 (widen.md U4). A unit is one item of a list naturally; it has no fields to
 make columns of.
 
-## To decide
+V7 (a 1-D array a unit for now: passed through whole, under V6).
 
-1. **V7, a 1-D array**: the owner answered "yup" to "a unit (its row
-   fails), or opened like a list?": which one?
+## Later
+
+- **Opening a 1-D array like a list**, one row per element, as pandas
+  does: a method added later (owner, 2026-11-23). Until then an array is a
+  unit, and a tool says what its parts are.
+- **Recursive expansion**: nested lists opened every level down, a layer
+  on the one-level primitive, as widen's (widen.md, *Later*).
