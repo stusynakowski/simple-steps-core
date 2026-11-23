@@ -230,9 +230,15 @@ Run 2026-11-23, against today:
 | `g(a, b)` on columns `t`, `u` | refused: no column is named `a` or `b` | ✓ |
 | `f(temp_c)` on columns `t` **and** `u`, both floats | **accepted; every row then fails, `TypeError: f() missing … 'temp_c'`** | ✗ two readings: refused, naming both (H2). It is A4: checked against the step `p`, which has a `temp_c`, not against the pick |
 
-*To settle:* binding by type when exactly one column fits (the second row)
-is H2 at work. Does it stay, written down, or must every binding be by
-name or written?
+**Decided, 2026-11-23** (owner: "it goes beyond a reasonable doubt for
+inference … I cannot have a user make a mistake because of ambiguities of
+the tool"). Run, three cases that "by type" covered:
+
+| Case | Today | Decided |
+|---|---|---|
+| **a.** One column picked, `to_f(wf["p"]["t"])` | bound to `temp_c`, written out | **stays**: by position, Python's own rule (`f(x)` gives `x` to the first parameter), not a guess |
+| **b.** The whole step, `to_f(wf["p"])`, no column `temp_c`, exactly one float column `t` | core searches `p`'s columns and binds `t` by its type | **refused**, naming the fix `temp_c=wf["p"]["t"]`: a column found by its type may be the wrong one |
+| **c.** A column named like a parameter that has a default: `q` has `offset`, `to_f` has `offset=0.0` | **the column is ignored, silently**; the tool gets `0.0` (**G2**) | **refused**, naming both: `offset=wf["q"]["offset"]` or `offset=0.0` |
 
 ### H4. The tool's types imply how it is called
 
@@ -484,6 +490,40 @@ accepted and written out as above (**G1**, a finding for the rules).
    table, so "obvious and intuitive" is one place to look.
 
 ## 8. Open questions
+
+**Decided in the consolidation review, 2026-11-23:**
+
+- **`filter`, `expand`, `group`** (question 2 below): they could each be a
+  step of its own, modify a tool's input, or modify its output (owner).
+  **One primitive, three places**: as a step (core's tool over a table), as
+  an input modifier (before the calls), as an output modifier (on the
+  outputs). This is what the primitives are organized by.
+- **Names** (`mod.group`, `mod.table`, the n×m shape): not renamed one by
+  one. Names come once the modifiers are organized into their classes and
+  the restructurings into primitives (owner: "we need good organizations of
+  modifiers … and define good classes of restructuring data in the grid").
+- **model.md** is updated once the rules (L3) settle; until then these pages
+  are proposals.
+- **A parameter typed `Block`** receives a block: useful for callables, and
+  likely needed. Mixed-typed grids give errors that are handled in steps, as
+  any spreadsheet or table library does. **Restructuring and casting
+  methods are necessary components.**
+
+**Areas not yet covered**, to settle (raised by core, 2026-11-23):
+
+| # | Area | The question |
+|---|---|---|
+| **N1** | **Mixed types in a column** (floats and a stray string) | refused when declared, or the cell that doesn't fit fails at run with its reason (like Excel's `#VALUE!`)? Proposed: the cell fails; the column's type is the union, and the plan says so |
+| **N2** | **Missing values into a typed parameter** (absent, `None`, `NaN` into `x: float`) | skip the call, fail the cell, or pass `None`? `Optional[float]` as the tool's way of saying it takes a missing value |
+| **N3** | **Data from several steps in one call**, row by row: `tool(a=wf["p"]["x"], b=wf["q"]["y"])` | their rows must be matched: the combines' *match*, needed inside `tool[modifiers](data)` when data comes from more than one step (refused today: join first) |
+| **N4** | **Which form is stored**: the shorthand or the full form | and when the opened full form is edited, does the shorthand survive? |
+| **N5** | **A preset and an explicit modifier that disagree** (`collapse(by="k")`, and an argument packed over everything) | which wins, or refused? |
+| **N6** | **Output names that clash** with input columns kept beside them | a rule for the names |
+| **N7** | **A parameter given twice**, by position and by name | refused |
+| **N8** | **Where an error shows**: refused when declared, or a failed cell at run | one clear line between them, so a user knows where to look |
+| **N9** | **Big data**: every convention decides from the plan's types, never by reading cells | so resolving a step costs nothing on a million rows |
+
+**Still open from before:**
 
 Recorded 2026-11-23, to settle once the top-down view (§0) is agreed. The
 owner works top down first, then these.
