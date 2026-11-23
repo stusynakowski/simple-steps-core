@@ -637,6 +637,8 @@ its item **absent**, so a row is never lost by unnesting.
 
 ## 6. A dev plan
 
+> **Superseded 2026-11-23** by [expression-grammar/roadmap.md](expression-grammar/roadmap.md) (a clean slate, names first). Kept as the record of the pieces found here.
+
 Each piece is small, and each behaviour change is confirmed first.
 
 | # | Piece | Kind | Needs |
