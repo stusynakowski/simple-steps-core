@@ -339,6 +339,23 @@ a sheet.
 | before a run | a plan | a planned block: shape known, cells pending |
 | header, index columns | its own | borrowed: the names of the columns it covers, its rows' numbers in the table |
 
+**A pick is an address, and it stays live** (run 2026-11-23, for the
+owner's "picks versus addresses … when is this needed, for tables that are
+constantly dynamic, but sometimes it's just Excel sheets"). As in Excel,
+`=SUM(A1:A3)` is an address and the values there now are its contents.
+When the data changes, the address follows:
+
+| Written | After a row is inserted on top of `p` |
+|---|---|
+| a pick by position, `wf["p"][1]["x"]` (Ben's row) | rewritten `wf["p"][2]["x"]`: it followed Ben, still `2.0`, as Excel shifts `A2` to `A3` |
+| a pick by condition, `wf["p"][cols["x"] > 1.5]` | read again: it now includes the new row's `9.0`, like a filter |
+| a tool over the step, `dbl[mod.map()](wf["p"])` | three rows become four: stale, then run again |
+
+There is nothing to choose between "dynamic" and "a sheet": every pick is
+an address. Into data that never changes, it behaves as a fixed sheet. Only
+**freezing** (§2) gives contents that don't follow: the values copied, the
+address dropped.
+
 A block becomes a table by being declared as a step: `k["cp"] =
 wf["f"]["x"]` makes that block step `cp`'s own table, with lineage back to
 `f` (today's linked copy, 015 C56).
