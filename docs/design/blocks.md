@@ -92,33 +92,132 @@ column to a list". Taken apart, packing is a preparation that leaves the
 data alone, and the verbs become presets of four independent choices
 (K32's direction, with the four questions as the primitives' names).
 
+### Scope: what one call reads of an argument
+
+*Owner, 2026-11-23: "2–3–4 are intertwined components that I want to figure
+out."* An argument's **scope** is the set of input rows whose cells go into
+one call's value for that argument. It is about rows only: which column an
+argument reads is fixed by its pick. For the call made for row 1 of
+
+| # | k | y |
+|---|---|---|
+| 0 | a | 10 |
+| 1 | b | 20 |
+| 2 | a | 30 |
+| 3 | b | 40 |
+
+| Scope of `ys` | Rows it reads | `ys` receives |
+|---|---|---|
+| **row** | 1 | `20`, the cell as it is |
+| **window**, the row and the one before | 0, 1 | `[10, 20]`, packed |
+| **group**, `by="k"` | 1, 3 | `[20, 40]`, packed |
+| **everything** | 0–3 | `[10, 20, 30, 40]`, packed |
+
+- **One row in scope: the cell as it is. More than one: packed.** That is
+  the only time packing happens.
+- **The calls and the scopes must agree.** Under one call per row, any
+  scope works: a wider one is read from that row's window, group, or
+  everything. Under one call per group, every argument from the input is
+  group-scoped (or everything); a row-scoped one is refused, naming the fix.
+  Two different groups (`by="k"` and `by="j"`) with no row-scoped argument
+  are refused.
+- **An argument from outside the input's rows** (another step's pick) is
+  everything, or one fixed cell. A literal is the same every call.
+- *The word is open:* "scope" also means something in programming (and in
+  core's code); "span" says the same.
+
+### Written two ways: argument methods, and modifiers as shorthands
+
+*Owner, 2026-11-23: "methods that cast the data properly, like
+`wf["step"]["col"].tolist()`, for the argument, to make it more explicit";
+"I would want modifiers to be good shorthands"; "certainly the modifiers
+handle the number of calls of the function. But we need to organize."*
+
+**Layer 1, the argument: a pick and how its cells are prepared.** A pick
+with no method gives **its row's cell**. A method **packs**, with the scope
+as its arguments, in pandas' words:
+
+| Method | Packs | Into |
+|---|---|---|
+| `.tolist()` | a column's cells | a list |
+| `.to_dict()` | a row's cells | a dict, column name → value |
+| `.to_frame()` | a block | a `DataFrame` |
+| `.to_numpy()` | a column or a block | an array (the app's 015 C58: the user says so) |
+
+```python
+wf["p"]["y"]                     # its row's cell
+wf["p"]["y"].tolist()            # everything, one list, the same every call
+wf["p"]["y"].tolist(by="k")      # its group's cells
+wf["p"]["y"].tolist(window=2)    # this row and the one before
+```
+
+A method is **written into the expression; it fetches nothing**: the pick
+stays an address with its packing noted, saved, printed back as written,
+resolved when the step runs. A pick already has one such member,
+`wf["p"].header` (the column names, one per row); picks have no `tolist`
+today (run 2026-11-23), and a column named `tolist` can't clash, since
+columns are picked with brackets.
+
+**Layer 2, the step: modifiers.** They decide **how many calls**, where
+each call's output lands, and how each call runs. A modifier that decides
+the calls is **a shorthand**: it also gives every argument read from the
+input the matching preparation, unless the argument says otherwise.
+
+```python
+sumup[mod.collapse(by="k")](wf["p"]["x"])       # the shorthand
+sumup(xs=wf["p"]["x"].tolist(by="k"))           # what it means: one call per group
+```
+
+**Every one of today's modifiers, by its job** (the 25 kinds in
+`modifier_catalog()`, run 2026-11-22), and the ones that don't fit:
+
+| Job | Modifiers | Shorthand for |
+|---|---|---|
+| **how many calls**, and the input's preparation | `map` (per row) · `collapse(by=)` (per group; `.tolist(by=)`) · `table` (one; `.to_frame()`) · `sweep` (one per combination of settings) · `source` (one, no input) | the scopes of the input's arguments |
+| **where the output lands, and its shape** | `expand` (into rows) · `widen` (into columns) · `filter` (keeps or drops its row) · `group` (a cell beside the input's columns) · *a group's output on every row of the group: missing* | how each call's output is unpacked and placed |
+| **rearranging, no tool** (§4's moves) | `select`, `drop`, `rename`, `name`, `copy`, `sort`, `slice`, `distinct`, `pack` | take, nest, unnest |
+| **how each call runs** | `retry`, `timeout`, `breaker`, `try_except` (progress and cancel to come, K23) | — |
+| **checks** | `expect` | — |
+| **don't fit** | **`cast`**: it changes values, which no modifier should (rule 2): a tool, or an argument method that says so (`.astype(float)`) · **`auto`**: not a modifier at run; it writes the others · **`select(rows=)`, `slice`**: the same as a pick's row part · **`copy`**: the same as a pick declared as a step | to settle |
+
+Several steps read together (`join`, `zip_`, `stack`) are question 1 for
+more than one step: which cells, from where, matched how.
+
+**`auto` writes Layer 1 too.** When a tool's type calls for a packing,
+`auto` writes `.tolist()` (or `.to_dict()`, …) into the expression: the
+same text a user would type, shown, removed by deleting it.
+
 ### What the user sees before running
 
 `def z(x: float, ys: list[float])`, one call per row. `x` takes one value,
 so it gets its row's cell. `ys` takes a list and `p`'s cells are floats, so
-`auto` writes **fixed and packed**: the whole column, as one list, the same
+`auto` writes **`.tolist()`**: the whole column, as one list, the same
 every call.
 
 ```
-zs = z(x=wf["p"]["x"], ys=to_list($ wf["p"]["y"]))      one call per row · 3 calls
+zs = z[mod.map()](x=wf["p"]["x"], ys=wf["p"]["y"].tolist())     one call per row · 3 calls
 
   x   ← its row's cell of p                float ✓
   ys  ← all of p["y"], packed to a list    list[float] ✓   (auto: z takes a list)
 ```
 
-(`$` and `to_list` show the idea; how they are written is open, §7.) The
+With `.tolist(by="k")`, each row gets its own group's list: **a group's
+value beside each row in one step**, which takes a `collapse` then a `join`
+today. The
 same expression today takes two steps: `all = op("gather")[mod.collapse()]
 (wf["p"][["x"]])`, then `z[mod.map()](wf["p"]["x"], ys=wf["all"][0]["x"])`
 (run 2026-11-22: `[-2.0, -1.0, 3.0]`).
 
 ### Still to settle
 
-- **How `$` (fixed) and packing are written** in an expression, and shown
-  in the UI.
-- **When the types call for packing, does `auto` add it** (written,
-  removable) **or refuse and suggest it?**
-- **Which packings exist**: `to_list`, `to_dict`, `to_table` for certain;
-  others (a `Series`, an array of a numeric column)?
+- **The packings**: `.tolist()`, `.to_dict()`, `.to_frame()`, `.to_numpy()`
+  proposed; others?
+- **The scope's word** ("scope" or "span") and its arguments (`by=`,
+  `window=`).
+- **The missing landing**: a group's output on every row of the group, as a
+  modifier (the shorthand for `.tolist(by=)` with per-row calls).
+- **The modifiers that don't fit** (`cast`, `auto`, `select(rows=)`,
+  `slice`, `copy`): where each goes.
 
 ## 1. Pick, block, table
 
@@ -442,8 +541,9 @@ Each piece is small, and each behaviour change is confirmed first.
 | **I1** | `widen` opens a list by position, and refuses any kind it can't open | behaviour | R1 |
 | **I2** | `expand` of an empty sequence or `None` keeps the row (once decided) | behaviour | the owner's choice |
 | **I3** | The four kinds of iterable (§5) in rules.md; a column's type says its kind, so unnesting a unit is refused when declared | docs, then behaviour | R1 |
-| **E1** | Packing as its own modifier (`to_list`, `to_dict`, `to_table`) and `$` (fixed) on an argument; `collapse` = split by group + `to_list` | additive, then behaviour | E0 |
-| **E2** | `auto` writes each argument's answers to questions 3 (fixed, packed) from the types | behaviour | E1 |
+| **E1** | Pick methods that pack, written into the expression: `.tolist()`, `.to_dict()`, `.to_frame()`, `.to_numpy()`, with `by=` and `window=` scopes; the calls and scopes checked to agree; `collapse(by=)` the shorthand for `.tolist(by=)` | additive, then behaviour | E0 |
+| **E2** | `auto` writes the packing methods from the tool's types | behaviour | E1 |
+| **E3** | The modifiers that don't fit (§0): `cast`, `select(rows=)`, `slice`, `copy` | behaviour, one at a time | E0, the owner's choice for each |
 | (K32) | Verbs rebuilt on the primitives, the four questions | large, parked | R1, E1 |
 
 **Suggested order:** E0 first, since it decides the rest; then B0, B1, then B3's A1 and A4 (the two that crash or
@@ -470,9 +570,12 @@ app needs a window or a pivot.
 
 **Open:**
 
-1. **How fixed (`$`) and packing are written** (§0), and whether `auto`
-   adds a packing when the types call for one, or refuses and suggests it.
-   Which packings exist beyond `to_list`, `to_dict`, `to_table`.
+1. **§0's open points**: the packings, the scope's word, the missing
+   landing, and the modifiers that don't fit. (Settled 2026-11-23: packing
+   is written as a method on the pick, `.tolist()`; no method means its
+   row's cell; `auto` writes the same method when the types call for it;
+   modifiers decide the calls and are shorthands for the arguments'
+   preparation.)
 2. **A tool's parameter typed `Block`** receives a block (owner). Without
    row numbers and lineage, so recipes, single-cell runs and staleness keep
    working, or with them, relaxing core-asks' "lineage never reaches a
