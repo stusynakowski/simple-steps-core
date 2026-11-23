@@ -22,6 +22,12 @@ primitives' names matter most."
 | **keep what we like, toss the rest** | an inventory, reviewed by the owner (below) |
 | **names matter most** | naming comes **before** building, not last |
 
+**Tests** (owner, 2026-11-23): "keep the tests for now, see where we land,
+but expect the tests themselves to change drastically." Today's tests stay
+and stay green while today's code is worked on (phase 2); the new set
+brings its own (phase 3), and the old ones change or go with what they test
+when it is switched over (phase 6). CLAUDE.md is unchanged.
+
 **Bugs in today's code:** the binding bugs (A4, H3's case b, G2) are
 replaced by the new set's binding (by keyword; conditions.md R1–R8), so
 they are **not patched**. The **data layer's** silent losses (F1, F2, I1,
