@@ -151,7 +151,7 @@ and phase 4's.
 | WR2 | **A refusal carries its fix** as an operation, `Problem.fix`; `k.fix(name)` applies it. Never applied unasked. The app's step agent (136-E) proposes with it | the app, the agent | decided (yes) |
 | WR3 | `join(a, b)` with no `on=` on related steps joins on the nearest shared ancestor, writing `on="#v"` | users | P3; decided (yes) |
 | E·R7 | **Media handles**: images and files filed by content hash, loaded when read; saved once however many steps hold them | images; plots (136-I9) | E-D1; the content store of P7d |
-| S9 | **Time and volatility**: pure, seeded, versioned, volatile tools; *as of* for tools that read the outside world (ST3); the seed (C-D2) | LLM and web tools, which today re-run every time | D41, D43–D46 |
+| S9 | **Time and volatility**: pure, seeded, versioned, volatile tools; *as of* for tools that read the outside world (ST3); the seed (C-D2). **Owner, 2026-11-23:** randomness is the user's responsibility, a seed or `temperature=0` as a literal argument, so core declares nothing about volatility; versioning of tools' code is wanted but out of scope for now (expression-grammar/influences.md D6, D7) | LLM and web tools, which today re-run every time | D41, D43–D46 |
 | L4 | `k.trace(step, rows, to=ancestor)`: the pick of the rows behind them. 136-I6's "which input row did this come from" is already `k.cell(...)["inputs"]`, one step back; this goes back further | the app's lineage gutter | P3 |
 | L7 | a plan whose columns are exact refuses a missing tool parameter at once | users | — |
 | L3 | a join that drops rows warns, with the count | users | — |
