@@ -124,3 +124,84 @@ Each of today's verbs is a preset: several cells at once.
 3. **Names**: once 1 and 2 are settled, one name per primitive, the place
    given by where it is written (a step, the input, the output). Proposed
    only then.
+
+## 7. What we have, and what is missing
+
+*Owner, 2026-11-23: "what are the primitives we have, and what are we
+missing?"* By component (conditions.md, *Each component's own primitives*):
+
+| Component | Primitive | Have today | Missing |
+|---|---|---|---|
+| **input** | bind | by name, by position, written | — |
+| | take | the pick's rows and columns | — |
+| | convert | `cast` | — |
+| | nest | only inside `collapse` (per group) | over everything, a window, this row's group, written on the argument |
+| | match | only as a `join` step | another step's rows matched inside one call (grammar.md N3) |
+| **call** | split | one; each row; each group; each combination | each column |
+| **execution** | time limit | per attempt (`timeout`) | the whole step |
+| | on failure | retry, a default, stop after n | — |
+| | progress, cancel, pace | — | all three (the app's K23) |
+| **output** | land | its own row; a new row per call | every row of the group |
+| | unnest into rows | `expand` | a row whose list is empty kept (I2) |
+| | **unnest into columns** | `widen`; records | **uneven rows: §8** |
+| | take, name | `filter`; `name` | convert on the output |
+| **as steps** | take, sort, distinct, nest, unnest, join together, name, copy | all | pivot (nest named by values), a cross product (match all), fill, convert |
+
+## 8. Unnest into columns, and uneven rows
+
+*Owner, 2026-11-23: "I believe the widen component is a key problem, and I
+think we can fix it with having good primitives (with additional
+modifications to the other components if necessary)"; "I see it as a
+problem with the potential for data to be uneven across rows."*
+
+**The root:** unnesting into columns is the one move whose **output
+columns come from the data**, and rows can disagree: different keys,
+different lengths, different kinds. So the columns aren't known until every
+row is read, and each row can disagree with the others.
+
+**Run 2026-11-23** ([grid-probes/widen.py](../grid-probes/widen.py)):
+
+| Cells | Today |
+|---|---|
+| ragged dicts `{a}`, `{a, b}` | ✓ columns `a`, `b`; row 0's `b` absent |
+| a dict and `None` | ✓ the `None` row's fields absent, with a warning |
+| a dict and a string | the string's row fails, the dict's works ✓ |
+| a nested dict | ✓ one level: the inner dict stays a value |
+| tuples `(1, 2)`, `(3, 4)` | ✓ `var0`, `var1` |
+| records (`NamedTuple`) | ✓ `r`, `g`, `b`, at run |
+| declared `columns=["a", "b"]`, a key missing | ✓ in the plan before the run; the missing key absent |
+| **lists** `[1, 2]`, `[3]` | **every row fails** (W1), though the docstring says lists widen by position |
+| **integer keys** `{1: …, 2: …}` | **the view crashes**, `KeyError: 'var1'` (W2) |
+| **ragged tuples** `(1, 2, 3)`, `(4,)` | **fail** (W3), where ragged dicts give absent cells |
+| **the plan, before the run** | **no widened column**, even for typed records (W4); a step reading one is accepted without a check |
+| a string, an array | no columns; the column dropped silently (I1, blocks.md §5) |
+
+**Proposed: the primitive, defined once, the same for every kind of cell.**
+
+1. **The fields come from exactly one place**, in this order:
+   **declared** (`columns=[…]`, works today); **from the type** (a record's
+   or a `TypedDict`'s fields, from the tool's return type); **discovered**
+   from the data on the first run, then **written into the expression**, so
+   declared from then on (H2: decided once, written down, never re-guessed).
+   Uneven data then can't make a step's shape unstable.
+2. **A row missing a field: absent cells**, for mappings and sequences
+   alike (fixes W3). Unevenness never fails a row and never drops one.
+3. **A row with a field not in the fields: a warning naming it.** Nothing
+   is added silently.
+4. **A cell that can't be opened** (a unit: a string, an array; blocks.md
+   §5) **fails its row**, with the reason; the other rows run (grammar.md
+   N1). Fixes I1.
+5. **Sequences open by position**, a list as a tuple (fixes W1); **keys
+   that aren't strings are named by a convention** (fixes W2).
+
+**The other components, changed to support it:**
+
+| Component | Change |
+|---|---|
+| the plan (staging) | carries the fields from types and declarations (W4) |
+| the surface (`auto`) | writes the discovered fields into the expression after the first run |
+| a step reading a field not known yet | shown as **assumed**, checked once known, not accepted silently |
+
+To settle with the owner: discovered fields written into the expression
+after the first run (rule 1); an extra field a warning, not a refusal (rule
+3); the naming convention for keys that aren't strings.
