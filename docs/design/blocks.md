@@ -92,6 +92,91 @@ column to a list". Taken apart, packing is a preparation that leaves the
 data alone, and the verbs become presets of four independent choices
 (K32's direction, with the four questions as the primitives' names).
 
+### The ordered components of a step
+
+*Owner, 2026-11-23: "this is the general process for writing a good step";
+"we are defining the ordered components needed to write any step"; "the
+modifiers for each of these ordered components depend on each other.
+Sometimes one modifier, say in calls, implies how we need to prepare the
+data, and land the outputs."*
+
+Every step that calls a tool is written from six components, in this order.
+The four questions above are the same ideas; this is their order, with the
+wrappers and the checks given their places:
+
+```
+pick ──► prepare each argument ──► calls ──► run each call ──► land the outputs ──► check
+ (1)            (2)                  (3)          (4)                 (5)             (6)
+```
+
+| # | Component | Answers | Modifiers in it | How many |
+|---|---|---|---|---|
+| 1 | **pick** | which cells | the pick, `wf[…]`; `select`, `slice` (which repeat the pick's own row and column parts) | one per argument |
+| 2 | **prepare each argument** | what each call's argument holds | packing (to a list, per group, per window); converting (`cast`) | per argument; each cell converted first, then packed |
+| 3 | **calls** | how many calls | `map`, `collapse`, `table`, `sweep`, `source` | **exactly one** (core already refuses two: "2 shape verbs in one step") |
+| 4 | **run each call** | how one call runs | `retry`, `timeout`, `breaker`, `try_except`; progress and cancel to come (K23) | several; **their written order is meaningful** |
+| 5 | **land the outputs** | where each output goes, in what shape | one cell (the default); beside the input's columns (`group`); keep or drop its row (`filter`); into rows (`expand`); into columns (`widen`, a record); then the columns' names (`name`) | one way of landing, then names |
+| 6 | **check** | is the output what was expected | `expect` | several |
+
+**The components' order is fixed, not the order they are written in.**
+Today it is the written order, and it changes what a step does without a
+word (**O1**, run 2026-11-23,
+[grid-probes/order.py](grid-probes/order.py)):
+
+| Written | What happened |
+|---|---|
+| `flaky[mod.map(), mod.retry(times=2)]` | row 1 failed once, was retried, succeeded; all three rows done |
+| `flaky[mod.retry(times=2), mod.map()]` | **the retry did nothing**: it wrapped the whole map, and a map records a failed row rather than raising, so there was nothing to retry. Row 1 failed |
+
+Proposed: core keeps the modifiers in component order, so a `retry` is
+always component 4 and runs on each call, whatever order it is written in.
+
+**Within component 4 the written order is kept, because there it means
+something**, and the UI shows it as nesting:
+
+| Written | Means |
+|---|---|
+| `timeout` inside `retry` | each attempt has its own time limit |
+| `retry` inside `timeout` | one time limit for all the attempts |
+| `try_except` outside `retry` | retry first; if it still fails, the default |
+| `try_except` inside `retry` | the default catches the first failure, so there is no retry |
+
+**Rearranging without a tool** (`drop`, `rename`, `sort`, `distinct`,
+`copy`, `pack`) is a step of its own: no calls. Its order matters (sort then
+take three is not take three then sort), and it is the workflow's order of
+steps.
+
+### How the components depend on each other
+
+A modifier in one component **implies defaults in the others, and limits
+what they can be**. Component 3 drives the most:
+
+| Calls (3) | Prepare (2): the input's arguments | Land (5): allowed | Land (5): default |
+|---|---|---|---|
+| `map`: one per row | its row's cell; any wider scope allowed (a window, a group, everything) | a cell, beside, keep or drop, into rows, into columns | a cell |
+| `collapse(by=)`: one per group | **packed per group** (required: a row's cell has no single meaning in a group's call) | one row per group; *or on every row of the group (missing today)* | one row per group |
+| `table`: one in total | **the whole block, as a table** | a table: its rows and columns | a table |
+| `sweep`: one per combination of settings | its combination | one row per combination | one row per combination |
+| `source`: one, no input | no input | a table | a table |
+
+The others depend in the same way:
+
+- **Prepare → calls.** If every argument is packed per group, the calls are
+  one per group. If any argument is its row's cell, they are one per row.
+  So a `collapse` can be read off its arguments, and a per-row argument
+  under `collapse` is refused, naming the fix.
+- **The tool's return type → land.** A `bool` can keep or drop (only when
+  written: `auto` never picks `filter`); a list can go into rows; a record
+  goes into columns. A tool that returns one value has nothing to spread.
+- **Land → check.** What `expect` can state (rows, columns) depends on how
+  the outputs landed.
+
+**This is what the shorthands are:** a modifier in component 3 that fills
+in components 2 and 5 with what it implies. `collapse(by="k")` is "one call
+per group, every input argument packed per group, one row per group out".
+Writing component 2 or 5 yourself overrides the default, within the limits
+above.
+
 ### Scope: what one call reads of an argument
 
 *Owner, 2026-11-23: "2–3–4 are intertwined components that I want to figure
@@ -210,6 +295,11 @@ same expression today takes two steps: `all = op("gather")[mod.collapse()]
 
 ### Still to settle
 
+- **A grammar that closes the system** (owner, 2026-11-23: "I am wondering
+  if we need a grammar that closes this system to be very robust"): the
+  components, their order and their dependencies written as one grammar
+  and its rules, so every step is either a sentence of it or refused with
+  the rule it breaks. Proposed as the next piece (§6, G0).
 - **The packings**: `.tolist()`, `.to_dict()`, `.to_frame()`, `.to_numpy()`
   proposed; others?
 - **The scope's word** ("scope" or "span") and its arguments (`by=`,
@@ -528,6 +618,8 @@ Each piece is small, and each behaviour change is confirmed first.
 
 | # | Piece | Kind | Needs |
 |---|---|---|---|
+| **G0** | **The step grammar**: the ordered components as a grammar (each component a slot, its modifiers the words that fill it), and the dependencies as numbered rules, each with the problem it gives. A probe that parses and prints back every expression in the tests, and a property test that generates sentences from the grammar: each one is accepted and runs, or is refused when declared, naming its rule; never a crash, never a silent output | docs, then a test | the owner's yes on §0 |
+| **O1** | Modifiers kept in component order, so `[retry, map]` retries each call | behaviour | G0 |
 | **E0** | **§0 into model.md and rules.md**: the four questions, the six rules, the verbs as presets | docs | the owner's yes on §0's open points |
 | **B0** | The words into model.md §2: pick (the address), block (what it holds; cell, row, column its cases), table, grid (the data cells only). Rename `_shape_kind`'s n×m case | docs, one rename | the owner's yes |
 | **B1** | The delivery contract: §3's table as rules.md text, and a test that runs the whole matrix and pins every cell (today's answers, A1–A7 marked expected-to-change) | test, no behaviour change | B0 |
@@ -546,7 +638,7 @@ Each piece is small, and each behaviour change is confirmed first.
 | **E3** | The modifiers that don't fit (§0): `cast`, `select(rows=)`, `slice`, `copy` | behaviour, one at a time | E0, the owner's choice for each |
 | (K32) | Verbs rebuilt on the primitives, the four questions | large, parked | R1, E1 |
 
-**Suggested order:** E0 first, since it decides the rest; then B0, B1, then B3's A1 and A4 (the two that crash or
+**Suggested order:** G0 first, since it closes the system the rest is built in; then E0; then B0, B1, then B3's A1 and A4 (the two that crash or
 fail raw), B2, B4. Freezing next: F1, F2, then F3. R1 and I3 alongside, since
 they're docs; I1 with them, since it loses data silently. R2 and I2 when the
 app needs a window or a pivot.
