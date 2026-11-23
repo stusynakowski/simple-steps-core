@@ -229,5 +229,5 @@ warned; a gap is absent, never an upcast `NaN`.
 
 To settle with the owner: discovered fields written into the expression
 after the first run (rule 1); an extra field a warning, not a refusal (rule
-3); nested mappings one level by default, with a written depth and
-separator.
+3); nested mappings one level by default, with a written depth (the
+separator decided: an underscore, as tidy.md T5).

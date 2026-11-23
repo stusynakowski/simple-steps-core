@@ -16,9 +16,9 @@ The point is to work really hard to enforce the tidy tables principle."*
 |---|---|---|
 | **T1** | **Every column has a name: a string**, unique, not empty, not starting with `#` (core's index columns) | labels can be integers, tuples, duplicates |
 | **T2** | **A column is addressed by its name or by its position**: `cols["am"]`, `cols[1]`, `cols[1:3]`, `cols[-1]`. **A string is always a name, an integer always a position**, so they can't be confused | `df[0]` is the *label* 0; a position needs `iloc` |
-| **T3** | **The canonical form stores the name.** A position is a spelling: `cols[1]` is written down as `cols["am"]` when the step is declared, and shown "am (column 1)" (fixes C1 below) | — |
+| **T3** | **A column's name and position are kept together** (owner, 2026-11-23). Both are written down when the step is declared, and shown "am (column 1)". **The name is what the pick follows; the position is rewritten when the column moves**, as a row's number is. If the name is gone, the pick is refused, naming both: it never falls back to whatever is at that position now (fixes C1 below) | — |
 | **T4** | **No meaningful row index.** Rows have core's hidden ids and shown row numbers; a key is an ordinary column | `set_index`, `reset_index`, an index that is data and isn't |
-| **T5** | **No hierarchical columns.** Flattened to string names with a separator (`t_am`), as `json_normalize` does | MultiIndex columns, from `groupby(…).agg(…)` and others |
+| **T5** | **No hierarchical columns.** Flattened to string names joined by an **underscore**, `t_am` (owner, 2026-11-23), as `json_normalize` does with its separator | MultiIndex columns, from `groupby(…).agg(…)` and others |
 | **T6** | **One variable per column**: one type per column; a mixed column is said when declared (grammar.md N1) | `object` columns of anything |
 | **T7** | **One observation per row.** A move that changes what a row is (nest, unnest, pivot, melt) is written, and lineage (`#<step>`) records it | reshaping leaves no trace |
 | **T8** | **One value per cell**, any Python object counting as one; nested and unnested only by written moves (primitives.md) | — |
@@ -32,7 +32,7 @@ The point is to work really hard to enforce the tidy tables principle."*
 | a name starting with `#` | refused, naming why | ✓ T1 |
 | an empty name | renamed `var0` | ✓ T1 |
 | a meaningful pandas index (`who`) | becomes an ordinary column `who` | ✓ T4 |
-| **duplicate names** | refused, but with **a raw pandas error**: "The truth value of a Series is ambiguous" (**C2**) | ✗ T1: a clear refusal, naming the duplicates |
+| **duplicate names** | refused, but with **a raw pandas error**: "The truth value of a Series is ambiguous" (**C2**) | ✗ T1. **Decided** (owner, 2026-11-23): **suffixed**, `a`, `a_1`, `a_2` (the next free number, if `a_1` is taken), and said |
 | **MultiIndex columns** | named **`"('t', 'am')"`**, the tuple as text (**C3**) | ✗ T5: flattened, `t_am` |
 
 Columns by position (run): `cols[1]` → `am`; `cols[1:3]` → `am`, `pm`;
@@ -47,8 +47,11 @@ table gives **`name`**. Two identical texts, two columns (H1 broken). Row
 picks don't have this problem: their numbers are rewritten as rows move.
 T3 is the fix: the name is written down.
 
-## To settle with the owner
+## Decided
 
-1. **T3**: a position written down as the name when declared?
-2. **T5**: the separator for flattened names, `_` or `.`?
-3. **C2**: duplicate names refused (clearly), or suffixed (`a`, `a_1`)?
+- **T3**: a column's name and position kept together; the name followed,
+  the position rewritten (owner, 2026-11-23: "position and name, they
+  should be kept together").
+- **T5**: an underscore joins flattened names. The same separator for
+  nested mappings unnested more than one level (primitives.md §8).
+- **C2**: duplicate names suffixed, `a`, `a_1`, `a_2`, and said.
