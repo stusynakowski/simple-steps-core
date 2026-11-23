@@ -202,6 +202,32 @@ row is read, and each row can disagree with the others.
 | the surface (`auto`) | writes the discovered fields into the expression after the first run |
 | a step reading a field not known yet | shown as **assumed**, checked once known, not accepted silently |
 
+### pandas' conventions, and where core is stricter
+
+*Owner, 2026-11-23: "consider the conventions on how pandas handles these
+issues; I know they can."* Run on the same cases, pandas 3.0.6
+([grid-probes/pandas_widen.py](../grid-probes/pandas_widen.py)):
+
+| Case | pandas | core today | Proposed |
+|---|---|---|---|
+| ragged mappings | the union of the keys, first seen first; missing → `NaN` | the union; missing → absent | **as pandas**; missing stays **absent** (pandas can't tell a gap from `None`) |
+| ragged sequences (lists, tuples, arrays, `str.split(expand=True)`) | **by position, as wide as the longest row**; missing → `NaN` | lists fail (W1); ragged tuples fail (W3) | **as pandas**: by position, to the longest; missing → absent |
+| records, dataclasses | their field names | ✓ at run, not in the plan (W4) | the same, and from the type before the run |
+| a `None` row | `json_normalize`: its fields missing | absent, with a warning | keep |
+| a value that can't be opened, among mappings | `.apply(pd.Series)` **adds a column `0` holding it, silently**; `DataFrame(…)` raises | its row fails, with the reason | **stricter**: keep core's |
+| a key not in declared columns | `DataFrame(…, columns=[…])` **drops it, silently** | — | **stricter**: a warning naming it |
+| integers with a gap | **upcast to float** (`1` → `1.0`) | nullable: `1` stays `1` | keep core's |
+| integer keys | integer column labels | the view crashes (W2) | core's own rule, column names are strings and numeric ones become `var<n>` (grid.md §7), applied everywhere |
+| nested mappings | `json_normalize`: **every level**, `a.z.q` (`sep=`, `max_level=`) | one level; the inner mapping stays a value | **one level by default**; a written depth and separator, as `json_normalize`'s |
+| `explode` of `[]`, `None` | **the row kept**, `NaN` | the row dropped (I2) | as pandas: the row kept, its item absent (owner, I2) |
+
+**So the rule for uneven rows is pandas'**: mappings unnest **by key, the
+union of the keys**; sequences **by position, as wide as the longest row**;
+anything missing is a gap. **Where pandas is silent, core is stricter**: an
+unopenable value fails its row; an extra key against declared fields is
+warned; a gap is absent, never an upcast `NaN`.
+
 To settle with the owner: discovered fields written into the expression
 after the first run (rule 1); an extra field a warning, not a refusal (rule
-3); the naming convention for keys that aren't strings.
+3); nested mappings one level by default, with a written depth and
+separator.
