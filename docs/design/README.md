@@ -23,7 +23,7 @@ done to a `Kernel` in a plain Python session**, with only core installed.
 | [plan.md](plan.md) | **The dev plan**: what's next, in order, what core will and won't build, and the changes the app will see |
 | [observations.md](observations.md) | Key dev observations: what's good about the design, its biggest flaws, and what would help most |
 | [grid.md](grid.md) | **The grid**: what a step holds, how each verb maps a grid to a grid, where that representation is inconsistent, and a starting shape for consolidating it |
-| [blocks.md](blocks.md) | **Blocks and moves** (draft, 2026-11-22): a pick is an address and a block what it holds; what a parameter accepts, run, with seven places it disagrees with itself (A1–A7); the four moves × two axes that rearrange cells; a dev plan (B0–B4, R1–R2) |
+| [blocks.md](blocks.md) | **Blocks and moves** (draft, 2026-11-22): a pick is an address and a block what it holds; what a parameter accepts, run, with seven places it disagrees with itself (A1–A7); the four moves × two axes that rearrange cells; freezing a block (C56); the four kinds of iterable a cell can hold; a dev plan (B, F, I, R pieces) |
 | [app-update-1.0.3.md](app-update-1.0.3.md) | **Moving the app to core 1.0.3**: what changes for what it does, the shims to delete, saving sessions, stages, bulky cells on disk |
 | [saving.md](saving.md) | Saving and loading a session: what a saved session holds, when you can save, and exactly when something can be lost |
 | [core-asks/](core-asks/) | **The app's requirements** of core: its model of references, picks and lineage (`model.md`), its plan and the probe (`probe.py`) that tests every ask |

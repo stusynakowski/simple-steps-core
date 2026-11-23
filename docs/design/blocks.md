@@ -5,7 +5,8 @@
 > parameter accepts**, run today
 > ([grid-probes/blocks.py](grid-probes/blocks.py)), and where it disagrees
 > with itself; §4 the **primitives** that rearrange cells, with every
-> modifier and combine written in them; §5 the dev plan; §6 the questions.
+> modifier and combine written in them; §5 the **kinds of iterable** a cell
+> can hold, and what core opens; §6 the dev plan; §7 the questions.
 > It builds on [grid.md](grid.md) (§8 the definitions, §10 every move) and
 > doesn't replace it. Nothing here is built.
 
@@ -125,6 +126,39 @@ What it buys:
   Through the block, all of them ask one rule: does this block (or literal),
   under this verb, fit this parameter?
 
+### Freezing a block
+
+*Owner, 2026-11-22: "freezing makes more sense", with good saving.* This
+settles the app's 015 C56.
+
+**Proposed:** `k.freeze(name, pick)` declares a **data step** holding the
+block's values as they are now. A data step's values are its expression, so
+the copy can be typed into, and it is **cut loose**: no lineage and no link,
+and a change upstream doesn't reach it. (Today's linked copy stays as it is:
+a pick declared as a step, `k["cp"] = wf["f"]["x"]`.)
+
+| A cell of the block that is | Freezing |
+|---|---|
+| `known` | its value, exactly, with its type |
+| **absent** (a `stack` or `join` gap) | absent, not `None` (needs F1) |
+| `pending` (its step hasn't run) | refused: run it first |
+| `failed` or `blocked` | refused, naming the rows: a failure isn't data |
+| in a `stale` step | refused, saying so; `stale=True` freezes it as it is, on purpose |
+
+**Saving already holds it** (run 2026-11-22,
+[grid-probes/freezing.py](grid-probes/freezing.py)): a data step of floats
+with gaps, strings, lists, dicts, numpy arrays (dtype kept) and nullable
+integers comes back from `k.save`/`Kernel.load` identical, with the same cell
+states, with or without outputs.
+
+**Two things to fix first**, found by the same run. Each also matters for
+any data the user pastes in:
+
+| # | Found | Should be |
+|---|---|---|
+| **F1** | Written into a data step, an **absent** cell becomes a **known `None`**: the gap is lost silently | absent stays absent |
+| **F2** | A nullable float column whose values are whole numbers, `Float64 [1.0, <NA>]`, is stored as **`Int64`**: `1.0` comes back as `1`. `[1.5, <NA>]` stays float | a column keeps its type |
+
 ## 3. What a parameter accepts
 
 Every argument reaches a call in one of three ways:
@@ -231,7 +265,63 @@ them"), here as a list rather than a rebuild.
 | window | unnest rows **aligned**: when the list is as long as the rows it was nested from, each item goes back to its row |
 | cross product | match **all** (every pair) |
 
-## 5. A dev plan
+## 5. Iterables: what core iterates, and what it opens
+
+*Owner, 2026-11-22: "this is why I think we need to define good primitives
+and build off of them. Different kinds of iterables."*
+
+Core iterates at the two levels of §1:
+
+| Level | Core iterates | Over | Verbs |
+|---|---|---|---|
+| **the block** | its rows | one call per row | `map`, `filter`, `group`, `expand` |
+| | its groups | one call per group (partition) | `collapse` |
+| | the whole block | one call | `table` |
+| | a grid of settings | one call per combination | `sweep` |
+| | *its columns* | *one call per column* | *none: a gap* |
+| | *a window of rows* | *one call per window* | *none: the window gap (§4)* |
+| **a cell's value** | its items, into rows | unnest rows | `expand` |
+| | its fields, into columns | unnest columns | `widen` |
+
+At the value level, everything depends on **what kind of iterable** the cell
+holds. **Run 2026-11-22**
+([grid-probes/iterables.py](grid-probes/iterables.py)):
+
+| Cell value | `expand` (into rows) | `widen` (into columns) |
+|---|---|---|
+| list `[1, 2]` | ✓ 2 rows | **completes with no columns: the list is dropped silently** (I1) |
+| tuple `(1, 2)` | ✓ 2 rows | ✓ `var0`, `var1` |
+| dict `{'a': 1, 'b': 2}` | ✓ rows `key`, value | ✓ columns `a`, `b` |
+| set, str, ndarray, range, DataFrame | the cell fails at run | **dropped silently** (I1) |
+| `[]`, `None` | **the row disappears** (I2) | dropped silently (I1) |
+
+There is no rule, only behaviour per type: a list and a tuple are both
+sequences, and `widen` opens one and drops the other.
+
+**Proposed: four kinds, decided by what the value is, the same for every
+verb:**
+
+| Kind | Python | Unnest into rows | Unnest into columns |
+|---|---|---|---|
+| **sequence**: ordered, by position | list, tuple | an item per row, with `#<step>.idx` | a column per position, `var0…` |
+| **mapping**: by key | dict, a record (`NamedTuple`, `dataclass`, `TypedDict`) | a row per key: `key`, value | a column per key or field |
+| **unit**: core never opens it | str, bytes, numbers, None, arrays, images, DataFrames, any other object | refused when declared, if the column's type says so; else the cell fails, naming the kind | the same |
+| **not openable as it is** | set (no order), range and generators (lazy) | refused, naming the fix: a tool that sorts, or makes a list | the same |
+
+An array is a unit: a tool says what its parts are (pixels, channels, tiles;
+decisions.md AR), and returns a sequence or a record. **No kind is ever
+dropped silently** (P-D2's "nothing is lost silently").
+
+**To decide:** an empty sequence or `None` under `expand`. Its row
+disappears today. pandas keeps one row with a gap. Proposed: keep the row,
+its item **absent**, so a row is never lost by unnesting.
+
+| # | Found | Should be |
+|---|---|---|
+| **I1** | `widen` of a list, set, str, array, range or DataFrame completes with no columns: the column is gone, nothing said (the arrays were plan P1's W-arr; it's wider than arrays) | a list opens by position, as a tuple does; any other kind is refused, naming it |
+| **I2** | `expand` of `[]` or `None` drops the row | one row, its item absent (to decide) |
+
+## 6. A dev plan
 
 Each piece is small, and each behaviour change is confirmed first.
 
@@ -244,13 +334,19 @@ Each piece is small, and each behaviour change is confirmed first.
 | **B4** | `k.accepts(operation, parameter)` and `k.fits(…)` for the UI: what a parameter takes under its modifiers, and how a pick would reach it | additive | B2, B3 |
 | **R1** | The primitives (§4) in rules.md, every modifier and combine listed as one; the restructurings as recipes | docs | B0 |
 | **R2** | The three missing options: match all, aligned unnest, nest by a column's values | behaviour, one piece each | R1, the owner's choice of which |
+| **F1, F2** | A data step keeps absent cells absent, and a column its type | behaviour, one piece each | — |
+| **F3** | `k.freeze(name, pick)` (§2, *Freezing*) | additive | F1, F2, B2 |
+| **I1** | `widen` opens a list by position, and refuses any kind it can't open | behaviour | R1 |
+| **I2** | `expand` of an empty sequence or `None` keeps the row (once decided) | behaviour | the owner's choice |
+| **I3** | The four kinds of iterable (§5) in rules.md; a column's type says its kind, so unnesting a unit is refused when declared | docs, then behaviour | R1 |
 | (K32) | Verbs rebuilt on the primitives | large, parked | R1 |
 
 **Suggested order:** B0, B1, then B3's A1 and A4 (the two that crash or
-fail raw), B2, B4. R1 alongside, since it's docs only. R2 when the app
-needs a window or a pivot.
+fail raw), B2, B4. Freezing next: F1, F2, then F3. R1 and I3 alongside, since
+they're docs; I1 with them, since it loses data silently. R2 and I2 when the
+app needs a window or a pivot.
 
-## 6. To settle with the owner
+## 7. To settle with the owner
 
 1. **Block** as the general word, with cell, row and column as its cases;
    and the n×m case renamed (`rows × columns`?). **The two levels** (§1):
@@ -264,3 +360,10 @@ needs a window or a pivot.
    under `map`? Proposed: no, it passes one cell; a whole column is a whole
    block from a step whose rows aren't the input's.
 5. **R2**: which of pivot, window and cross product first?
+6. **Freezing** (§2): refuse pending, failed and stale cells (stale allowed
+   with `stale=True`); cut loose, no link back. Should the frozen step note
+   where it came from, for display only (never hashed)?
+7. **The four kinds of iterable** (§5): a list opens as a tuple does; an
+   array is a unit, opened only by a tool; set, range and generators refused.
+8. **I2**: an empty list or `None` under `expand` keeps its row, the item
+   absent?
