@@ -34,8 +34,7 @@ surface needs none of its own: its one job is to choose a canonical form
 |---|---|---|
 | **input** | **bind** (by position, by name, given) and the restructurings on the input: take, convert, nest, join together | in a fixed order: bind, take, convert each cell, nest |
 | **call** | **split into pieces, one call per piece**: one piece; each row; each group (a key); each combination of settings | exactly one per step |
-| **call execution** | the wrappers around each call: retry, time limit, catch a failure, the call's own progress | by nesting: written order means something |
-| **step execution** | the controls around all the calls: progress, cancel, stop after n failures, a time limit, how many at once, a rate | each independent |
+| **execution** | a few primitives, each at a **level** (each call, the step): time limit, progress, on failure, cancel, pace | within a level, by nesting: written order means something |
 | **output** | **land** (its own row; a new row per call; every row of its scope) and the restructurings on the output: unnest, take, convert, name | in a fixed order: land, unnest, take, convert, name |
 | **tool** | none of its own: the user's function, core's cell tools (`identity`, `gather`, `total`, …), or a restructuring used as a step | — |
 
@@ -98,8 +97,10 @@ That is why `collapse` has crossed classes.
 | # | When | Then | Status |
 |---|---|---|---|
 | **R24** | zero calls (data, the empty step) | no input but the data, no execution, the output is the data | proposed |
-| **R25** | execution modifiers | two classes (owner, 2026-11-23): **call execution** wraps each call; **step execution** wraps all the calls together. Whatever order they are written in among the other modifiers; within a level, the written order is kept (O1 was the two levels mixed) | decided: two levels |
+| **R25** | execution modifiers | one class, each primitive at a level (owner, 2026-11-23): `per="call"` wraps each call; `per="step"` wraps all the calls together. Whatever order they are written in among the other modifiers; within a level, the written order is kept (O1 was the two levels mixed) | decided: two levels |
 | **R25a** | a call's own progress | needs a tool that reports it (a callable core passes in); asked of a tool that doesn't, it is said when declared | proposed |
+| **R25c** | a primitive at a level it has no sense at (`pace` per call; `cancel` per call) | refused, naming the levels it has | proposed |
+| **R25d** | an execution modifier | never changes the value of a cell that succeeds; a default on failure is written, and shown as a change of value | decided (the test, grammar.md §6.4) |
 | **R25b** | the step's progress, cancel, stop after n failures, at once, rate | need more than one call; with one call, only cancel and a time limit apply | proposed |
 
 ### Output → names
