@@ -38,8 +38,8 @@
 |---|---|---|---|---|
 | **JN7** | **`on=` is written**: no join on "every shared column" | ✓ refused without it | joins on all shared columns, silently | decided: core's |
 | **JN8** | `how=` inner, left, right, outer; **the unmatched side's cells absent** | ✓ | `NaN` | decided: core's |
-| **JN9** | **Keys repeated on both sides** multiply the rows (2 × 2 = 4): **said**, naming the key and the counts; an optional expectation, **`expect="one_to_one"`, `"one_to_many"`, `"many_to_one"`**, refuses it when broken (pandas' `validate=`) | 4 rows, **silently** | silently, or `validate=` | proposed |
-| **JN10** | **A missing key** (`None`, absent) **matches nothing**, as in SQL: a missing key identifies nothing; the row is kept or dropped by `how=` like any unmatched row, and said | **`None` matches `None`** | matches | **to decide** |
+| **JN9** | **A join expects each key at most once on each side: `one_to_one` by default.** Repeated keys are refused, naming the key and the counts, unless the relationship is written: `expect="one_to_many"`, `"many_to_one"` or `"many_to_many"` (pandas' `validate=`, made the default) | 4 rows, **silently** | silently, or `validate=` | **decided** (owner, 2026-11-23: "expect one to one") |
+| **JN10** | **A missing key** (`None`, absent) **matches nothing**, as in SQL: a missing key identifies nothing; the row is kept or dropped by `how=` like any unmatched row, and said | **`None` matches `None`** | matches | **decided** (owner, 2026-11-23) |
 | **JN11** | **Key types that differ** (text against integers): **refused when declared**, naming both types and the fix (convert one) | **the step fails at run, no reason shown (JF2)** | raises | proposed |
 | **JN12** | **Shared non-key columns**: suffixed **`_left`, `_right`** (says which side) | ✓ | `_x`, `_y` | decided: core's |
 | **JN13** | **Several keys**, `on=["k", "j"]` | ✓ (`on` takes a list) | ✓ | decided |
@@ -81,13 +81,16 @@ Written on the argument (an input modifier; placeholder
 | **on a tool's input** | **lookup** (§E); data matched from another step for one call |
 | **on a tool's output** | — (an output lands on its call's row; joining outputs is a step) |
 
+## Decided, 2026-11-23
+
+JN10 (a missing key matches nothing), JN9 (`one_to_one` by default; other
+relationships written).
+
 ## To decide
 
-1. **JN10**: a missing key matches nothing (SQL), or `None` matches `None`
-   (today, pandas)?
-2. **JN9**: repeated keys said, with an optional `expect=` that refuses
-   when broken?
-3. **JN16**: the cross product added?
-4. **§E, lookup**: its conditions JN18–JN21.
+1. **JN16**: the cross product: where it is needed (the owner is thinking
+   it through).
+2. **§E, lookup**: its conditions JN18–JN21 (explained further to the
+   owner).
 5. JN4, JN11, JN22 follow decisions already made; accepted unless the owner
    objects.
