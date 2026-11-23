@@ -1,0 +1,77 @@
+# The shorthands: is each one any good?
+
+> **Draft, 2026-11-23, for the owner.** The start of the shorthand map
+> (roadmap phase 1b). The full map, each shorthand written out in the
+> canonical form, comes once the primitives and their conditions are solid;
+> this page judges **whether each of today's verbs is worth keeping as a
+> shorthand at all**.
+
+*Owner, 2026-11-23: "I see these as potentially fine modifiers and tools
+within an expression. The point is to consolidate multiple primitives
+across components into one shorthand verb. They will be built off the
+primitives. My question is whether they are any good, or any useful."*
+
+## The tests
+
+A shorthand earns its place when it is:
+
+1. **a common need**: people reach for it often;
+2. **one reading**: it opens into exactly one canonical form (H1);
+3. **not redundant**: nothing simpler (a pick, another shorthand) does it;
+4. **clearly named**: no clash with the grammar's own words.
+
+## Today's, judged
+
+"Built from" uses the placeholders of canonical.md and primitives.md.
+
+| Shorthand | Built from | Verdict | Why |
+|---|---|---|---|
+| **`map`** | each row · land on its row | **keep** | the most common of all; known from functional programming |
+| **`filter`** | each row · keep or drop its row (a tool's `bool`, or a condition) | **keep** | very common; one name for keeping rows, by a test or by a condition |
+| **`expand`** | each row · unnest into rows | **keep** | common (pandas' `explode`) |
+| **`collapse(by=)`** | each group · nest over the group · a new row per group | **keep** | the group-by aggregate (Stata's word) |
+| **`group`** | each row · land beside the input's columns | **keep the idea, rename** | "add a column, keep the others" (dplyr's `mutate`, pandas' `assign`): very useful; "group" names something else |
+| **`table`** | one call · nest the whole block as a table | **keep the idea, rename** | whole-table tools (transpose, describe); "table" names what a step holds |
+| **`sweep`** | each combination of settings | **keep** | parameter studies, grid searches: niche, valuable |
+| **`source`** | one call, no input | **keep** | loading data: essential |
+| **`auto`** | writes the most likely of the others | **keep, as the resolver** | it is H2; never stored as a verb (written as what it chose) |
+| **`sort`** | take rows: reorder | **keep** | common; no pick does it |
+| **`distinct`** | take rows: one per key | **keep** | common; no pick does it |
+| **`drop`** | take columns: all but these | **keep** | easier than listing what to keep |
+| **`widen`** | unnest columns (a dict or record) | **keep** | JSON in |
+| **`pack`** | nest columns into a dict | **keep** | JSON out; less common |
+| **`rename`**, **`name`** | name: as a step, on the output | **merge into one** | one primitive in two places, one word |
+| **`cast`** | convert: on the input, or as a step | **keep** | str → float is everyday |
+| **`expect`** | a check on the output | **keep** | cheap robustness |
+| **`retry`**, **`timeout`**, **`try_except`**, **`breaker`** | one execution primitive each, at a level | **keep, as the primitives themselves** | not consolidations: each is already one primitive (grammar.md §6.4) |
+| **`join`** | match by key · join together along columns | **keep** | essential |
+| **`stack`** | join together along rows | **keep** | essential |
+| **`zip_`** | match by position or by id · join together along columns | **keep, by id only** | pairing by position goes silently wrong when the two orders differ |
+| **`select`** | take columns | **drop** | a pick does it: `wf["p"][["x", "y"]]` |
+| **`slice`**, **`select(rows=)`** | take rows by position | **drop** | a pick's row part does it: `wf["p"][0:10]` |
+| **`copy`** | take | **drop** | a pick declared as a step is the linked copy; freezing is the by-value one |
+
+**Count:** about twenty to keep, three to drop, two to merge into one, two
+to rename.
+
+## Useful ones that are missing
+
+Each built from the same primitives (primitives.md):
+
+| Shorthand (placeholder) | Built from | Like |
+|---|---|---|
+| a group's value beside each row | each row · nest over `group(by=…)` · land on its row | pandas' `transform` |
+| a window | each row · nest over `window(n)` · land on its row | rolling means, lags, running totals |
+| pivot | partition by a key · nest columns named by a column's values · unnest columns | `pivot_wider` |
+| melt | nest columns · unnest into rows | `pivot_longer` |
+| a cross product | match all pairs · join together | `crossing` |
+| fill | take each missing cell's value from the row above | `fillna(method="ffill")` |
+| split | one text column into several (a tool returning a record) | `separate` |
+
+## To settle with the owner
+
+1. The verdicts: anything kept that shouldn't be, or dropped that should
+   stay?
+2. Which missing ones are worth adding, and when (phase 5)?
+3. Names for the two renamed and the one merged: with the rest of the
+   naming (phase 1).

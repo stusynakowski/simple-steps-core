@@ -71,16 +71,13 @@ primitives.md §6, canonical.md §7).
 
 | Toss | Why |
 |---|---|
-| verbs as single modifiers that cross classes (`map`, `collapse`, `filter`, `group`, `expand`, `table` as they are) | each mixes call, input and output (primitives.md §5); they come back, if at all, as named presets of the canonical form |
+| the verbs **as they are built today**: each its own mechanism, mixing call, input and output (primitives.md §5) | the verbs themselves are kept as **shorthands, rebuilt on the primitives**: consolidating several primitives across components into one verb is the point (owner, 2026-11-23). Which are worth it: [shorthands.md](shorthands.md) |
 | modifier order as written deciding meaning | O1: `[retry, map]` retries nothing |
 | binding by position across a block, by a column's type, and a default silently beating a same-named column | A4, H3 case b, G2: guesses beyond a reasonable doubt |
 | conversions decided at the call from the parameter's type (`_CONVERTS`) | A6, A7: the parameter's type chose the level |
-| several spellings of one primitive (`filter` with a condition, `slice`, `select(rows=)`, a pick's row part) | primitives.md §3: up to five spellings of "take rows" |
-| `copy` beside a pick declared as a step | the same thing twice |
+| shorthands a pick already does: `select`, `slice`, `select(rows=)`; and `copy` | redundant (shorthands.md); up to five spellings of "take rows" today |
 | `auto` deciding from the data at run (`compile_operation`'s run-time `auto`) | a step's meaning must be fixed when declared |
-| `mod.group`, `mod.table` as names | they clash with "group" and "table" |
+| the names `group` and `table` for those verbs | the ideas kept, renamed: they clash with "group" and "table" (shorthands.md) |
 
-**To decide:** `sweep` (keep as a call over combinations of settings?);
-`source` (a tool with no input: keep as is?); `expect` (a check on the
-output: keep as an output modifier?); `breaker` (becomes execution's
-"stop after n failures", per step).
+**`sweep`, `source`, `expect`, `breaker`:** proposed kept, in shorthands.md
+(`breaker` as execution's "stop after n failures", per step).
