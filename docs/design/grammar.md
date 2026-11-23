@@ -1,9 +1,10 @@
 # The step grammar
 
 > **Draft, 2026-11-23, for the owner.** The start of the grammar that closes
-> the system ([blocks.md](blocks.md) §0, plan piece G0). This page begins
-> with **what must be resolved for any expression** (§1–§4), then **the
-> owner's heuristics** for resolving it (§5). The shape (which words
+> the system ([blocks.md](blocks.md) §0, plan piece G0). It begins **top
+> down**, with how a user should see an expression (§0); then **what must
+> be resolved for any expression** (§1–§4), then **the owner's heuristics**
+> for resolving it (§5). The shape (which words
 > fill which component) and the numbered rules (how the components depend
 > on each other) come next, on this page.
 
@@ -12,6 +13,76 @@ valid expression. When we specify a tool, modifiers, picks, or modifiers to
 the pick, we converge on the components … everything needs to be obvious
 and intuitive for how things are handled, but the conventions are clear. So
 we can parse the expression to converge on the exact components."*
+
+## 0. Top down: what the user sees
+
+*Owner, 2026-11-23: "I usually start from a top-down perspective before
+sorting out those specifics. Even if we have a system that is closed, if it
+doesn't make sense to the user we defeat the purpose of why we are building
+this. I find the 'stupider' the question, the more fundamental and
+important the question is." And: "It's hard to think about multiple ideas
+at once, but good compartmentalizing helps people perform complicated
+things, if they can break things down into intuitive, isolated parts."*
+
+**The goal:** a user writes an expression that is **really simple**, in
+the style of functional programming, while the necessary details are still
+there. They are handled in **isolated parts**, so the user thinks about one
+at a time.
+
+### What is solid: the inputs
+
+Every expression has inputs, and **they are never fuzzy**:
+
+| Input | Is | What the user writes |
+|---|---|---|
+| **a literal** | a value, written in the expression. It persists with it | `offset=1.0` |
+| **a resource** | an object the tool needs, such as a model or a connection: **a literal, as far as the expression is concerned** | `res["llm"]` |
+| **a reference** | data from a previous step, and **always structured**: a grid of cells | `wf["p"]` |
+
+A reference is always structured, so it is always clear:
+
+- **The step's name is always given**: `wf["p"]`.
+- **Columns are named by strings**, one or a list: `["temp_c"]`, `[["x", "y"]]`.
+- **Rows are indices**, and can be picked as they are today: a row, a list,
+  a range, a condition.
+
+(One difference between a literal and a resource, behind the scenes: a
+literal is saved in the expression; a resource is saved as its settings,
+and the object is built when the step runs, its secrets never saved.)
+
+### What is fuzzy: the exact function, and how it runs
+
+What is open is **which function the user wants, exactly, and how it is
+run** over those inputs: how many calls, what each call is given, what
+happens on an error, what comes out. That is where every finding so far
+(A1–A7, O1, I1, I2) has been.
+
+### What resolves it: three sources of information
+
+| Source | Tells core | Example |
+|---|---|---|
+| **the data** | a consistent structure, and the types within it | `p` has a column `temp_c` of floats |
+| **the tool** | the type hints on its inputs and its output | `to_f(temp_c: float) -> float` |
+| **the modifiers** | what the user has said about how to run it | `mod.collapse(by="ward")` |
+
+Together they converge on the exact function (§1, and §5's H9).
+
+### The isolated parts, as plain questions
+
+Each part is one plain question, so a user can think about one at a time.
+They are the same as §5's classes of modifier (H7), in words:
+
+| Plain question | Part | Answered by | Components (§2) |
+|---|---|---|---|
+| **What goes in?** | the inputs | the literals, resources and references written | C2, C3 |
+| **What does it do?** | the tool | the tool's name | C1 |
+| **How is each input handed over?** | input | input modifiers, or the types | C3, C4 |
+| **How many times is it run?** | call | a call modifier, or the types | C5 |
+| **What if a call goes wrong?** | execution | execution modifiers | C6 |
+| **What comes out, and where does it go?** | output | output modifiers, or the return type | C7, C8, C9 |
+
+*To check with the owner:* are these the questions a user would ask, in
+their words?
 
 ## 1. The idea: an expression converges on its components
 
@@ -225,12 +296,29 @@ or asks.
 3. **The conventions**: for each component, its default, written as one
    table, so "obvious and intuitive" is one place to look.
 
-To settle with the owner:
+## 7. Open questions
 
-- Are the nine **C1–C9** the right set? Anything missing (for example, the
-  step's name as part of the expression), or anything that should be
-  merged?
-- **The empty step, data and pick** (§3): should they be written as tool
-  calls too (a pick as `identity` over a block, data as a `source`), so
-  there is only one kind of expression? Core already stores a DataFrame
-  step this way in some saved files (`identity[mod.source()]()`).
+Recorded 2026-11-23, to settle once the top-down view (§0) is agreed. The
+owner works top down first, then these.
+
+**From §5:**
+
+1. **H3, binding by type.** When exactly one column fits a parameter
+   whose name matches none, core binds it by type and writes it out
+   (today). Does that stay (one reading, H2), or must every binding be by
+   name or written?
+2. **H7, `filter`, `expand`, `group`.** Each is an output modifier, but
+   also implies one call per row. Output modifiers that fill in the call,
+   or call modifiers?
+3. **H7, `cast`.** It changes values. Is a conversion allowed as an input
+   preparation, or is it a tool?
+
+**From §2 and §3:**
+
+4. Are the nine **C1–C9** the right set? Anything missing (for example, the
+   step's name as part of the expression), or anything that should be
+   merged?
+5. **The empty step, data and pick** (§3): should they be written as tool
+   calls too (a pick as `identity` over a block, data as a `source`), so
+   there is only one kind of expression? Core already stores a DataFrame
+   step this way in some saved files (`identity[mod.source()]()`).
