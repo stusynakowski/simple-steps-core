@@ -50,8 +50,8 @@
 
 | # | Condition | Today | pandas | |
 |---|---|---|---|---|
-| **JN16** | **Every pair** of rows: the row count is the **product**, known exactly; shared names suffixed as JN12 | **refused: "needs on="** | `how="cross"` | proposed |
-| **JN17** | A product past a size (say, 1,000,000 rows): said before the run | — | — | proposed |
+| **JN16** | **Every pair** of rows: the row count is the **product**, known exactly; shared names suffixed as JN12 | **refused: "needs on="** | `how="cross"` | decided |
+| **JN17** | A product past a size (say, 1,000,000 rows): said before the run | — | — | decided |
 
 ## E. Lookup: another step's value, per row (grammar.md N3)
 
@@ -62,10 +62,10 @@ Written on the argument (an input modifier; placeholder
 
 | # | Condition | |
 |---|---|---|
-| **JN18** | **Exactly one match**: that row's cell, given to the call | proposed |
-| **JN19** | **No match**: the cell is **absent** (so the call gets what a missing value gets: grammar.md N2, the cell fails unless the parameter is `Optional`) | proposed |
-| **JN20** | **Several matches**: if the parameter takes a list, they are **nested into one** (H6), in their order; otherwise **refused when declared** if the keys are known to repeat, else that row fails, naming the key | proposed |
-| **JN21** | Keys follow JN10, JN11, JN14 (missing keys match nothing; types must agree; list keys need `read=`) | proposed |
+| **JN18** | **Exactly one match**: that row's cell, given to the call | decided |
+| **JN19** | **No match**: the cell is **absent** (so the call gets what a missing value gets: grammar.md N2, the cell fails unless the parameter is `Optional`) | decided |
+| **JN20** | **Several matches**: if the parameter takes a list, they are **nested into one** (H6), in their order; otherwise **refused when declared** if the keys are known to repeat, else that row fails, naming the key | decided |
+| **JN21** | Keys follow JN10, JN11, JN14 (missing keys match nothing; types must agree; list keys need `read=`) | decided |
 
 ## F. Before the run (the plan)
 
@@ -84,13 +84,11 @@ Written on the argument (an input modifier; placeholder
 ## Decided, 2026-11-23
 
 JN10 (a missing key matches nothing), JN9 (`one_to_one` by default; other
-relationships written).
-
-## To decide
-
-1. **JN16**: the cross product: where it is needed (the owner is thinking
-   it through).
-2. **§E, lookup**: its conditions JN18–JN21 (explained further to the
-   owner).
+relationships written), **JN16–JN17** (the cross product added, said past a
+size; its uses: showing gaps, a calendar scaffold, every pair, every
+combination of two tables), **JN18–JN21** (lookup, Excel's `VLOOKUP`
+without its silent first match or type mismatch). The terms may change
+later (owner: "I might change the terms to something more intuitive later,
+but these are fine").
 5. JN4, JN11, JN22 follow decisions already made; accepted unless the owner
    objects.
