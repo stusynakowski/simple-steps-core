@@ -408,17 +408,40 @@ multiple calls over zero rows make none (the data: the step completes, with no r
 step already current isn't run again, its kept output reused; a cancelled
 run stops part way. The last two are execution's outcomes (§6.4).
 
-### 6.4 Execution: how each call runs
+### 6.4 Execution: at two levels, each call and the step
 
-Each axis is optional and independent of the others; their order is the
-one place where the written order means something (blocks.md §0):
+*Owner, 2026-11-23: "I would do inner, corresponding to each call, then
+executional components to each step … think a long process where we might
+want to know the progress of the step and the progress of each call."*
+
+**The step wraps the calls; each call wraps the tool.** Each axis is
+optional and independent; within a level, the written order means
+something (blocks.md §0).
+
+**Each call** (what happens to one run of the tool):
 
 | Axis | Classes |
 |---|---|
 | **E-r. Retry** | `E-r.none` · `E-r.n` up to n attempts |
-| **E-t. Time limit** | `E-t.none` · `E-t.attempt` per attempt · `E-t.all` for all the attempts |
-| **E-f. On failure** | `E-f.cell` the cell fails, with its reason (the default) · `E-f.default` a default value instead · `E-f.stop` stop after n failures (a breaker) |
-| **E-p. Progress** | `E-p.none` · `E-p.shown` progress reported, and the run can be cancelled (K23) |
+| **E-t. Time limit** | `E-t.none` · `E-t.attempt` per attempt · `E-t.call` for all of a call's attempts |
+| **E-f. On failure** | `E-f.cell` the cell fails, with its reason (the default) · `E-f.default` a default value instead |
+| **E-p. Its own progress** | `E-p.none` · `E-p.reported`: the tool reports how far it is through its call. Needs the tool to report it (a callable core passes in): core can't see inside a call |
+
+**The step** (what happens across all its calls):
+
+| Axis | Classes |
+|---|---|
+| **S-p. Progress** | `S-p.none` · `S-p.shown`: calls done of calls in all, failed, retrying; each call's time so far. Core can always measure it |
+| **S-c. Cancel** | `S-c.none` · `S-c.yes`: the whole step can be stopped (K23) |
+| **S-f. Stop after failures** | `S-f.none` · `S-f.n` stop after n failed calls (a breaker: it counts across calls, so it is the step's) |
+| **S-t. Time limit** | `S-t.none` · `S-t.step` for the whole step |
+| **S-a. At once** | `S-a.one` one call at a time (today) · `S-a.n` up to n calls at once |
+| **S-r. Rate** | `S-r.none` · `S-r.n` at most n calls a second (a model's API, a web service) |
+
+**O1 was the two levels mixed:** `[retry, map]` put `retry` at the step's
+level ("retry the whole step"), where nothing raised; `[map, retry]` put it
+at each call's. Named levels make both meanings writable, and neither
+accidental.
 
 Fixed by **execution modifiers** only. The data and the tool never imply
 them.

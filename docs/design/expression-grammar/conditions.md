@@ -97,7 +97,9 @@ That is why `collapse` has crossed classes.
 | # | When | Then | Status |
 |---|---|---|---|
 | **R24** | zero calls (data, the empty step) | no input but the data, no execution, the output is the data | proposed |
-| **R25** | execution wrappers | each wraps **every call**, whatever order they are written in among the other modifiers; among themselves, the written order is kept (O1) | proposed |
+| **R25** | execution modifiers | two levels (owner, 2026-11-23): **each call**'s wrap each call; **the step**'s wrap all the calls together. Whatever order they are written in among the other modifiers; within a level, the written order is kept (O1 was the two levels mixed) | decided: two levels |
+| **R25a** | a call's own progress | needs a tool that reports it (a callable core passes in); asked of a tool that doesn't, it is said when declared | proposed |
+| **R25b** | the step's progress, cancel, stop after n failures, at once, rate | need more than one call; with one call, only cancel and a time limit apply | proposed |
 
 ### Output → names
 
