@@ -31,7 +31,7 @@ structure becomes several variables.
 | # | Condition | Today | |
 |---|---|---|---|
 | **U8** | The fields come from **exactly one** place, in this order: **declared** (`columns=[…]`); **the type** (a record's or `TypedDict`'s fields, from the tool's return type); **discovered** from the data | declared ✓; type: only at run (W4); discovered ✓ | decided |
-| **U9** | **Discovered fields are written into the expression** after the first run, so they are declared from then on; the shape can't change because the data did | not written | **to decide** |
+| **U9** | **Discovered fields are not written into the expression** (owner, 2026-11-23: "I would not do that; I would have hardcoded methods and conditions, conventions, to handle any possible issues"). They are discovered on every run, by the fixed conventions of this page (U10–U24), so every shape the data can take is handled the same way. A step reading a discovered field is checked when it runs: a field it needs that is absent fails that reader's rows, naming the field | not written | **decided** |
 | **U10** | Discovered from **mappings**: the **union of the keys, first seen first** | ✓ | decided (pandas) |
 | **U11** | Discovered from **sequences**: **positions 0 to the longest − 1**, named `var0`, `var1`, … | tuples ✓ | decided (pandas; tidy T1) |
 | **U12** | **Nothing to discover from** (zero rows, every row empty): no fields, **said**; nothing is written until a row has a field | every row `None`: no columns, a warning that the rows held no dict ✓; **zero rows: no columns, nothing said** | proposed |
@@ -42,7 +42,7 @@ structure becomes several variables.
 |---|---|---|---|
 | **U13** | A row **missing** a field: that cell is **absent** | ✓ mappings; **sequences fail (W3)** | decided |
 | **U14** | A field **present with the value `None`**: that cell is `None`, known, apart from absent (tidy T9) | ✓ | decided |
-| **U15** | A row with a field **not among the fields** (declared, or written after discovery): **a warning naming the field and the rows**; not added | — (pandas drops it silently) | **to decide**: warning, or refused |
+| **U15** | A row with a field **not among the declared fields**: **a warning naming the field and the rows**, and the convention applied: the declared fields are kept, the extra one is not added. Where a case can't be handled by a convention, it is **refused, or an error saying what happened** (owner, 2026-11-23: "warn, but have a good convention for what we have currently; do what you can, but refuse or put an error with w…", *the end of the sentence cut off: read as "with what happened"*) | — (pandas drops it silently) | **decided** |
 | **U16** | A declared field **missing from every row**: its column is all absent, with a warning | ✓ absent | proposed: the warning |
 
 ## D. Names
@@ -52,14 +52,14 @@ structure becomes several variables.
 | **U17** | A field's name is a **string** (tidy T1). An integer key `1` is named `var1`, as a numeric column name is | **integer keys crash the view (W2)** | decided (T1) |
 | **U18** | A key starting with `#` is renamed without it (`#a` → `a`), and said | **the field vanishes silently (W5)** | proposed |
 | **U19** | Two fields with **one name** after naming (`1` and `"1"`; `#a` and `a`): **suffixed**, `a`, `a_1`, and said | **the step fails (W6)** | decided (tidy C2) |
-| **U20** | A field named like **a column kept beside it**: suffixed the same way, `a_1`, and said; `replace=True` written: the field replaces the column | **the whole step fails**; `replace=True` ✓ | **to decide**: suffixed, or refused |
+| **U20** | A field named like **a column kept beside it**: suffixed the same way, `a_1`, and said; `replace=True` written: the field replaces the column | **the whole step fails**; `replace=True` ✓ | **decided**: suffixed (owner, 2026-11-23) |
 | **U21** | Each field keeps **its name and its position** together (tidy T3) | — | decided |
 
 ## E. Depth
 
 | # | Condition | Today | |
 |---|---|---|---|
-| **U22** | **One level** by default: a nested mapping stays a value | ✓ | **to decide**: one level, or all (as `json_normalize`) |
+| **U22** | **One level** by default: a nested mapping stays a value. **Recursive expansion is an extension**, written (U23) | ✓ | **decided** (owner, 2026-11-23: "yes, but we can add extensions to do the recursive expansion") |
 | **U23** | A written **depth** opens more levels, names joined by an **underscore**: `a_z` | — | decided: the underscore (tidy T5) |
 
 ## F. Types, rows, the input column
@@ -81,7 +81,7 @@ structure becomes several variables.
 
 | # | Condition | Today | |
 |---|---|---|---|
-| **U29** | **Many distinct fields** (say, more than 50), or fields that look like data (dates, ids): **a warning that the keys are probably values**, suggesting **unnest into rows** (`key`, value) instead: the tidy shape | — | **to decide**: the threshold |
+| **U29** | **More than 50 distinct fields**, or fields that look like data (dates, ids): **a warning that the keys are probably values**, suggesting **unnest into rows** (`key`, value) instead: the tidy shape | — | **decided**: 50 (owner, 2026-11-23) |
 
 ## I. The three places
 
@@ -89,15 +89,41 @@ structure becomes several variables.
 |---|---|
 | **a step** | `widen` over a column of a table: everything above |
 | **on a tool's output** | a tool returning a record or a mapping, its fields as columns (a record by default, today; a mapping after the run). The same conditions, with the fields from the return type where it says them (U8) |
-| **on a tool's input** | a mapping cell's fields given to the tool's parameters by name: *new*; to decide whether it is wanted |
+| **on a tool's input** | **the spread**, §J: *new*; wanted, limited and clearly defined (owner) |
 
-## To decide
+## J. The spread: a cell's parts as a tool's arguments
 
-1. **U9**: discovered fields written into the expression after the first
-   run?
-2. **U15**: a field not among the fields: a warning, or refused?
-3. **U20**: a field named like a column kept beside it: suffixed (as
-   duplicates are, tidy C2), or refused?
-4. **U22**: one level by default, or every level?
-5. **U29**: the threshold for "the keys are probably values".
-6. **The input place** (§I): wanted?
+*Owner, 2026-11-23: "yes, but think really specific for now. Frankly some
+kind of args or kwargs modifier to properly bind keys to tools makes sense,
+but I want this scope limited and very clearly defined."*
+
+**Definition: exactly Python's `f(**mapping)` and `f(*sequence)`, one call
+per row, and nothing more.** An input modifier on one argument
+(placeholder name `spread`).
+
+| # | Condition | |
+|---|---|---|
+| **U30** | **Keywords**: a **mapping** cell's (or a record's) keys bind to the tool's parameters **by name**, as `f(**cell)` | proposed |
+| **U31** | **Positions**: a **sequence** cell's items bind to the tool's parameters **by position**, as `f(*cell)` | proposed |
+| **U32** | **At most one spread of each kind** per step, on one argument; **one level**; a mapping's keys are strings | proposed |
+| **U33** | **A key that names no parameter**: that row fails, naming the key, unless the tool takes `**kwargs` (then it is passed). As Python | proposed |
+| **U34** | **A required parameter the cell doesn't supply**, and nothing else binds: that row fails, naming it. As Python | proposed |
+| **U35** | **A parameter given by the spread and also written**: refused when declared, if the fields are known (declared, or typed); else that row fails, "got multiple values". As Python (conditions.md R8) | proposed |
+| **U36** | **Each value is checked against its parameter's type**, as any argument is (conditions.md R11: said when declared if known, the cells that don't fit fail) | proposed |
+| **U37** | **A cell that isn't a mapping** (for keywords) **or a sequence** (for positions): that row fails, naming the kind | proposed |
+
+**Out of scope for now:** spreading more than one argument, nested
+mappings, renaming keys on the way in, defaults supplied by the spread.
+
+## Decided, 2026-11-23
+
+U9 (not written: fixed conventions instead), U15 (warn, the convention
+applied; refuse or an error saying what happened where no convention
+fits), U20 (suffixed), U22 (one level; recursive expansion an extension),
+U29 (50), the input place (the spread, §J, limited).
+
+## Still to settle
+
+1. **U15**: the owner's sentence was cut off ("refuse or put an error with
+   w…"): read as "with what happened". Right?
+2. **§J**: the spread's conditions U30–U37, and its name.
