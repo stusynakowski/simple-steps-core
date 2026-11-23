@@ -17,8 +17,38 @@ A shorthand earns its place when it is:
 
 1. **a common need**: people reach for it often;
 2. **one reading**: it opens into exactly one canonical form (H1);
-3. **not redundant**: nothing simpler (a pick, another shorthand) does it;
+3. **one meaning**: every spelling of a primitive opens into the **same**
+   canonical form, and a spelling is **defined only by its mapping**, never
+   by code of its own, so two spellings can't drift apart (today they do:
+   "take rows" has five spellings, five implementations);
 4. **clearly named**: no clash with the grammar's own words.
+
+## Several spellings, one primitive
+
+*Owner, 2026-11-23: "people think in different ways and do the same thing
+(same primitives) but write them in different ways. `select` is one of
+them, similar to a pick but in functional or modifier form."* Verbs taking
+plain values as settings are the norm (dplyr `select(df, x, y)`, pandas
+`df.filter(items=[…])`, SQL `SELECT x, y`). So a primitive may have
+**several spellings**, each a soft link to it:
+
+| Thinks in | Writes | Opens into |
+|---|---|---|
+| addresses | `wf["p"][["x", "y"]]` | take columns `x`, `y` of `p` |
+| verbs | `select(wf["p"], columns=["x", "y"])` | the same |
+| addresses | `wf["p"][0:10]` | take rows 0–9 of `p` |
+| verbs | `slice(wf["p"], start=0, stop=10)` | the same |
+
+The UI shows the canonical form whichever was written.
+
+**Layers** (owner: "primitives are valid expressions; we can consolidate
+them, or define functions and modifiers built off of them"):
+
+| Layer | Is |
+|---|---|
+| a primitive | a valid expression on its own, written directly |
+| a shorthand | a named composition of primitives (`filter`, `collapse`) |
+| *a user's own shorthand* (later) | a composition a user names and reuses; it opens into primitives like any other, so the system stays closed |
 
 ## Today's, judged
 
@@ -47,12 +77,12 @@ A shorthand earns its place when it is:
 | **`join`** | match by key · join together along columns | **keep** | essential |
 | **`stack`** | join together along rows | **keep** | essential |
 | **`zip_`** | match by position or by id · join together along columns | **keep, by id only** | pairing by position goes silently wrong when the two orders differ |
-| **`select`** | take columns | **drop** | a pick does it: `wf["p"][["x", "y"]]` |
-| **`slice`**, **`select(rows=)`** | take rows by position | **drop** | a pick's row part does it: `wf["p"][0:10]` |
-| **`copy`** | take | **drop** | a pick declared as a step is the linked copy; freezing is the by-value one |
+| **`select`** (rows, columns) | take | **keep, as the verb spelling of take** | for those who think in verbs; the same as a pick (owner, 2026-11-23) |
+| **`slice`** | take rows by position | **keep, as a spelling** | the same as a pick's row part, `wf["p"][0:10]` |
+| **`copy`** | take, with lineage columns made data | **keep** | the only way to turn `#p` lineage into ordinary data (grid.md §8); *corrected 2026-11-23: first judged redundant* |
 
-**Count:** about twenty to keep, three to drop, two to merge into one, two
-to rename.
+**Count:** all kept, as shorthands or spellings, but two merged into one
+and two renamed; `zip_` by id only.
 
 ## Useful ones that are missing
 
@@ -70,8 +100,8 @@ Each built from the same primitives (primitives.md):
 
 ## To settle with the owner
 
-1. The verdicts: anything kept that shouldn't be, or dropped that should
-   stay?
+1. The verdicts: anything kept that shouldn't be?
+4. **A user's own shorthands**: wanted, and when?
 2. Which missing ones are worth adding, and when (phase 5)?
 3. Names for the two renamed and the one merged: with the rest of the
    naming (phase 1).

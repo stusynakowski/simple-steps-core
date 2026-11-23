@@ -75,7 +75,7 @@ primitives.md §6, canonical.md §7).
 | modifier order as written deciding meaning | O1: `[retry, map]` retries nothing |
 | binding by position across a block, by a column's type, and a default silently beating a same-named column | A4, H3 case b, G2: guesses beyond a reasonable doubt |
 | conversions decided at the call from the parameter's type (`_CONVERTS`) | A6, A7: the parameter's type chose the level |
-| shorthands a pick already does: `select`, `slice`, `select(rows=)`; and `copy` | redundant (shorthands.md); up to five spellings of "take rows" today |
+| several spellings of one primitive **each with its own code** (five for "take rows" today) | they drift apart. The spellings are kept (people write the same thing differently: owner, 2026-11-23), each **defined only by its mapping** to the canonical form (shorthands.md) |
 | `auto` deciding from the data at run (`compile_operation`'s run-time `auto`) | a step's meaning must be fixed when declared |
 | the names `group` and `table` for those verbs | the ideas kept, renamed: they clash with "group" and "table" (shorthands.md) |
 
