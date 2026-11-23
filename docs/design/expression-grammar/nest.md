@@ -29,16 +29,43 @@ it on every case.
 | **NS3** | **Groups in the order their keys are first seen** | ✓ | **sorted** by default | decided: core's (the data's order) |
 | **NS4** | **A missing key (`None`, absent) is a group of its own** | ✓ | **dropped silently** by default | decided: core's (stricter) |
 | **NS5** | **Several keys**, `by=["k", "j"]`: a group per combination, the keys kept as **separate columns** (no tuple keys: tidy.md T5) | **refused: "by= must be str" (NF1)** | ✓, tuple keys | proposed |
-| **NS6** | **A key that isn't a single value** (a list): **refused**, naming it: a key is a unit (tidy.md T8) | grouped by value | raises | **to decide**: refused, or grouped by value (today) |
+| **NS6** | **A key that isn't a single value** (a list): **three readings**, so with none written it is **refused, naming them**; written with **`key(…, read=…)`**, one reading (§A.1) | grouped by the exact list: `["a", "b"]` and `["b", "a"]` are two groups (run) | raises | proposed (owner, 2026-11-23: "is there a way to define a modifier or extension to handle possible cases?") |
 | **NS7** | **Within a group, the rows' order** is kept | ✓ | ✓ | decided |
 | **NS8** | **Zero rows**: zero groups; **everything** over zero rows: **one row holding `[]`** (everything is one piece, even empty) | zero groups ✓; everything: one row holding `[]` ✓ (run) | — | decided: today's |
+
+### A.1 How a key is read: `key(column, read=…)`
+
+Run 2026-11-23: `tags` holding `["a", "b"]`, `["b", "a"]`, `["a", "b"]`,
+`["a"]` (x = 1–4), `collapse(by="tags")` gives three groups: `[a, b]` → 1,
+3; `[b, a]` → 2; `[a]` → 4. "Group by a list" has three reasonable
+readings:
+
+| `read=` | Groups | Opens into (primitives.md) |
+|---|---|---|
+| `"each"` | `a` → 1, 2, 3, 4; `b` → 1, 2, 3: a row in several groups (usually what is meant: "for each tag, its rows") | unnest the key into rows, then partition; lineage records each row's groups |
+| `"exact"` | `[a, b]` → 1, 3; `[b, a]` → 2; `[a]` → 4 (today) | convert each key to a tuple, then partition |
+| `"set"` | `{a, b}` → 1, 2, 3; `{a}` → 4 | convert each key to a sorted tuple, then partition |
+| a tool, `read=first_tag` | as the tool says ("by the first tag", "by lowercase") | the tool computes each row's key, then partition |
+
+```python
+mod.collapse(by=key("tags", read="each"))
+mod.collapse(by="tags")          # tags holds lists: refused, naming the readings
+```
+
+- **H2**: with no `read=`, several readings: refused, the message naming
+  them. Written, one.
+- **No behaviour of its own**: each reading is a combination of
+  primitives (README.md, the principle).
+- **Open-ended**: more readings can be added later; a tool covers the rest.
+- **Everywhere a key is used**: `collapse`, `distinct`, `join` and match,
+  nesting over `group(by=…)`. One `key(…, read=…)` for all of them.
 
 ## B. Gaps and `None` inside
 
 | # | Condition | Today | pandas | |
 |---|---|---|---|---|
 | **NS9** | **Nest columns (pack): a gap becomes a missing key**; `None` stays a key holding `None`. Widen undoes it exactly (widen.md U13, U14) | **both become `None` (NF2)** | `NaN`, `None` | proposed |
-| **NS10** | **Nest rows: a gap inside the list** | **becomes `None` (NF2)**: then expand gives `None` back, not absent | `<NA>` | **to decide**: `None` kept, or a marker expand turns back into absent (core's own, never shown as a value) |
+| **NS10** | **Nest rows: a gap inside the list is core's own marker**, never shown as a value, and **expand turns it back into absent**, so nest and expand undo each other exactly | **becomes `None` (NF2)**: then expand gives `None` back, not absent | `<NA>` | **decided** (owner, 2026-11-23: "turn back into absent") |
 
 ## C. Types, lineage, names
 
@@ -67,11 +94,8 @@ it on every case.
 
 ## To decide
 
-1. **NS6**: a key that is a list: refused (a key is a single value), or
-   grouped by value (today)?
-2. **NS10**: a gap inside a nested list: `None` (today, pandas), or a
-   marker that expand turns back into absent, so nest and expand undo each
-   other exactly?
+1. **NS6**: `key(column, read=…)` with `"each"`, `"exact"`, `"set"` and
+   a tool; a list key with no `read=` refused, naming them. And its name.
 3. **NS5, NS9, NS12, NS16**: proposed; accepted unless the owner
    objects.
 4. **E**: the outputs gathered into one list, and a group as a table:
