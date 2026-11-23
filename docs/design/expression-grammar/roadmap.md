@@ -28,6 +28,10 @@ and stay green while today's code is worked on (phase 2); the new set
 brings its own (phase 3), and the old ones change or go with what they test
 when it is switched over (phase 6). CLAUDE.md is unchanged.
 
+**Extensions, later**: writing to databases or files, streaming, work
+across machines, charts beyond a figure in a cell (closure.md §1): outside
+the first closed core, added after it.
+
 **Bugs in today's code:** the binding bugs (A4, H3's case b, G2) are
 replaced by the new set's binding (by keyword; conditions.md R1–R8), so
 they are **not patched**. The **data layer's** silent losses (F1, F2, I1,
@@ -43,7 +47,7 @@ I2) live under any instruction set, so they **are fixed**, in today's code.
 | **2. The data layer's silent losses** | F1 (absent stays absent in a data step), F2 (a column keeps its type), I1 (`widen` opens a list, refuses what it can't open), I2 (`expand` keeps a row whose list is empty, its item absent): one at a time, each confirmed | each has its test, every check green |
 | **3. The canonical core** | the new instruction set built: the five components as objects, the parser and the printer (one canonical text, printed back exactly), the resolver (written, implied, convention: grammar.md §1), the conditions (conditions.md) each with its problem text; tests written for it, and a property test that generates expressions from the grammar: each runs, or is refused naming its condition | every condition decided and tested |
 | **4. The surface** | shorthands mapped into the canonical form, each opening into it exactly (presets; methods on picks; `auto`, writing the most likely and saying why). A spelling has no behaviour of its own (the principle, README.md): each is tested only for opening into the right combination of primitives | every shorthand round-trips |
-| **5. What's new** | recursive expansion as a layer on widen and expand (widen.md, expand.md, *Later*); the outputs gathered into one list, a group as a table, unnesting a table cell (nest.md §E); `key(…, read=…)` (nest.md §A.1); opening a 1-D array like a list (expand.md, *Later*); the scopes of nesting (`"group"`, `group(by=…)`, `"all"`, `window(n)`); landing on every row of a group; execution's primitives at their levels (time limit, progress, on failure, cancel, pace: the app's K23); freezing; `k.block`, `k.accepts`, `k.fits` | each confirmed |
+| **5. What's new** | pivot, fill, one call per column (in scope: closure.md §4); recursive expansion as a layer on widen and expand (widen.md, expand.md, *Later*); the outputs gathered into one list, a group as a table, unnesting a table cell (nest.md §E); `key(…, read=…)` (nest.md §A.1); opening a 1-D array like a list (expand.md, *Later*); the scopes of nesting (`"group"`, `group(by=…)`, `"all"`, `window(n)`); landing on every row of a group; execution's primitives at their levels (time limit, progress, on failure, cancel, pace: the app's K23); freezing; `k.block`, `k.accepts`, `k.fits` | each confirmed |
 | **6. Switch over** | the new set replaces the old; model.md's words; the app's update guide (the app moves to the new set; no sessions carried over) | the app runs on it |
 
 Open questions that don't block a phase are settled when their phase

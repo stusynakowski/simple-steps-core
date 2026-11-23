@@ -4,7 +4,7 @@
 > system is closed within the goals of this tool". "Closed" made into
 > criteria that can each be checked, and where each stands.
 
-## 1. The goals (the scope): proposed, for the owner to correct
+## 1. The goals (the scope): agreed, 2026-11-23
 
 From the owner's words through these pages:
 
@@ -19,16 +19,21 @@ convert, name); running tools over them, per row, per group, once, per
 combination; how each call runs (time, failures, progress, cancel, pace);
 reading the data in and showing it.
 
-**Out of scope, proposed** (done by tools, or not at all): what a tool
-computes inside itself; writing to databases or files as a side effect;
-streaming and real-time data; distributing work across machines; charts
-(a tool may return a figure, which is a value in a cell).
+**Extensions, added later** (owner, 2026-11-23: "pretty much the out of
+scope features would be extensions we can add later"): writing to
+databases or files as a side effect; streaming and real-time data;
+distributing work across machines; charts beyond a figure as a cell's
+value. Not excluded: outside the first closed core. What a tool computes
+inside itself stays the tool's own.
+
+**In scope, confirmed** (owner, 2026-11-23): pivot, fill, and one call per
+column (§4).
 
 ## 2. The criteria
 
 | # | Closed means | Checked by |
 |---|---|---|
-| **CL1** | **The scope is written** (§1), so "within the goals" has an edge | the owner's yes |
+| **CL1** | **The scope is written** (§1), so "within the goals" has an edge | **agreed**, 2026-11-23 |
 | **CL2** | **Complete**: every task in scope can be written in the primitives | a catalogue of tasks (§4), each written in primitives, or marked out of scope |
 | **CL3** | **Every combination is decided**: every combination of the components' classes (grammar.md §6) is valid, or refused naming its condition (conditions.md) | a property test that generates expressions from the grammar: each runs, or is refused with its condition; never a crash |
 | **CL4** | **Every kind of cell, under every primitive, has a defined outcome** | the coverage table (§3), every square filled |
@@ -70,15 +75,15 @@ From blocks.md §4, dplyr and tidyr, and Excel:
 | join, stack, zip; every combination | join together | ✓ (cross: new, decided) |
 | look a value up in another table (`VLOOKUP`) | lookup | ✓ new, decided |
 | wide to long (melt) | nest columns, unnest into rows | ✓ |
-| long to wide (pivot) | nest columns **named by a column's values**, unnest | · *missing* |
+| long to wide (pivot) | nest columns **named by a column's values**, unnest | · *missing; in scope* |
 | a window (running total, lag, rank, rolling mean) | nest over a window, land on its row | · *the scope decided; not built* |
-| fill a gap from the row above | — | · *missing* |
+| fill a gap from the row above | — | · *missing; in scope* |
 | split a text column into several; unite several | a tool returning a record; a tool of several parameters | ✓ |
 | unnest JSON, one level; every level | unnest | ✓; every level later |
 | a formula per cell (`IF`, arithmetic) | a tool | ✓ |
 | `$A$1`, a whole column for every row | nest over everything | ✓ |
 | a calculation over the whole table | one call, nest the block | ✓ |
-| one call per column | — | · *missing* |
+| one call per column | calls, split over columns | · *missing; in scope* |
 
 ## 5. Where it stands
 
@@ -88,12 +93,11 @@ From blocks.md §4, dplyr and tidyr, and Excel:
 | take, convert, name | **not done**: the next pages |
 | call (split), land, execution's primitives | in grammar.md §6 and canonical.md; **their conditions** not pinned down as the four above |
 | the conditions between components | conditions.md: R1–R26, many still **proposed** |
-| CL1, the scope | **proposed**, §1 |
+| CL1, the scope | **agreed**, §1 |
 | CL3, CL5, CL6: the property test | **to build** (roadmap phase 3) |
 
-## To settle with the owner
+## Next
 
-1. **CL1**: the goals and the scope in §1: right, and is anything in or
-   out that shouldn't be?
-2. The **missing tasks** in §4 (pivot, fill, one call per column): in
-   scope?
+The **take** and **convert** pages, which fill the coverage table's last
+columns; then **pivot**, **fill** and **one call per column**, the
+catalogue's missing tasks, each pinned down as the others were.
