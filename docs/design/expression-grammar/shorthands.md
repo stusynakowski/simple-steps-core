@@ -89,7 +89,7 @@ them, or define functions and modifiers built off of them"):
 | **`retry`**, **`timeout`**, **`try_except`**, **`breaker`** | one execution primitive each, at a level | **keep, as the primitives themselves** | not consolidations: each is already one primitive (grammar.md §6.4) |
 | **`join`** | match by key · join together along columns | **keep** | essential |
 | **`stack`** | join together along rows | **keep** | essential |
-| **`zip_`** | match by position or by id · join together along columns | **keep, by id only** | pairing by position goes silently wrong when the two orders differ |
+| **`zip_`** | match the same rows (as core recorded them) or by id · join together along columns | **keep** | it never pairs by position (corrected 2026-11-23, joins.md JN5): already as wanted |
 | **`select`** (rows, columns) | take | **keep, as the verb spelling of take** | for those who think in verbs; the same as a pick (owner, 2026-11-23) |
 | **`slice`** | take rows by position | **keep, as a spelling** | the same as a pick's row part, `wf["p"][0:10]` |
 | **`copy`** | take, with lineage columns made data | **keep** | the only way to turn `#p` lineage into ordinary data (grid.md §8); *corrected 2026-11-23: first judged redundant* |
