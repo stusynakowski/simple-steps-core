@@ -75,6 +75,7 @@ That is why `collapse` has crossed classes.
 | **R13** | one call per row | each argument: its row's cell, or nested over a window, its group, or everything | proposed |
 | **R14** | one call per group (a key) | each argument from the input **nested per that group** (or over everything); a per-row argument is refused, naming the fix | proposed (blocks.md §0) |
 | **R15** | one call in all | each argument nested over everything, or a literal | proposed |
+| **R15a** | `nest(over="group")` with no `by`, under a call that isn't one per group | refused, naming the fix: `over=group(by=…)` (canonical.md §3.1) | proposed |
 | **R16** | arguments nested by two different keys, and no per-row argument | refused: no single piece to make one call per | proposed (blocks.md §0) |
 | **R17** | an argument from **another step's rows**, per row | refused unless matched (a join first, or matched in the call: N3); whole, or one fixed cell, is fine | proposed |
 

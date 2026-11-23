@@ -44,7 +44,7 @@ Placeholders, to show the shape. One modifier, one job.
 
 | Class | Modifier | Does |
 |---|---|---|
-| **input** | `mod.input.nest(param, over=…, form="list")` | many cells of that argument into one: `over="call"` (the call's own piece: a row gives one cell, a group its cells, one call everything), `over="all"`, `over=by(wf["p"]["k"])` (this row's group), `over=window(n)`; `form` list, dict, table, array |
+| **input** | `mod.input.nest(param, over=…, form="list")` | many cells of that argument into one, over a **scope** named by what it is (§3.1); `form` list, dict, table, array |
 | | `mod.input.convert(param, to=float)` | each cell's value converted, before nesting (the one change of value, written: X3) |
 | | `mod.input.match(param, on=…)` | data from another step, matched to the call's rows (N3: to come) |
 | **call** | `mod.call.once()` | one call |
@@ -58,6 +58,22 @@ Placeholders, to show the shape. One modifier, one job.
 | | `mod.output.keep_input()` | the input's columns kept beside the output |
 | | `mod.output.name("temp_f")` | the output columns' names |
 | | `mod.output.expect(rows=…)` | a check on the output |
+
+### 3.1 The scopes of `nest`
+
+Each scope is named by what it is (owner, 2026-11-23, on `over="call"`:
+"not sure, should we need a different term?": it reused "call" for "the rows
+this call covers", three things under one word).
+
+| `over=` | Nests | Valid with |
+|---|---|---|
+| *(not nested)* | nothing: the row's own cell, as it is | `each_row` |
+| `"group"` | the rows of **this call's** group | `each_group(by=…)`: the key is written once, in the call |
+| `group(by=wf["p"]["ward"])` | the rows of **this row's** group | `each_row`: a group's value beside each of its rows |
+| `"all"` | every row | any call |
+| `window(n)` | this row and the `n` before it | `each_row` |
+
+`"group"` alone under `each_row` is refused, naming the fix (`by=`).
 
 **Taking rows and columns is the pick's job** (the address's row and column
 parts), so it has no input modifier.
@@ -84,7 +100,7 @@ to_f[mod.call.each_row(), mod.output.land("own_row")](                    # cano
 
 ```python
 sumup[mod.collapse(by="ward")](wf["p"], xs=wf["p"]["x"])
-sumup[mod.input.nest("xs", over="call"),
+sumup[mod.input.nest("xs", over="group"),
       mod.call.each_group(by=wf["p"]["ward"]),
       mod.output.land("new_row")](xs=wf["p"]["x"])
 ```
@@ -101,7 +117,7 @@ z[mod.input.nest("ys", over="all"),
 **A group's value beside each of its rows** (a collapse and a join today)
 
 ```python
-mean[mod.input.nest("xs", over=by(wf["p"]["ward"])),
+mean[mod.input.nest("xs", over=group(by=wf["p"]["ward"])),
      mod.call.each_row(),
      mod.output.land("own_row")](xs=wf["p"]["x"])
 ```
@@ -146,20 +162,27 @@ core.take[mod.call.once()](table=wf["p"][["x", "y"]])
 | the z-score and the group-beside-each-row in two steps | one step each |
 | `group`, `table` name clashes | the class names (`input`, `call`, `exec`, `output`) and `land(...)` replace the verbs in the canonical form; verbs stay as surface presets |
 
-## 7. To settle with the owner
+## 7. Decided, and open
 
-1. **The shape and the order inside the brackets**: input, call, execution,
-   output?
-2. **Bindings always by keyword** in the canonical form (the surface keeps
-   positions and names)?
-3. **Defaults**: a parameter left at its default, written in the canonical
-   form (`offset=0.0`) or left out? Written, a change to the tool's default
-   wouldn't reach the step; left out, R6 keeps it unambiguous.
-4. **`over="call"`**: nesting over the call's own piece, so `collapse` needs
-   its key only once, in the call. Clear, or should the key be repeated?
-5. **Execution order**, written left to right from the outside in?
-6. **Core's tools as `core.<name>`**, and data as the value itself: the two
+**Decided** (owner, 2026-11-23):
+
+1. **The shape and the order inside the brackets**: input, call,
+   execution, output. Yes.
+2. **Bindings always by keyword** in the canonical form; the surface keeps
+   positions and names. Yes.
+3. **Defaults are not written**: a parameter left at its default stays out
+   of the canonical form. The default is the tool developer's to define
+   (owner: "it's fine if it's a default defined by the developer"); R6 keeps
+   it unambiguous when a column has the parameter's name.
+4. **`over="call"` replaced** by scopes named by what they are (§3.1).
+5. **Longer is fine**: the surface has components exactly equivalent to it,
+   shorter (owner: "we will have components that will be equivalent
+   exactly, but will be shorthand versions").
+
+**Open:**
+
+6. **Execution order**, written left to right from the outside in?
+7. **Core's tools as `core.<name>`**, and data as the value itself: the two
    exceptions to `tool[…](…)` being data and the empty step.
-7. **Verbose**: the canonical form is longer than today's. That is the cost
-   of being explicit; the surface keeps everyday writing short. Acceptable,
-   given that users see it only when they open an expression?
+8. **The words**: every name here is a placeholder until the primitives are
+   named (primitives.md §6).
