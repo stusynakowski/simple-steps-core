@@ -4,7 +4,8 @@
 > the system ([blocks.md](blocks.md) §0, plan piece G0). It begins **top
 > down**, with how a user should see an expression (§0); then **what must
 > be resolved for any expression** (§1–§4), then **the owner's heuristics**
-> for resolving it (§5). The shape (which words
+> for resolving it (§5), and **the classes each of the five components can
+> be** (§6), which the rules will narrow. The shape (which words
 > fill which component) and the numbered rules (how the components depend
 > on each other) come next, on this page.
 
@@ -286,7 +287,125 @@ or asks.
                                                                            no:  explicit (shown, or asked)
 ```
 
-## 6. Next on this page
+## 6. The five components, and the classes each can be
+
+*Owner, 2026-11-23: "Given the 5 components of any tool expression, can we
+start listing out some generic, isolated (orthogonal) classes each
+component could be. Then we can define rules that, if they are specified,
+remove the set of possible classes, such that ideally there is enough
+information to converge on exactly one interpretation. If there isn't one
+interpretation, we use the most likely interpretation based on that
+information, and state that selection in the expression." And: "rules about
+the data that help condition what is stated", "generic to any tool".*
+
+The five components are **the tool** and §5's four classes of modifier
+(H7): **input, call, execution, output**. Each has a few **axes**; each
+axis has a few **classes**. A class has a short id, so the rules can name
+it. Each axis says which source fixes it (§0): **the data**, **the tool**'s
+types, or **the modifiers** written. Every class here is generic: it names
+a kind of thing, never a particular tool.
+
+### 6.1 Tool: what kind of function it is, from its type hints
+
+| Axis | Classes |
+|---|---|
+| **T-a. How many parameters need a value** (no default) | `T-a0` none (it makes data) · `T-a1` one · `T-an` several |
+| **T-p. What each parameter takes**, from its type | `T-p.unit` one value (`float`, `str`, `ndarray`, a class) · `T-p.seq` many values as one (`list[T]`, `tuple[T, …]`) · `T-p.map` named values (`dict`, a record) · `T-p.table` a table (`DataFrame`) · `T-p.acc` an accumulator (a first parameter named `acc`, `memo`, `carry`: a reducer) · `T-p.any` untyped, `Any` |
+| **T-r. What it returns** | `T-r.unit` one value · `T-r.bool` a yes or no · `T-r.seq` many values · `T-r.rec` named fields (a record) · `T-r.map` a `dict` · `T-r.table` a table · `T-r.any` untyped |
+
+Fixed by **the tool**, before any data is seen.
+
+### 6.2 Input: what goes in, and how it is handed over
+
+Per argument:
+
+| Axis | Classes | Fixed by |
+|---|---|---|
+| **I-s. Source** | `I-s.lit` a literal · `I-s.res` a resource (a literal, to the expression) · `I-s.ref` a reference | what is written |
+| **I-g. What a reference gives** (its block's shape) | `I-g.cell` · `I-g.row` · `I-g.col` · `I-g.block` (rows × columns) | the pick |
+| **I-c. What its cells hold** | `I-c.unit` · `I-c.seq` · `I-c.map` · `I-c.table` · `I-c.unknown` (types not known before the run) | the data, through the plan |
+| **I-r. Whose rows** | `I-r.input` the input's own rows (it can go row by row with them) · `I-r.other` another step's rows (it can only be given whole, or as one fixed cell) | the data's lineage |
+| **I-b. Binding** | `I-b.pos` by position · `I-b.name` a column named as the parameter · `I-b.type` the one column whose type fits · `I-b.given` written, `param=pick` | the data and the tool; or written |
+| **I-h. Handover** | `I-h.cell` one cell per call, as it is · `I-h.pack` many cells packed into one; with its **scope**, `everything`, `group(key)`, `window(n)`, and its **form**, list, dict, table, array | the call, the types; or written |
+| **I-v. Conversion** | `I-v.none` · `I-v.cast` each cell converted first (open, §8 question 3) | written |
+
+### 6.3 Call: how many times the tool runs
+
+| Axis | Classes |
+|---|---|
+| **K. The calls** | `K.none` once, with no input (a source) · `K.all` once, over everything · `K.row` once per row · `K.group` once per group (and its key) · `K.combo` once per combination of settings (a sweep) |
+
+Fixed by **a call modifier**, or converged on from the tool and the input.
+(One call per column is a gap: blocks.md §5.)
+
+### 6.4 Execution: how each call runs
+
+Each axis is optional and independent of the others; their order is the
+one place where the written order means something (blocks.md §0):
+
+| Axis | Classes |
+|---|---|
+| **E-r. Retry** | `E-r.none` · `E-r.n` up to n attempts |
+| **E-t. Time limit** | `E-t.none` · `E-t.attempt` per attempt · `E-t.all` for all the attempts |
+| **E-f. On failure** | `E-f.cell` the cell fails, with its reason (the default) · `E-f.default` a default value instead · `E-f.stop` stop after n failures (a breaker) |
+| **E-p. Progress** | `E-p.none` · `E-p.shown` progress reported, and the run can be cancelled (K23) |
+
+Fixed by **execution modifiers** only. The data and the tool never imply
+them.
+
+### 6.5 Output: what comes out, and where it goes
+
+| Axis | Classes | Fixed by |
+|---|---|---|
+| **O-w. Which rows it lands on** | `O-w.own` its call's row · `O-w.new` one new row per call (a group's call gives one row) · `O-w.spread` every row of its scope (a group's output beside each of its rows) · `O-w.keep` it keeps or drops its call's row | the call; or written |
+| **O-s. What shape** | `O-s.cell` one cell · `O-s.rows` spread into rows · `O-s.cols` spread into columns · `O-s.table` a table, its rows and columns | the return type; or written |
+| **O-k. The input's columns** | `O-k.drop` not kept beside the output · `O-k.keep` kept beside it | written; a default per call |
+| **O-n. Names** | `O-n.step` the step's name · `O-n.fields` a record's field names · `O-n.given` written (`mod.name`) | the return type; or written |
+| **O-e. Checks** | `O-e.none` · `O-e.stated` rows or columns expected (`expect`) | written |
+
+### 6.6 How rules remove classes: two examples
+
+A **rule** says: given these classes, those are impossible (or implied).
+Writing something, or knowing the data or the tool, removes classes until
+one is left on each axis. When more than one is left, core picks the most
+likely, **says why**, and **writes it into the expression** (H2).
+
+**One reading.** `to_f(temp_c: float) -> float`, given `wf["p"]`, where `p`
+has a float column `temp_c`:
+
+| Axis | Known | Left |
+|---|---|---|
+| tool | `T-a1`, `T-p.unit`, `T-r.unit` | — |
+| I-b | `p` has a column named `temp_c` | `I-b.name` |
+| I-g, I-c, I-r | a column, floats, the input's rows | — |
+| K | a one-value parameter and a column of single values, row by row: `K.row`. `K.all` or `K.group` would need packing, and nothing packs a single value | **`K.row`**, the only reading |
+| I-h | `K.row` and `T-p.unit` | `I-h.cell` |
+| O-w, O-s, O-n | `K.row`, and `T-r.unit` | `O-w.own`, `O-s.cell`, `O-n.step` |
+
+Written down: `to_f[mod.map()](wf["p"])`.
+
+**Several readings, the most likely written.** `sumup(xs: list[float]) ->
+float`, given `wf["p"]["x"]`, a float column:
+
+| Axis | Known | Left |
+|---|---|---|
+| tool | `T-a1`, `T-p.seq`, `T-r.unit` | — |
+| I-h | a list of floats, from single floats: it must be packed (H6) | `I-h.pack`, form list |
+| K, and the scope | `K.all` (one sum of the whole column); `K.group` (needs a key, and none is given); `K.row` with the whole column packed for every row (the same sum on every row: valid, unlikely) | `K.all` **most likely**; `K.row` possible |
+| O-w | from `K.all` | `O-w.new`: one row |
+
+Written down, with the reason shown: `sumup[mod.collapse()](wf["p"],
+xs=wf["p"]["x"])`: *"xs takes a list of floats; x holds single floats; so x
+is packed into one list, one call."* Opening it shows the packing (H1).
+
+Run 2026-11-23: that written form works today (`9.0`). The shorter
+`sumup[mod.collapse()](wf["p"]["x"])` is **refused**: "sumup() needs 'xs',
+which 'p' does not have". Binding by type compares a single float with
+`list[float]`, before the packing is taken into account: `I-b.type` doesn't
+yet see `I-h.pack`. Under these rules it has one reading, so it would be
+accepted and written out as above (**G1**, a finding for the rules).
+
+## 7. Next on this page
 
 1. **The shape**: for each component, the words that fill it (the
    modifiers, the pick's parts, the literals), as a grammar.
@@ -296,7 +415,7 @@ or asks.
 3. **The conventions**: for each component, its default, written as one
    table, so "obvious and intuitive" is one place to look.
 
-## 7. Open questions
+## 8. Open questions
 
 Recorded 2026-11-23, to settle once the top-down view (§0) is agreed. The
 owner works top down first, then these.
