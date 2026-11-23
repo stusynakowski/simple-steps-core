@@ -19,6 +19,18 @@
 > | Housekeeping 2 | done before this arrived: the guide pins `@v1.0.3`, no commit |
 > | Housekeeping 3 | done before this arrived: the guide names no plan number |
 
+> **Direction, 2026-11-23** (core's owner): core is designing **a new
+> instruction set**, from a clean slate: **the expression syntax will
+> break, and old sessions won't be carried over.** The design is in
+> [../expression-grammar/](../expression-grammar/README.md), the plan in its
+> roadmap.md. For these asks: **K23** (progress and cancel) becomes
+> execution's primitives, at two levels, each call and the step (with
+> calls at once and a rate); **C58** is covered by the new rules for types
+> (a parameter's type is checked under every call, A5); **C56** is
+> freezing (blocks.md §2). C53, C55 and C57 are done, in today's code. C59
+> (reading during a run) needs no design: its test is still to add. C48 and
+> C54 wait for the new set.
+
 > **For simple-steps-core.** From the Simple Steps app, 2026-11-20, while
 > planning cell editing (app plans 134, 135) and after making runs
 > non-blocking (138 N0–N2). Every result below comes from running core
