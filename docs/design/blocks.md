@@ -52,7 +52,8 @@ Plus how each call runs: the wrappers, `retry`, `timeout`, `breaker`,
 
 1. **Every argument becomes exactly one cell per call.** A tool goes from
    cells to cells.
-2. **Modifiers prepare; they never change a value.** Splitting, fixing and
+2. **Modifiers prepare; they never change a value**, except a conversion,
+   written as an input modifier (owner, 2026-11-23). Splitting, fixing and
    packing only decide which cells reach a call and how many become one.
    A cell holding a list reaches the tool as that list.
 3. **Packing is the only way many cells become one**, and it is always
@@ -213,6 +214,10 @@ argument reads is fixed by its pick. For the call made for row 1 of
 
 ### Written two ways: argument methods, and modifiers as shorthands
 
+*Settled 2026-11-23 (owner): the full form is `tool[modifiers](data)`; a
+method on a pick is **a shorthand, a soft link to an input modifier**, kept
+because it reads well. See [expression-grammar/grammar.md](expression-grammar/grammar.md) §5, H7.*
+
 *Owner, 2026-11-23: "methods that cast the data properly, like
 `wf["step"]["col"].tolist()`, for the argument, to make it more explicit";
 "I would want modifiers to be good shorthands"; "certainly the modifiers
@@ -344,7 +349,8 @@ and column are its special cases. (Today's code, `_shape_kind`, says
 `block` only for n×m. It needs another name, say `rows × columns`, if the
 owner agrees.)
 
-**A tool never receives a block.** A parameter *accepts* a block: core
+**Does a tool ever receive a block?** *Open* (§7, question 2: the owner
+would give one to a parameter typed `Block`). Otherwise a parameter *accepts* a block: core
 checks it, and the UI shows it. At the call, core hands the tool the block's
 values in the parameter's form (a value, a list, a dict, a `Series`, a
 `DataFrame`). Tools stay plain Python. No `#` columns, states or row ids
@@ -664,8 +670,8 @@ app needs a window or a pivot.
 
 1. **§0's open points**: the packings, the scope's word, the missing
    landing, and the modifiers that don't fit. (Settled 2026-11-23: packing
-   is written as a method on the pick, `.tolist()`; no method means its
-   row's cell; `auto` writes the same method when the types call for it;
+   is an input modifier, and `.tolist()` on a pick is its shorthand; no
+   method means its row's cell; `auto` writes the same method when the types call for it;
    modifiers decide the calls and are shorthands for the arguments'
    preparation.)
 2. **A tool's parameter typed `Block`** receives a block (owner). Without

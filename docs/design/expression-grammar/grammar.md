@@ -85,6 +85,24 @@ They are the same as §5's classes of modifier (H7), in words:
 *To check with the owner:* are these the questions a user would ask, in
 their words?
 
+### The levels of this page: abstractions of abstractions
+
+*Owner, 2026-11-23: "they need to be connected to each other; we are making
+a hierarchy of abstractions of abstractions. We're writing an expression →
+what components are needed → what are the possible (general) states of those
+components → how do those components influence the states of others, in
+order to be a valid expression."*
+
+Each level is built from the one above it. The breakdowns on this page and
+in blocks.md are not rivals: each belongs to one level.
+
+| Level | Asks | Here | Its parts |
+|---|---|---|---|
+| **L0. The expression** | what did the user write? | §0, §1 | a tool, its modifiers, its data: in full, **`tool[modifiers](data)`** (§5, H7), or a shorthand of it |
+| **L1. The components** | what must be resolved? | §2, §6 | the **five**: tool, input, call, execution, output. Their contents are C1–C9 (§2); they are resolved **in a fixed order** (blocks.md §0, *The ordered components*); the user meets them as the **plain questions** above |
+| **L2. The states** | what can each component be? | §6 | each component's axes, and the classes on each axis (`T-k.core`, `K-n.many`, …) |
+| **L3. The rules** | how does one component's state limit the others', so the expression is valid? | §7 (next) | numbered rules: given these classes, those are impossible, or implied. Where more than one reading is left, the most likely is written and shown (H2) |
+
 ## 1. The idea: an expression converges on its components
 
 What a user writes is **partial**. A tool, a pick and perhaps a modifier or
@@ -234,6 +252,23 @@ that column into a list**. It can be written short, but **opening the
 expression shows the collapse** (H1).
 
 ### H7. Everything can be written in the modifiers, in orthogonal classes
+
+**The full form of every expression is `tool[modifiers](data)`** (owner,
+2026-11-23: "under the hood I think it makes sense to have everything abide
+by `=tool[modifiers](data)`, though we will be able to write shorthand
+syntax to make everything easier to understand"). A `drop` is core's tool
+with its modifiers over its data; a `join` is core's tool over several
+data. **A shorthand is a soft link to a full form** (owner: "soft links to
+the same thing, motivating primitives here, such that we can ultimately
+perform things like that, to make shorthand writing easier"): it is
+written for ease, and opened it shows the full form (H1). Two kinds of
+shorthand:
+
+| Shorthand | Is a soft link to | Example |
+|---|---|---|
+| **a preset modifier** | several modifiers, in several classes | `collapse(by="k")`: one call per group (call), each input argument packed per group (input), one row per group (output) |
+| **a method on a pick** | an input modifier for that argument | `wf["p"]["y"].tolist(by="k")`: that argument packed per group. Helpful to read (owner: "helpful for me and to the user"), the same thing as the modifier |
+
 
 Everything can be written as modifiers; today they are ambiguous (O1, and
 blocks.md §0's modifiers that don't fit). **The tool's modifiers are
@@ -462,15 +497,20 @@ owner works top down first, then these.
 2. **H7, `filter`, `expand`, `group`.** Each is an output modifier, but
    also implies one call per row. Output modifiers that fill in the call,
    or call modifiers?
-3. **H7, `cast`.** It changes values. Is a conversion allowed as an input
-   preparation, or is it a tool?
+3. ~~**H7, `cast`.**~~ **Settled, 2026-11-23:** a conversion is an **input
+   modifier** (owner: "this motivates the need to classify the modifiers").
+   blocks.md §0's rule "modifiers never change a value" reads: except a
+   conversion, written as an input modifier.
 
 **From §2 and §3:**
 
 4. Are the nine **C1–C9** the right set? Anything missing (for example, the
    step's name as part of the expression), or anything that should be
    merged?
-5. **The empty step, data and pick** (§3): should they be written as tool
+5. ~~**The empty step, data and pick**~~ **Settled, 2026-11-23:** every
+   expression's full form is `tool[modifiers](data)` (H7); a pick, a drop, a
+   join apply core's tool (§6.1, whose function); only data and the empty
+   step apply nothing. *The question was:* should they be written as tool
    calls too (a pick as `identity` over a block, data as a `source`), so
    there is only one kind of expression? Core already stores a DataFrame
    step this way in some saved files (`identity[mod.source()]()`).
