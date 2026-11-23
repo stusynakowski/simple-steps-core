@@ -513,8 +513,8 @@ accepted and written out as above (**G1**, a finding for the rules).
 
 | # | Area | The question |
 |---|---|---|
-| **N1** | **Mixed types in a column** (floats and a stray string) | refused when declared, or the cell that doesn't fit fails at run with its reason (like Excel's `#VALUE!`)? Proposed: the cell fails; the column's type is the union, and the plan says so |
-| **N2** | **Missing values into a typed parameter** (absent, `None`, `NaN` into `x: float`) | skip the call, fail the cell, or pass `None`? `Optional[float]` as the tool's way of saying it takes a missing value |
+| **N1** | **Mixed types in a column** (floats and a stray string) | **Decided** (owner, 2026-11-23): when declared, core **says** it won't work where a type is wrong (a warning, not a refusal: "we can still run"). The cells with the right type run; the others fail, and **the error passes through, naming where the issue is** (the input cell), as a `blocked` cell names the failure it comes from |
+| **N2** | **Missing values into a typed parameter** (absent, `None`, `NaN` into `x: float`) | **Decided, yes** (owner, 2026-11-23): the cell fails, unless the tool types the parameter `Optional[float]`, which gets `None`. *To clarify:* the owner added "it's good to probably return …": what is returned? |
 | **N3** | **Data from several steps in one call**, row by row: `tool(a=wf["p"]["x"], b=wf["q"]["y"])` | their rows must be matched: the combines' *match*, needed inside `tool[modifiers](data)` when data comes from more than one step (refused today: join first) |
 | **N4** | **Which form is stored**: the shorthand or the full form | and when the opened full form is edited, does the shorthand survive? |
 | **N5** | **A preset and an explicit modifier that disagree** (`collapse(by="k")`, and an argument packed over everything) | which wins, or refused? |
@@ -522,6 +522,11 @@ accepted and written out as above (**G1**, a finding for the rules).
 | **N7** | **A parameter given twice**, by position and by name | refused |
 | **N8** | **Where an error shows**: refused when declared, or a failed cell at run | one clear line between them, so a user knows where to look |
 | **N9** | **Big data**: every convention decides from the plan's types, never by reading cells | so resolving a step costs nothing on a million rows |
+
+**The silent-loss bugs** (A4, F1, F2, I1, I2, G2): **the biggest issue
+now**, and **the first thing developed** once the abstractions and the
+roadmap are right (owner, 2026-11-23: "we have the context now on what the
+design problems are").
 
 **Still open from before:**
 
