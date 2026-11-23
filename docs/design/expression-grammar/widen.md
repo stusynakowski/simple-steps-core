@@ -34,7 +34,7 @@ structure becomes several variables.
 | **U9** | **Discovered fields are written into the expression** after the first run, so they are declared from then on; the shape can't change because the data did | not written | **to decide** |
 | **U10** | Discovered from **mappings**: the **union of the keys, first seen first** | ✓ | decided (pandas) |
 | **U11** | Discovered from **sequences**: **positions 0 to the longest − 1**, named `var0`, `var1`, … | tuples ✓ | decided (pandas; tidy T1) |
-| **U12** | **Nothing to discover from** (zero rows, every row empty): no fields, **said**; nothing is written until a row has a field | no columns, not said | proposed |
+| **U12** | **Nothing to discover from** (zero rows, every row empty): no fields, **said**; nothing is written until a row has a field | every row `None`: no columns, a warning that the rows held no dict ✓; **zero rows: no columns, nothing said** | proposed |
 
 ## C. Uneven rows
 
