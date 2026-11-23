@@ -20,8 +20,8 @@ when declared, naming the rule it breaks.
 | [roadmap.md](roadmap.md) | **the plan**: a clean slate (owner, 2026-11-23), no migration, names first; phases 0–6; a keep/toss inventory for the owner | what is built, in what order |
 | [influences.md](influences.md) | what could blur the distinctions in §6 (whose function, what it works on, how many calls, how sure core can be), each run or reasoned | deciding each edge case on purpose |
 
-**Background** (one level up): [blocks.md](../blocks.md) §0, the ordered
-components and how they depend on each other, where this grammar came from;
+**Background** (one level up): [blocks.md](../blocks.md), the runs and
+findings behind this grammar (its §0 says how the grammar got here);
 [grid.md](../grid.md), the grid and its moves.
 
 **Status:** drafts, nothing built. The numbered rules have started in

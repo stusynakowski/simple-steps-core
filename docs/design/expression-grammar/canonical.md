@@ -26,8 +26,7 @@ tool[ input modifiers , call modifier , execution modifiers , output modifiers ]
 - **Brackets: how. Parentheses: what.** (model.md §3, "brackets decorate,
   parens apply".)
 - **Inside the brackets, the classes come in this order**: input, call,
-  execution, output. The order a step works in (blocks.md §0, the ordered
-  components). Core keeps them in this order whatever order they are typed
+  execution, output. The order a step works in. Core keeps them in this order whatever order they are typed
   in (fixes O1).
 - **The class is in the modifier's name**: `mod.input.…`, `mod.call.…`,
   `mod.exec.…`, `mod.output.…`. The UI's widgets are these four groups;

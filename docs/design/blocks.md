@@ -1,318 +1,45 @@
 # Blocks, and the moves that rearrange cells
 
-> **Draft, 2026-11-22, for the owner**, to choose the next dev plan. **§0 is
-> the idea everything else serves** (owner, 2026-11-23: "this is
-> important"). §1 is the words; §2 the **block**, an object core doesn't have yet; §3 **what a
-> parameter accepts**, run today
-> ([grid-probes/blocks.py](grid-probes/blocks.py)), and where it disagrees
-> with itself; §4 the **primitives** that rearrange cells, with every
-> modifier and combine written in them; §5 the **kinds of iterable** a cell
-> can hold, and what core opens; §6 the dev plan; §7 the questions.
-> It builds on [grid.md](grid.md) (§8 the definitions, §10 every move) and
-> doesn't replace it. Nothing here is built.
+> **Evidence, 2026-11-22/23.** The runs and findings behind the expression
+> grammar. **The design itself now lives in
+> [expression-grammar/](expression-grammar/README.md)** (the grammar, the
+> primitives, the conditions, a canonical form, the roadmap); §0 says how it
+> got there. What stays here: §1 the words, pick, block, table, and a pick
+> as a live address; §2 the block as an object, and freezing; §3 what a
+> parameter accepts today, run ([grid-probes/blocks.py](grid-probes/blocks.py)),
+> and A1–A7; §4 the moves that rearrange cells, and today's
+> restructurings; §5 the kinds of iterable, I1–I2. Nothing here is built.
 
-## 0. The idea: one expression, from sheet to sheet
+## 0. How we got here, and the runs kept
 
 *Owner, 2026-11-23: "how do we enable a spreadsheet-like experience, but
 with one expression mapping from sheet to sheet, in a way that is very easy
 to understand and can handle cells containing any type of Python data
-structure?" And: "every function should operate from cell to cell"; "I
-would like the modifiers to handle the preparation and leave the data
-alone"; "collapse … just to list".*
+structure?"*
 
-**A step is one formula dragged over a sheet.** The tool sits in the middle
-and only ever sees cells:
+This section was where that idea was worked out, on 2026-11-23, in this
+order. Each idea is now in the grammar folder, where it is kept current:
 
-```
- sheet in ──pick──► block ──split into calls──► each call: one cell per argument ──► tool ──► output ──place──► sheet out
-            (1)              (2)                 (3) prepared; values untouched                      (4)
-```
+| Worked out here | Became | Now in |
+|---|---|---|
+| a step is one formula dragged over a sheet; four questions (which cells, how many calls, what each argument gets, where the output goes) | the five components: tool, input, call, execution, output | grammar.md §0, §6 |
+| six rules: one cell per argument per call; modifiers prepare and never change a value (except a written conversion); packing is the only way many cells become one; columns go to parameters, rows to the split; any Python value; `auto` writes its defaults | the heuristics H1–H9, and the two levels of a value | grammar.md §5; canonical.md |
+| today's verbs as preset answers | presets, as cells of the primitives table | primitives.md §5 |
+| the ordered components, and how they depend on each other | the conditions between components | conditions.md |
+| scope: what one call reads of an argument (row, window, group, everything) | the scopes of `nest`: `"group"`, `group(by=…)`, `"all"`, `window(n)` | canonical.md §3.1 |
+| methods on a pick (`.tolist()`) as a second way of writing | a shorthand, a soft link to an input modifier; the full form `tool[modifiers](data)` | grammar.md H7; canonical.md |
+| every modifier placed by its job | one primitive, three places | primitives.md §3 |
+| a grammar that closes the system | the grammar, and the plan | grammar.md; roadmap.md |
 
-**A call** is one run of the tool's function, one Python invocation with
-one output. A step is the set of calls its split makes (run 2026-11-22, a
-3-row input: `map` 3 calls, `collapse(by=…)` one per group, `table` 1,
-`sweep` one per combination, `source` 1). A wrapper such as `retry` can make
-several *attempts* at one call; it is still one call.
+**The runs from it, kept as evidence:**
 
-### The four questions
-
-Every step answers four questions. Each has a default:
-
-| Question | Choices | Default | Excel's version |
-|---|---|---|---|
-| **1. Which cells?** | a pick, `wf["p"][rows][columns]`: the block | the whole step | the range you point at |
-| **2. How many calls?** | one per row · one per group (`by="k"`) · one in total | one per row | dragging a formula down |
-| **3. What does each argument get?** | its **row's** cells, or a **fixed** pick, the same every call. When that is many cells: **packed** into one cell, as a list, a dict or a table | its row's cell | `B2` against `$B$2:$B$4`; and a function such as `SUM` taking a range |
-| **4. Where does each call's output go?** | one cell · spread into rows · spread into columns · keep or drop its row | one cell | a value, or a spill |
-
-Plus how each call runs: the wrappers, `retry`, `timeout`, `breaker`,
-`try_except` (and progress and cancel, K23).
-
-### The rules
-
-1. **Every argument becomes exactly one cell per call.** A tool goes from
-   cells to cells.
-2. **Modifiers prepare; they never change a value**, except a conversion,
-   written as an input modifier (owner, 2026-11-23). Splitting, fixing and
-   packing only decide which cells reach a call and how many become one.
-   A cell holding a list reaches the tool as that list.
-3. **Packing is the only way many cells become one**, and it is always
-   written: `to_list` (the default for a column), `to_dict` (a row's cells,
-   by column name), `to_table` (a block). So "a block made into a list" and
-   "a cell that holds a list" can't be confused: one is packed, in the
-   expression; the other is a cell's value.
-4. **A block's two directions do different jobs** (run 2026-11-22 on
-   `wf["p"][["x", "y"]]`): **columns go to parameters**, by name, under every
-   modifier; **rows are what the split decides**: one row per call,
-   `f(x=1.0, y=10.0)` … under `map`; or the rows of a group packed into
-   lists inside one call, `g(x=[1.0, 3.0], y=[10.0, 30.0])`, under
-   `collapse(by="k")`.
-5. **Any Python value works**, because values are never touched. The one
-   check is whether a cell's type, or a packed cell's (`list[float]`), fits
-   the parameter's type.
-6. **The tool's signature sets the defaults, through `auto`.** It reads the
-   parameter types and the modifiers and writes every choice into the
-   expression, where it is shown before anything runs, never re-guessed
-   after a run, and changed with one edit. Writing a choice yourself
-   overrides it, and is never second-guessed.
-
-### Today's verbs are preset answers
-
-| Verb today | 2. Calls | 3. Each argument | 4. Output |
-|---|---|---|---|
-| `map` | per row | its row's cell | one cell |
-| `filter` | per row | its row's cell | keep or drop its row |
-| `group` | per row | its row's cell | one cell, beside the input's columns |
-| `expand` | per row | its row's cell | spread into rows |
-| `collapse(by="k")` | per group | the group's cells, **packed into a list** | one cell |
-| `table` | one in total | everything, **packed into a table** | a table |
-| `sweep` | one per combination of settings | its combination | one cell |
-
-So `collapse` is two answers together: "one call per group" and "pack each
-column to a list". Taken apart, packing is a preparation that leaves the
-data alone, and the verbs become presets of four independent choices
-(K32's direction, with the four questions as the primitives' names).
-
-### The ordered components of a step
-
-*Owner, 2026-11-23: "this is the general process for writing a good step";
-"we are defining the ordered components needed to write any step"; "the
-modifiers for each of these ordered components depend on each other.
-Sometimes one modifier, say in calls, implies how we need to prepare the
-data, and land the outputs."*
-
-Every step that calls a tool is written from six components, in this order.
-The four questions above are the same ideas; this is their order, with the
-wrappers and the checks given their places:
-
-```
-pick ──► prepare each argument ──► calls ──► run each call ──► land the outputs ──► check
- (1)            (2)                  (3)          (4)                 (5)             (6)
-```
-
-| # | Component | Answers | Modifiers in it | How many |
-|---|---|---|---|---|
-| 1 | **pick** | which cells | the pick, `wf[…]`; `select`, `slice` (which repeat the pick's own row and column parts) | one per argument |
-| 2 | **prepare each argument** | what each call's argument holds | packing (to a list, per group, per window); converting (`cast`) | per argument; each cell converted first, then packed |
-| 3 | **calls** | how many calls | `map`, `collapse`, `table`, `sweep`, `source` | **exactly one** (core already refuses two: "2 shape verbs in one step") |
-| 4 | **run each call** | how one call runs | `retry`, `timeout`, `breaker`, `try_except`; progress and cancel to come (K23) | several; **their written order is meaningful** |
-| 5 | **land the outputs** | where each output goes, in what shape | one cell (the default); beside the input's columns (`group`); keep or drop its row (`filter`); into rows (`expand`); into columns (`widen`, a record); then the columns' names (`name`) | one way of landing, then names |
-| 6 | **check** | is the output what was expected | `expect` | several |
-
-**The components' order is fixed, not the order they are written in.**
-Today it is the written order, and it changes what a step does without a
-word (**O1**, run 2026-11-23,
-[grid-probes/order.py](grid-probes/order.py)):
-
-| Written | What happened |
+| Run | What it showed |
 |---|---|
-| `flaky[mod.map(), mod.retry(times=2)]` | row 1 failed once, was retried, succeeded; all three rows done |
-| `flaky[mod.retry(times=2), mod.map()]` | **the retry did nothing**: it wrapped the whole map, and a map records a failed row rather than raising, so there was nothing to retry. Row 1 failed |
-
-Proposed: core keeps the modifiers in component order, so a `retry` is
-always component 4 and runs on each call, whatever order it is written in.
-
-**Within component 4 the written order is kept, because there it means
-something**, and the UI shows it as nesting:
-
-| Written | Means |
-|---|---|
-| `timeout` inside `retry` | each attempt has its own time limit |
-| `retry` inside `timeout` | one time limit for all the attempts |
-| `try_except` outside `retry` | retry first; if it still fails, the default |
-| `try_except` inside `retry` | the default catches the first failure, so there is no retry |
-
-**Rearranging without a tool** (`drop`, `rename`, `sort`, `distinct`,
-`copy`, `pack`) is a step of its own: no calls. Its order matters (sort then
-take three is not take three then sort), and it is the workflow's order of
-steps.
-
-### How the components depend on each other
-
-A modifier in one component **implies defaults in the others, and limits
-what they can be**. Component 3 drives the most:
-
-| Calls (3) | Prepare (2): the input's arguments | Land (5): allowed | Land (5): default |
-|---|---|---|---|
-| `map`: one per row | its row's cell; any wider scope allowed (a window, a group, everything) | a cell, beside, keep or drop, into rows, into columns | a cell |
-| `collapse(by=)`: one per group | **packed per group** (required: a row's cell has no single meaning in a group's call) | one row per group; *or on every row of the group (missing today)* | one row per group |
-| `table`: one in total | **the whole block, as a table** | a table: its rows and columns | a table |
-| `sweep`: one per combination of settings | its combination | one row per combination | one row per combination |
-| `source`: one, no input | no input | a table | a table |
-
-The others depend in the same way:
-
-- **Prepare → calls.** If every argument is packed per group, the calls are
-  one per group. If any argument is its row's cell, they are one per row.
-  So a `collapse` can be read off its arguments, and a per-row argument
-  under `collapse` is refused, naming the fix.
-- **The tool's return type → land.** A `bool` can keep or drop (only when
-  written: `auto` never picks `filter`); a list can go into rows; a record
-  goes into columns. A tool that returns one value has nothing to spread.
-- **Land → check.** What `expect` can state (rows, columns) depends on how
-  the outputs landed.
-
-**This is what the shorthands are:** a modifier in component 3 that fills
-in components 2 and 5 with what it implies. `collapse(by="k")` is "one call
-per group, every input argument packed per group, one row per group out".
-Writing component 2 or 5 yourself overrides the default, within the limits
-above.
-
-### Scope: what one call reads of an argument
-
-*Owner, 2026-11-23: "2–3–4 are intertwined components that I want to figure
-out."* An argument's **scope** is the set of input rows whose cells go into
-one call's value for that argument. It is about rows only: which column an
-argument reads is fixed by its pick. For the call made for row 1 of
-
-| # | k | y |
-|---|---|---|
-| 0 | a | 10 |
-| 1 | b | 20 |
-| 2 | a | 30 |
-| 3 | b | 40 |
-
-| Scope of `ys` | Rows it reads | `ys` receives |
-|---|---|---|
-| **row** | 1 | `20`, the cell as it is |
-| **window**, the row and the one before | 0, 1 | `[10, 20]`, packed |
-| **group**, `by="k"` | 1, 3 | `[20, 40]`, packed |
-| **everything** | 0–3 | `[10, 20, 30, 40]`, packed |
-
-- **One row in scope: the cell as it is. More than one: packed.** That is
-  the only time packing happens.
-- **The calls and the scopes must agree.** Under one call per row, any
-  scope works: a wider one is read from that row's window, group, or
-  everything. Under one call per group, every argument from the input is
-  group-scoped (or everything); a row-scoped one is refused, naming the fix.
-  Two different groups (`by="k"` and `by="j"`) with no row-scoped argument
-  are refused.
-- **An argument from outside the input's rows** (another step's pick) is
-  everything, or one fixed cell. A literal is the same every call.
-- *The word is open:* "scope" also means something in programming (and in
-  core's code); "span" says the same.
-
-### Written two ways: argument methods, and modifiers as shorthands
-
-*Settled 2026-11-23 (owner): the full form is `tool[modifiers](data)`; a
-method on a pick is **a shorthand, a soft link to an input modifier**, kept
-because it reads well. See [expression-grammar/grammar.md](expression-grammar/grammar.md) §5, H7.*
-
-*Owner, 2026-11-23: "methods that cast the data properly, like
-`wf["step"]["col"].tolist()`, for the argument, to make it more explicit";
-"I would want modifiers to be good shorthands"; "certainly the modifiers
-handle the number of calls of the function. But we need to organize."*
-
-**Layer 1, the argument: a pick and how its cells are prepared.** A pick
-with no method gives **its row's cell**. A method **packs**, with the scope
-as its arguments, in pandas' words:
-
-| Method | Packs | Into |
-|---|---|---|
-| `.tolist()` | a column's cells | a list |
-| `.to_dict()` | a row's cells | a dict, column name → value |
-| `.to_frame()` | a block | a `DataFrame` |
-| `.to_numpy()` | a column or a block | an array (the app's 015 C58: the user says so) |
-
-```python
-wf["p"]["y"]                     # its row's cell
-wf["p"]["y"].tolist()            # everything, one list, the same every call
-wf["p"]["y"].tolist(by="k")      # its group's cells
-wf["p"]["y"].tolist(window=2)    # this row and the one before
-```
-
-A method is **written into the expression; it fetches nothing**: the pick
-stays an address with its packing noted, saved, printed back as written,
-resolved when the step runs. A pick already has one such member,
-`wf["p"].header` (the column names, one per row); picks have no `tolist`
-today (run 2026-11-23), and a column named `tolist` can't clash, since
-columns are picked with brackets.
-
-**Layer 2, the step: modifiers.** They decide **how many calls**, where
-each call's output lands, and how each call runs. A modifier that decides
-the calls is **a shorthand**: it also gives every argument read from the
-input the matching preparation, unless the argument says otherwise.
-
-```python
-sumup[mod.collapse(by="k")](wf["p"]["x"])       # the shorthand
-sumup(xs=wf["p"]["x"].tolist(by="k"))           # what it means: one call per group
-```
-
-**Every one of today's modifiers, by its job** (the 25 kinds in
-`modifier_catalog()`, run 2026-11-22), and the ones that don't fit:
-
-| Job | Modifiers | Shorthand for |
-|---|---|---|
-| **how many calls**, and the input's preparation | `map` (per row) · `collapse(by=)` (per group; `.tolist(by=)`) · `table` (one; `.to_frame()`) · `sweep` (one per combination of settings) · `source` (one, no input) | the scopes of the input's arguments |
-| **where the output lands, and its shape** | `expand` (into rows) · `widen` (into columns) · `filter` (keeps or drops its row) · `group` (a cell beside the input's columns) · *a group's output on every row of the group: missing* | how each call's output is unpacked and placed |
-| **rearranging, no tool** (§4's moves) | `select`, `drop`, `rename`, `name`, `copy`, `sort`, `slice`, `distinct`, `pack` | take, nest, unnest |
-| **how each call runs** | `retry`, `timeout`, `breaker`, `try_except` (progress and cancel to come, K23) | — |
-| **checks** | `expect` | — |
-| **don't fit** | **`cast`**: it changes values, which no modifier should (rule 2): a tool, or an argument method that says so (`.astype(float)`) · **`auto`**: not a modifier at run; it writes the others · **`select(rows=)`, `slice`**: the same as a pick's row part · **`copy`**: the same as a pick declared as a step | to settle |
-
-Several steps read together (`join`, `zip_`, `stack`) are question 1 for
-more than one step: which cells, from where, matched how.
-
-**`auto` writes Layer 1 too.** When a tool's type calls for a packing,
-`auto` writes `.tolist()` (or `.to_dict()`, …) into the expression: the
-same text a user would type, shown, removed by deleting it.
-
-### What the user sees before running
-
-`def z(x: float, ys: list[float])`, one call per row. `x` takes one value,
-so it gets its row's cell. `ys` takes a list and `p`'s cells are floats, so
-`auto` writes **`.tolist()`**: the whole column, as one list, the same
-every call.
-
-```
-zs = z[mod.map()](x=wf["p"]["x"], ys=wf["p"]["y"].tolist())     one call per row · 3 calls
-
-  x   ← its row's cell of p                float ✓
-  ys  ← all of p["y"], packed to a list    list[float] ✓   (auto: z takes a list)
-```
-
-With `.tolist(by="k")`, each row gets its own group's list: **a group's
-value beside each row in one step**, which takes a `collapse` then a `join`
-today. The
-same expression today takes two steps: `all = op("gather")[mod.collapse()]
-(wf["p"][["x"]])`, then `z[mod.map()](wf["p"]["x"], ys=wf["all"][0]["x"])`
-(run 2026-11-22: `[-2.0, -1.0, 3.0]`).
-
-### Still to settle
-
-- **A grammar that closes the system** (owner, 2026-11-23: "I am wondering
-  if we need a grammar that closes this system to be very robust"): the
-  components, their order and their dependencies written as one grammar
-  and its rules, so every step is either a sentence of it or refused with
-  the rule it breaks. Proposed as the next piece (§6, G0).
-- **The packings**: `.tolist()`, `.to_dict()`, `.to_frame()`, `.to_numpy()`
-  proposed; others?
-- **The scope's word** ("scope" or "span") and its arguments (`by=`,
-  `window=`).
-- **The missing landing**: a group's output on every row of the group, as a
-  modifier (the shorthand for `.tolist(by=)` with per-row calls).
-- **The modifiers that don't fit** (`cast`, `auto`, `select(rows=)`,
-  `slice`, `copy`): where each goes.
+| calls per verb, a 3-row input (2026-11-22) | `map` 3 calls; `collapse(by=…)` one per group; `table` 1; `sweep` one per combination of settings; `source` 1. A `retry` can make several attempts at one call, still one call |
+| a block's two directions, `wf["p"][["x", "y"]]` (2026-11-22) | columns go to parameters by name, under every verb; rows are split: `f(x=1.0, y=10.0)`, `f(x=2.0, y=20.0)`, … under `map`; `g(x=[1.0, 3.0], y=[10.0, 30.0])`, `g(x=[2.0], y=[20.0])` under `collapse(by="k")` |
+| **O1**, the order of modifiers (2026-11-23, [grid-probes/order.py](grid-probes/order.py)) | `flaky[mod.map(), mod.retry(times=2)]`: row 1 failed once, was retried, all three rows done. `flaky[mod.retry(times=2), mod.map()]`: **the retry did nothing** (it wrapped the whole map, which records a failed row rather than raising). Row 1 failed. The two levels of execution mixed (grammar.md §6.4) |
+| each row against the whole column, today (2026-11-22) | two steps: `all = op("gather")[mod.collapse()](wf["p"][["x"]])`, then `z[mod.map()](wf["p"]["x"], ys=wf["all"][0]["x"])`, giving `[-2.0, -1.0, 3.0]` |
+| picks have no `tolist` today (2026-11-23) | a pick has one such member, `wf["p"].header`; a column named `tolist` couldn't clash, since columns are picked with brackets |
 
 ## 1. Pick, block, table
 
@@ -401,11 +128,12 @@ cell's list into many cells (§4).
 | `map`, a whole cell holding a list | `[7, 8]` | the cell's value ✓ |
 | `map`, a whole cell holding a number | `[9.0]` | **the block wrapped into a list (A7)**: the parameter's type chose the level |
 
-**How the two levels are kept apart is §0's rule 3**: packing is the
+**How the two levels are kept apart** (canonical.md, `mod.input.nest`): nesting is the
 only way many cells become one, and it is always written, so the A7 row
 above stops being a guess. (A first attempt, "cell or block, chosen by
-`auto` from the types", stood here on 2026-11-22; §0 replaces it: every
-argument is one cell per call, and a reduction is always a written packing.)
+`auto` from the types", stood here on 2026-11-22; the canonical form
+replaces it: every argument is one cell per call, and a reduction is always
+a written `nest`.)
 
 ## 2. The block, as an object
 
@@ -510,12 +238,12 @@ with itself**, each found by running:
 | **A3** | The same number arrives in two forms: paired as `float`, from a whole cell as `numpy.float64` | one form, plain Python |
 | **A4** | A pick narrower than its step is checked against **the step's** columns: `h(x: float)` on `wf["d"]["s"]`, when `d` also has a column `x`, is accepted, then every row fails with a raw `TypeError: h() missing … 'x'`. On its own the same pick is refused with a clear message | checked against the block: the pick's columns |
 | **A5** | Under `mod.table()` the parameter's type isn't checked at all (the app's 015 C58: `np.ndarray` gets a `DataFrame`) | the same rule, block → the parameter's form |
-| **A6** | `paired → list` is refused ("the verb decides what a column passes"), but `paired → DataFrame` passes the whole 3-row column, though each call should get one cell | under §0: the argument is its row's cell; a list or table of the column needs a written **fixed + packed** (`auto` may write it) |
-| **A7** | A whole cell holding a number, into `y: list`, arrives as `[9.0]`; a cell holding a list arrives as the list | under §0, rule 3: no silent wrapping; a cell is delivered as it is, and `9.0` doesn't fit `list`, unless a packing is written |
+| **A6** | `paired → list` is refused ("the verb decides what a column passes"), but `paired → DataFrame` passes the whole 3-row column, though each call should get one cell | in the canonical form: the argument is its row's cell; a list or table of the column needs a written `mod.input.nest` (a shorthand may write it) |
+| **A7** | A whole cell holding a number, into `y: list`, arrives as `[9.0]`; a cell holding a list arrives as the list | in the canonical form: no silent wrapping; a cell is delivered as it is, and `9.0` doesn't fit `list`, unless a `nest` is written |
 
 **Proposed: the table above is the contract**, with one row per verb,
-redone under §0: each cell becomes what the four questions answer
-(its row's cell, a fixed cell, packed, or refused). The delivery rule (a literal, cell or block × the verb ×
+redone under the canonical form (expression-grammar/canonical.md): each
+cell becomes its row's cell, a fixed cell, nested, or refused. The delivery rule (a literal, cell or block × the verb ×
 the parameter's type → delivered, or refused with a reason) lives in one function.
 `k.accepts` is that function's table read by parameter, and a test pins
 every cell, the way this probe prints them.
@@ -635,69 +363,27 @@ its item **absent**, so a row is never lost by unnesting.
 | **I1** | `widen` of a list, set, str, array, range or DataFrame completes with no columns: the column is gone, nothing said (the arrays were plan P1's W-arr; it's wider than arrays) | a list opens by position, as a tuple does; any other kind is refused, naming it |
 | **I2** | `expand` of `[]` or `None` drops the row | one row, its item absent (to decide) |
 
-## 6. A dev plan
+## 6. The plan
 
-> **Superseded 2026-11-23** by [expression-grammar/roadmap.md](expression-grammar/roadmap.md) (a clean slate, names first). Kept as the record of the pieces found here.
+Superseded 2026-11-23 by [expression-grammar/roadmap.md](expression-grammar/roadmap.md):
+a clean slate, names first. The findings named here (A1–A7, F1–F2, I1–I2,
+O1, G1–G2) are placed there: the binding ones replaced by the new set, the
+data layer's fixed in today's code.
 
-Each piece is small, and each behaviour change is confirmed first.
+## 7. Decided here
 
-| # | Piece | Kind | Needs |
-|---|---|---|---|
-| **G0** | **The step grammar** ([expression-grammar/grammar.md](expression-grammar/grammar.md), started 2026-11-23): the ordered components as a grammar (each component a slot, its modifiers the words that fill it), and the dependencies as numbered rules, each with the problem it gives. A probe that parses and prints back every expression in the tests, and a property test that generates sentences from the grammar: each one is accepted and runs, or is refused when declared, naming its rule; never a crash, never a silent output | docs, then a test | the owner's yes on §0 |
-| **O1** | Modifiers kept in component order, so `[retry, map]` retries each call | behaviour | G0 |
-| **E0** | **§0 into model.md and rules.md**: the four questions, the six rules, the verbs as presets | docs | the owner's yes on §0's open points |
-| **B0** | The words into model.md §2: pick (the address), block (what it holds; cell, row, column its cases), table, grid (the data cells only). Rename `_shape_kind`'s n×m case | docs, one rename | the owner's yes |
-| **B1** | The delivery contract: §3's table as rules.md text, and a test that runs the whole matrix and pins every cell (today's answers, A1–A7 marked expected-to-change) | test, no behaviour change | B0 |
-| **B2** | `k.block(pick)`: read-only, from today's parts (§2) | additive | B0 |
-| **B3** | One delivery rule, fixing A1–A7 one at a time (A1 and A4 first: a crash and a raw error) | behaviour, one piece each | B1 |
-| **B4** | `k.accepts(operation, parameter)` and `k.fits(…)` for the UI: what a parameter takes under its modifiers, and how a pick would reach it | additive | B2, B3 |
-| **R1** | The primitives (§4) in rules.md, every modifier and combine listed as one; the restructurings as recipes | docs | B0 |
-| **R2** | The three missing options: match all, aligned unnest, nest by a column's values | behaviour, one piece each | R1, the owner's choice of which |
-| **F1, F2** | A data step keeps absent cells absent, and a column its type | behaviour, one piece each | — |
-| **F3** | `k.freeze(name, pick)` (§2, *Freezing*) | additive | F1, F2, B2 |
-| **I1** | `widen` opens a list by position, and refuses any kind it can't open | behaviour | R1 |
-| **I2** | `expand` of an empty sequence or `None` keeps the row (once decided) | behaviour | the owner's choice |
-| **I3** | The four kinds of iterable (§5) in rules.md; a column's type says its kind, so unnesting a unit is refused when declared | docs, then behaviour | R1 |
-| **E1** | Pick methods that pack, written into the expression: `.tolist()`, `.to_dict()`, `.to_frame()`, `.to_numpy()`, with `by=` and `window=` scopes; the calls and scopes checked to agree; `collapse(by=)` the shorthand for `.tolist(by=)` | additive, then behaviour | E0 |
-| **E2** | `auto` writes the packing methods from the tool's types | behaviour | E1 |
-| **E3** | The modifiers that don't fit (§0): `cast`, `select(rows=)`, `slice`, `copy` | behaviour, one at a time | E0, the owner's choice for each |
-| (K32) | Verbs rebuilt on the primitives, the four questions | large, parked | R1, E1 |
+**Decided on this page** (2026-11-22/23), and still standing:
 
-**Suggested order:** G0 first, since it closes the system the rest is built in; then E0; then B0, B1, then B3's A1 and A4 (the two that crash or
-fail raw), B2, B4. Freezing next: F1, F2, then F3. R1 and I3 alongside, since
-they're docs; I1 with them, since it loses data silently. R2 and I2 when the
-app needs a window or a pivot.
-
-## 7. To settle with the owner
-
-**Decided, 2026-11-22:**
-
-- **Block** is the general word; cell, row and column are its cases. The
-  code's n×m case is renamed (`rows × columns`).
-- **§0, one expression from sheet to sheet** (2026-11-23): every argument
-  is one cell per call; modifiers prepare and never change a value; packing
-  is the only way many cells become one, always written; `auto` sets the
-  defaults from the tool's signature, and writing a choice yourself
-  overrides it. A call is one run of the tool.
+- **Block** is the general word; cell, row and column are its cases (the
+  code's n×m case to be renamed, with the names: roadmap phase 1).
+- **A pick gives a block, never a table; only a step makes a table** (§1).
 - **A paired cell of the wrong type** is refused when declared (A2).
 - **Freezing** copies whatever is there (§2).
-- **The four kinds of iterable** (§5).
-- **I2**: an empty list or `None` under `expand` keeps its row, the item
-  absent.
+- **The four kinds of iterable** (§5), and **I2**: an empty list or `None`
+  under `expand` keeps its row, its item absent.
 
-**Open:**
-
-1. **§0's open points**: the packings, the scope's word, the missing
-   landing, and the modifiers that don't fit. (Settled 2026-11-23: packing
-   is an input modifier, and `.tolist()` on a pick is its shorthand; no
-   method means its row's cell; `auto` writes the same method when the types call for it;
-   modifiers decide the calls and are shorthands for the arguments'
-   preparation.)
-2. **A tool's parameter typed `Block`** receives a block (owner). Without
-   row numbers and lineage, so recipes, single-cell runs and staleness keep
-   working, or with them, relaxing core-asks' "lineage never reaches a
-   tool"? Wait until a tool needs it?
-3. **R2**: which of pivot, window and cross product first? (When the app
-   needs one.)
-4. **Freezing**: should a frozen step note where it came from, for display
-   only?
+**Open questions** are kept in one place now: grammar.md §8 (a parameter
+typed `Block`; N2–N9), canonical.md §7, primitives.md §6, and conditions.md's
+proposed conditions. Two from here, carried there: which of pivot, window
+and cross product comes first (when the app needs one); whether a frozen
+step notes where it came from, for display only.

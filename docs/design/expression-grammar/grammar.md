@@ -1,7 +1,7 @@
 # The step grammar
 
 > **Draft, 2026-11-23, for the owner.** The start of the grammar that closes
-> the system ([blocks.md](../blocks.md) §0, plan piece G0). It begins **top
+> the system ([roadmap.md](roadmap.md); its evidence in [blocks.md](../blocks.md)). It begins **top
 > down**, with how a user should see an expression (§0); then **what must
 > be resolved for any expression** (§1–§4), then **the owner's heuristics**
 > for resolving it (§5), and **the classes each of the five components can
@@ -100,7 +100,7 @@ in blocks.md are not rivals: each belongs to one level.
 | Level | Asks | Here | Its parts |
 |---|---|---|---|
 | **L0. The expression** | what did the user write? | §0, §1 | a tool, its modifiers, its data: in full, **`tool[modifiers](data)`** (§5, H7), or a shorthand of it |
-| **L1. The components** | what must be resolved? | §2, §6 | the **five**: tool, input, call, execution (at levels: each call, the step), output. Their contents are C1–C9 (§2); they are resolved **in a fixed order** (blocks.md §0, *The ordered components*); the user meets them as the **plain questions** above |
+| **L1. The components** | what must be resolved? | §2, §6 | the **five**: tool, input, call, execution (at levels: each call, the step), output. Their contents are C1–C9 (§2); they are resolved **in a fixed order** (canonical.md §2); the user meets them as the **plain questions** above |
 | **L2. The states** | what can each component be? | §6 | each component's axes, and the classes on each axis (`T-k.core`, `K-n.many`, …) |
 | **L3. The rules** | how does one component's state limit the others', so the expression is valid? | §7 (next) | numbered rules: given these classes, those are impossible, or implied. Where more than one reading is left, the most likely is written and shown (H2) |
 
@@ -188,7 +188,7 @@ part of this, in this order:
 | Component | Today | Findings |
 |---|---|---|
 | C4 preparation | implied by the verb and the parameter's type, at the call, not written; four separate checks | A1–A7 ([blocks.md](../blocks.md) §3) |
-| C6 and C5's order | the written order, which can change what a step does | O1 (blocks.md §0) |
+| C6 and C5's order | the written order, which can change what a step does | O1 (blocks.md §0, the runs) |
 | C7 landing | implied by the verb; "on every row of its scope" missing | §4's window and transform gaps |
 | C2's block | checked against the input **step's** columns, not the pick's | A4; and H3's last row (two columns, two readings, accepted) |
 
@@ -278,7 +278,7 @@ shorthand:
 
 
 Everything can be written as modifiers; today they are ambiguous (O1, and
-blocks.md §0's modifiers that don't fit). **The tool's modifiers are
+the modifiers that don't fit: roadmap.md's toss list). **The tool's modifiers are
 organized into classes, as orthogonal as possible**:
 
 | Class | Decides | Components (§2) | Today's modifiers |
@@ -292,13 +292,12 @@ The rearrangements with no tool (`drop`, `rename`, `copy`, `sort`,
 `distinct`, `pack`) are steps of their own, not a tool's modifiers.
 
 **Where classes bleed into each other: the shorthands.** A shorthand
-belongs to **one** class, and fills in the others' defaults (blocks.md §0,
-*How the components depend*). `collapse(by="k")` is a **call** modifier;
+belongs to **one** class, and fills in the others' defaults (conditions.md). `collapse(by="k")` is a **call** modifier;
 it implies an **input** preparation (each input argument packed per group)
 and an **output** landing (one row per group). Opened, the expression shows
 all three (H1). *Open:* `filter`, `expand` and `group` are output
 modifiers here, but each also implies calls per row. `cast` changes values,
-which blocks.md §0's rule 2 says no modifier does: a conversion is a
+which the rule "modifiers never change a value" forbids: a conversion is a
 preparation, if the owner agrees the rule allows it.
 
 ### H8. The pick conditions which modifiers apply
@@ -511,8 +510,8 @@ accepted and written out as above (**G1**, a finding for the rules).
 1. **The shape**: for each component, the words that fill it (the
    modifiers, the pick's parts, the literals), as a grammar.
 2. **The rules**: every dependency between the components as a numbered
-   rule, each with the problem it gives when broken. blocks.md §0's table
-   of dependencies is the start.
+   rule, each with the problem it gives when broken. They are started in
+   conditions.md.
 3. **The conventions**: for each component, its default, written as one
    table, so "obvious and intuitive" is one place to look.
 
@@ -571,7 +570,7 @@ owner works top down first, then these.
    or call modifiers?
 3. ~~**H7, `cast`.**~~ **Settled, 2026-11-23:** a conversion is an **input
    modifier** (owner: "this motivates the need to classify the modifiers").
-   blocks.md §0's rule "modifiers never change a value" reads: except a
+   the rule "modifiers never change a value" (§6.4's test) reads: except a
    conversion, written as an input modifier.
 
 **From §2 and §3:**
