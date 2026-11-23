@@ -1,7 +1,8 @@
 # Blocks, and the moves that rearrange cells
 
-> **Draft, 2026-11-22, for the owner**, to choose the next dev plan. §1 is
-> the words; §2 the **block**, an object core doesn't have yet; §3 **what a
+> **Draft, 2026-11-22, for the owner**, to choose the next dev plan. **§0 is
+> the idea everything else serves** (owner, 2026-11-23: "this is
+> important"). §1 is the words; §2 the **block**, an object core doesn't have yet; §3 **what a
 > parameter accepts**, run today
 > ([grid-probes/blocks.py](grid-probes/blocks.py)), and where it disagrees
 > with itself; §4 the **primitives** that rearrange cells, with every
@@ -9,6 +10,115 @@
 > can hold, and what core opens; §6 the dev plan; §7 the questions.
 > It builds on [grid.md](grid.md) (§8 the definitions, §10 every move) and
 > doesn't replace it. Nothing here is built.
+
+## 0. The idea: one expression, from sheet to sheet
+
+*Owner, 2026-11-23: "how do we enable a spreadsheet-like experience, but
+with one expression mapping from sheet to sheet, in a way that is very easy
+to understand and can handle cells containing any type of Python data
+structure?" And: "every function should operate from cell to cell"; "I
+would like the modifiers to handle the preparation and leave the data
+alone"; "collapse … just to list".*
+
+**A step is one formula dragged over a sheet.** The tool sits in the middle
+and only ever sees cells:
+
+```
+ sheet in ──pick──► block ──split into calls──► each call: one cell per argument ──► tool ──► output ──place──► sheet out
+            (1)              (2)                 (3) prepared; values untouched                      (4)
+```
+
+**A call** is one run of the tool's function, one Python invocation with
+one output. A step is the set of calls its split makes (run 2026-11-22, a
+3-row input: `map` 3 calls, `collapse(by=…)` one per group, `table` 1,
+`sweep` one per combination, `source` 1). A wrapper such as `retry` can make
+several *attempts* at one call; it is still one call.
+
+### The four questions
+
+Every step answers four questions. Each has a default:
+
+| Question | Choices | Default | Excel's version |
+|---|---|---|---|
+| **1. Which cells?** | a pick, `wf["p"][rows][columns]`: the block | the whole step | the range you point at |
+| **2. How many calls?** | one per row · one per group (`by="k"`) · one in total | one per row | dragging a formula down |
+| **3. What does each argument get?** | its **row's** cells, or a **fixed** pick, the same every call. When that is many cells: **packed** into one cell, as a list, a dict or a table | its row's cell | `B2` against `$B$2:$B$4`; and a function such as `SUM` taking a range |
+| **4. Where does each call's output go?** | one cell · spread into rows · spread into columns · keep or drop its row | one cell | a value, or a spill |
+
+Plus how each call runs: the wrappers, `retry`, `timeout`, `breaker`,
+`try_except` (and progress and cancel, K23).
+
+### The rules
+
+1. **Every argument becomes exactly one cell per call.** A tool goes from
+   cells to cells.
+2. **Modifiers prepare; they never change a value.** Splitting, fixing and
+   packing only decide which cells reach a call and how many become one.
+   A cell holding a list reaches the tool as that list.
+3. **Packing is the only way many cells become one**, and it is always
+   written: `to_list` (the default for a column), `to_dict` (a row's cells,
+   by column name), `to_table` (a block). So "a block made into a list" and
+   "a cell that holds a list" can't be confused: one is packed, in the
+   expression; the other is a cell's value.
+4. **A block's two directions do different jobs** (run 2026-11-22 on
+   `wf["p"][["x", "y"]]`): **columns go to parameters**, by name, under every
+   modifier; **rows are what the split decides**: one row per call,
+   `f(x=1.0, y=10.0)` … under `map`; or the rows of a group packed into
+   lists inside one call, `g(x=[1.0, 3.0], y=[10.0, 30.0])`, under
+   `collapse(by="k")`.
+5. **Any Python value works**, because values are never touched. The one
+   check is whether a cell's type, or a packed cell's (`list[float]`), fits
+   the parameter's type.
+6. **The tool's signature sets the defaults, through `auto`.** It reads the
+   parameter types and the modifiers and writes every choice into the
+   expression, where it is shown before anything runs, never re-guessed
+   after a run, and changed with one edit. Writing a choice yourself
+   overrides it, and is never second-guessed.
+
+### Today's verbs are preset answers
+
+| Verb today | 2. Calls | 3. Each argument | 4. Output |
+|---|---|---|---|
+| `map` | per row | its row's cell | one cell |
+| `filter` | per row | its row's cell | keep or drop its row |
+| `group` | per row | its row's cell | one cell, beside the input's columns |
+| `expand` | per row | its row's cell | spread into rows |
+| `collapse(by="k")` | per group | the group's cells, **packed into a list** | one cell |
+| `table` | one in total | everything, **packed into a table** | a table |
+| `sweep` | one per combination of settings | its combination | one cell |
+
+So `collapse` is two answers together: "one call per group" and "pack each
+column to a list". Taken apart, packing is a preparation that leaves the
+data alone, and the verbs become presets of four independent choices
+(K32's direction, with the four questions as the primitives' names).
+
+### What the user sees before running
+
+`def z(x: float, ys: list[float])`, one call per row. `x` takes one value,
+so it gets its row's cell. `ys` takes a list and `p`'s cells are floats, so
+`auto` writes **fixed and packed**: the whole column, as one list, the same
+every call.
+
+```
+zs = z(x=wf["p"]["x"], ys=to_list($ wf["p"]["y"]))      one call per row · 3 calls
+
+  x   ← its row's cell of p                float ✓
+  ys  ← all of p["y"], packed to a list    list[float] ✓   (auto: z takes a list)
+```
+
+(`$` and `to_list` show the idea; how they are written is open, §7.) The
+same expression today takes two steps: `all = op("gather")[mod.collapse()]
+(wf["p"][["x"]])`, then `z[mod.map()](wf["p"]["x"], ys=wf["all"][0]["x"])`
+(run 2026-11-22: `[-2.0, -1.0, 3.0]`).
+
+### Still to settle
+
+- **How `$` (fixed) and packing are written** in an expression, and shown
+  in the UI.
+- **When the types call for packing, does `auto` add it** (written,
+  removable) **or refuse and suggest it?**
+- **Which packings exist**: `to_list`, `to_dict`, `to_table` for certain;
+  others (a `Series`, an array of a numeric column)?
 
 ## 1. Pick, block, table
 
@@ -79,60 +189,11 @@ cell's list into many cells (§4).
 | `map`, a whole cell holding a list | `[7, 8]` | the cell's value ✓ |
 | `map`, a whole cell holding a number | `[9.0]` | **the block wrapped into a list (A7)**: the parameter's type chose the level |
 
-**The convention: cell or block, it depends, by a fixed rule** (owner,
-2026-11-22: "cell and the block, the answer is it depends"; "a default
-convention on how to handle the grid based on the type, but the user can
-also specify if they know exactly what they want": what `auto` was made for).
-
-Each argument is delivered one of two ways:
-
-| Delivery | Each call gets | Like Excel's |
-|---|---|---|
-| **cell** | one cell: its row's (a paired argument), or one fixed cell of another step, the same every call | `B2` dragged down; `$B$1` |
-| **block** | the whole block, the same every call, nested into the parameter's form: a column → a list, a row → a dict, rows × columns → a table | `SUM($B$2:$B$4)` |
-
-1. **A cell's value is never changed**: a cell holding a list is that list,
-   delivered as it is.
-2. **The modifier decides what a call's share is**: under `map`, a row;
-   under `collapse`, a group (its cells nested into a list); under `table`,
-   everything.
-3. **`auto` picks each argument's delivery from the types**, when the step is
-   declared:
-
-   | Parameter's type | `auto` writes |
-   |---|---|
-   | no type, `Any`, or a type one cell of the argument fits | **cell** |
-   | a type one cell can't fit but the block does (`list[float]` on a float column; `pd.DataFrame` on cells that aren't tables) | **block** |
-   | neither | refused when declared, naming both |
-   | the argument's types not known yet | **cell**, shown as assumed |
-
-   It picks the verb the same way (today's rules, `checks.infer_verb`), plus
-   one it lacks: a tool whose input parameter takes a list of what the
-   column's cells hold is a `collapse` (run: `auto` on `sumup(xs: list)`
-   over a float column picks `map`, and the step is invalid).
-4. **What `auto` picks is written into the expression**, as `auto` already
-   does for the verb: shown, never re-guessed after a run, changed with one
-   edit. **Writing it yourself overrides it**, and is never second-guessed.
-5. **A block can be made in place or as its own step.** In place, the
-   argument is marked as a block. As a step, a `collapse` (or `pack`) makes
-   one cell, which is then delivered as a cell. It's the same nest move
-   (§4); the in-place form is shorthand. (Run: `all = op("gather")
-   [mod.collapse()](wf["p"][["x"]])`, then `z[mod.map()](wf["p"]["x"],
-   ys=wf["all"][0]["x"])`, gives each row against the whole column.)
-
-**How a block is marked in an expression is open** (§7): candidates are a
-modifier on the argument, `ys=wf["p"]["y"][mod.collapse()]`, which says it
-is the nest move, or a mark of its own.
-
-Before anything runs, the UI can show each argument's delivery and whether
-its type fits:
-
-```
-zs = z[mod.map()](wf["p"]["x"], ys=<block> wf["p"]["y"])     staged · 3 rows
-
-  x   ← one cell per row of p         float ✓
-  ys  ← all of p["y"], every row      list[float] ✓   (auto: one float isn't a list)
-```
+**How the two levels are kept apart is §0's rule 3**: packing is the
+only way many cells become one, and it is always written, so the A7 row
+above stops being a guess. (A first attempt, "cell or block, chosen by
+`auto` from the types", stood here on 2026-11-22; §0 replaces it: every
+argument is one cell per call, and a reduction is always a written packing.)
 
 ## 2. The block, as an object
 
@@ -237,12 +298,12 @@ with itself**, each found by running:
 | **A3** | The same number arrives in two forms: paired as `float`, from a whole cell as `numpy.float64` | one form, plain Python |
 | **A4** | A pick narrower than its step is checked against **the step's** columns: `h(x: float)` on `wf["d"]["s"]`, when `d` also has a column `x`, is accepted, then every row fails with a raw `TypeError: h() missing … 'x'`. On its own the same pick is refused with a clear message | checked against the block: the pick's columns |
 | **A5** | Under `mod.table()` the parameter's type isn't checked at all (the app's 015 C58: `np.ndarray` gets a `DataFrame`) | the same rule, block → the parameter's form |
-| **A6** | `paired → list` is refused ("the verb decides what a column passes"), but `paired → DataFrame` passes the whole 3-row column, though each call should get one cell | one rule for both (§1, the convention): `auto` writes **block** for both, since one float fits neither; written, so it shows |
-| **A7** | A whole cell holding a number, into `y: list`, arrives as `[9.0]`; a cell holding a list arrives as the list | the same choice, made visible: `auto` writes **block** (a 1-cell block as a list), shown in the expression, instead of being decided silently at the call |
+| **A6** | `paired → list` is refused ("the verb decides what a column passes"), but `paired → DataFrame` passes the whole 3-row column, though each call should get one cell | under §0: the argument is its row's cell; a list or table of the column needs a written **fixed + packed** (`auto` may write it) |
+| **A7** | A whole cell holding a number, into `y: list`, arrives as `[9.0]`; a cell holding a list arrives as the list | under §0, rule 3: no silent wrapping; a cell is delivered as it is, and `9.0` doesn't fit `list`, unless a packing is written |
 
 **Proposed: the table above is the contract**, with one row per verb,
-redone under §1's convention: each cell becomes what `auto` writes (cell,
-block, or refused). The delivery rule (a literal, cell or block × the verb ×
+redone under §0: each cell becomes what the four questions answer
+(its row's cell, a fixed cell, packed, or refused). The delivery rule (a literal, cell or block × the verb ×
 the parameter's type → delivered, or refused with a reason) lives in one function.
 `k.accepts` is that function's table read by parameter, and a test pins
 every cell, the way this probe prints them.
@@ -368,6 +429,7 @@ Each piece is small, and each behaviour change is confirmed first.
 
 | # | Piece | Kind | Needs |
 |---|---|---|---|
+| **E0** | **§0 into model.md and rules.md**: the four questions, the six rules, the verbs as presets | docs | the owner's yes on §0's open points |
 | **B0** | The words into model.md §2: pick (the address), block (what it holds; cell, row, column its cases), table, grid (the data cells only). Rename `_shape_kind`'s n×m case | docs, one rename | the owner's yes |
 | **B1** | The delivery contract: §3's table as rules.md text, and a test that runs the whole matrix and pins every cell (today's answers, A1–A7 marked expected-to-change) | test, no behaviour change | B0 |
 | **B2** | `k.block(pick)`: read-only, from today's parts (§2) | additive | B0 |
@@ -380,34 +442,26 @@ Each piece is small, and each behaviour change is confirmed first.
 | **I1** | `widen` opens a list by position, and refuses any kind it can't open | behaviour | R1 |
 | **I2** | `expand` of an empty sequence or `None` keeps the row (once decided) | behaviour | the owner's choice |
 | **I3** | The four kinds of iterable (§5) in rules.md; a column's type says its kind, so unnesting a unit is refused when declared | docs, then behaviour | R1 |
-| (K32) | Verbs rebuilt on the primitives | large, parked | R1 |
+| **E1** | Packing as its own modifier (`to_list`, `to_dict`, `to_table`) and `$` (fixed) on an argument; `collapse` = split by group + `to_list` | additive, then behaviour | E0 |
+| **E2** | `auto` writes each argument's answers to questions 3 (fixed, packed) from the types | behaviour | E1 |
+| (K32) | Verbs rebuilt on the primitives, the four questions | large, parked | R1, E1 |
 
-**Suggested order:** B0, B1, then B3's A1 and A4 (the two that crash or
+**Suggested order:** E0 first, since it decides the rest; then B0, B1, then B3's A1 and A4 (the two that crash or
 fail raw), B2, B4. Freezing next: F1, F2, then F3. R1 and I3 alongside, since
 they're docs; I1 with them, since it loses data silently. R2 and I2 when the
 app needs a window or a pivot.
 
 ## 7. To settle with the owner
 
-**Where we left off (2026-11-22, late):** the owner's latest direction
-simplifies §1's convention. **Every argument gets one cell per call.** When
-a tool needs many cells as one value (a list, a table), **a collapse
-modifier reduces them first**, so a reduction is always a visible modifier,
-never implied by a parameter's type, and the UI shows every reduction the
-same way. **A call** is one run of the tool's function; a step is the set
-of calls its modifier makes (one per row under `map`, one per group under
-`collapse`, one under `table`). Still to settle: when a tool's type says
-`list` and the cells aren't lists, does `auto` **add** the collapse
-modifier (written, removable) or **refuse and suggest it**? §1 is to be
-rewritten once that is settled.
-
 **Decided, 2026-11-22:**
 
 - **Block** is the general word; cell, row and column are its cases. The
   code's n×m case is renamed (`rows × columns`).
-- **Cell or block, it depends, by a fixed convention** (§1): `auto` picks
-  from the types and writes it into the expression; writing it yourself
-  overrides. Both the in-place and the separate-step forms of a block exist.
+- **§0, one expression from sheet to sheet** (2026-11-23): every argument
+  is one cell per call; modifiers prepare and never change a value; packing
+  is the only way many cells become one, always written; `auto` sets the
+  defaults from the tool's signature, and writing a choice yourself
+  overrides it. A call is one run of the tool.
 - **A paired cell of the wrong type** is refused when declared (A2).
 - **Freezing** copies whatever is there (§2).
 - **The four kinds of iterable** (§5).
@@ -416,8 +470,9 @@ rewritten once that is settled.
 
 **Open:**
 
-1. **How a block is marked** in an expression: a modifier on the argument
-   (`ys=wf["p"]["y"][mod.collapse()]`), or a mark of its own?
+1. **How fixed (`$`) and packing are written** (§0), and whether `auto`
+   adds a packing when the types call for one, or refuses and suggests it.
+   Which packings exist beyond `to_list`, `to_dict`, `to_table`.
 2. **A tool's parameter typed `Block`** receives a block (owner). Without
    row numbers and lineage, so recipes, single-cell runs and staleness keep
    working, or with them, relaxing core-asks' "lineage never reaches a
