@@ -29,11 +29,11 @@ it on every case.
 | **NS3** | **Groups in the order their keys are first seen** | ✓ | **sorted** by default | decided: core's (the data's order) |
 | **NS4** | **A missing key (`None`, absent) is a group of its own** | ✓ | **dropped silently** by default | decided: core's (stricter) |
 | **NS5** | **Several keys**, `by=["k", "j"]`: a group per combination, the keys kept as **separate columns** (no tuple keys: tidy.md T5) | **refused: "by= must be str" (NF1)** | ✓, tuple keys | proposed |
-| **NS6** | **A key that isn't a single value** (a list): **three readings**, so with none written it is **refused, naming them**; written with **`key(…, read=…)`**, one reading (§A.1) | grouped by the exact list: `["a", "b"]` and `["b", "a"]` are two groups (run) | raises | proposed (owner, 2026-11-23: "is there a way to define a modifier or extension to handle possible cases?") |
+| **NS6** | **A key that isn't a single value** (a list): **three readings**, so with none written it is **refused, naming them**; written with **`key(…, read=…)`**, one reading (§A.1) | grouped by the exact list: `["a", "b"]` and `["b", "a"]` are two groups (run) | raises | **decided** (owner, 2026-11-23); its name in phase 1 |
 | **NS7** | **Within a group, the rows' order** is kept | ✓ | ✓ | decided |
 | **NS8** | **Zero rows**: zero groups; **everything** over zero rows: **one row holding `[]`** (everything is one piece, even empty) | zero groups ✓; everything: one row holding `[]` ✓ (run) | — | decided: today's |
 
-### A.1 How a key is read: `key(column, read=…)`
+### A.1 How a key is read: `key(column, read=…)` (accepted, owner 2026-11-23)
 
 Run 2026-11-23: `tags` holding `["a", "b"]`, `["b", "a"]`, `["a", "b"]`,
 `["a"]` (x = 1–4), `collapse(by="tags")` gives three groups: `[a, b]` → 1,
@@ -89,14 +89,37 @@ mod.collapse(by="tags")          # tags holds lists: refused, naming the reading
 |---|---|
 | **a step** | `collapse` with `gather`, `pack`: everything above |
 | **on a tool's input** | **packing an argument** over a scope (canonical.md `mod.input.nest`): the main use; this row's group and a window are new |
-| **on a tool's output** | the outputs gathered into one list: *missing*; to decide whether wanted |
-| **a group as a table** | each group's rows nested into **one table cell** (a `DataFrame` per group), for a tool that takes a table per group (a model per group): *new*; to decide |
+| **on a tool's output** | **the outputs gathered into one list** (§E.1): *new*, wanted (owner, 2026-11-23) |
+| **a group as a table** | **each group's rows nested into one table cell** (§E.2): *new*, wanted (owner, 2026-11-23) |
+
+### E.1 The outputs gathered into one list
+
+One call per row, then **the outputs nested over a scope** (everything, or
+a group by key): "run this per row, and give me the results as one list".
+The same as two steps (calls per row, then nest), in one.
+
+| # | Condition | |
+|---|---|---|
+| **NS17** | The calls are one per row; the outputs are nested over everything (one row out) or over a group (one row per group), as NS2–NS8 | proposed |
+| **NS18** | A **failed** call's output is a marker in the list, as a gap is (NS10); expand turns it back into **a failed cell, with its reason** | proposed |
+| **NS19** | Lineage: the nested cell names the input rows of its outputs, in order (NS13) | proposed |
+
+### E.2 A group as a table
+
+Each group's rows, **with their columns**, nested into **one cell holding a
+table**, for a tool that takes a table per group (a model fitted per
+group).
+
+| # | Condition | |
+|---|---|---|
+| **NS20** | One row per group: the key columns, and one cell holding the group's rows as a table; the table's columns are the block's, **without index columns** (lineage stays outside, on the row: NS13) | proposed |
+| **NS21** | The cell's type is a **table type**, its columns and their types, known before the run | proposed |
+| **NS22** | **Unnesting a table cell** (its rows and columns back): a later method; until then a table in a cell is a unit (expand.md V6: passed through) | proposed: later |
 
 ## To decide
 
-1. **NS6**: `key(column, read=…)` with `"each"`, `"exact"`, `"set"` and
-   a tool; a list key with no `read=` refused, naming them. And its name.
+1. ~~NS6~~ decided: `key(column, read=…)`.
 3. **NS5, NS9, NS12, NS16**: proposed; accepted unless the owner
    objects.
-4. **E**: the outputs gathered into one list, and a group as a table:
-   wanted?
+4. ~~E~~ decided: both wanted (§E.1, §E.2); their conditions NS17–NS22
+   proposed.
