@@ -41,3 +41,15 @@ show("declared columns=", [{"a": 1, "b": 2}], columns=["a"])
 show("declared, missing key", [{"a": 1}], columns=["a", "b"])
 show("NamedTuple cells", [RGB(1, 2, 3), RGB(4, 5, 6)])
 show("str", ["ab", "cd"])
+
+# More cases (2026-11-23): empty mappings and sequences, None values, a
+# clash with a kept column, zero rows, mixed types, '#' keys, names that
+# collide once made strings.
+print()
+show("empty dict {}", [{}, {"a": 1}])
+show("key present, value None", [{"a": None}, {"a": 1}])
+show("mixed value types per key", [{"a": 1}, {"a": "x"}])
+show("key with a #", [{"#a": 1}])
+show("keys 1 and '1'", [{1: "x", "1": "y"}])
+show("empty tuple ()", [(), (1,)])
+show("all None", [None, None])
