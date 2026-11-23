@@ -14,6 +14,7 @@ when declared, naming the rule it breaks.
 | Page | What it holds | Read it for |
 |---|---|---|
 | [grammar.md](grammar.md) | §0 top down: what the user sees, the inputs, the plain questions · §1–§4 the components every expression must resolve, and what core resolves today · §5 the owner's heuristics, H1–H9 · §6 **the five components and the classes each can be** · §8 open questions | the grammar itself |
+| [primitives.md](primitives.md) | **one primitive, three places**: take, nest, unnest, join together, convert, name; each as a step, on a tool's input, or on its output; today's modifiers placed in that table, the gaps, and today's verbs as presets | organizing the modifiers, before naming them |
 | [influences.md](influences.md) | what could blur the distinctions in §6 (whose function, what it works on, how many calls, how sure core can be), each run or reasoned | deciding each edge case on purpose |
 
 **Background** (one level up): [blocks.md](../blocks.md) §0, the ordered
