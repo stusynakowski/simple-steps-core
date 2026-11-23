@@ -2,7 +2,8 @@
 
 > **Draft, 2026-11-23, for the owner.** The start of the grammar that closes
 > the system ([blocks.md](blocks.md) §0, plan piece G0). This page begins
-> with **what must be resolved for any expression**. The shape (which words
+> with **what must be resolved for any expression** (§1–§4), then **the
+> owner's heuristics** for resolving it (§5). The shape (which words
 > fill which component) and the numbered rules (how the components depend
 > on each other) come next, on this page.
 
@@ -98,9 +99,123 @@ part of this, in this order:
 | C4 preparation | implied by the verb and the parameter's type, at the call, not written; four separate checks | A1–A7 ([blocks.md](blocks.md) §3) |
 | C6 and C5's order | the written order, which can change what a step does | O1 (blocks.md §0) |
 | C7 landing | implied by the verb; "on every row of its scope" missing | §4's window and transform gaps |
-| C2's block | checked against the input **step's** columns, not the pick's | A4 |
+| C2's block | checked against the input **step's** columns, not the pick's | A4; and H3's last row (two columns, two readings, accepted) |
 
-## 5. Next on this page
+## 5. The owner's heuristics
+
+*Owner, 2026-11-23: "I think this has been the key problem in this project,
+and it impacts everything else, so if I get this right everything else will
+be much easier." Not in order of priority; heuristics, with exceptions
+possible.*
+
+### H1. Explicit beyond a reasonable doubt
+
+A shorthand may be written, but **opening the expression shows exactly what
+every component maps to**. If there is any potential for ambiguity, the
+expression is explicit.
+
+### H2. One reading may be left out; several must be written
+
+If a component is missing from what is written, but **there is really only
+one way to read the expression**, core fills it in (and writes it down,
+§1). If there are **several valid readings**, the user writes it, or core
+writes the reading it is fairly sure of and **shows it** as its choice. It
+is never filled in silently.
+
+### H3. Binding by name
+
+- A tool's parameters can be given **by position**, with no names.
+- When the data comes from a step's **columns**, the column names **match
+  the parameter names** they bind to: a column `temp_c` binds to the
+  parameter `temp_c`.
+- **Naming a parameter's source explicitly overrides it**: `temp_c=wf["p"]["u"]`.
+
+Run 2026-11-23, against today:
+
+| Case | Today | Under H3 |
+|---|---|---|
+| `f(temp_c)` on `wf["p"]`, which has a column `temp_c` | bound by name, left short | ✓ |
+| `f(temp_c)` on one column, `wf["p"]["t"]` | bound by type, written out: `temp_c=wf["p"][cols["t"]]` | ✓ by H2: one reading, written down |
+| `f(temp_c)` on `wf["p"]`, `temp_c=wf["p"]["u"]` written | the written binding wins | ✓ |
+| `g(a, b)` on columns `t`, `u` | refused: no column is named `a` or `b` | ✓ |
+| `f(temp_c)` on columns `t` **and** `u`, both floats | **accepted; every row then fails, `TypeError: f() missing … 'temp_c'`** | ✗ two readings: refused, naming both (H2). It is A4: checked against the step `p`, which has a `temp_c`, not against the pick |
+
+*To settle:* binding by type when exactly one column fits (the second row)
+is H2 at work. Does it stay, written down, or must every binding be by
+name or written?
+
+### H4. The tool's types imply how it is called
+
+The parameter types and the return type are where the conventions come
+from (§1's third source).
+
+### H5. Tidy tables: rows are samples, columns are variables
+
+Rows are what is **iterated**: the calls go over them, and they are what
+packs into a list. Columns are **keys**: they bind to parameters by name.
+
+### H6. A list parameter given single values implies a collapse
+
+A tool's parameter typed as a list of something, given a column of a
+previous step whose cells each hold one such thing, **implies collapsing
+that column into a list**. It can be written short, but **opening the
+expression shows the collapse** (H1).
+
+### H7. Everything can be written in the modifiers, in orthogonal classes
+
+Everything can be written as modifiers; today they are ambiguous (O1, and
+blocks.md §0's modifiers that don't fit). **The tool's modifiers are
+organized into classes, as orthogonal as possible**:
+
+| Class | Decides | Components (§2) | Today's modifiers |
+|---|---|---|---|
+| **input** | how each argument's data is **prepared** and **bound** | C3 binding, C4 preparation | `select`, `slice` (pickers); `cast`; packing (to a list, per group, per window: to come) |
+| **call** | **whether the call happens more than once**, and over what | C5 calls | `map`, `collapse`, `table`, `sweep`, `source`; `auto` writes one |
+| **execution** | how each call **runs** | C6 each call's run | `retry`, `timeout`, `breaker`, `try_except`; progress and cancel (K23) |
+| **output** | the output's **structure** and **names** | C7 landing, C8 names | `expand`, `widen`, `filter`, `group`, `name`; and `expect` (C9) |
+
+The rearrangements with no tool (`drop`, `rename`, `copy`, `sort`,
+`distinct`, `pack`) are steps of their own, not a tool's modifiers.
+
+**Where classes bleed into each other: the shorthands.** A shorthand
+belongs to **one** class, and fills in the others' defaults (blocks.md §0,
+*How the components depend*). `collapse(by="k")` is a **call** modifier;
+it implies an **input** preparation (each input argument packed per group)
+and an **output** landing (one row per group). Opened, the expression shows
+all three (H1). *Open:* `filter`, `expand` and `group` are output
+modifiers here, but each also implies calls per row. `cast` changes values,
+which blocks.md §0's rule 2 says no modifier does: a conversion is a
+preparation, if the owner agrees the rule allows it.
+
+### H8. The pick conditions which modifiers apply
+
+What the pick gives (a cell, a row, a column, a block; their types)
+**decides which modifiers are valid**, and which are implied. A single cell
+can't be collapsed by group; packing to a dict needs a row; a block given
+to a parameter that takes one value has no single reading.
+
+### H9. The parser: a conditional directed graph that converges
+
+The parser takes the **pieces written** (a tool, picks, modifiers, the
+pick's parts) and maps them onto **the components to resolve** (§2). Each
+piece written **narrows** what the others can be, through the conditions
+between them (H4, H6, H8, and the dependencies). When one valid reading is
+left, it converges, and core writes it down. When several are left, core is
+explicit: it writes the one it is fairly sure the user wants and shows it,
+or asks.
+
+```
+ written:   tool ─┐      pick ─┐      modifiers ─┐      arguments ─┐
+                  ▼            ▼                 ▼                 ▼
+ resolve:   C1 signature ─► C2 block ─► C3 binding ─► C5 calls ─► C4 preparation ─► C7 landing ─► C8 names
+                  │            │            ▲            ▲   │          ▲              ▲
+                  └── types ───┴── shape ───┴────────────┴───┴──────────┴──────────────┘
+                         (each arrow: a condition that narrows the next component)
+ then:      C6 each call's run, C9 checks (as written)  ──►  one reading?  yes: written down
+                                                                           no:  explicit (shown, or asked)
+```
+
+## 6. Next on this page
 
 1. **The shape**: for each component, the words that fill it (the
    modifiers, the pick's parts, the literals), as a grammar.
