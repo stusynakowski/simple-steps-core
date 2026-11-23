@@ -17,8 +17,26 @@ Keep **the address** and **the contents** apart:
 |---|---|---|---|
 | **pick** | an **address**: a step, at most one row part, at most one column part | an expression; saved | `wf["p"][1:3][["x", "y"]]` |
 | **block** | **what a pick holds now**: a rectangle of cells, with their states and types | the kernel, at the moment it is asked; never saved | rows 1–2 of `p` × columns `x`, `y` |
-| **table** | a block with its **header** and **index columns** (`#`, `#<step>`); one per step | a step's output | all of `p` |
+| **table** | **where cells live**: everything one step holds, its **header**, **index columns** (`#`, `#<step>`) and grid; one per step, named by the step | a step's output; saved with the session | all of `p` |
 | **cell**, **row**, **column** | a block of 1×1, 1×n, n×1 | — | `wf["p"][2]["x"]` |
+
+**A pick gives a block, never a table; only a step makes a table** (owner,
+2026-11-22). The two don't differ in structure. A block of the whole grid,
+`wf["p"]`, has the table's rows and columns. They differ in role: a table
+*has* its cells, a block *points at* some of them, like a range `B2:D5` on
+a sheet.
+
+| | Table | Block |
+|---|---|---|
+| owned by | its step: one table per step | no one: it refers to a table's cells |
+| made by | declaring a step | resolving a pick |
+| lifetime | the step's; saved | while it's looked at; never saved |
+| before a run | a plan | a planned block: shape known, cells pending |
+| header, index columns | its own | borrowed: the names of the columns it covers, its rows' numbers in the table |
+
+A block becomes a table by being declared as a step: `k["cp"] =
+wf["f"]["x"]` makes that block step `cp`'s own table, with lineage back to
+`f` (today's linked copy, 015 C56).
 
 A pick is always a rectangle: every chosen row × every chosen column, not
 necessarily next to each other. "Block" is the general word, and cell, row

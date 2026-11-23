@@ -26,7 +26,9 @@
 - **A tool receives values**: the part of a pick its verb hands each call,
   plain Python, never `#` columns, states or row ids (*run*, §3).
 - **Every part of a grid is a pick, and every pick is a grid**: a cell is
-  1×1, a row 1×n, a column n×1 (*run*, plan.md §1).
+  1×1, a row 1×n, a column n×1 (*run*, plan.md §1). *Amended 2026-11-22
+  ([blocks.md §1](blocks.md)): a pick gives a **block**, a rectangle of a
+  table's cells, never a table; only a step makes a table.*
 
 ## 2. What a step holds today
 
@@ -173,7 +175,7 @@ artifact; its figures are this page's §1–§3 drawn). In the owner's words:
 
 | The owner's model | Against core | |
 |---|---|---|
-| every step holds a table; `wf["s"]` is its **title** | every pick of it is also a table | matches |
+| every step holds a table; `wf["s"]` is its **title** | every pick of it is also a table | matches. *Amended 2026-11-22: a pick of it is a block; only a step makes a table ([blocks.md §1](blocks.md))* |
 | **column names** are strings, the variables; the **header** is the list of them | numeric names become `var<n>`; never starting with `#` | matches |
 | **`#`**, `0…n-1`, is every step's index column, and **divides the table**: reference columns on its left, the data the step produced on its right (owner, 2026-11-16) | it is what users see and type; core also keeps a hidden row identity, so a pick follows its row when a source is edited (rule 10) | matches; the hidden identity stays |
 | **`#<previous step>`** columns are stored on every step made from earlier ones | stored for expand, collapse, join, stack; derived for filter, sort, picks; none for map, group, select (G1, G4) | sharper than core: one form. To settle: every ancestor or the parent only; a collapse's list and an expand's `.idx` |
@@ -202,7 +204,7 @@ once agreed.*
 
 | Word | Is | Holds | Is never |
 |---|---|---|---|
-| **table** | what one step holds, titled by the step's name, `wf["s"]` | a **header**, **index columns** and a **grid**; a plan before it runs, a result after; one table per step | another kind of object when picked: any pick of a table (a cell, a row, a column, a block) is a smaller table |
+| **table** | what one step holds, titled by the step's name, `wf["s"]` | a **header**, **index columns** and a **grid**; a plan before it runs, a result after; one table per step what a pick gives: a pick gives a **block**, a rectangle of the table's cells that points at them and owns none; only a step makes a table (owner, 2026-11-22, [blocks.md §1](blocks.md)) |
 | **header** | the ordered names of the table's columns | one name per column: a string, unique, a column type (§9); `#` only for index columns | data |
 | **index columns** | the columns that say where rows are and where they came from. **`#`** divides the table | `#`: the row's number here, `0…n-1`, in current order. Left of it, **reference columns**: `#<step>` (the row number(s) in that step), `#<step>.idx` (the place in that row's list) | data: read-only, never passed to a tool; copied into data only with `mod.copy` |
 | **grid** | the table's data cells: its rows × its data columns, right of `#` | the cells | the index columns |
