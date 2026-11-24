@@ -11,6 +11,11 @@ one reading, core writes the most likely and says so. The system is
 **closed**: every expression is either a sentence of the grammar, or refused
 when declared, naming the rule it breaks.
 
+**The goal: reactive staging** (owner, 2026-11-23): know what a step will
+give, quickly, before running it, so a solid workflow can be built without
+running any step; and **arguments in the modifiers** to change any
+convention (closure.md CL8, §6).
+
 **The principle** (owner, 2026-11-23): **the same primitives, which need
 to be tried and true and need to work; different spellings and syntaxes,
 which mean different combinations of valid primitives in a valid syntax.**

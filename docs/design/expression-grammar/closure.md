@@ -40,6 +40,7 @@ column (§4).
 | **CL5** | **Every outcome is visible**: a value; absent; failed, with its reason; blocked, naming where from; or refused, naming the condition. **Never silent** (README.md: an error handled within the system over not knowing) | the property test checks every output cell's state, and every warning |
 | **CL6** | **Round trips hold**: nest then unnest gives the cells back (nest.md NS1); every spelling opens into one canonical form; printing then parsing gives the expression back | the property test |
 | **CL7** | **Decided once**: an expression's meaning doesn't change after a run (H2); a pick follows its rows and columns by identity (tidy.md T3) | tests that change the data and check the expression's text and meaning |
+| **CL8** | **Reactive staging**: what a step will give is known **quickly, before it runs**, enough to build a solid workflow without running any step; what the data alone decides is **marked**, and **an argument makes it exact** (owner, 2026-11-23) | §6: each piece's plan; a test that declares whole workflows, runs nothing, and checks every plan against the run that follows |
 
 ## 3. The coverage table: each kind of cell, under each primitive
 
@@ -76,6 +77,42 @@ following decisions already made:
   running a step brings what it reads up to date first (owner, 2026-11-16).
   Before the run, every primitive's output is pending, and its plan is
   worked out from the plan of what it reads.
+
+## 6. Reactive staging: what is known before the run (for CL8)
+
+*Owner, 2026-11-23: "as long as we have the reactive staging, we have
+arguments in the modifiers to change the conditions. The goal is reactive
+staging, to know what you are going to get quickly before you run it; you
+can still have a solid workflow without running the steps."*
+
+**Quick:** the plan is worked out from the plans of what a step reads,
+never by reading cells (grammar.md N9), so it costs the same on a million
+rows as on ten. **Solid:** every condition that the plans can decide is
+decided **when the step is declared** (a type that can't fit, a key of the
+wrong type, a column that isn't there), not at the run. **Honest:** what
+only the data can decide is shown as such, with the argument that decides
+it in advance.
+
+| Piece | Columns, types | Rows | Known only from the data | The argument that makes it exact |
+|---|---|---|---|---|
+| take: a position pick, sort | exact | exact | — | — |
+| take: a condition, `filter`, `distinct` | exact | at most the input's | which rows | — (`expect(rows=…)` states it) |
+| calls per row | exact, **if the tool's return type is written** | exact | the output's type, if untyped | the tool's return annotation |
+| widen | **declared or typed**: exact | exact | **discovered fields** | `columns=[…]`, or a record return type |
+| expand | exact | **at least the input's** | how many items | `expect(rows=…)` |
+| nest | exact (`list[T]`, a record type) | everything: 1; columns: the input's; groups: 1 to the input's | how many groups | `expect(rows=…)` |
+| stack, zip, cross | exact | exact (a sum, one origin, a product) | — | — |
+| join, by key | exact | **`one_to_one` (the default): a left join exact; inner at most the smaller side** | which keys match | `expect=` the relationship |
+| lookup | exact | exact (never changes the rows) | which keys match | — |
+| convert | exact (the target) | exact | which cells fail | — |
+| pivot | **`names=[…]`**: exact; else from the data | at most the input's | **the names** | `names=[…]` |
+| fill | exact | exact | which gaps are filled | — |
+| one call per column | exact | one row, or the input's | — | — |
+
+**What a user sees for a step not yet run:** its columns and their types;
+its row count, exact or bounded; every problem the plans can show; and,
+marked, each thing only the data decides, with the argument that would
+decide it now.
 
 ## 4. The catalogue of tasks (for CL2)
 
