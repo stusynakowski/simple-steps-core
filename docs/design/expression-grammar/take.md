@@ -30,7 +30,7 @@ only by join together (joins.md), where the reason is written.
 |---|---|---|---|---|
 | **TK7** | A condition on columns (`cols["x"] > 1`, `&`, `\|`, `~`) or on lineage (`row["s"]`) keeps the rows where it is true | ✓ | ✓ | decided |
 | **TK8** | **Types the condition can't compare** (`"a" > 1`): refused when declared, naming the value | ✓ | raises at run | decided |
-| **TK9** | **A missing value** in a compared column (a gap, `None`): the test can't be decided, so **the row is dropped and it is said**, in **the step's warnings** (as widen's "rows held no dict"): how many rows, and the first few row numbers. Nothing per cell. **Cost, run on 1M rows: 0.16 ms to count the gaps, beside 0.71 ms for the comparison**, in the same pass (owner's concern: "more overhead on the computation") | **dropped silently** | dropped silently | recommended; the owner's yes awaited |
+| **TK9** | **A missing value** in a compared column (a gap, `None`): the test can't be decided, so **the row is dropped and it is said**, in **the step's warnings** (as widen's "rows held no dict"): how many rows, and the first few row numbers. Nothing per cell. **Cost, run on 1M rows: 0.16 ms to count the gaps, beside 0.71 ms for the comparison**, in the same pass (owner's concern: "more overhead on the computation"). **`undecided="keep"`** written keeps the row instead, marked undecided (§C.1) | **dropped silently** | dropped silently | **decided** (owner, 2026-11-23): the default, and the option |
 
 ## C. Rows by a tool's test (`filter`)
 
@@ -38,7 +38,22 @@ only by join together (joins.md), where the reason is written.
 |---|---|---|---|
 | **TK10** | One call per row; `True` keeps the row, `False` drops it | ✓ | decided |
 | **TK11** | **A call that fails**: the row is **kept, as failed**, with its reason | ✓ (run) | decided |
-| **TK12** | **A call that returns something other than `True` or `False`**: the tool's return type decides, as `Optional` does for a missing value going in (grammar.md N2). **`-> bool`**: `None` is a broken promise, the test didn't cover that case: the row is **kept, as failed**, "the test returned None, not yes or no", as TK11, so the rows to fix are shown. **`-> Optional[bool]`**: `None` is "can't tell", on purpose: **as TK9**, the row dropped and said (owner, 2026-11-23: "filtering because you didn't have the right condition") | **treated as `False`: the row dropped silently (TF2)** | recommended; the owner's yes awaited |
+| **TK12** | **A call that returns something other than `True` or `False`**: the tool's return type decides, as `Optional` does for a missing value going in (grammar.md N2). **`-> bool`**: `None` is a broken promise, the test didn't cover that case: the row is **kept, as failed**, "the test returned None, not yes or no", as TK11, so the rows to fix are shown. **`-> Optional[bool]`**: `None` is "can't tell", on purpose: **as TK9**, the row dropped and said (owner, 2026-11-23: "filtering because you didn't have the right condition"). **`undecided=`** written chooses either (§C.1) | **treated as `False`: the row dropped silently (TF2)** | **decided** (owner, 2026-11-23): the defaults, and the option |
+
+### C.1 `undecided=`: either, written; the defaults above
+
+*Owner, 2026-11-23: "add an extension to do either, but default to the
+first."* One written option on taking rows by a test (a condition, or
+`filter`'s tool):
+
+| Undecided because | Default | `undecided="drop"` | `undecided="keep"` |
+|---|---|---|---|
+| a condition on a missing value (TK9) | dropped, and said | the default | kept, marked undecided |
+| a `-> bool` tool returning `None` (TK12) | kept, marked failed | dropped, and said | the default |
+| a `-> Optional[bool]` tool returning `None` (TK12) | dropped, and said | the default | kept, marked undecided |
+
+Dropped rows are always said, in the step's warnings; kept ones are always
+marked. Never silent either way.
 
 ## D. Sort
 
@@ -81,11 +96,7 @@ only by join together (joins.md), where the reason is written.
 | **on a tool's input** | the pick's row and column parts: which cells reach the calls |
 | **on a tool's output** | `filter`: the tool's `True` or `False` keeps or drops its row |
 
-## To decide
+## Decided, 2026-11-23
 
-1. **TK9**: a condition on a missing value: the row dropped **and said**
-   (SQL drops it, silently), or kept?
-2. **TK12**: a filter's tool returning `None` (not yes or no): the row kept
-   as failed, as when the tool fails?
-3. TK16, TK17, TK20, TK24, TK25 follow decisions already made; accepted
-   unless the owner objects.
+TK9 and TK12, with `undecided=` to choose either (§C.1). TK16, TK17, TK20,
+TK24, TK25 accepted, following decisions already made.
