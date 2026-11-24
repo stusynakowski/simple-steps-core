@@ -47,21 +47,22 @@ column (§4).
 
 | Cell | unnest into columns | unnest into rows | nest | join together (as a key) | take | convert |
 |---|---|---|---|---|---|---|
-| a unit (number, text) | fails its row (widen U4) | passed through (expand V6) | ✓ | ✓ | · | · |
-| `None` | fields absent (U5) | row kept, item absent (V4) | kept `None` (NS9) | matches nothing (joins JN10) | · | · |
-| absent | fields absent (U5) | row kept (V4) | a marker / missing key (NS9, NS10) | matches nothing (JN10) | · | · |
-| a sequence | by position (U3) | one row per item (V1) | ✓ | `key(read=)` (nest NS6) | · | · |
-| a mapping | by key (U1) | `key`, value rows (V2) | ✓ | `key(read=)` | · | · |
+| a unit (number, text) | fails its row (widen U4) | passed through (expand V6) | ✓ | ✓ | compared, sorted (take TK7, TK13) | converted, or fails (convert CV2–CV11) |
+| `None` | fields absent (U5) | row kept, item absent (V4) | kept `None` (NS9) | matches nothing (joins JN10) | a test undecided (TK9); sorted last (TK15); a value of its own (TK19) | stays `None` (CV13) |
+| absent | fields absent (U5) | row kept (V4) | a marker / missing key (NS9, NS10) | matches nothing (JN10) | a test undecided (TK9); sorted last (TK15) | stays absent (CV13) |
+| a sequence | by position (U3) | one row per item (V1) | ✓ | `key(read=)` (nest NS6) | `key(read=)` (TK17, TK20) | to text through JSON (CV12) |
+| a mapping | by key (U1) | `key`, value rows (V2) | ✓ | `key(read=)` | `key(read=)` (TK17, TK20) | to text through JSON (CV12) |
 | a record | by field (U2) | by field (V3) | a record type (NS12) | · | · | · |
 | an array | a unit (U4) | a unit for now (V7) | ✓ | · | · | · |
 | a table in a cell | a unit (U4) | passed through (V6); unnesting later (NS22) | a group as a table (NS20) | · | · | · |
 | a set, a generator | its row fails (U7) | its row fails (V5) | ✓ | · | · | · |
-| failed, blocked | blocked (U6) | blocked (V8) | a marker (NS18) | · | · | · |
+| failed, blocked | blocked (U6) | blocked (V8) | a marker (NS18) | · | a failed test keeps its row, failed (TK11) | · |
 | pending (not run) | · | · | · | · | · | · |
 
-**Still open:** the **take** and **convert** columns; records, arrays,
-tables and failed cells as **keys**; **pending** cells everywhere (a step
-reading a step that hasn't run).
+**Still open:** records, arrays, tables and sets under **take** and
+**convert**; records, arrays, tables and failed cells as **keys**; failed
+cells under convert; **pending** cells everywhere (a step reading a step
+that hasn't run). Each is a small rule, following the decided ones.
 
 ## 4. The catalogue of tasks (for CL2)
 
@@ -90,7 +91,9 @@ From blocks.md §4, dplyr and tidyr, and Excel:
 | Part | State |
 |---|---|
 | widen, expand, nest, join together | **conditions decided** (widen.md, expand.md, nest.md, joins.md) |
-| take, convert, name | **not done**: the next pages |
+| take, convert | **conditions decided** (take.md, convert.md) |
+| pivot, fill, one call per column | **conditions decided** (pivot-fill-columns.md) |
+| name | folded into tidy.md (T1–T5) and each primitive's names section |
 | call (split), land, execution's primitives | in grammar.md §6 and canonical.md; **their conditions** not pinned down as the four above |
 | the conditions between components | conditions.md: R1–R26, many still **proposed** |
 | CL1, the scope | **agreed**, §1 |
