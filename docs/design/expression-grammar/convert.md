@@ -21,15 +21,15 @@ later** (closure.md §1).
 |---|---|---|---|---|---|
 | **CV2** | text → `float` | Python's reading: spaces trimmed, `1e3` allowed (`"1.5"`, `" 3 "`, `"1e3"` → 1.5, 3.0, 1000.0) | ✓ | ✓ | decided |
 | **CV3** | text → `float`, **not a number** (`"abc"`, `"1,000"`) | that cell fails, with its reason | ✓ | `to_numeric(coerce)`: **`NaN`, silently** | decided: core's |
-| **CV4** | text → number, **thousands separators** (`"1,000"`) | fails (CV3): a separator depends on the locale; reading it is a later extension | ✓ fails | `NaN` | **to decide** |
-| **CV5** | `float` → `int` | **a whole number only**: `2.0` → 2; `1.7` fails, "isn't a whole number" | ✓ | `astype(int)`: **1.7 → 1, silently** | decided: core's |
-| **CV6** | text → `int`, written with a decimal point (`"2.0"`) | read as a number, then CV5: `"2.0"` → 2, `"2.5"` fails; **or** fails (text must be an integer) | fails | raises | **to decide** |
-| **CV7** | `int` → `float` | **exact only**: an integer past 2⁵³ that a float can't hold exactly **fails** | **precision lost silently** (2⁶⁰+1, **CF2**) | the same | proposed (CV1) |
+| **CV4** | text → number, **thousands separators** (`"1,000"`) | fails now (CV3): a separator depends on the locale. **A locale-aware reading method later** (`thousands=`, `decimal=`, as pandas' `read_csv`) | ✓ fails | `NaN` | **decided** (owner, 2026-11-23) |
+| **CV5** | `float` → `int` | **a whole number only**: `2.0` → 2; `1.7` fails, "isn't a whole number". **`round=` written** (`"nearest"`, `"down"`, `"up"`) converts it, as written | ✓ | `astype(int)`: **1.7 → 1, silently** | decided: core's; `round=` added (§E) |
+| **CV6** | text → `int`, written with a decimal point (`"2.0"`) | **by default, read as a number, then CV5**: `"2.0"` → 2, `"2.5"` fails. **`strict=True`**: the text must be an integer | fails | raises | **decided** (owner, 2026-11-23: "default to yes, but add a condition for strict") |
+| **CV7** | `int` → `float` | **exact by default**: an integer past 2⁵³ that a float can't hold exactly **fails**. **`lossy=True`** accepts the nearest float, written | **precision lost silently** (2⁶⁰+1, **CF2**) | the same | decided |
 | **CV8** | text → `bool` | `"true"`, `"false"`, any case; `"False"` is false | ✓ | **`"False"` → True** | decided: core's |
-| **CV9** | text → `bool`, other words (`"yes"`, `"no"`, `"1"`, `"0"`) | fail; **or** accepted | fail | → True | **to decide** |
-| **CV10** | `int` → `bool` | **0 and 1 only**; any other integer fails | **2 → True, silently (CF1)** | the same | proposed (CV1) |
+| **CV9** | text → `bool`, other words | **by default** `"true"`/`"false"`, `"yes"`/`"no"`, `"1"`/`"0"`, any case; any other text fails. **`strict=True`**: only `"true"`, `"false"` | fail | → True | **decided** (owner, 2026-11-23: "make extensions for either cases") |
+| **CV10** | `int` → `bool` | **0 and 1 only, by default**; any other integer fails. **`nonzero=True`**: any non-zero is `True`, written | **2 → True, silently (CF1)** | the same | decided |
 | **CV11** | `bool` → `int` | 1, 0 | ✓ | ✓ | decided |
-| **CV12** | anything → `str` | **a unit** (a number, a bool) → its text; **a structure** (a list, a dict) → fails, "use a tool to write it as text (JSON, …)"; **or** any value's text (`"[1, 2]"`) | any value's text | the same | **to decide** |
+| **CV12** | anything → `str` | **a unit** (a number, a bool) → its text. **A structure** (a list, a dict) goes to and from text **through a named data format, JSON by default** (`format="json"`), never Python's own text (`"[1, 2]"`). The same method **reads** text back into a list or a dict (text → `list`, `dict`: new targets) | any value's Python text | the same | **decided** (owner, 2026-11-23: "yes, need a data reading method") |
 
 ## B. Missing values, failures
 
@@ -55,14 +55,26 @@ later** (closure.md §1).
 | **a step** | a column of a table converted, as a step of its own: *missing* (primitives.md §7); in scope |
 | **on a tool's output** | the outputs converted: *missing*; in scope |
 
-## To decide
+## E. A reasonable default, and an argument for the other way
 
-1. **CV6**: text `"2.0"` to an integer: read as a number then a whole
-   number (→ 2), or fails (text must be an integer)?
-2. **CV9**: text to yes/no: only `"true"` and `"false"`, or also `"yes"`,
-   `"no"`, `"1"`, `"0"`?
-3. **CV12**: a list or dict to text: fails (a tool writes it), or its
-   Python text (`"[1, 2]"`)?
-4. **CV4**: thousands separators: fail now, an extension later?
-5. **CV1, CV7, CV10, CV17**: proposed, by the principle; accepted unless the
-   owner objects.
+*Owner, 2026-11-23: "use a reasonable option, but ensure we have extensions
+for either case, in these cases (arguments in the modifier or tool
+needed)."* Every conversion that could reasonably go two ways has a default
+and a written argument for the other:
+
+| Conversion | Default | The other way, written |
+|---|---|---|
+| `float` → `int`, not whole | fails | `round="nearest" \| "down" \| "up"` |
+| text → `int`, `"2.0"` | read as a number, then whole | `strict=True`: integer text only |
+| `int` → `float`, past 2⁵³ | fails | `lossy=True` |
+| text → `bool` | true/false, yes/no, 1/0 | `strict=True`: true/false only |
+| `int` → `bool`, not 0 or 1 | fails | `nonzero=True` |
+| a list or dict ↔ text | JSON | `format=` another data format (later) |
+| text with thousands separators | fails | `thousands=`, `decimal=` (later, a locale-aware reading method) |
+
+(The names are placeholders until phase 1.)
+
+## Decided, 2026-11-23
+
+CV4, CV6, CV9, CV12 (the owner's answers); CV1, CV7, CV10, CV17 (by the
+principle), each with its argument for the other way (§E).

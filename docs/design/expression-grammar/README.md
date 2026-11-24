@@ -15,7 +15,9 @@ when declared, naming the rule it breaks.
 to be tried and true and need to work; different spellings and syntaxes,
 which mean different combinations of valid primitives in a valid syntax.**
 All behaviour lives in the primitives; a spelling has none of its own.
-And **an error handled within the system is better than not knowing**
+And **where a convention could reasonably go either way, a reasonable
+default, and an argument in the modifier or tool for the other way**
+(owner, 2026-11-23: `undecided=`, `strict=`, `round=`, …). And **an error handled within the system is better than not knowing**
 (owner, 2026-11-23): where no convention fits, the case is a visible error
 (a failed cell, or a refusal, with its reason), never silence. So
 the testing goes into the primitives and the conditions between them, and
