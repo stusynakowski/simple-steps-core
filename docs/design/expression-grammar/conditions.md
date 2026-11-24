@@ -32,7 +32,7 @@ surface needs none of its own: its one job is to choose a canonical form
 
 | Component | Its primitives | Combined |
 |---|---|---|
-| **input** | **bind** (by position, by name, given) and the restructurings on the input: take, convert, nest, join together | in a fixed order: bind, take, convert each cell, nest |
+| **input** | **bind** (by position, by name, given) and the restructurings on the input: take, convert, nest, combine | in a fixed order: bind, take, convert each cell, nest |
 | **call** | **split into pieces, one call per piece**: one piece; each row; each group (a key); each combination of settings | exactly one per step |
 | **execution** | a few primitives, each at a **level** (each call, the step): time limit, progress, on failure, cancel, pace | within a level, by nesting: written order means something |
 | **output** | **land** (its own row; a new row per call; every row of its scope) and the restructurings on the output: unnest, take, convert, name | in a fixed order: land, unnest, take, convert, name |

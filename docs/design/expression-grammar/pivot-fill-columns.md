@@ -59,7 +59,7 @@ recipe is that cell's pick (`wf["d"][1]["x"]`).
 everything, for that column); the outputs land by their length.
 
 ```python
-centre[mod.call.each_column(cols[["a", "b"]])](values=…)
+centre[mod.calls.each_column(cols[["a", "b"]])](values=…)
 ```
 
 | # | Condition | pandas | |
@@ -67,7 +67,7 @@ centre[mod.call.each_column(cols[["a", "b"]])](values=…)
 | **PC1** | One call per chosen column; the tool's parameter takes the column's cells as **a list** (`list[float]`); optionally a parameter `column` gets the column's name | `apply(axis=0)`: a `Series` | decided |
 | **PC2** | **One value per call**: lands as **one row**, a column per input column (a summary: a mean, a count) | a `Series` | decided |
 | **PC3** | **As many values as rows**: lands **on the rows**, the same shape (a transform: centring, ranking) | the same shape | decided |
-| **PC4** | **Any other length**: that column's cells **fail**, "returned 2 values for 3 rows"; **`land="list"`** keeps the output as one cell instead | **a table of the other length, silently: the rows no longer match** | decided |
+| **PC4** | **Any other length**: that column's cells **fail**, "returned 2 values for 3 rows"; **`place="list"`** keeps the output as one cell instead | **a table of the other length, silently: the rows no longer match** | decided |
 | **PC5** | The output columns **keep the input columns' names** | the same | decided |
 | **PC6** | **A call that fails**: that column's cells fail, with the reason; the other columns run | raises | decided |
 | **PC7** | **Lineage**: PC2 names every input row; PC3 keeps each row's own | — | decided |
@@ -88,4 +88,4 @@ with its default and its argument for the other way:
 | FL2 | a gap is absent or `None` | `only="absent"` |
 | FL3 | one run over the whole column; no guessing at groups | `by=` |
 | FL5 | every gap in a run filled | `limit=n` |
-| PC4 | an output of another length fails its cells | `land="list"` |
+| PC4 | an output of another length fails its cells | `place="list"` |

@@ -13,6 +13,8 @@ what we described, and define good classes of restructuring data in the
 grid, so we can build good primitives that encompass these components";
 "restructuring and casting methods will be necessary components".*
 
+> **Names decided 2026-11-23/24** ([names.md](names.md)): the placeholders on this page are **take, nest, unnest, combine** (its forms **append, align, join, cross, lookup**), **convert, rename**; previous terms kept in [spellings/](spellings/README.md).
+
 ## 1. The idea
 
 A **primitive** is one way of moving or changing cells, defined once. It
@@ -41,9 +43,9 @@ acts along **rows** or **columns**:
 | **P1. take** | choose, reorder or repeat, none changed | keep rows by a condition or a test; sort; first n; distinct | choose columns; drop columns | no |
 | **P2. nest** | many cells into one cell | a column's cells into a list (over everything, a group, a window) | a row's cells into a dict | no: the values are kept inside |
 | **P3. unnest** | one cell into many | a list's items into rows | a dict's or record's fields into columns | no |
-| **P4. join together** | tables side by side | one under another (stack) | matched rows side by side (zip, join) | no |
+| **P4. combine** | tables side by side | one under another (stack) | matched rows side by side (zip, join) | no |
 | **P5. convert** | each cell's value into another type | — (cell by cell) | — | **yes**: the one primitive that does, and only when written |
-| **P6. name** | the columns' names | — | rename columns; name the outputs | no |
+| **P6. rename** | the columns' names | — | rename columns; name the outputs | no |
 
 **Working out which rows go together** (not primitives that move cells;
 they feed P1, P2 and P4):
@@ -51,7 +53,7 @@ they feed P1, P2 and P4):
 | | Gives | Feeds |
 |---|---|---|
 | **partition** | one table's rows in groups, by a key | nest per group (P2); distinct (P1) |
-| **match** | two tables' rows in pairs: by position, by row id, by key, or all pairs | join together (P4) |
+| **match** | two tables' rows in pairs: by position, by row id, by key, or all pairs | combine (P4) |
 
 ## 3. Every primitive in every place, with today's modifiers
 
@@ -66,9 +68,9 @@ doesn't have it yet.
 | **P2. nest columns** | `pack` | packing a row to a dict: *gap* (blocks.md's `.to_dict()`) | *gap* |
 | **P3. unnest rows** | `expand` with `identity` | *gap*: a cell's list given item by item | `expand` (a tool's list into rows) |
 | **P3. unnest columns** | `widen` | *gap* | a record's fields into columns (automatic today); `widen` |
-| **P4. join together** | `stack`, `zip_`, `join` | *gap*: data from several steps, matched for one call (grammar.md §8, N3) | — |
+| **P4. combine** | `stack`, `zip_`, `join` | *gap*: data from several steps, matched for one call (grammar.md §8, N3) | — |
 | **P5. convert** | *gap*: a step that converts a column | `cast` | *gap*: convert the outputs |
-| **P6. name** | `rename` | — | `name` |
+| **P6. rename** | `rename` | — | `name` |
 | (partition) | — | `by=` of a packing, or of `collapse` | — |
 | (match) | inside `join`, `zip_` | inside N3 | — |
 
@@ -115,7 +117,7 @@ Each of today's verbs is a preset: several cells at once.
 
 ## 6. To settle with the owner
 
-1. **The six primitives**: take, nest, unnest, join together, convert,
+1. **The six primitives**: take, nest, unnest, combine, convert,
    name. Is anything missing (for example *fill*, a missing value from the
    one above; or *split*, one column's text into several), or should two
    be one?
@@ -145,7 +147,7 @@ missing?"* By component (conditions.md, *Each component's own primitives*):
 | | unnest into rows | `expand` | a row whose list is empty kept (I2) |
 | | **unnest into columns** | `widen`; records | **uneven rows: §8** |
 | | take, name | `filter`; `name` | convert on the output |
-| **as steps** | take, sort, distinct, nest, unnest, join together, name, copy | all | pivot (nest named by values), a cross product (match all), fill, convert |
+| **as steps** | take, sort, distinct, nest, unnest, combine, name, copy | all | pivot (nest named by values), a cross product (match all), fill, convert |
 
 ## 8. Unnest into columns, and uneven rows
 

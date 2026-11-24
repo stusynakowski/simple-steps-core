@@ -14,8 +14,8 @@ From the owner's words through these pages:
 > them over the grid. The user **knows what they will get before running**,
 > with **minimal cognitive load**: simple to write, obvious when opened.
 
-**In scope:** reshaping tidy tables (take, nest, unnest, join together,
-convert, name); running tools over them, per row, per group, once, per
+**In scope:** reshaping tidy tables (take, nest, unnest, combine,
+convert, rename); running tools over them, per row, per group, once, per
 combination; how each call runs (time, failures, progress, cancel, pace);
 reading the data in and showing it.
 
@@ -46,7 +46,7 @@ column (§4).
 
 ✓ decided, with its page; · not decided yet; — has no sense there.
 
-| Cell | unnest into columns | unnest into rows | nest | join together (as a key) | take | convert |
+| Cell | unnest into columns | unnest into rows | nest | combine (as a key) | take | convert |
 |---|---|---|---|---|---|---|
 | a unit (number, text) | fails its row (widen U4) | passed through (expand V6) | ✓ | ✓ | compared, sorted (take TK7, TK13) | converted, or fails (convert CV2–CV11) |
 | `None` | fields absent (U5) | row kept, item absent (V4) | kept `None` (NS9) | matches nothing (joins JN10) | a test undecided (TK9); sorted last (TK15); a value of its own (TK19) | stays `None` (CV13) |
@@ -123,7 +123,7 @@ From blocks.md §4, dplyr and tidyr, and Excel:
 | keep rows by a test; choose columns; sort; distinct; first n | take | ✓ |
 | a new column per row; a column beside the others | calls per row, land | ✓ |
 | a value per group; per group, beside each row | nest over a group; land | ✓ (beside each row: new, decided) |
-| join, stack, zip; every combination | join together | ✓ (cross: new, decided) |
+| join, stack, zip; every combination | combine | ✓ (cross: new, decided) |
 | look a value up in another table (`VLOOKUP`) | lookup | ✓ new, decided |
 | wide to long (melt) | nest columns, unnest into rows | ✓ |
 | long to wide (pivot) | nest columns **named by a column's values**, unnest | · in scope; conditions proposed (pivot-fill-columns.md §1) |
@@ -140,7 +140,7 @@ From blocks.md §4, dplyr and tidyr, and Excel:
 
 | Part | State |
 |---|---|
-| widen, expand, nest, join together | **conditions decided** (widen.md, expand.md, nest.md, joins.md) |
+| widen, expand, nest, combine | **conditions decided** (widen.md, expand.md, nest.md, joins.md) |
 | take, convert | **conditions decided** (take.md, convert.md) |
 | pivot, fill, one call per column | **conditions decided** (pivot-fill-columns.md) |
 | name | folded into tidy.md (T1–T5) and each primitive's names section |

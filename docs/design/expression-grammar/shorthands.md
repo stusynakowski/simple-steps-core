@@ -87,9 +87,9 @@ them, or define functions and modifiers built off of them"):
 | **`cast`** | convert: on the input, or as a step | **keep** | str → float is everyday |
 | **`expect`** | a check on the output | **keep** | cheap robustness |
 | **`retry`**, **`timeout`**, **`try_except`**, **`breaker`** | one execution primitive each, at a level | **keep, as the primitives themselves** | not consolidations: each is already one primitive (grammar.md §6.4) |
-| **`join`** | match by key · join together along columns | **keep** | essential |
-| **`stack`** | join together along rows | **keep** | essential |
-| **`zip_`** | match the same rows (as core recorded them) or by id · join together along columns | **keep** | it never pairs by position (corrected 2026-11-23, joins.md JN5): already as wanted |
+| **`join`** | match by key · combine along columns | **keep** | essential |
+| **`stack`** | combine along rows | **keep** | essential |
+| **`zip_`** | match the same rows (as core recorded them) or by id · combine along columns | **keep** | it never pairs by position (corrected 2026-11-23, joins.md JN5): already as wanted |
 | **`select`** (rows, columns) | take | **keep, as the verb spelling of take** | for those who think in verbs; the same as a pick (owner, 2026-11-23) |
 | **`slice`** | take rows by position | **keep, as a spelling** | the same as a pick's row part, `wf["p"][0:10]` |
 | **`copy`** | take, with lineage columns made data | **keep** | the only way to turn `#p` lineage into ordinary data (grid.md §8); *corrected 2026-11-23: first judged redundant* |
@@ -107,7 +107,7 @@ Each built from the same primitives (primitives.md):
 | a window | each row · nest over `window(n)` · land on its row | rolling means, lags, running totals |
 | pivot | partition by a key · nest columns named by a column's values · unnest columns | `pivot_wider` |
 | melt | nest columns · unnest into rows | `pivot_longer` |
-| a cross product | match all pairs · join together | `crossing` |
+| a cross product | match all pairs · combine | `crossing` |
 | fill | take each missing cell's value from the row above | `fillna(method="ffill")` |
 | split | one text column into several (a tool returning a record) | `separate` |
 

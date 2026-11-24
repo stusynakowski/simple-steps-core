@@ -11,7 +11,7 @@ spellings (shorthands.md): a pick's row and column parts, `select`,
 `slice`, a condition (`wf["p"][cols["x"] > 1]`), `filter` with a tool,
 `sort`, `distinct`, `drop`. **Repeating a row** is not take's: a pick that
 names a row twice is refused ("names row 0 twice", run); rows are repeated
-only by join together (joins.md), where the reason is written.
+only by combine (joins.md), where the reason is written.
 
 ## A. Rows by position
 

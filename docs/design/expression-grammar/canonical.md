@@ -28,8 +28,8 @@ tool[ input modifiers , call modifier , execution modifiers , output modifiers ]
 - **Inside the brackets, the classes come in this order**: input, call,
   execution, output. The order a step works in. Core keeps them in this order whatever order they are typed
   in (fixes O1).
-- **The class is in the modifier's name**: `mod.input.…`, `mod.call.…`,
-  `mod.exec.…`, `mod.output.…`. The UI's widgets are these four groups;
+- **The class is in the modifier's name**: `mod.input.…`, `mod.calls.…`,
+  `mod.run.…`, `mod.output.…`. The UI's widgets are these four groups;
   execution's shows its two levels, each call and the whole step.
 - **Bindings are always by keyword**: `parameter=source`. A source is an
   address (a pick), a literal, or a resource. Never by position, never by a
@@ -47,16 +47,16 @@ Placeholders, to show the shape. One modifier, one job.
 | **input** | `mod.input.nest(param, over=…, form="list")` | many cells of that argument into one, over a **scope** named by what it is (§3.1); `form` list, dict, table, array |
 | | `mod.input.convert(param, to=float)` | each cell's value converted, before nesting (the one change of value, written: X3) |
 | | `mod.input.match(param, on=…)` | data from another step, matched to the call's rows (N3: to come) |
-| **call** | `mod.call.once()` | one call |
-| | `mod.call.each_row()` | one call per row |
-| | `mod.call.each_group(by=wf["p"]["k"])` | one call per group of that key |
-| | `mod.call.each_combination()` | one call per combination of settings (a sweep) |
-| **execution** | `mod.exec.timeout(seconds=30, per="call")` · `mod.exec.timeout(minutes=10, per="step")` · `mod.exec.progress(per="step")` · `mod.exec.progress(per="call")` (the tool reports its own) · `mod.exec.on_failure(retry=3, per="call")` · `mod.exec.on_failure(default=None, per="call")` (a change of value, shown) · `mod.exec.on_failure(stop_after=5, per="step")` · `mod.exec.cancel()` · `mod.exec.pace(at_once=8, per_second=2)` | wraps each call; **within the level, left to right, outside in**: `retry(3), timeout(30)` is three attempts, each with thirty seconds |
-| **output** | `mod.output.land("own_row" \| "new_row" \| "each_row_of_group")` | where each output goes |
-| | `mod.output.keep_rows()` | the tool's `bool` keeps or drops its row |
+| **call** | `mod.calls.once()` | one call |
+| | `mod.calls.each_row()` | one call per row |
+| | `mod.calls.each_group(by=wf["p"]["k"])` | one call per group of that key |
+| | `mod.calls.each_combination()` | one call per combination of settings (a sweep) |
+| **execution** | `mod.run.time_limit(seconds=30, per="call")` · `mod.run.time_limit(minutes=10, per="step")` · `mod.run.progress(per="step")` · `mod.run.progress(per="call")` (the tool reports its own) · `mod.run.on_failure(retry=3, per="call")` · `mod.run.on_failure(default=None, per="call")` (a change of value, shown) · `mod.run.on_failure(stop_after=5, per="step")` · `mod.run.cancel()` · `mod.run.pace(at_once=8, per_second=2)` | wraps each call; **within the level, left to right, outside in**: `retry(3), timeout(30)` is three attempts, each with thirty seconds |
+| **output** | `mod.output.place("row" \| "new_row" \| "group_rows")` | where each output goes |
+| | `mod.output.keep_if()` | the tool's `bool` keeps or drops its row |
 | | `mod.output.unnest(into="rows" \| "columns")` | a returned list into rows, or a record into columns |
 | | `mod.output.keep_input()` | the input's columns kept beside the output |
-| | `mod.output.name("temp_f")` | the output columns' names |
+| | `mod.output.rename("temp_f")` | the output columns' names |
 | | `mod.output.expect(rows=…)` | a check on the output |
 
 ### 3.1 The scopes of `nest`
@@ -83,7 +83,7 @@ parts), so it has no input modifier.
 | Whose function | Canonical form |
 |---|---|
 | **none**: data, the empty step | the value itself. Nothing is applied, so there is no `tool[…](…)` (grammar.md §6.1) |
-| **core's**: a pick, a drop, a sort, a join, … | `core.take[mod.call.once()](table=wf["p"][["x", "y"]])`, `core.join[mod.call.once()](left=wf["a"], right=wf["b"], on="id")`: core's tool, its settings as bindings |
+| **core's**: a pick, a drop, a sort, a join, … | `core.take[mod.calls.once()](table=wf["p"][["x", "y"]])`, `core.join[mod.calls.once()](left=wf["a"], right=wf["b"], on="id")`: core's tool, its settings as bindings |
 | **the user's** | `tool[…](…)`, as in §2 |
 
 ## 5. Examples: the surface, and what it opens into
@@ -92,7 +92,7 @@ parts), so it has no input modifier.
 
 ```python
 to_f[mod.map()](wf["p"], offset=1.0)                                     # surface
-to_f[mod.call.each_row(), mod.output.land("own_row")](                    # canonical
+to_f[mod.calls.each_row(), mod.output.place("row")](                    # canonical
     temp_c=wf["p"]["temp_c"], offset=1.0)
 ```
 
@@ -101,8 +101,8 @@ to_f[mod.call.each_row(), mod.output.land("own_row")](                    # cano
 ```python
 sumup[mod.collapse(by="ward")](wf["p"], xs=wf["p"]["x"])
 sumup[mod.input.nest("xs", over="group"),
-      mod.call.each_group(by=wf["p"]["ward"]),
-      mod.output.land("new_row")](xs=wf["p"]["x"])
+      mod.calls.each_group(by=wf["p"]["ward"]),
+      mod.output.place("new_row")](xs=wf["p"]["x"])
 ```
 
 **Each row against the whole column** (two steps today)
@@ -110,56 +110,56 @@ sumup[mod.input.nest("xs", over="group"),
 ```python
 z[mod.map()](wf["p"]["x"], ys=wf["p"]["y"].tolist())
 z[mod.input.nest("ys", over="all"),
-  mod.call.each_row(),
-  mod.output.land("own_row")](x=wf["p"]["x"], ys=wf["p"]["y"])
+  mod.calls.each_row(),
+  mod.output.place("row")](x=wf["p"]["x"], ys=wf["p"]["y"])
 ```
 
 **A group's value beside each of its rows** (a collapse and a join today)
 
 ```python
 mean[mod.input.nest("xs", over=group(by=wf["p"]["ward"])),
-     mod.call.each_row(),
-     mod.output.land("own_row")](xs=wf["p"]["x"])
+     mod.calls.each_row(),
+     mod.output.place("row")](xs=wf["p"]["x"])
 ```
 
 **`filter` with a tool**
 
 ```python
 hot[mod.filter()](wf["p"])
-hot[mod.call.each_row(), mod.output.keep_rows()](temp=wf["p"]["temp"])
+hot[mod.calls.each_row(), mod.output.keep_if()](temp=wf["p"]["temp"])
 ```
 
 **`expand`**
 
 ```python
 split[mod.expand()](wf["p"]["name"])
-split[mod.call.each_row(), mod.output.unnest(into="rows")](name=wf["p"]["name"])
+split[mod.calls.each_row(), mod.output.unnest(into="rows")](name=wf["p"]["name"])
 ```
 
 **A long step: each call, and the step** (owner: "the progress of the step
 and the progress of each call")
 
 ```python
-fetch[mod.call.each_row(),
-      mod.exec.on_failure(retry=3, per="call"), mod.exec.timeout(seconds=30, per="call"),
-      mod.exec.progress(per="step"), mod.exec.on_failure(stop_after=5, per="step"),
-      mod.exec.pace(at_once=8),
-      mod.output.land("own_row")](url=wf["p"]["url"])
+fetch[mod.calls.each_row(),
+      mod.run.on_failure(retry=3, per="call"), mod.run.time_limit(seconds=30, per="call"),
+      mod.run.progress(per="step"), mod.run.on_failure(stop_after=5, per="step"),
+      mod.run.pace(at_once=8),
+      mod.output.place("row")](url=wf["p"]["url"])
 ```
 
 **Retries, in a fixed place** (O1)
 
 ```python
 flaky[mod.retry(times=2), mod.map()](wf["p"])                  # retries nothing today
-flaky[mod.call.each_row(), mod.exec.on_failure(retry=2, per="call"),
-      mod.output.land("own_row")](x=wf["p"]["x"])               # each call retried
+flaky[mod.calls.each_row(), mod.run.on_failure(retry=2, per="call"),
+      mod.output.place("row")](x=wf["p"]["x"])               # each call retried
 ```
 
 **A `drop`**
 
 ```python
 mod.drop(columns=["k"])(wf["p"])
-core.take[mod.call.once()](table=wf["p"][["x", "y"]])
+core.take[mod.calls.once()](table=wf["p"][["x", "y"]])
 ```
 
 ## 6. What it fixes

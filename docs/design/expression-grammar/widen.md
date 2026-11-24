@@ -99,7 +99,7 @@ but I want this scope limited and very clearly defined."*
 
 **Definition: exactly Python's `f(**mapping)` and `f(*sequence)`, one call
 per row, and nothing more.** An input modifier on one argument
-(placeholder name `spread`).
+(named `as_keywords` and `as_positions`, names.md §2).
 
 | # | Condition | |
 |---|---|---|

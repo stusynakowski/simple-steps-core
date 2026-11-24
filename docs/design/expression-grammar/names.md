@@ -129,5 +129,8 @@ they are**; each says what it changes. `land=` follows §2.5.
 
 ## 3. To decide
 
-~~§1, the primitives~~: decided. **§2, the canonical form's words**, next;
-then every page renamed in one pass.
+**Both decided** (owner, 2026-11-24: "these are fine"): §1 the primitives,
+§2 the canonical form's words. Every page renamed in one pass; **every
+previous term kept in [spellings/](spellings/README.md)**, as the start of
+their mappings as spellings (owner: "save the previous terms in a separate
+folder, as we are likely to have spellings for them").

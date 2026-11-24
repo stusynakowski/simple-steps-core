@@ -1,6 +1,6 @@
-# Join together: the conditions of putting tables side by side or one under another
+# Combine: the conditions of putting tables side by side or one under another
 
-> **Draft, 2026-11-23, for the owner.** The primitive **join together**,
+> **Draft, 2026-11-23, for the owner.** The primitive **combine**,
 > with **match** (which rows go together across tables), every case pinned
 > down. Each condition: what it says, today (run 2026-11-23, beside pandas'
 > `concat` and `merge`: [grid-probes/joins.py](../grid-probes/joins.py)),
@@ -75,7 +75,7 @@ Written on the argument (an input modifier; placeholder
 
 ## G. The three places
 
-| Place | Join together there |
+| Place | Combine there |
 |---|---|
 | **a step** | `stack`, `zip_`, `join`, cross: everything above |
 | **on a tool's input** | **lookup** (§E); data matched from another step for one call |
