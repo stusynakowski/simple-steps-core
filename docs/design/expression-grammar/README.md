@@ -11,6 +11,11 @@ one reading, core writes the most likely and says so. The system is
 **closed**: every expression is either a sentence of the grammar, or refused
 when declared, naming the rule it breaks.
 
+**The primitives' names** (decided 2026-11-23, names.md §1): **take;
+nest, unnest; combine (append, align, join, cross, lookup); convert;
+rename; pivot, unpivot; fill.** Other pages still use placeholders until
+the canonical form's words are decided (names.md §2).
+
 **The goal: reactive staging** (owner, 2026-11-23): know what a step will
 give, quickly, before running it, so a solid workflow can be built without
 running any step; and **arguments in the modifiers** to change any

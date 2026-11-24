@@ -25,6 +25,12 @@ Keep Rows) weigh most under NM2, then SQL, then tidyr and pandas.
 
 ## 1. The primitives
 
+**Decided, 2026-11-23** (owner: "these work"): **take; nest, unnest;
+combine, with append, align, join, cross, lookup; convert; rename; pivot,
+unpivot; fill.** Each with the spellings listed beside it. The other pages
+still use the placeholders; they are renamed in one pass once §2 is
+decided.
+
 *Second look, 2026-11-23 (owner: "can you think harder … I need your help
 with judgment").* Checked against what the words mean elsewhere, run where
 it can be: pandas' `DataFrame.stack()` is **wide to long** (a reshape, not
@@ -123,6 +129,5 @@ they are**; each says what it changes. `land=` follows §2.5.
 
 ## 3. To decide
 
-The owner, each name, in this order: **§1 the primitives** (take; nest,
-unnest; combine and its forms append, align, join, cross, lookup; convert;
-rename; pivot, unpivot; fill), then **§2**.
+~~§1, the primitives~~: decided. **§2, the canonical form's words**, next;
+then every page renamed in one pass.
