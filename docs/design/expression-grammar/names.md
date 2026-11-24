@@ -76,7 +76,7 @@ dict.
 | `call.once()` | **`calls.once()`** | — |
 | `call.each_row()` | **`calls.each_row()`** | reads as English: "calls: each row" |
 | `call.each_group(by=…)` | **`calls.each_group(by=…)`** | — |
-| `call.each_combination()` | **`calls.each_setting()`** | a sweep's pieces are combinations of settings; "setting" is the word a user writes |
+| `call.each_combination()` | **`calls.each_combination()`** | a sweep makes one call per **combination** of several settings; *changed on the second look from `each_setting`*, which reads as one call per setting |
 | one call per column | **`calls.each_column()`** | — |
 
 ### 2.3 Input
@@ -105,7 +105,7 @@ dict.
 | Placeholder | Candidates | Recommended | Why |
 |---|---|---|---|
 | `land("own_row" \| "new_row" \| "each_row_of_group")` | `land(…)` · `place(…)` · `onto(…)` | **`output.place("row" \| "new_row" \| "group_rows")`** | "place" is plain; the values shorter |
-| `keep_rows()` (a filter's test) | `keep_rows()` · `keep_if()` | **`output.keep_if()`** | reads as English: "keep if the tool says yes" |
+| `keep_rows()` (a filter's test) | `keep_rows()` · `keep_if()` | **`output.keep_if()`** | reads as English: "keep the row if the tool says yes". It is **take on the output** (§1); the plain phrase wins over the primitive's name here |
 | `unnest(into=…)` | **`output.unnest(into=…)`** | the primitive's name |
 | `keep_input()` | **`output.keep_input()`** | — |
 | `name(…)` | **`output.rename(…)`** | the primitive's name (§1) |
