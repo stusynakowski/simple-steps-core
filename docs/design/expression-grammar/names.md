@@ -59,7 +59,7 @@
 | `input.nest(param, over=…)` | **`input.pack(param, over=…)`** | the primitive's name (§1) |
 | the scopes `"all"`, `"group"`, `group(by=…)`, `window(n)` | **the same** | each says what it is (canonical.md §3.1) |
 | `input.convert(param, to=…)` | **`input.convert(param, to=…)`** | — |
-| the spread (`f(**cell)`, `f(*cell)`) | `input.spread` · **`input.as_keywords` / `input.as_positions`** · `input.kwargs` | **`as_keywords` / `as_positions`** | **`spread` means pivot-wider in older tidyr** (NM2); these say exactly what happens |
+| the spread (`f(**cell)`, `f(*cell)`) | **`input.as_keywords` / `input.as_positions`** (over `input.spread`, `input.kwargs`) | **`spread` means pivot-wider in older tidyr** (NM2); these say exactly what happens |
 | `input.lookup(param, on=…)` | **`input.lookup(param, on=…)`** | Excel's word |
 | `key(column, read=…)` | **the same** | — |
 
