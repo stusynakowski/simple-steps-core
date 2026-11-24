@@ -16,20 +16,41 @@
 | **NM5** | **one name per primitive**; familiar words may be **spellings** of it (`select` for take) | the principle: one primitive, several spellings (README.md) |
 | **NM6** | **pairs read as pairs** (in and out, wide and long) | they undo each other (nest.md NS1) |
 | **NM7** | **short, and a valid Python name** | it is written in expressions |
+| **NM8** | **primitives are verbs**; the classes of modifier are nouns; an argument says what it changes | a primitive is something done |
+
+**The closest vocabulary is Excel's Power Query**: spreadsheet users
+building a table in steps, as Simple Steps' users do. Its words (Append,
+Merge, Expand, Group By, Pivot, Unpivot, Fill Down, Change Type, Rename,
+Keep Rows) weigh most under NM2, then SQL, then tidyr and pandas.
 
 ## 1. The primitives
 
-| Primitive (placeholder) | Candidates | Recommended | Why |
+*Second look, 2026-11-23 (owner: "can you think harder … I need your help
+with judgment").* Checked against what the words mean elsewhere, run where
+it can be: pandas' `DataFrame.stack()` is **wide to long** (a reshape, not
+rows appended); `DataFrame.align` pairs rows **by index**; numpy's `take`
+with a permutation **is a sort** (`take([30, 10, 20], argsort)` → `[10, 20,
+30]`).
+
+| Primitive | Recommended | Why | Spellings that open into it |
 |---|---|---|---|
-| **take**: choose and reorder rows and columns | `take` · `keep` · `choose` · `select` · `subset` | **`take`** | short, plain (NM1, NM7). `select` echoes the retired "selection" and in SQL means columns only; it stays a **spelling** (NM5). `keep` reads oddly for sorting |
-| **nest** / **unnest** | **`pack` / `unpack`** · `nest` / `unnest` · `collapse` / `expand` | **`pack` / `unpack`** | **model.md's own words** (NM3): "a column into a list, a row into a dict, and back". `nest` is tidyr's for data frames in cells, a narrower meaning (NM2) |
-| unnest **into rows** / **into columns** | `unpack(into="rows")` / `unpack(into="columns")` · `unpack_rows` / `unpack_columns` · `expand` / `widen` | **`unpack(into=…)`** | one primitive, the direction an argument (NM5, the canonical form's style); `expand`, `widen` stay **spellings** |
-| **join together** | **`combine`** · `join` · `merge` | **`combine`** | **model.md's word** (NM3) for "reads several steps"; `join` is one of its forms (by key), so it can't name them all |
-| its forms | `stack` · `zip` · `join` · `cross` · `lookup` | **the same** | each familiar where it means the same (NM2): `stack` (rows), `join` (SQL, by key), `cross` (SQL's `CROSS JOIN`), `lookup` (Excel's `VLOOKUP`). `zip` is Python's (pairs by position), which core's isn't: **`zip` → `align`?** (it pairs the same rows, by identity) |
-| **convert** | **`convert`** · `cast` · `as_type` | **`convert`** | plain (NM1); `cast` is programming jargon, kept as a **spelling** |
-| **name** | **`name`** · `rename` | **`name`** | it names outputs as well as renaming columns; `rename` a **spelling** |
-| **pivot** / **melt** | `pivot_wider` / `pivot_longer` · `to_wide` / `to_long` · `pivot` / `melt` | **`to_wide` / `to_long`** | a pair that reads as one (NM6), in plain words (NM1); tidyr's `pivot_wider` / `pivot_longer` are close; `pivot`, `melt` (pandas) are spellings |
-| **fill** | `fill` · `fill_down` | **`fill`** | tidyr's word, the same meaning (NM2); the direction is an argument |
+| choose, reorder rows and columns | **`take`** | numpy's meaning exactly: these positions, in this order; a condition gives the positions, a sort is taking in sorted order. `keep` fails for sorting; `select` echoes the retired "selection" | `select`, `filter` (a condition), `slice`, `sort`, `distinct`, `drop`, a pick's parts |
+| many cells into one | **`nest`** | **the design's word** (nest.md), and tidyr's for this move. *Changed from `pack`*: tidyr's `pack` is columns only, and Python's "unpacking" is `f(*args)`, the spread | `pack` (columns into a dict, as tidyr's), `collapse`, `gather` |
+| one cell into many | **`unnest(into="rows" \| "columns")`** | tidyr's family (`unnest_longer`, `unnest_wider`); the direction an argument (NM5) | `expand`, `widen`, `explode` |
+| tables made one | **`combine`** | **model.md's word** (NM3); pandas' `DataFrame.combine` is element-wise and obscure | — |
+| … rows added under | **`append`** | Power Query's "Append Queries". *Changed from `stack`*: pandas' and R's `stack` are wide to long | `stack`, `concat`, `bind_rows` |
+| … rows paired by identity | **`align`** | pandas' `align`, the same meaning: rows matched by index. *Changed from `zip`*: Python's `zip` pairs by position, which core never does | `zip_` |
+| … rows matched by key | **`join`** | SQL; Power Query's "Merge" | `merge` |
+| … every pair | **`cross`** | SQL's `CROSS JOIN` | — |
+| … a value per row, from another step | **`lookup`** | Excel's `VLOOKUP` / `XLOOKUP` | `vlookup` |
+| change a value's type | **`convert`** | plain; Power Query's "Change Type" | `cast`, `astype` |
+| name columns | **`rename`** | *changed from `name`*: pandas, dplyr and Power Query all say `rename`; "name" is a noun everywhere else in core (a step's name, a column's name) | `name` |
+| long to wide, and back | **`pivot` / `unpivot`** | *changed from `to_wide` / `to_long`*: Power Query's "Pivot Column", "Unpivot Columns", and SQL's `PIVOT` / `UNPIVOT`: the pair spreadsheet users know | `pivot_wider`, `pivot_longer`, `melt` |
+| a gap from the nearest value | **`fill`** | tidyr's word; Power Query's "Fill Down" | `fill_down`, `ffill` |
+
+**model.md's "pack, unpack"** become nest and unnest when model.md is
+updated (roadmap phase 6), "pack" kept as the spelling for columns into a
+dict.
 
 ## 2. The canonical form's words
 
@@ -56,7 +77,7 @@
 
 | Placeholder | Recommended | Why |
 |---|---|---|
-| `input.nest(param, over=…)` | **`input.pack(param, over=…)`** | the primitive's name (§1) |
+| `input.nest(param, over=…)` | **`input.nest(param, over=…)`** | the primitive's name (§1) |
 | the scopes `"all"`, `"group"`, `group(by=…)`, `window(n)` | **the same** | each says what it is (canonical.md §3.1) |
 | `input.convert(param, to=…)` | **`input.convert(param, to=…)`** | — |
 | the spread (`f(**cell)`, `f(*cell)`) | **`input.as_keywords` / `input.as_positions`** (over `input.spread`, `input.kwargs`) | **`spread` means pivot-wider in older tidyr** (NM2); these say exactly what happens |
@@ -79,9 +100,9 @@
 |---|---|---|---|
 | `land("own_row" \| "new_row" \| "each_row_of_group")` | `land(…)` · `place(…)` · `onto(…)` | **`output.place("row" \| "new_row" \| "group_rows")`** | "place" is plain; the values shorter |
 | `keep_rows()` (a filter's test) | `keep_rows()` · `keep_if()` | **`output.keep_if()`** | reads as English: "keep if the tool says yes" |
-| `unnest(into=…)` | **`output.unpack(into=…)`** | the primitive's name |
+| `unnest(into=…)` | **`output.unnest(into=…)`** | the primitive's name |
 | `keep_input()` | **`output.keep_input()`** | — |
-| `name(…)` | **`output.name(…)`** | — |
+| `name(…)` | **`output.rename(…)`** | the primitive's name (§1) |
 | `expect(…)` | **`output.expect(…)`** | — |
 
 ### 2.6 Arguments, the other way (README.md's principle)
@@ -102,6 +123,6 @@ they are**; each says what it changes. `land=` follows §2.5.
 
 ## 3. To decide
 
-The owner, each name, in this order: **§1 the primitives** (`take`;
-`pack`/`unpack`; `combine` and its forms, and whether `zip` becomes
-`align`; `convert`; `name`; `to_wide`/`to_long`; `fill`), then **§2**.
+The owner, each name, in this order: **§1 the primitives** (take; nest,
+unnest; combine and its forms append, align, join, cross, lookup; convert;
+rename; pivot, unpivot; fill), then **§2**.
