@@ -75,15 +75,15 @@ From blocks.md §4, dplyr and tidyr, and Excel:
 | join, stack, zip; every combination | join together | ✓ (cross: new, decided) |
 | look a value up in another table (`VLOOKUP`) | lookup | ✓ new, decided |
 | wide to long (melt) | nest columns, unnest into rows | ✓ |
-| long to wide (pivot) | nest columns **named by a column's values**, unnest | · *missing; in scope* |
+| long to wide (pivot) | nest columns **named by a column's values**, unnest | · in scope; conditions proposed (pivot-fill-columns.md §1) |
 | a window (running total, lag, rank, rolling mean) | nest over a window, land on its row | · *the scope decided; not built* |
-| fill a gap from the row above | — | · *missing; in scope* |
+| fill a gap from the row above | take: a cell copied into a gap | · in scope; conditions proposed (§2) |
 | split a text column into several; unite several | a tool returning a record; a tool of several parameters | ✓ |
 | unnest JSON, one level; every level | unnest | ✓; every level later |
 | a formula per cell (`IF`, arithmetic) | a tool | ✓ |
 | `$A$1`, a whole column for every row | nest over everything | ✓ |
 | a calculation over the whole table | one call, nest the block | ✓ |
-| one call per column | calls, split over columns | · *missing; in scope* |
+| one call per column | calls split over columns, each nested into a list | · in scope; conditions proposed (§3) |
 
 ## 5. Where it stands
 
