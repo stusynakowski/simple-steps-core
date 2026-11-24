@@ -30,7 +30,7 @@ only by join together (joins.md), where the reason is written.
 |---|---|---|---|---|
 | **TK7** | A condition on columns (`cols["x"] > 1`, `&`, `\|`, `~`) or on lineage (`row["s"]`) keeps the rows where it is true | ✓ | ✓ | decided |
 | **TK8** | **Types the condition can't compare** (`"a" > 1`): refused when declared, naming the value | ✓ | raises at run | decided |
-| **TK9** | **A missing value** in a compared column (a gap, `None`): the test can't be decided, so **the row is dropped and it is said**, naming how many rows and which | **dropped silently** | dropped silently | **to decide**: dropped and said (as SQL, but said), or kept |
+| **TK9** | **A missing value** in a compared column (a gap, `None`): the test can't be decided, so **the row is dropped and it is said**, in **the step's warnings** (as widen's "rows held no dict"): how many rows, and the first few row numbers. Nothing per cell. **Cost, run on 1M rows: 0.16 ms to count the gaps, beside 0.71 ms for the comparison**, in the same pass (owner's concern: "more overhead on the computation") | **dropped silently** | dropped silently | recommended; the owner's yes awaited |
 
 ## C. Rows by a tool's test (`filter`)
 
@@ -38,7 +38,7 @@ only by join together (joins.md), where the reason is written.
 |---|---|---|---|
 | **TK10** | One call per row; `True` keeps the row, `False` drops it | ✓ | decided |
 | **TK11** | **A call that fails**: the row is **kept, as failed**, with its reason | ✓ (run) | decided |
-| **TK12** | **A call that returns something other than `True` or `False`** (`None`, `1`): the row is **kept, as failed**, "the test returned None, not yes or no", as TK11 | **treated as `False`: the row dropped silently (TF2)** | **to decide** |
+| **TK12** | **A call that returns something other than `True` or `False`**: the tool's return type decides, as `Optional` does for a missing value going in (grammar.md N2). **`-> bool`**: `None` is a broken promise, the test didn't cover that case: the row is **kept, as failed**, "the test returned None, not yes or no", as TK11, so the rows to fix are shown. **`-> Optional[bool]`**: `None` is "can't tell", on purpose: **as TK9**, the row dropped and said (owner, 2026-11-23: "filtering because you didn't have the right condition") | **treated as `False`: the row dropped silently (TF2)** | recommended; the owner's yes awaited |
 
 ## D. Sort
 
