@@ -52,17 +52,30 @@ column (§4).
 | absent | fields absent (U5) | row kept (V4) | a marker / missing key (NS9, NS10) | matches nothing (JN10) | a test undecided (TK9); sorted last (TK15) | stays absent (CV13) |
 | a sequence | by position (U3) | one row per item (V1) | ✓ | `key(read=)` (nest NS6) | `key(read=)` (TK17, TK20) | to text through JSON (CV12) |
 | a mapping | by key (U1) | `key`, value rows (V2) | ✓ | `key(read=)` | `key(read=)` (TK17, TK20) | to text through JSON (CV12) |
-| a record | by field (U2) | by field (V3) | a record type (NS12) | · | · | · |
-| an array | a unit (U4) | a unit for now (V7) | ✓ | · | · | · |
-| a table in a cell | a unit (U4) | passed through (V6); unnesting later (NS22) | a group as a table (NS20) | · | · | · |
-| a set, a generator | its row fails (U7) | its row fails (V5) | ✓ | · | · | · |
-| failed, blocked | blocked (U6) | blocked (V8) | a marker (NS18) | · | a failed test keeps its row, failed (TK11) | · |
-| pending (not run) | · | · | · | · | · | · |
+| a record | by field (U2) | by field (V3) | a record type (NS12) | `key(read=)` (K1) | as a key: `key(read=)` (K1); in a condition: refused (TK8) | to text through JSON, as a mapping (CV12) |
+| an array | a unit (U4) | a unit for now (V7) | ✓ | `key(read=)` (K1) | as a key: `key(read=)` (K1); in a condition: refused (TK8) | to text through JSON, as a list (CV12); its dtype not kept (said) |
+| a table in a cell | a unit (U4) | passed through (V6); unnesting later (NS22) | a group as a table (NS20) | refused: a table isn't a key (K1) | as a key: refused (K1); in a condition: refused (TK8) | to text through a named format, later (CV12) |
+| a set, a generator | its row fails (U7) | its row fails (V5) | ✓ | a set: `key(read="set")` (K1); a generator: refused | as a key: as the join column; in a condition: refused (TK8) | a set: to text through JSON as a sorted list (said); a generator: refused |
+| failed, blocked | blocked (U6) | blocked (V8) | a marker (NS18) | as a key: its row blocked, naming the failure (K2) | a failed test keeps its row, failed (TK11); a failed cell in a condition: the row blocked (K2) | stays failed, not converted (K2) |
+| pending (not run) | pending (K3) | pending (K3) | pending (K3) | pending (K3) | pending (K3) | pending (K3) |
 
-**Still open:** records, arrays, tables and sets under **take** and
-**convert**; records, arrays, tables and failed cells as **keys**; failed
-cells under convert; **pending** cells everywhere (a step reading a step
-that hasn't run). Each is a small rule, following the decided ones.
+**Every square is filled** (2026-11-23, in one pass: owner, "do all in
+one pass and confirm"). Three general rules fill the last ones, each
+following decisions already made:
+
+- **K1. Any structure used as a key, or compared** (a list, a dict, a
+  record, an array, a set: in a group, a join, a sort, `distinct`) needs
+  **`key(…, read=…)`** (nest.md §A.1); with none written, refused, naming
+  the readings. A table is never a key. In a condition (`>`, `==`), a
+  structure is refused when declared (take.md TK8).
+- **K2. A failed or blocked cell never becomes a value**: under every
+  primitive it stays failed, or blocks what it feeds, naming where the
+  failure came from (widen.md U6, expand.md V8, nest.md NS18). Never
+  converted, never matched, never compared.
+- **K3. A pending cell (its step hasn't run) is never an input at run**:
+  running a step brings what it reads up to date first (owner, 2026-11-16).
+  Before the run, every primitive's output is pending, and its plan is
+  worked out from the plan of what it reads.
 
 ## 4. The catalogue of tasks (for CL2)
 
@@ -95,8 +108,9 @@ From blocks.md §4, dplyr and tidyr, and Excel:
 | pivot, fill, one call per column | **conditions decided** (pivot-fill-columns.md) |
 | name | folded into tidy.md (T1–T5) and each primitive's names section |
 | call (split), land, execution's primitives | in grammar.md §6 and canonical.md; **their conditions** not pinned down as the four above |
-| the conditions between components | conditions.md: R1–R26, many still **proposed** |
 | CL1, the scope | **agreed**, §1 |
+| CL4, the coverage table | **every square filled** (§3, K1–K3) |
+| the conditions between components | **all decided** (conditions.md, 2026-11-23) |
 | CL3, CL5, CL6: the property test | **to build** (roadmap phase 3) |
 
 ## Next
