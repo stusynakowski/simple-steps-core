@@ -360,7 +360,7 @@ its item **absent**, so a row is never lost by unnesting.
 
 | # | Found | Should be |
 |---|---|---|
-| **I1** | `widen` of a list, set, str, array, range or DataFrame completes with no columns: the column is gone, nothing said (the arrays were plan P1's W-arr; it's wider than arrays) | a list opens by position, as a tuple does; any other kind is refused, naming it |
+| **I1** | `widen` of a list, set, str, array, range or DataFrame completes with no columns: the column is gone, nothing said (the arrays were plan P1's W-arr; it's wider than arrays) — **done 2026-11-25**: a list opens by position; anything else fails its row, kept visible | a list opens by position, as a tuple does; any other kind is refused, naming it |
 | **I2** | `expand` of `[]` or `None` drops the row (and `[]` under `columns=` without a word) | **done 2026-11-25**: the row kept as a placeholder, its item absent (expression-grammar/expand.md §A.1) | one row, its item absent (to decide) |
 
 ## 6. The plan

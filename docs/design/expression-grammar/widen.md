@@ -20,11 +20,11 @@ structure becomes several variables.
 |---|---|---|---|
 | **U1** | A **mapping** (`dict`) opens by key | ✓ | decided |
 | **U2** | A **record** (`NamedTuple`, `dataclass`, a `TypedDict` instance) opens by field name | ✓ `NamedTuple` | decided |
-| **U3** | A **sequence** (`list`, `tuple`) opens by position | ✓ tuples; **lists fail (W1)** | decided (pandas) |
-| **U4** | A **unit** (a string, a number, an array, an image, a `DataFrame`) can't be opened: **its row fails**, naming the kind; the other rows run | ✓ strings | decided (N1) |
-| **U5** | **`None`, an absent cell, `{}`, `()`**: nothing to open: **its fields are absent**, with a warning counting the rows | ✓ `None`, `{}`; **`()` fails the step (W3)** | decided |
+| **U3** | A **sequence** (`list`, `tuple`) opens by position | ✓ tuples; **lists fail (W1)** | **built** 2026-11-25 |
+| **U4** | A **unit** (a string, a number, an array, an image, a `DataFrame`) can't be opened: **its row fails**, naming the kind; the other rows run | ✓ strings | **built** 2026-11-25 |
+| **U5** | **`None`, an absent cell, `{}`, `()`**: nothing to open: **its fields are absent**, with a warning counting the rows | ✓ `None`, `{}`; **`()` fails the step (W3)** | **built** 2026-11-25 |
 | **U6** | A **failed or blocked** input cell: its fields are **blocked**, naming the failure they come from | — | proposed |
-| **U7** | **Not openable as it is** (a `set`, a generator): its row fails, naming the fix | — | decided (blocks.md §5) |
+| **U7** | **Not openable as it is** (a `set`, a generator): its row fails, naming the fix | — | **built** 2026-11-25 |
 
 ## B. Which fields: the output's columns
 
@@ -33,14 +33,14 @@ structure becomes several variables.
 | **U8** | The fields come from **exactly one** place, in this order: **declared** (`columns=[…]`); **the type** (a record's or `TypedDict`'s fields, from the tool's return type); **discovered** from the data | declared ✓; type: only at run (W4); discovered ✓ | decided |
 | **U9** | **Discovered fields are not written into the expression** (owner, 2026-11-23: "I would not do that; I would have hardcoded methods and conditions, conventions, to handle any possible issues"). They are discovered on every run, by the fixed conventions of this page (U10–U24), so every shape the data can take is handled the same way. A step reading a discovered field is checked when it runs: a field it needs that is absent fails that reader's rows, naming the field | not written | **decided** |
 | **U10** | Discovered from **mappings**: the **union of the keys, first seen first** | ✓ | decided (pandas) |
-| **U11** | Discovered from **sequences**: **positions 0 to the longest − 1**, named `var0`, `var1`, … | tuples ✓ | decided (pandas; tidy T1) |
+| **U11** | Discovered from **sequences**: **positions 0 to the longest − 1**, named `var0`, `var1`, … | tuples ✓ | **built** 2026-11-25 |
 | **U12** | **Nothing to discover from** (zero rows, every row empty): no fields, **said**; nothing is written until a row has a field | every row `None`: no columns, a warning that the rows held no dict ✓; **zero rows: no columns, nothing said** | proposed |
 
 ## C. Uneven rows
 
 | # | Condition | Today | |
 |---|---|---|---|
-| **U13** | A row **missing** a field: that cell is **absent** | ✓ mappings; **sequences fail (W3)** | decided |
+| **U13** | A row **missing** a field: that cell is **absent** | ✓ mappings; **sequences fail (W3)** | **built** 2026-11-25 |
 | **U14** | A field **present with the value `None`**: that cell is `None`, known, apart from absent (tidy T9) | ✓ | decided |
 | **U15** | A row with a field **not among the declared fields**: **a warning naming the field and the rows**, and the convention applied: the declared fields are kept, the extra one is not added. Where a case can't be handled by a convention, it is **refused, or an error saying what happened** (owner, 2026-11-23: "warn, but have a good convention for what we have currently; do what you can, but refuse or put an error with w…", *the end of the sentence cut off: read as "with what happened"*) | — (pandas drops it silently) | **decided** |
 | **U16** | A declared field **missing from every row**: its column is all absent, with a warning | ✓ absent | proposed: the warning |

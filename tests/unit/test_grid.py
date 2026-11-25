@@ -1885,7 +1885,7 @@ def test_a_non_mapping_cell_is_a_per_unit_failure():
     wf.run("wide")          # the failing step itself; run_all would stop here
     out = wf.step("wide").output
     assert _row_states(out) == ["known", "failed"]
-    assert "takes a dict or a tuple" in _errors(out)[1]
+    assert "takes a dict, a list or a tuple" in _errors(out)[1]
     assert list(wf.step("wide").output.failed.index) == [1], "re-drivable"
 
 
@@ -1946,15 +1946,18 @@ def test_widen_a_tuple_with_explicit_columns_matches_by_position():
     assert list(out["a"]) == [10, 20] and list(out["b"]) == [1, 4]
 
 
-def test_widen_refuses_tuples_of_different_lengths_never_pads():
-    """PK6: tuples are fields, so every row has the same number; pandas pads."""
+def test_widen_takes_ragged_tuples_to_the_longest_the_missing_absent():
+    """Was PK6 ("never pads"); changed 2026-11-23 (owner, widen.md U11, U13,
+    after pandas): sequences go by position to the longest row, a missing
+    position absent."""
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [(1, 2, 3), (9,), (4, 5, 6)]})
     wf["wide"] = mod.widen()(wf["raw"])
     wf.run("wide")
     step = wf.step("wide")
-    assert step.state == "failed"
-    assert "3 items (rows 0, 2)" in str(step.output.notes) and "1 item (row 1)" in str(step.output.notes)
+    assert step.state == "completed"
+    assert step.output.data["var0"].tolist() == [1, 9, 4]
+    assert (1, "var1") in step.output.absent_cells() and (1, "var2") in step.output.absent_cells()
 
 
 def test_widen_explicit_columns_must_match_the_tuples_length():
@@ -1963,20 +1966,23 @@ def test_widen_explicit_columns_must_match_the_tuples_length():
     wf["wide"] = mod.widen(columns=["a", "b", "c"])(wf["raw"])
     wf.run("wide")
     step = wf.step("wide")
-    assert step.state == "failed"
-    assert "2 items" in str(step.output.notes) and "3 columns" in str(step.output.notes)
+    # changed 2026-11-23 (owner, widen.md U13): declared names name the
+    # positions; one the rows lack is absent (it was refused)
+    assert step.state == "completed"
+    assert step.output.data["a"].tolist() == [10, 20]
+    assert set(step.output.absent_cells()) >= {(0, "c"), (1, "c")}
 
 
-def test_widen_fails_a_list_row_pointing_to_expand():
-    """PK7: a list is items, not fields; the other rows run."""
+def test_widen_opens_a_list_by_position_as_a_tuple():
+    """Was PK7 ("a list is items: expand it"); changed 2026-11-23 (owner,
+    widen.md U3, after pandas): a list is a sequence, opened by position."""
     wf = Workflow()
     wf["raw"] = pd.DataFrame({"value": [(10, 1), [20, 4]]})
     wf["wide"] = mod.widen()(wf["raw"])
     wf.run("wide")
     out = wf.step("wide").output
-    assert _row_states(out) == ["known", "failed"]
-    assert "mod.expand(columns=['value'])" in _errors(out)[1]
-    assert out.data["var0"].tolist()[0] == 10
+    assert _row_states(out) == ["known", "known"]
+    assert out.data["var0"].tolist() == [10, 20]
 
 
 def test_widen_refuses_dicts_and_tuples_in_one_column():
@@ -1986,7 +1992,7 @@ def test_widen_refuses_dicts_and_tuples_in_one_column():
     wf.run("wide")
     step = wf.step("wide")
     assert step.state == "failed"
-    assert "dicts (row 0) and tuples (row 1)" in str(step.output.notes)
+    assert "dicts (row 0) and sequences (row 1)" in str(step.output.notes)
 
 
 # ─────────────────────────────────────────────────────────────────────────

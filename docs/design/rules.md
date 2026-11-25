@@ -48,9 +48,12 @@ rows ↔ a list, or columns ↔ a dict. Longer changes are several steps.
 | a column → a list: `gather[collapse()]` | `expand` |
 | a row → a dict: `pack` | `widen` |
 
-Packing takes anything. Unpacking needs one shape: `widen` takes dicts (a
-key a row lacks is absent) or tuples all of one length (`var0, var1, …`, a
-namedtuple's fields, or `columns=[…]`), never both, never padded. A list is items: `expand` it.
+Packing takes anything. Unpacking needs one shape: `widen` takes dicts (by
+key, the union of their keys; a key a row lacks is absent) or sequences,
+lists and tuples (by position, as wide as the longest row: `var0, var1, …`,
+a namedtuple's fields, or `columns=[…]`; a position a row lacks is absent),
+never both. A string, a number or an array fails its own row; a set has no
+order, so sort it into a list first.
 `expand` never loses a row: an empty list, `None` or a gap keeps its row, its item absent, said in a warning; no tool is called for it, and nesting it back gives the empty list again. `expand` takes lists and tuples; a string is one value, and a set has no
 order, so sort it first.
 

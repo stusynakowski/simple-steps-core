@@ -11,6 +11,7 @@ from typing import Any
 from typing import Callable
 from typing import Iterable
 from typing import Sequence
+import inspect
 import itertools
 import numpy as np
 import pandas as pd
@@ -1025,41 +1026,33 @@ def _rows_named(positions: list[int]) -> str:
 
 def _widen_columns(cells: list[Any], records: list[dict],
                    columns: Sequence[str] | None) -> list[str]:
-    """The columns a widen writes, once the column's shape is checked (PK6).
+    """The columns a widen writes, once the column's shape is checked.
 
-    Dicts or tuples, never both. **Dicts**: ``columns=`` chooses keys, else the
-    union of their keys, first seen first. **Tuples** are fields, so they all
-    have one length, never padded (pandas pads): a namedtuple names them,
-    ``columns=`` names them (as many as the items), else ``c0, c1, …``. A
-    shape that isn't one is refused, naming the rows by number.
+    **Mappings** (dicts) by key: ``columns=`` chooses the keys, else the union
+    of the keys, first seen first. **Sequences** (lists, tuples) by position,
+    **as wide as the longest row** (owner, 2026-11-23, after pandas: widen.md
+    U3, U11, U13; it was "never padded", PK6): a namedtuple names them,
+    ``columns=`` names the positions, else ``var0, var1, …``. Mappings and
+    sequences in one column are refused, naming the rows.
     """
     present = [(n, c) for n, (c, r) in enumerate(zip(cells, records))
                if r["status"] == "completed" and not (_is_missing(c) or c is ABSENT)]
     dicts = [n for n, c in present if isinstance(c, Mapping)]
-    tuples = [(n, c) for n, c in present if isinstance(c, tuple)]
-    if dicts and tuples:
-        raise ValueError(f"widen takes dicts or tuples, not both: this column holds dicts "
-                         f"({_rows_named(dicts)}) and tuples ({_rows_named([n for n, _ in tuples])})")
-    if tuples:
-        lengths: dict = {}
-        for n, c in tuples:
-            lengths.setdefault(len(c), []).append(n)
-        if len(lengths) > 1:
-            raise ValueError(
-                "widen's tuples are fields, so each row has as many, and these differ: "
-                + ", ".join(f"{k} item{'s' if k != 1 else ''} ({_rows_named(ns)})"
-                            for k, ns in lengths.items())
-                + ". If they are items, expand them")
-        width = next(iter(lengths))
-        if columns and len(columns) != width:
-            raise ValueError(f"widen names {len(columns)} columns "
-                             f"({', '.join(map(repr, columns))}), and the tuples have "
-                             f"{width} items: name one per item")
+    sequences = [(n, c) for n, c in present if isinstance(c, (tuple, list))]
+    if dicts and sequences:
+        raise ValueError(f"widen takes dicts or sequences (lists, tuples), not both: this "
+                         f"column holds dicts ({_rows_named(dicts)}) and sequences "
+                         f"({_rows_named([n for n, _ in sequences])})")
+    if sequences:
         if columns:
             return list(columns)
-        fields = getattr(tuples[0][1], "_fields", None)
+        width = max(len(c) for _n, c in sequences)
+        fields = next((getattr(c, "_fields", None) for _n, c in sequences
+                       if getattr(c, "_fields", None)), None)
+        if fields and len(fields) == width:
+            return list(fields)
         # a position is a numeric name, so var0, var1, … as a source's are (L21, PK8)
-        return list(fields) if fields else [_column_name(i, i) for i in range(width)]
+        return [_column_name(i, i) for i in range(width)]
     if columns:
         return list(columns)
     # the union of the dicts' keys; a row that isn't one fails on its own
@@ -1069,9 +1062,10 @@ def _widen_columns(cells: list[Any], records: list[dict],
 def _widen_cell(cell: Any, wanted: Sequence[str], spread: str) -> tuple[dict, str | None]:
     """Lift one cell into the wanted columns, with a per-row error or None.
 
-    A dict is matched by key, a tuple by position; their shapes were checked
-    for the whole column first (PK6). A list, or any other value, fails its
-    own row (PK7).
+    A mapping is matched by key, a sequence (a list, a tuple) by position; a
+    key or position the cell lacks is **absent**, never a failure. A unit (a
+    string, a number, an array), or a value not openable as it is (a set, a
+    generator), fails its own row, naming why (widen.md U4, U7).
     """
     if _is_missing(cell) or cell is ABSENT:
         # No dict at all: every field absent, never a failure (C6).
@@ -1079,14 +1073,17 @@ def _widen_cell(cell: Any, wanted: Sequence[str], spread: str) -> tuple[dict, st
     if isinstance(cell, Mapping):
         # A key the record lacks is absent, never a failure (J-D2).
         return {c: (cell[c] if c in cell else ABSENT) for c in wanted}, None
-    if isinstance(cell, tuple):
-        return dict(zip(wanted, cell)), None
-    if isinstance(cell, list):
-        return ({c: None for c in wanted},
-                f"TypeError: widen spreads fields, and a list is items: expand it, "
-                f"mod.expand(columns=[{spread!r}]), or make it a tuple")
-    return ({c: None for c in wanted},
-            f"TypeError: widen takes a dict or a tuple, got {type(cell).__name__}")
+    if isinstance(cell, (tuple, list)):
+        # a position the row lacks is absent (U13): ragged rows go to the longest
+        return {c: (cell[i] if i < len(cell) else ABSENT) for i, c in enumerate(wanted)}, None
+    failed = {c: None for c in wanted}
+    if isinstance(cell, (set, frozenset)):
+        return failed, (f"TypeError: widen opens a sequence by position, and a set has no "
+                        f"order: sort it into a list first")
+    if isinstance(cell, range) or inspect.isgenerator(cell) or inspect.isgeneratorfunction(cell):
+        return failed, (f"TypeError: widen can't open a {type(cell).__name__} as it is (it is "
+                        f"lazy): make it a list first")
+    return failed, f"TypeError: widen takes a dict, a list or a tuple, got {type(cell).__name__}"
 
 
 def widen_(source: Any, fn: Callable = identity, *, column: str | None = None,
@@ -1159,8 +1156,11 @@ def widen_(source: Any, fn: Callable = identity, *, column: str | None = None,
     # Carried columns first, then the fields — the order `map` uses, and the
     # order a reader sees. With replace=True, a field takes its column's place.
     data = frame.copy()
-    if spread not in wanted:
-        data = data.drop(columns=[spread])   # its fields are the columns now (G10)
+    opened_nothing = not wanted and any(r["status"] != "completed" for r in records)
+    if spread not in wanted and not opened_nothing:
+        # its fields are the columns now (G10); but when nothing opened, it
+        # stays, so its failed cells show (I1: they vanished with it)
+        data = data.drop(columns=[spread])
     absent: dict = {}
     for column in wanted:
         values = [row[column] for row in lifted]
