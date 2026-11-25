@@ -461,7 +461,9 @@ def test_L25_expand_doesnt_normalise_a_bare_string(j):
     j["e2"] = identity[mod.expand()](wf["l"])
     j.run("l")
     j.run("e2")
-    assert data(j, "e2")["e2"].tolist() == ["a", "c"]
+    # I2 (owner, 2026-11-22/25): as_list made [] of the None row; it is kept, absent
+    got = data(j, "e2")["e2"].tolist()
+    assert got[:2] == ["a", "c"] and pd.isna(got[2])
 
 
 def test_L26b_a_mapping_packs_back_with_gather_dict(j):
@@ -479,12 +481,14 @@ def test_L26_expanding_a_mapping_gives_key_value_rows(j):
     assert data(j, "e")[["key", "value"]].values.tolist() == [["2026-01", 3], ["2026-02", 4]]
 
 
-def test_L27_expanding_none_gives_no_rows(j):
+def test_L27_expanding_none_keeps_its_row_absent(j):
+    # I2 (owner, 2026-11-22/25): was "expanding None gives no rows"
     j["m"] = mixed_rc[mod.source()]()
     j["n"] = mod.select(rows=[2])(wf["m"])                         # the None row
     j["e"] = identity[mod.expand()](wf["n"])
     run(j)
-    assert len(data(j, "e")) == 0
+    assert len(data(j, "e")) == 1
+    assert set(j.workflow.steps["e"].output.states["e"]) == {"absent"}
 
 
 # ── # columns and reductions (§5.1, §5.2) ────────────────────────────────────

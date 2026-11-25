@@ -22,11 +22,29 @@ observation holding several becomes several observations (tidy.md T7).
 | **V1** | A **sequence** (`list`, `tuple`): one row per item, in order | ✓ | ✓ | decided |
 | **V2** | A **mapping** (`dict`): one row per key, the key in a `key` column, the value beside it | ✓ | keys only, **values lost** | decided: core's |
 | **V3** | A **record** (`NamedTuple`, `dataclass`): one row per field, like a mapping (`key` = the field's name) | **opened as a plain tuple: rows `1`, `2`, `3`, the field names lost** (run 2026-11-23, **E2**) | — | proposed, as widen opens records by field (widen.md U2) |
-| **V4** | **Empty or missing** (`[]`, `()`, `{}`, `None`, an absent cell): **the row is kept, its item absent**, so a row is never lost by unnesting | **the row is dropped**; only `None` is warned (**E1**) | the row kept, `NaN` | **decided** (owner, I2) |
+| **V4** | **Empty or missing** (`[]`, `()`, `{}`, `None`, an absent cell): **the row is kept, its item absent**, so a row is never lost by unnesting | **the row is dropped**; only `None` is warned (**E1**) | the row kept, `NaN` | **built** 2026-11-25 (owner, I2) |
 | **V5** | **Not openable as it is** (a `set`: no order; `range`, a generator: lazy): its row fails, naming the fix (sort it, or make a list) | the row fails ✓ | opened | decided (blocks.md §5) |
 | **V6** | **A unit** (a string, a number): **passed through as one item**, as pandas does; the column is then **mixed** (lists' items beside the unit), so its type is a union and the mix is said (N1) | the row fails | passed through | **decided** (owner, 2026-11-23: "pass through, but it will be mixed") |
 | **V7** | **A 1-D array: a unit, for now** (blocks.md §5): under V6 it **passes through as one item**, whole; a tool says what its parts are. **Opening it like a list is a later method** (*Later*, below) | the row fails | opened | **decided** (owner, 2026-11-23: "assume unit for now, but methods to open like a list later; make a note") |
 | **V8** | **A failed or blocked input cell**: one blocked row, naming the failure it comes from | ✓ (one placeholder row) | — | decided |
+
+### A.1 A placeholder: no item is never an item (built 2026-11-25)
+
+*Owner, 2026-11-25: "yup, makes sense", to keeping both I2 (a row is never
+lost by unnesting) and NS1 (nest and unnest undo each other exactly).*
+
+- A row kept by V4 is a **placeholder**: its row id is `"<parent>.-"`
+  (`"2.-"`), never shown; its item's place, `#d.idx`, is absent.
+- **No call is made for a placeholder**: a `map` over it gives an absent
+  cell, and the row stays a placeholder.
+- **Nesting gives nothing for it**: its group stays (and its id among the
+  group's rows), but it adds no item, so `[]` expanded and nested back is
+  `[]` again.
+- **An empty list core packed from zero rows** (its packed ids `[]`)
+  unnests to **zero rows**, the exact inverse; one whose packed id is a
+  placeholder gives that placeholder back.
+- A **gap inside a list** (`[1, gap, 3]`) has a place, so it is an item:
+  it nests back as nest.md NS10's marker.
 
 ## B. The rows
 

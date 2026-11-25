@@ -320,8 +320,10 @@ def test_no_value_means_one_thing_in_every_verb():
     k["j"] = join(wf["p"], wf["s"], on="name", how="left")
     k["f"] = op("first_present")[mod.map()](wf["j"], value=wf["j"][cols["score"]], default=0.0)
     k.run_all()
-    assert values(k, "e", "a") == [1, 2]
-    assert [w.message for w in k.step("e").warnings] == ["1 row held no list (None, or no value): it gave no rows"]
+    # I2 (owner, 2026-11-22/25): Ben's None keeps its row, its item absent
+    assert values(k, "e", "a")[:2] == [1, 2] and pd.isna(values(k, "e", "a")[2])
+    assert [w.message for w in k.step("e").warnings] == [
+        "1 row held no list (None, [] or no value): kept, its items absent"]
     assert k.step("w").state == "completed" and (1, "x") in k.step("w").output.absent_cells()
     assert [w.message for w in k.step("w").warnings] == ["1 row held no dict (None, or no value): its fields are absent"]
     got = values(k, "f", "f")

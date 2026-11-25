@@ -2335,7 +2335,10 @@ class Workflow:
             if idx:                                 # an item's place in its parent's cell
                 seen: dict = {}
                 places = []
-                for v in ids:
+                for row_id, v in zip(index, ids):
+                    if is_placeholder_id(row_id):   # no item (I2): no place
+                        places.append(None)
+                        continue
                     places.append(seen.get(str(v), 0))
                     seen[str(v)] = places[-1] + 1
                 add(f"{name}.idx", (parent, "idx", places))
@@ -4046,7 +4049,7 @@ from .values import (  # noqa: E402
     _type_name,
     _value_fits,
 )
-from .verbs import grid, source_  # noqa: E402
+from .verbs import grid, is_placeholder_id, source_  # noqa: E402
 
 
 def _spread_record(operation: Operation, output: Output) -> None:

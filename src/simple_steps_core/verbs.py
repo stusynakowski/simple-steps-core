@@ -71,6 +71,18 @@ def _child_id(parent: Any, k: int) -> str:
     return f"{parent}.{k}"
 
 
+def _placeholder_id(parent: Any) -> str:
+    """Row id of the row kept for *parent* when it had **no item** (I2): ``1``
+    → ``"1.-"``. No item is never an item: its place is absent, and nesting
+    gives nothing for it (owner, 2026-11-25)."""
+    return f"{parent}.-"
+
+
+def is_placeholder_id(row_id: Any) -> bool:
+    """Is *row_id* a row kept for a parent with no item (:func:`_placeholder_id`)?"""
+    return isinstance(row_id, str) and row_id.endswith(".-")
+
+
 def _units(frame: pd.DataFrame, absent: Any = ()):
     """``(index, row dict)`` per row, each value as the tool should get it.
 
@@ -174,10 +186,16 @@ def map_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN) -> Output:
     """
     frame = rows(source)
     blocked = _upstream_failures(source)
-    values, records = [], []
+    values, records, placeholders = [], [], []
     for index, row in _units(frame, _absent_of(source)):
         if index in blocked:
             value, record = None, _blocked(*blocked[index])
+        elif is_placeholder_id(index):
+            # no item (I2) is never an item: no call; its output absent, the
+            # row still a placeholder (owner, 2026-11-25)
+            value, record = None, {"status": "completed", "error": None, "attempts": 0,
+                                   "seconds": 0.0}
+            placeholders.append(index)
         else:
             value, record = _call(fn, row)
         values.append(value)
@@ -188,6 +206,7 @@ def map_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN) -> Output:
     out = Output(data=data, records=records, index=frame.index,
                  meta={"verb": "map", "form": "column", "value_column": name,
                        "n_in": len(frame)})
+    out.mark_absent({name: placeholders} if placeholders else {})
     return out
 
 
@@ -346,7 +365,9 @@ def collapse_(source: Any, fn: Callable, *, by: str | None = None,
             accumulator, error, caught = (
                 initial if initial is not None else empty_value(fn)), None, None
             try:
-                units = list(_units(chunk))
+                # a placeholder row (I2) is no item: it gives nothing, though
+                # its group, and its id among the group's rows, stay
+                units = [(i, r) for i, r in _units(chunk) if not is_placeholder_id(i)]
                 if form == "per_column":
                     # A built-in reducer, once per variable; never the key (R-D1).
                     # A column that won't reduce fails its own cell, not the
@@ -470,6 +491,25 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
     none_rows = 0
     blocked = _upstream_failures(source)
     out_rows, records, ids = [], [], []
+    kept_empty: list = []                 # rows kept with their item absent (I2)
+
+    def keep_empty(index: Any, record: dict, mapping: bool = False) -> None:
+        # I2 (owner): nothing to expand keeps its row, its item absent, so a
+        # row is never lost by unnesting (expand.md V4); the row is a
+        # placeholder: no item, so its place is absent and nesting skips it
+        packed = frame.at[index, restore] if restore in frame.columns else None
+        out_rows.append({"key": None, name: None} if mapping else {name: None})
+        records.append({**record, "status": "completed", "unit": index})
+        ids.append(packed[0] if isinstance(packed, list) and packed and is_placeholder_id(packed[0])
+                   else _placeholder_id(index))
+        kept_empty.append((ids[-1], mapping))
+
+    def packed_from_nothing(index: Any) -> bool:
+        # a list core packed from zero rows: unnesting it is the exact inverse,
+        # zero rows (nest.md NS1)
+        packed = frame.at[index, restore] if restore in frame.columns else None
+        return isinstance(packed, list) and not packed
+
     for index, row in _units(frame, _absent_of(source)):
         arg = row
         # 008 C16: each item's row id is derived from its parent's — `1.0`,
@@ -481,9 +521,11 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
             ids.append(_child_id(index, 0))
             continue
         if arg and all(v is ABSENT for v in arg.values()):
-            # a gap (F1: absent in data given) holds nothing to expand: said as
+            # a gap (F1: absent in data given) holds nothing to expand: kept as
             # None is, never opened as an empty mapping (identity gives {})
             none_rows += 1
+            keep_empty(index, {"status": "completed", "error": None, "attempts": 0,
+                               "seconds": 0.0})
             continue
         produced, record = _call(fn, arg)
         if record["status"] != "completed":
@@ -503,13 +545,14 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
             out_rows.append({name: None})
             ids.append(_child_id(index, 0))
             continue
-        # expand never tidies data for you (reshaping.md §9.2, J-D3): None gives
-        # no rows (counted, and said); a dict is a mapping, one row per key
-        # (J-D4); a single value where a list belongs fails its row.
+        # expand never tidies data for you (reshaping.md §9.2, J-D3): None, [],
+        # {} keep their row, its item absent (I2, counted and said); a dict is
+        # a mapping, one row per key (J-D4); a single value where a list
+        # belongs fails its row.
         mapping = isinstance(produced, Mapping)
         if produced is None or produced is ABSENT:
-            # a gap (F1: absent in data given) is said as None is: no silent loss
             none_rows += 1
+            keep_empty(index, record)
             continue
         if not mapping and (isinstance(produced, (str, bytes, set, frozenset))
                             or not isinstance(produced, Iterable)):
@@ -522,6 +565,12 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
             ids.append(_child_id(index, 0))
             continue
         items = list(produced.items()) if mapping else list(produced)
+        if not items:
+            if packed_from_nothing(index):
+                continue
+            none_rows += 1
+            keep_empty(index, record, mapping)
+            continue
         packed_ids = frame.at[index, restore] if restore in frame.columns else None
         for k, item in enumerate(items):
             # Only the item (owner decision, 2026-10-20), on an id derived from
@@ -554,12 +603,18 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
     # nothing has to read the parent back out of the "i.j" label.
     data.insert(0, _id_column_for(source), pd.Series(
         [r.get("unit") for r in records], index=data.index, dtype=object))
-    warnings_ = ([f"{none_rows} row{'s' if none_rows != 1 else ''} held None (or no value), "
-                  f"not a list: {'they' if none_rows != 1 else 'it'} gave no rows"]
+    warnings_ = ([f"{none_rows} row{'s' if none_rows != 1 else ''} held None, [] or no value: "
+                  f"kept, {'their' if none_rows != 1 else 'its'} item absent"]
                  if none_rows else [])
-    return Output(data=data, records=records, index=data.index,
-                  meta={"verb": "expand", "form": "column", "value_column": name,
-                        "n_in": len(frame), "warnings": warnings_})
+    out = Output(data=data, records=records, index=data.index,
+                 meta={"verb": "expand", "form": "column", "value_column": name,
+                       "n_in": len(frame), "warnings": warnings_})
+    absent: dict = {}
+    for row_id, mapping in kept_empty:
+        for column in ([name, "key"] if mapping else [name]):
+            absent.setdefault(column, []).append(row_id)
+    out.mark_absent(absent)
+    return out
 
 
 def _literals(fn: Callable) -> dict:
@@ -617,6 +672,19 @@ def _unpack(source: Any, columns: list[str], restore: str | None, keep: bool = T
                          f"already has: rename it first")
     out_rows, records, ids = [], [], []
     none_rows = 0
+    kept_empty: list = []                # rows kept with their items absent (I2)
+
+    def keep_empty(index: Any, row: dict) -> None:
+        # I2 (owner): nothing to unpack keeps its row, the unpacked columns
+        # absent, the carried ones as they were (expand.md V4): a placeholder
+        packed = frame.at[index, restore] if restore in frame.columns else None
+        out_rows.append({c: row.get(c) for c in kept})
+        records.append({"status": "completed", "error": None, "attempts": 0,
+                        "seconds": 0.0, "unit": index})
+        ids.append(packed[0] if isinstance(packed, list) and packed and is_placeholder_id(packed[0])
+                   else _placeholder_id(index))
+        kept_empty.append(ids[-1])
+
     for index, row in _units(frame):
         if index in blocked:
             records.append({**_blocked(*blocked[index]), "unit": index})
@@ -625,7 +693,8 @@ def _unpack(source: Any, columns: list[str], restore: str | None, keep: bool = T
             continue
         lists = {c: (frame.at[index, c] if is_id_column(c) else row.get(c)) for c in columns}
         if all(v is None for v in lists.values()):
-            none_rows += 1                   # no list: no rows, said (J-D3, C6)
+            none_rows += 1                   # no list: kept, its items absent (I2)
+            keep_empty(index, row)
             continue
         keys = None
         if dicts:
@@ -657,6 +726,12 @@ def _unpack(source: Any, columns: list[str], restore: str | None, keep: bool = T
             continue
         packed_ids = frame.at[index, restore] if restore in frame.columns else None
         n = next(iter(lengths.values()), 0)
+        if n == 0:
+            if restore in frame.columns and frame.at[index, restore] == []:
+                continue                     # packed from zero rows: the exact inverse
+            none_rows += 1                   # empty lists: kept, not lost silently (I2)
+            keep_empty(index, row)
+            continue
         for k in range(n):
             out_rows.append({**{c: row.get(c) for c in kept}, **{c: lists[c][k] for c in columns},
                              **({KEY_COLUMN: keys[k]} if keys is not None else {})})
@@ -673,11 +748,15 @@ def _unpack(source: Any, columns: list[str], restore: str | None, keep: bool = T
         data[c] = _typed([r.get(c) for r in out_rows], data.index)
     data.insert(0, _id_column_for(source), pd.Series(
         [r.get("unit") for r in records], index=data.index, dtype=object))
-    warnings_ = ([f"{none_rows} row{'s' if none_rows != 1 else ''} held no list (None, or no "
-                  f"value): {'they' if none_rows != 1 else 'it'} gave no rows"] if none_rows else [])
-    return Output(data=data, records=records, index=data.index,
-                  meta={"verb": "expand", "form": "column", "value_column": None,
-                        "n_in": len(frame), "warnings": warnings_})
+    warnings_ = ([f"{none_rows} row{'s' if none_rows != 1 else ''} held no list (None, [] or no "
+                  f"value): kept, {'their' if none_rows != 1 else 'its'} items absent"]
+                 if none_rows else [])
+    out = Output(data=data, records=records, index=data.index,
+                 meta={"verb": "expand", "form": "column", "value_column": None,
+                       "n_in": len(frame), "warnings": warnings_})
+    out.mark_absent({c: list(kept_empty) for c in [*columns, *([KEY_COLUMN] if dicts else [])]
+                     if kept_empty})
+    return out
 
 
 def _id_column_for(source: Any) -> str:

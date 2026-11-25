@@ -1741,7 +1741,10 @@ def test_an_expand_to_nothing_keeps_its_columns_and_their_dtypes():
     wf.run("gone")
 
     out = wf.step("gone").output.data
-    assert len(out) == 0
+    # I2 (owner, 2026-11-22/25): each row expanded to nothing keeps a
+    # placeholder row, its item absent; the columns are kept as before
+    assert list(out.index) == ["0.-", "1.-"]
+    assert set(wf.step("gone").output.states["gone"]) == {"absent"}
     # an expand step is its parents and its items, even when there are none
     assert list(out.columns) == ["#raw", "gone"]
 

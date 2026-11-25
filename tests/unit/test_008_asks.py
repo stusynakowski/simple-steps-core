@@ -1002,9 +1002,10 @@ def test_009_expand_ids_derive_from_the_parent(r3):
     r3["as_n"] = mod.rename(columns={"items": "n"})(r3["items"])
     r3["again"] = fan_ids_009[mod.expand()](r3["as_n"])     # nested: 0.0 → 0.0.k
     r3.run_all()
-    assert list(r3.step("items").output.data.index) == ["0.0", "1.0", "1.1"]
+    # I2 (owner, 2026-11-22/25): LA expands to nothing, so it keeps a placeholder row, 2.-
+    assert list(r3.step("items").output.data.index) == ["0.0", "1.0", "1.1", "2.-"]
     assert list(r3.step("items").output.data.columns) == ["#r", "items"]   # its parent, its results
-    assert list(r3.step("items").output.data["#r"]) == [0, 1, 1]
+    assert list(r3.step("items").output.data["#r"]) == [0, 1, 1, 2]
     assert list(r3.step("again").output.data.index)[:2] == ["0.0.0", "0.0.1"]
 
 
@@ -1019,8 +1020,10 @@ def test_009_each_item_meets_its_parent_row_in_a_join_on_lineage(r3):
     r3["with_parent"] = join(r3["items"], r3["r"], on="#r")    # row 2 expanded to nothing
     r3.run_all()
     out = r3.step("with_parent").output.data
-    assert {c: list(out[c]) for c in ("items", "city", "n")} == {
-        "items": [10, 20, 21], "city": ["SF", "NYC", "NYC"], "n": [1, 2, 2]}
+    # I2 (owner, 2026-11-22/25): LA expands to nothing, so it keeps a placeholder row, 2.-, so it meets LA, its item absent
+    assert {c: list(out[c]) for c in ("city", "n")} == {
+        "city": ["SF", "NYC", "NYC", "LA"], "n": [1, 2, 2, 0]}
+    assert list(out["items"])[:3] == [10, 20, 21] and pd.isna(list(out["items"])[3])
 
 
 def test_009_after_a_sort_rows_pair_by_id_not_position(r3):
@@ -1073,7 +1076,8 @@ def test_009_string_row_ids_survive_a_saved_session(r3):
     r3["items"] = fan_ids_009[mod.expand()](r3["r"])
     r3.run_all()
     back = Workflow.from_json(r3.to_session_json(), TOOLS_008)
-    assert list(back.step("items").output.data.index) == ["0.0", "1.0", "1.1"]
+    # I2 (owner, 2026-11-22/25): LA expands to nothing, so it keeps a placeholder row, 2.-
+    assert list(back.step("items").output.data.index) == ["0.0", "1.0", "1.1", "2.-"]
     assert list(back.step("r").output.data.index) == [0, 1, 2]
 
 
