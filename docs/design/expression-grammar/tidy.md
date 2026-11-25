@@ -22,7 +22,7 @@ The point is to work really hard to enforce the tidy tables principle."*
 | **T6** | **One variable per column**: one type per column; a mixed column is said when declared (grammar.md N1) | `object` columns of anything |
 | **T7** | **One observation per row.** A move that changes what a row is (nest, unnest, pivot, melt) is written, and lineage (`#<step>`) records it | reshaping leaves no trace |
 | **T8** | **One value per cell**, any Python object counting as one; nested and unnested only by written moves (primitives.md) | — |
-| **T9** | **A missing value is absent**, apart from `None`; no upcasting (an integer column with a gap stays integers) | `NaN` everywhere, integers upcast to floats |
+| **T9** | **A missing value is absent**, apart from `None`; no upcasting (an integer column with a gap stays integers). **In data given, every gap is absent** (F1), and **a column keeps its dtype** (F2): integers with a gap are given as `Int64`; a float column of whole numbers and gaps is warned, not converted (built 2026-11-25) | `NaN` everywhere, integers upcast to floats |
 
 ## Run 2026-11-23: today against the rules
 

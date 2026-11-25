@@ -381,8 +381,9 @@ def test_C14_missing_is_none_and_nullability_is_checked():
     def inc_008(n: int) -> int:
         return n + 1
 
+    # Integers with a gap, given as Int64: missing is None, nullability checked.
     w = Workflow()
-    w["r"] = pd.DataFrame({"n": [1, None, 3]})
+    w["r"] = pd.DataFrame({"n": pd.array([1, None, 3], dtype="Int64")})
     w["o"] = inc_opt_008[mod.map()](w["r"])
     w["i"] = inc_008[mod.map()](w["r"])
     w.run_all()
@@ -392,6 +393,17 @@ def test_C14_missing_is_none_and_nullability_is_checked():
     assert w.step("i").problems == (
         "r.n can be None, but inc_008() takes n: int; accept int | None, or "
         "filter the Nones first",)
+
+    # Changed 2026-11-24 (owner, phase 2 F2): a column keeps its dtype. pandas'
+    # float64 for [1, None, 3] stays float, so an int parameter is refused,
+    # and the data step says how to make it integers (it used to become Int64).
+    w = Workflow()
+    w["r"] = pd.DataFrame({"n": [1, None, 3]})
+    w["o"] = inc_opt_008[mod.map()](w["r"])
+    assert str(w.step("r").output.data["n"].dtype) == "float64"
+    assert any("Int64" in str(x) for x in w.step("r").warnings)
+    assert w.step("o").problems == (
+        "inc_opt_008() declares n: int | None, but 'r' has n as float64",)
 
 
 # ── Phase 3: saved format v2 — C11, C1, C2, C7 (K9), K17 ────────────────

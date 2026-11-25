@@ -197,6 +197,9 @@ class Workflow:
         step.output.meta["version"] = _data_version(step.output.data)
         step.output.meta["read"] = {}
         step.output.meta["inverse"] = {"kind": "generated"}
+        # a data step never runs, so what its data says is said now (F2)
+        step.warnings = tuple(Problem(w, "data_type", step=step_id, severity="warning")
+                              for w in step.output.meta.pop("warnings", None) or [])
         return step
 
     def _keep_row_ids(self, step_id: str, before: Output) -> None:

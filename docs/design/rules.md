@@ -68,8 +68,12 @@ result that breaks the plan fails.
 **9. Nothing is lost silently, and core never guesses.** Filters and
 statistics drop values on purpose, but every row still traces back. A `null`
 (a value: nothing), `absent` (no value here at all: a key a record lacks, a
-`stack` or `join` gap) and `[]` are three different things. Core never tidies
-your data and never matches rows by position.
+`stack` or `join` gap) and `[]` are three different things. **A gap in data
+you give** (`NaN`, `pd.NA`, `None`) **is absent**: a blank you write is "no
+value". **A column keeps its type as you gave it**: a float column holding
+whole numbers and gaps stays float, and you're told to give it as `Int64`
+(or convert it) if it's integers. Core never tidies your data and never
+matches rows by position.
 
 **10. A pick keeps its row.** `wf["p"][1]` picks Ben; insert a row above
 him and the pick is rewritten to `wf["p"][2]`. Delete him and the step is

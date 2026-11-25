@@ -57,6 +57,7 @@ CODES: dict[str, str] = {
     "modifier_order": "an execution modifier written before the verb covers the whole step, not each row",
     "default_type": "a try_except default doesn't fit the tool's return type",
     "run_warning": "something a step met while it ran: rows that held no list, fields a record didn't declare",
+    "data_type": "data given whose type may not be what was meant: a float column holding only whole numbers and gaps",
     "not_a_list": "expand was given rows holding no list (None): they gave no rows",
     "unmatched_rows": "rows of two grids would meet with no match core recorded: join, or zip_(…, match_ids=True)",
     "wrong_shape": "a referenced argument's shape (cell, row, column, table) doesn't fit the parameter's type",

@@ -197,8 +197,8 @@ any data the user pastes in:
 
 | # | Found | Should be |
 |---|---|---|
-| **F1** | Written into a data step, an **absent** cell becomes a **known `None`**: the gap is lost silently | absent stays absent |
-| **F2** | A nullable float column whose values are whole numbers, `Float64 [1.0, <NA>]`, is stored as **`Int64`**: `1.0` comes back as `1`. `[1.5, <NA>]` stays float | a column keeps its type |
+| **F1** | Written into a data step, an **absent** cell becomes a **known `None`**: the gap is lost silently | absent stays absent. **Done 2026-11-25**: every gap in data given is absent (owner: "B") |
+| **F2** | A nullable float column whose values are whole numbers, `Float64 [1.0, <NA>]`, is stored as **`Int64`**: `1.0` comes back as `1`. `[1.5, <NA>]` stays float | a column keeps its type. **Done 2026-11-25**: the dtype decides, for plain floats too; a warning, never a conversion (owner) |
 
 ## 3. What a parameter accepts
 

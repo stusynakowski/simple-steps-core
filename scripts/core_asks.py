@@ -430,7 +430,10 @@ def c14_missing_is_none():
         return n + 1
 
     wf = Workflow()
-    wf["r"] = pd.DataFrame({"n": [1, None, 3]})
+    # Integers with a gap given as Int64: since 2026-11-24 (owner, phase 2 F2)
+    # a column keeps its dtype, so pandas' float64 for [1, None, 3] stays float
+    # and is warned, no longer turned into Int64.
+    wf["r"] = pd.DataFrame({"n": pd.array([1, None, 3], dtype="Int64")})
     wf["o"] = inc_opt[mod.map()](wf["r"])
     wf["i"] = inc[mod.map()](wf["r"])
     wf.run_all()

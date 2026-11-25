@@ -59,6 +59,10 @@ def identity(**row: Any) -> Any:
         return row[VALUE_COLUMN]
     if len(row) == 1:
         return next(iter(row.values()))
+    if not row:
+        # every cell of the row absent (F1: a gap in data given): no value,
+        # said as None is, never a made-up empty row ({})
+        return None
     return row
 
 

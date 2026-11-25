@@ -480,6 +480,11 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
             out_rows.append({name: None})
             ids.append(_child_id(index, 0))
             continue
+        if arg and all(v is ABSENT for v in arg.values()):
+            # a gap (F1: absent in data given) holds nothing to expand: said as
+            # None is, never opened as an empty mapping (identity gives {})
+            none_rows += 1
+            continue
         produced, record = _call(fn, arg)
         if record["status"] != "completed":
             records.append({**record, "unit": index})
@@ -502,7 +507,8 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
         # no rows (counted, and said); a dict is a mapping, one row per key
         # (J-D4); a single value where a list belongs fails its row.
         mapping = isinstance(produced, Mapping)
-        if produced is None:
+        if produced is None or produced is ABSENT:
+            # a gap (F1: absent in data given) is said as None is: no silent loss
             none_rows += 1
             continue
         if not mapping and (isinstance(produced, (str, bytes, set, frozenset))
@@ -548,8 +554,9 @@ def expand_(source: Any, fn: Callable, *, name: str = VALUE_COLUMN,
     # nothing has to read the parent back out of the "i.j" label.
     data.insert(0, _id_column_for(source), pd.Series(
         [r.get("unit") for r in records], index=data.index, dtype=object))
-    warnings_ = ([f"{none_rows} row{'s' if none_rows != 1 else ''} held None, not a list: "
-                  f"{'they' if none_rows != 1 else 'it'} gave no rows"] if none_rows else [])
+    warnings_ = ([f"{none_rows} row{'s' if none_rows != 1 else ''} held None (or no value), "
+                  f"not a list: {'they' if none_rows != 1 else 'it'} gave no rows"]
+                 if none_rows else [])
     return Output(data=data, records=records, index=data.index,
                   meta={"verb": "expand", "form": "column", "value_column": name,
                         "n_in": len(frame), "warnings": warnings_})
@@ -818,15 +825,26 @@ def grid(value: Any) -> Output:
     ``score[mod.map()](grid(df))`` — how a chain begins. A table's own index
     becomes a column; its rows get ids 0…n-1 (see :func:`_own_index`).
     """
-    frame = _normalize_missing(_own_index(_str_columns(rows(value), "the source"),
-                                          "the source"))
-    return Output(
+    given = _own_index(_str_columns(rows(value), "the source"), "the source")
+    frame = _normalize_missing(given)
+    out = Output(
         data=frame,
         records=[{"status": "completed", "error": None, "attempts": 1,
                          "seconds": 0.0} for _ in range(len(frame))], index=frame.index,
         meta={"verb": "source", "form": "column", "value_column": None,
               "n_in": len(frame)},
     )
+    # F1 (owner, 2026-11-24): a gap in data you give is absent, "no value".
+    out.mark_absent(gap_cells(frame))
+    # F2: a column keeps its dtype; one that may be integers written as
+    # floats is said, never changed.
+    floats = whole_float_gaps(frame)
+    if floats:
+        out.meta["warnings"] = [
+            f"{', '.join(floats)} {'is' if len(floats) == 1 else 'are'} float, holding only "
+            f"whole numbers and gaps: if {'these are' if len(floats) == 1 else 'they are'} "
+            f"integers, give the column as Int64, or convert it (to=int)"]
+    return out
 
 
 def _no_tool(verb: str, fn: Callable) -> None:
@@ -1385,6 +1403,8 @@ from .output import (  # noqa: E402
     _is_missing,
     _normalize_missing,
     _str_columns,
+    gap_cells,
+    whole_float_gaps,
     _typed,
     _upstream_failures,
     ABSENT,

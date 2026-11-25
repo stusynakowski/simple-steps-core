@@ -15,6 +15,7 @@ import math
 import pickle
 import secrets
 import numbers
+import numpy as np
 import pandas as pd
 
 
@@ -413,17 +414,18 @@ def _typed(values: list, index: Any) -> Any:
 
 
 def _normalize_missing(frame: pd.DataFrame) -> pd.DataFrame:
-    """Give a source's columns with missing values a type that can hold None.
-
-    ``pd.DataFrame({"n": [1, None, 3]})`` is ``float64`` with ``NaN`` — pandas'
-    spelling of "ints with a gap". It becomes nullable ``Int64`` (the rule
-    pandas' own ``convert_dtypes`` uses: every present value is whole), so a
-    tool reading it gets ``None`` and ints (008 C14). Columns with no missing
-    value are untouched.
+    """Spell a source's gaps one way: an ``object`` column's gaps become
+    ``None``. **A column keeps its dtype, as given** (phase 2, F2; owner,
+    2026-11-24): its type is never worked out from its values. A ``float64``
+    column holding only whole numbers and gaps stays float; it used to become
+    ``Int64`` (008 C14), so adding one ``37.5`` flipped the column's type.
+    :func:`whole_float_gaps` names such columns, for a warning.
     """
     out = None
     for column in frame.columns:
         series = frame[column]
+        if series.dtype != object:
+            continue
         try:
             missing = series.isna()
         except (TypeError, ValueError):
@@ -431,12 +433,39 @@ def _normalize_missing(frame: pd.DataFrame) -> pd.DataFrame:
         if not missing.any():
             continue
         out = frame.copy() if out is None else out
-        present = series[~missing]
-        if series.dtype.kind == "f" and len(present) and (present % 1 == 0).all():
-            out[column] = series.astype("Int64")
-        elif series.dtype == object:
-            out[column] = series.where(~missing, None)
+        out[column] = series.where(~missing, None)
     return frame if out is None else out
+
+
+def whole_float_gaps(frame: pd.DataFrame) -> list[str]:
+    """The ``float64`` columns that hold only whole numbers and at least one
+    gap: perhaps integers that pandas wrote as floats, to be said, never
+    changed (F2)."""
+    found = []
+    for column in frame.columns:
+        series = frame[column]
+        if series.dtype != np.float64:
+            continue
+        missing = series.isna()
+        present = series[~missing]
+        if missing.any() and len(present) and bool((present % 1 == 0).all()):
+            found.append(str(column))
+    return found
+
+
+def gap_cells(frame: pd.DataFrame) -> dict:
+    """``{column: [row ids]}``: every gap in data that was given (``NaN``,
+    ``pd.NA``, ``None``), to be marked absent (F1; owner, 2026-11-24: a blank
+    you write is "no value")."""
+    gaps = {}
+    for column in frame.columns:
+        try:
+            missing = frame[column].isna()
+        except (TypeError, ValueError):
+            continue
+        if missing.any():
+            gaps[column] = list(frame.index[missing.to_numpy(dtype=bool)])
+    return gaps
 
 
 def _column_name(name: Any, position: int) -> str:

@@ -1639,6 +1639,11 @@ def _type_mismatches(operation: Operation, fn: Callable,
             has_none = bool(series.loc[series.index.intersection(completed)].isna().any())
         except (TypeError, ValueError):
             has_none = False
+        # An absent cell is a missing value too, not a failure (F1: a gap in
+        # data you give is absent); its row isn't "known", so look at it here.
+        states = getattr(upstream, "states", None)
+        if not has_none and states is not None and parameter.name in states.columns:
+            has_none = bool((states[parameter.name].astype(str) == "absent").any())
         if has_none and not admits_none:
             # 008 C14: said in terms of None, not of the float64 that NaN
             # used to force.
