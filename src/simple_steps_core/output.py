@@ -480,6 +480,34 @@ def _column_name(name: Any, position: int) -> str:
     return str(name)
 
 
+def widen_field_names(keys: Sequence[Any], kept: Sequence[Any] = (),
+                      replace: bool = False) -> tuple[dict, list[str]]:
+    """``({key: name}, [what is said])``: the name each of widen's fields
+    gets (expression-grammar/widen.md U17–U20), the same at the plan and at
+    the run. A string (an integer key is ``var1``, tidy.md T1); a ``#`` key
+    loses it; a name taken by another field, or by a column *kept* beside
+    the fields, is suffixed ``_1`` (the next free number), unless *replace*
+    lets a field take its column's place."""
+    said: list[str] = []
+    kept_names = set() if replace else {str(c) for c in kept}
+    named: dict = {}
+    used: set = set()
+    for position, key in enumerate(keys):
+        base = _column_name(key, position)
+        if base.startswith("#"):
+            base = base.lstrip("#") or _column_name(None, position)
+            said.append(f"field {key!r} named {base!r}: names starting with # are core's")
+        name, n = base, 1
+        while name in used or name in kept_names:
+            name, n = f"{base}_{n}", n + 1
+        if name != base:
+            taken_by = "a column kept beside it" if base in kept_names else "another field"
+            said.append(f"field {key!r} named {name!r}: {base!r} is taken by {taken_by}")
+        used.add(name)
+        named[key] = name
+    return named, said
+
+
 def _str_columns(frame: pd.DataFrame, step_id: str = "the step") -> pd.DataFrame:
     """Every column name text (008 C7: names are text, rows are int).
 

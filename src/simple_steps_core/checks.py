@@ -680,15 +680,10 @@ def check(operation: Operation, workflow: "Workflow | None" = None,
                 column = holding[0] if len(holding) == 1 else None
             elif column is None:
                 column = available[0]
-            # C4: a field never replaces a column the input carries, unless said
-            fields = list(verb.settings.get("columns") or workflow._declared_fields(operation) or [])
-            clash = [f for f in fields if f in available and f != column]
-            if column is not None and clash and not verb.settings.get("replace"):
-                problems.append(Problem(
-                    f"widen's field{'s' if len(clash) > 1 else ''} {', '.join(map(repr, clash))} "
-                    f"would replace the column{'s' if len(clash) > 1 else ''} of that name in {sid!r}: "
-                    f"rename {'them' if len(clash) > 1 else 'it'} first, or say replace=True",
-                    "column_clash"))
+            # C4: a field never replaces a column the input carries, unless
+            # replace=True says so; since 2026-11-23 (owner, widen.md U20) it is
+            # suffixed, name_1, and said, the plan naming it as the run will
+            # (output.widen_field_names), not refused
         named_ = list(verb.settings.get("columns") or [])
         if verb.kind == "expand" and not named_ and is_identity(fn) \
                 and "column" not in (operation.arguments or {}) \
@@ -2109,9 +2104,13 @@ def stage(operation: Operation, workflow: "Workflow | None" = None,
         spread = verb.settings.get("column") or (names_[0] if len(names_) == 1 else None)
         fields = list(verb.settings.get("columns") or
                       (workflow._declared_fields(operation) if workflow is not None else None) or [])
-        # the column it spreads goes: its fields are the columns now (G10)
-        ordered = [c for c in upstream_columns if c != spread or c in fields]
-        ordered += [c for c in fields if c not in ordered]
+        # the column it spreads goes: its fields are the columns now (G10);
+        # each field named as the run will name it (widen.md U17–U20)
+        kept = [c for c in upstream_columns if c != spread]
+        named, _said = widen_field_names(fields, kept, bool(verb.settings.get("replace")))
+        # replace=True: a field takes its column's place, where the run writes it
+        ordered = list(kept)
+        ordered += [named[f] for f in fields if named[f] not in ordered]
     elif kind in CARRIES_COLUMNS:
         ordered = list(upstream_columns)
     elif kind == "sweep":
@@ -2294,7 +2293,7 @@ from .modifiers import (  # noqa: E402
     _required_settings,
 )
 from .operation import _src, Operation  # noqa: E402
-from .output import Output, ROW_ID, STATES, is_id_column, variables  # noqa: E402
+from .output import Output, ROW_ID, STATES, is_id_column, variables, widen_field_names  # noqa: E402
 from .references import (  # noqa: E402
     ResRef,
     StepRef,

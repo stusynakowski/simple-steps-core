@@ -34,7 +34,7 @@ structure becomes several variables.
 | **U9** | **Discovered fields are not written into the expression** (owner, 2026-11-23: "I would not do that; I would have hardcoded methods and conditions, conventions, to handle any possible issues"). They are discovered on every run, by the fixed conventions of this page (U10–U24), so every shape the data can take is handled the same way. A step reading a discovered field is checked when it runs: a field it needs that is absent fails that reader's rows, naming the field | not written | **decided** |
 | **U10** | Discovered from **mappings**: the **union of the keys, first seen first** | ✓ | decided (pandas) |
 | **U11** | Discovered from **sequences**: **positions 0 to the longest − 1**, named `var0`, `var1`, … | tuples ✓ | **built** 2026-11-25 |
-| **U12** | **Nothing to discover from** (zero rows, every row empty): no fields, **said**; nothing is written until a row has a field | every row `None`: no columns, a warning that the rows held no dict ✓; **zero rows: no columns, nothing said** | proposed |
+| **U12** | **Nothing to discover from** (zero rows, every row empty): no fields, **said**; nothing is written until a row has a field | every row `None`: no columns, a warning that the rows held no dict ✓; **zero rows: no columns, nothing said** | **built** 2026-11-25 |
 
 ## C. Uneven rows
 
@@ -42,17 +42,17 @@ structure becomes several variables.
 |---|---|---|---|
 | **U13** | A row **missing** a field: that cell is **absent** | ✓ mappings; **sequences fail (W3)** | **built** 2026-11-25 |
 | **U14** | A field **present with the value `None`**: that cell is `None`, known, apart from absent (tidy T9) | ✓ | decided |
-| **U15** | A row with a field **not among the declared fields**: **a warning naming the field and the rows**, and the convention applied: the declared fields are kept, the extra one is not added. Where a case can't be handled by a convention, it is **refused, or an error saying what happened** (owner, 2026-11-23: "warn, but have a good convention for what we have currently; do what you can, but refuse or put an error with w…", *the end of the sentence cut off: read as "with what happened"*) | — (pandas drops it silently) | **decided** |
-| **U16** | A declared field **missing from every row**: its column is all absent, with a warning | ✓ absent | proposed: the warning |
+| **U15** | A row with a field **not among the declared fields**: **a warning naming the field and the rows**, and the convention applied: the declared fields are kept, the extra one is not added. Where a case can't be handled by a convention, it is **refused, or an error saying what happened** (owner, 2026-11-23: "warn, but have a good convention for what we have currently; do what you can, but refuse or put an error with w…", *the end of the sentence cut off: read as "with what happened"*) | — (pandas drops it silently) | **built** 2026-11-25 |
+| **U16** | A declared field **missing from every row**: its column is all absent, with a warning | ✓ absent | **built** 2026-11-25 |
 
 ## D. Names
 
 | # | Condition | Today | |
 |---|---|---|---|
-| **U17** | A field's name is a **string** (tidy T1). An integer key `1` is named `var1`, as a numeric column name is | **integer keys crash the view (W2)** | decided (T1) |
-| **U18** | A key starting with `#` is renamed without it (`#a` → `a`), and said | **the field vanishes silently (W5)** | proposed |
-| **U19** | Two fields with **one name** after naming (`1` and `"1"`; `#a` and `a`): **suffixed**, `a`, `a_1`, and said | **the step fails (W6)** | decided (tidy C2) |
-| **U20** | A field named like **a column kept beside it**: suffixed the same way, `a_1`, and said; `replace=True` written: the field replaces the column | **the whole step fails**; `replace=True` ✓ | **decided**: suffixed (owner, 2026-11-23) |
+| **U17** | A field's name is a **string** (tidy T1). An integer key `1` is named `var1`, as a numeric column name is | **integer keys crash the view (W2)** | **built** 2026-11-25 |
+| **U18** | A key starting with `#` is renamed without it (`#a` → `a`), and said | **the field vanishes silently (W5)** | **built** 2026-11-25 |
+| **U19** | Two fields with **one name** after naming (`1` and `"1"`; `#a` and `a`): **suffixed**, `a`, `a_1`, and said | **the step fails (W6)** | **built** 2026-11-25 |
+| **U20** | A field named like **a column kept beside it**: suffixed the same way, `a_1`, and said; `replace=True` written: the field replaces the column | **the whole step fails**; `replace=True` ✓ | **built** 2026-11-25 |
 | **U21** | Each field keeps **its name and its position** together (tidy T3) | — | decided |
 
 ## E. Depth
@@ -81,7 +81,7 @@ structure becomes several variables.
 
 | # | Condition | Today | |
 |---|---|---|---|
-| **U29** | **More than 50 distinct fields**, or fields that look like data (dates, ids): **a warning that the keys are probably values**, suggesting **unnest into rows** (`key`, value) instead: the tidy shape | — | **decided**: 50 (owner, 2026-11-23) |
+| **U29** | **More than 50 distinct fields**, or fields that look like data (dates, ids): **a warning that the keys are probably values**, suggesting **unnest into rows** (`key`, value) instead: the tidy shape | — | **built** 2026-11-25 |
 
 ## I. The three places
 

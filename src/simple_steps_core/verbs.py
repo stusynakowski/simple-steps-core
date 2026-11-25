@@ -1145,13 +1145,32 @@ def widen_(source: Any, fn: Callable = identity, *, column: str | None = None,
             record["status"] = "failed"
             record["error"] = error
 
-    # C4: a field never replaces a carried column, unless replace=True says so.
-    clash = [c for c in wanted if c != spread and c in frame.columns]
-    if clash and not replace:
-        raise ValueError(
-            f"widen's field{'s' if len(clash) > 1 else ''} {', '.join(map(repr, clash))} "
-            f"would replace the input's column{'s' if len(clash) > 1 else ''} of that "
-            f"name: rename {'them' if len(clash) > 1 else 'it'} first, or say replace=True")
+    # Each field's name (widen.md U17–U20): a string (an integer key is var1,
+    # tidy.md T1); a "#" key loses it; two fields with one name, or a field
+    # named like a column kept beside it (C4), are suffixed _1, and it is
+    # said; replace=True lets a field take its column's place.
+    named, said = widen_field_names(wanted, [c for c in frame.columns if c != spread], replace)
+
+    # What the rows hold that the declared fields don't, and declared fields
+    # that no row has (U15, U16), and fields that are probably values (U29).
+    if columns:
+        declared = set(columns)
+        extra = list(dict.fromkeys(
+            k for c, r in zip(cells, records) if r["status"] == "completed"
+            and isinstance(c, Mapping) for k in c if k not in declared))
+        longest = max((len(c) for c, r in zip(cells, records) if r["status"] == "completed"
+                       and isinstance(c, (tuple, list))), default=0)
+        if extra:
+            said.append(f"field{'s' if len(extra) > 1 else ''} not among the declared columns, "
+                        f"not added: {', '.join(map(str, extra))}")
+        if longest > len(columns):
+            said.append(f"positions past the {len(columns)} declared columns, not added: "
+                        f"{len(columns)}–{longest - 1}")
+    elif len(wanted) > 50:
+        said.append(f"{len(wanted)} fields: the keys are probably values; to make them rows, "
+                    f"unnest into rows instead (expand)")
+    if not len(frame) and not columns:
+        said.append("no rows: no fields to discover; declare them with columns=[…]")
 
     # Carried columns first, then the fields — the order `map` uses, and the
     # order a reader sees. With replace=True, a field takes its column's place.
@@ -1164,16 +1183,19 @@ def widen_(source: Any, fn: Callable = identity, *, column: str | None = None,
     absent: dict = {}
     for column in wanted:
         values = [row[column] for row in lifted]
-        absent[column] = [i for i, v in zip(frame.index, values) if v is ABSENT]
-        data[column] = _typed([None if v is ABSENT else v for v in values], frame.index)
+        name = named[column]
+        absent[name] = [i for i, v in zip(frame.index, values) if v is ABSENT]
+        data[name] = _typed([None if v is ABSENT else v for v in values], frame.index)
+        if columns and len(frame) and len(absent[name]) == len(frame):
+            said.append(f"declared field {name!r} is missing from every row: its cells are absent")
     empty = sum(1 for cell, record in zip(cells, records)
                 if record["status"] == "completed" and (_is_missing(cell) or cell is ABSENT))
     out = Output(data=data, records=records, index=frame.index,
                  meta={"verb": "widen", "form": "column", "value_column": None,
                        "n_in": len(frame), "columns": list(data.columns),
-                       "warnings": [f"{empty} row{'s' if empty != 1 else ''} held no dict (None, "
-                                    f"or no value): {'their' if empty != 1 else 'its'} fields are "
-                                    f"absent"] if empty else []})
+                       "warnings": ([f"{empty} row{'s' if empty != 1 else ''} held no dict (None, "
+                                     f"or no value): {'their' if empty != 1 else 'its'} fields are "
+                                     f"absent"] if empty else []) + said})
     out.mark_absent(absent)
     return out
 
@@ -1484,6 +1506,7 @@ from .output import (  # noqa: E402
     _str_columns,
     gap_cells,
     whole_float_gaps,
+    widen_field_names,
     _typed,
     _upstream_failures,
     ABSENT,

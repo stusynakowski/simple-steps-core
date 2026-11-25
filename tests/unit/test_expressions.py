@@ -271,12 +271,19 @@ def test_a_column_argument_never_becomes_or_replaces_an_output_column():
 
 def test_a_widen_field_never_replaces_a_column_unless_told():
     # C4: a field named like a column the input carries used to win, silently.
+    # Changed 2026-11-23 (owner, widen.md U20): it is suffixed, name_1, and
+    # said (it was refused); the plan names it as the run does.
     k = Kernel(Catalog([]))
     k["s"] = pd.DataFrame({"name": ["Ada", "Ben"],
                            "c": [{"name": "X", "a": 1}, {"name": "Y", "a": 2}]})
     k["declared"] = mod.widen(column="c", columns=["name", "a"])(wf["s"])
-    assert [p.code for p in k.step("declared").problems] == ["column_clash"]
-    assert refused(k, "found", lambda: mod.widen(column="c")(wf["s"]), "would replace")
+    assert k.step("declared").problems == ()
+    assert k.step("declared").plan["columns"]["names"] == ["name", "name_1", "a"]
+    k["found"] = mod.widen(column="c")(wf["s"])
+    k.run_all()
+    for step in ("declared", "found"):
+        assert values(k, step, "name") == ["Ada", "Ben"] and values(k, step, "name_1") == ["X", "Y"]
+        assert any("name_1" in str(w) for w in k.step(step).warnings)
     del k["declared"], k["found"]
     k["told"] = mod.widen(column="c", replace=True)(wf["s"])
     k["apart"] = mod.widen(column="c", columns=["a"])(wf["s"])

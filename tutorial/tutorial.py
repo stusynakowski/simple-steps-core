@@ -360,9 +360,12 @@ def ch5():
     k["nd"] = pd.DataFrame({"name": ["Ada"], "c": [{"name": "X", "a": 1}]})
     k.run("nd")
     s = put(k, "w3", mod.widen(column="c")(wf["nd"]))
-    lesson("R15", "a widen field never replaces a column the input has, unless replace=True",
-           (s.state, data(put(k, "w4", mod.widen(column="c", replace=True)(wf["nd"])), "name")),
-           ("failed", ["X"]), "the field won silently: name Ada became X (C4)")
+    # since 2026-11-23 (owner, widen.md U20): suffixed name_1 and said, not refused
+    lesson("R15", "a widen field never replaces a column the input has: it is named name_1, "
+           "and said, unless replace=True",
+           (s.state, data(s, "name"), data(s, "name_1"),
+            data(put(k, "w4", mod.widen(column="c", replace=True)(wf["nd"])), "name")),
+           ("completed", ["Ada"], ["X"], ["X"]), "the field won silently: name Ada became X (C4)")
     k["nn"] = pd.DataFrame({"name": ["Ada", "Ben"], "c": [{"x": 1}, None]})
     k.run("nn")
     s = put(k, "w5", mod.widen(column="c")(wf["nn"]))
