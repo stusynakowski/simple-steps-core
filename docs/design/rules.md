@@ -78,6 +78,9 @@ statistics drop values on purpose, but every row still traces back. A `null`
 you give** (`NaN`, `pd.NA`, `None`) **is absent**: a blank you write is "no
 value". Column names are text: two columns with one name are named `a`,
 `a_1` (you're told), and hierarchical columns are joined by `_` (`t_am`).
+**A conversion keeps the value's meaning, or that cell fails**: `1.7` isn't
+an integer, `2` isn't `True`, a huge integer isn't a float; `"2.0"` is 2,
+`"yes"` is `True`, and a list becomes text as JSON.
 **A column keeps its type as you gave it**: a float column holding
 whole numbers and gaps stays float, and you're told to give it as `Int64`
 (or convert it) if it's integers. Core never tidies your data and never

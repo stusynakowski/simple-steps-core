@@ -55,6 +55,17 @@ later** (closure.md §1).
 | **a step** | a column of a table converted, as a step of its own: *missing* (primitives.md §7); in scope |
 | **on a tool's output** | the outputs converted: *missing*; in scope |
 
+### Built in today's `cast`, 2026-11-25
+
+CV5 (whole numbers only), CV6 (`"2.0"` → 2), CV7 (an integer a float can't
+hold exactly fails: CF2), CV9 (true/false, yes/no, 1/0), CV10 (only 0 and 1
+to a bool: CF1), CV12 (a list or dict to text as JSON; a set, an array, a
+table fail, naming a tool; a unit such as a date keeps its own text),
+CV13. **The arguments for the other way** (§E: `round=`, `strict=`,
+`lossy=`, `nonzero=`, `format=`) **come with the canonical `convert`**
+(roadmap phase 3): today's `cast` takes column names as its keywords, so
+`round=` would read as a column named "round".
+
 ## E. A reasonable default, and an argument for the other way
 
 *Owner, 2026-11-23: "use a reasonable option, but ensure we have extensions

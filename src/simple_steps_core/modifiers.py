@@ -117,16 +117,61 @@ def _d_try_except(fn: Callable, *, default: Any = _NO_DEFAULT,
 CASTS: dict[str, Callable] = {"str": str, "int": int, "float": float, "bool": bool}
 
 
+#: The words text converts to a bool from (expression-grammar/convert.md CV9).
+_BOOL_WORDS = {"true": True, "false": False, "yes": True, "no": False, "1": True, "0": False}
+
+
 def _cast_cell(value: Any, to: str) -> Any:
-    """*value* as type *to*; an absent or missing cell stays as it is."""
+    """*value* as type *to*, **keeping its meaning exactly, or failing**
+    (convert.md CV1: no truncation, no rounding, no "anything non-empty is
+    true"); an absent or missing cell stays as it is (CV13)."""
+    import json
+    import numbers
+
     if value is None or value is ABSENT or (isinstance(value, float) and value != value):
         return value
-    if to == "int" and isinstance(value, float) and not value.is_integer():
-        raise ValueError(f"{value!r} isn't a whole number")
-    if to == "bool" and isinstance(value, str):
-        if value.lower() not in ("true", "false"):
-            raise ValueError(f"{value!r} isn't true or false")
-        return value.lower() == "true"
+    if hasattr(value, "item") and getattr(value, "ndim", None) == 0:
+        value = value.item()                          # a numpy scalar is a number
+    if to == "int":
+        if isinstance(value, str):
+            text = value.strip()
+            try:
+                return int(text)
+            except ValueError:
+                try:
+                    number = float(text)              # "2.0" is the whole number 2 (CV6)
+                except ValueError:
+                    raise ValueError(f"{value!r} isn't a number") from None
+                value = number
+        if isinstance(value, float) and not value.is_integer():
+            raise ValueError(f"{value!r} isn't a whole number")
+        return int(value)
+    if to == "float" and isinstance(value, numbers.Integral) and not isinstance(value, bool):
+        if float(value) != value:                     # past 2**53: not held exactly (CV7)
+            raise ValueError(f"{value!r} is too large to hold exactly as a float")
+        return float(value)
+    if to == "bool":
+        if isinstance(value, str):
+            word = value.strip().lower()
+            if word not in _BOOL_WORDS:
+                raise ValueError(f"{value!r} isn't true or false (or yes, no, 1, 0)")
+            return _BOOL_WORDS[word]
+        if isinstance(value, numbers.Number) and not isinstance(value, bool):
+            if value not in (0, 1):                   # 2 isn't True (CV10)
+                raise ValueError(f"{value!r} isn't 0 or 1")
+            return bool(value)
+    if to == "str" and isinstance(value, (list, tuple, dict)):
+        try:                                          # a structure as text: JSON (CV12)
+            return json.dumps(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"a {type(value).__name__} that JSON can't hold: write it "
+                             f"as text with a tool") from None
+    if to == "str" and (isinstance(value, (set, frozenset)) or hasattr(value, "__array__")
+                        or hasattr(value, "to_frame") or hasattr(value, "__next__")):
+        # a structure with no text of its own (a set, an array, a table): a
+        # unit such as a date keeps its own text
+        raise ValueError(f"a {type(value).__name__} has no text of its own here: write it "
+                         f"as text with a tool")
     return CASTS[to](value)
 
 
