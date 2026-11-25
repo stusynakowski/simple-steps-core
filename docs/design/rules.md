@@ -76,7 +76,9 @@ statistics drop values on purpose, but every row still traces back. A `null`
 (a value: nothing), `absent` (no value here at all: a key a record lacks, a
 `stack` or `join` gap) and `[]` are three different things. **A gap in data
 you give** (`NaN`, `pd.NA`, `None`) **is absent**: a blank you write is "no
-value". **A column keeps its type as you gave it**: a float column holding
+value". Column names are text: two columns with one name are named `a`,
+`a_1` (you're told), and hierarchical columns are joined by `_` (`t_am`).
+**A column keeps its type as you gave it**: a float column holding
 whole numbers and gaps stays float, and you're told to give it as `Int64`
 (or convert it) if it's integers. Core never tidies your data and never
 matches rows by position.

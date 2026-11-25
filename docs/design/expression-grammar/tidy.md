@@ -32,8 +32,8 @@ The point is to work really hard to enforce the tidy tables principle."*
 | a name starting with `#` | refused, naming why | ✓ T1 |
 | an empty name | renamed `var0` | ✓ T1 |
 | a meaningful pandas index (`who`) | becomes an ordinary column `who` | ✓ T4 |
-| **duplicate names** | refused, but with **a raw pandas error**: "The truth value of a Series is ambiguous" (**C2**) | ✗ T1. **Decided** (owner, 2026-11-23): **suffixed**, `a`, `a_1`, `a_2` (the next free number, if `a_1` is taken), and said |
-| **MultiIndex columns** | named **`"('t', 'am')"`**, the tuple as text (**C3**) | ✗ T5: flattened, `t_am` |
+| **duplicate names** | refused, but with **a raw pandas error**: "The truth value of a Series is ambiguous" (**C2**) | ✗ T1. **Decided** (owner, 2026-11-23): **suffixed**, `a`, `a_1`, `a_2` (the next free number, if `a_1` is taken), and said. **Built 2026-11-25**, in data given, a `table` tool's output and every run's output. **Open:** two *different* names made one by making them text (`1` and `"1"`, `0` and `"var0"`) are still refused, naming both, as core-asks L21b asks |
+| **MultiIndex columns** | named **`"('t', 'am')"`**, the tuple as text (**C3**) | ✗ T5: flattened, `t_am`. **Built 2026-11-25** |
 
 Columns by position (run): `cols[1]` → `am`; `cols[1:3]` → `am`, `pm`;
 `cols[[0, 2]]` → `name`, `pm`; `cols[-1]` → `pm`; `cols["am":"pm"]` → `am`,

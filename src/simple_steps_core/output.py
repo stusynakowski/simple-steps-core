@@ -508,25 +508,48 @@ def widen_field_names(keys: Sequence[Any], kept: Sequence[Any] = (),
     return named, said
 
 
-def _str_columns(frame: pd.DataFrame, step_id: str = "the step") -> pd.DataFrame:
-    """Every column name text (008 C7: names are text, rows are int).
+def _tidy_columns(frame: pd.DataFrame, step_id: str = "the step") -> tuple[pd.DataFrame, list[str]]:
+    """Every column name text, one per column (tidy.md T1, T5, C2, C3), and
+    what was changed, to be said.
 
-    Numeric and empty names become ``var<n>`` (L21, core-asks M6). Two names
-    that collide once converted fail, naming both.
+    Hierarchical (MultiIndex) columns are flattened, their parts joined by an
+    underscore (``t_am``); numeric and empty names become ``var<n>`` (L21);
+    **two columns with one name are suffixed** ``_1`` (the next free number)
+    and it is said (owner, 2026-11-23: they used to fail, with a raw pandas
+    error for duplicates given as such).
     """
-    names = [_column_name(c, i) for i, c in enumerate(frame.columns)]
-    if names == list(frame.columns):
-        return frame
-    seen: dict[str, Any] = {}
+    columns = list(frame.columns)
+    if isinstance(frame.columns, pd.MultiIndex):
+        columns = ["_".join(str(part) for part in c if str(part) != "") for c in columns]
+    names = [_column_name(c, i) for i, c in enumerate(columns)]
+    said: list[str] = []
+    used: dict = {}
+    final = []
     for original, name in zip(frame.columns, names):
-        if name in seen:
+        if name in used and used[name] != original:
+            # two different names made one by making them text (1 and "1"):
+            # refused, naming both (core-asks L21b; suffixing them is the
+            # owner's to decide)
             raise SelectionError(
-                f"columns {seen[name]!r} and {original!r} of {step_id!r} are both "
+                f"columns {used[name]!r} and {original!r} of {step_id!r} are both "
                 f"{name!r} (a numeric name becomes var<n>); rename one")
-        seen[name] = original
+        base, n = name, 1
+        while name in used or name in final:
+            name, n = f"{base}_{n}", n + 1
+        if name != base:
+            said.append(f"column {original!r} named {name!r}: {base!r} is taken by another column")
+        used.setdefault(base, original)
+        final.append(name)
+    if final == list(frame.columns) and not isinstance(frame.columns, pd.MultiIndex):
+        return frame, said
     out = frame.copy()
-    out.columns = names
-    return out
+    out.columns = final
+    return out, said
+
+
+def _str_columns(frame: pd.DataFrame, step_id: str = "the step") -> pd.DataFrame:
+    """Every column name text: :func:`_tidy_columns`, without what it says."""
+    return _tidy_columns(frame, step_id)[0]
 
 
 def _uncaught_failure(output: "Output") -> tuple[Any, str] | None:

@@ -803,10 +803,12 @@ def table_(source: Any, fn: Callable) -> Output:
                                f"{type(value).__name__}"}
             return Output(data=pd.DataFrame({VALUE_COLUMN: [None]}, index=[0], dtype=object),
                           records=[record], index=[0], meta=meta)
-    data = _normalize_missing(_own_index(_str_columns(value, "the table"), "the table"))
+    tidied, renamed = _tidy_columns(value, "the table")
+    data = _normalize_missing(_own_index(tidied, "the table"))
     records = [{**record, "unit": "table"} for _ in range(len(data))]
     return Output(data=data, records=records, index=data.index,
-                  meta={**meta, "columns": list(data.columns)})
+                  meta={**meta, "columns": list(data.columns),
+                        "warnings": [*meta.get("warnings", []), *renamed]})
 
 
 def auto_(source: Any, fn: Callable) -> Output:
@@ -905,7 +907,8 @@ def grid(value: Any) -> Output:
     ``score[mod.map()](grid(df))`` — how a chain begins. A table's own index
     becomes a column; its rows get ids 0…n-1 (see :func:`_own_index`).
     """
-    given = _own_index(_str_columns(rows(value), "the source"), "the source")
+    tidied, renamed = _tidy_columns(rows(value), "the source")
+    given = _own_index(tidied, "the source")
     frame = _normalize_missing(given)
     out = Output(
         data=frame,
@@ -919,8 +922,9 @@ def grid(value: Any) -> Output:
     # F2: a column keeps its dtype; one that may be integers written as
     # floats is said, never changed.
     floats = whole_float_gaps(frame)
+    out.meta["warnings"] = list(renamed)            # tidy.md C2: names suffixed, said
     if floats:
-        out.meta["warnings"] = [
+        out.meta["warnings"] += [
             f"{', '.join(floats)} {'is' if len(floats) == 1 else 'are'} float, holding only "
             f"whole numbers and gaps: if {'these are' if len(floats) == 1 else 'they are'} "
             f"integers, give the column as Int64, or convert it (to=int)"]
@@ -1504,6 +1508,7 @@ from .output import (  # noqa: E402
     _is_missing,
     _normalize_missing,
     _str_columns,
+    _tidy_columns,
     gap_cells,
     whole_float_gaps,
     widen_field_names,

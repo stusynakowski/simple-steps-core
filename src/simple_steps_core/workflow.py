@@ -3409,7 +3409,9 @@ class Workflow:
                 _mapping_keeps_value(output, step_id, source)
             if paired and unpaired is not None:
                 _unpair(output, unpaired, paired)
-            output.data = _str_columns(output.data, step_id)
+            output.data, renamed = _tidy_columns(output.data, step_id)
+            if renamed:                              # tidy.md C2: suffixed, said
+                output.meta.setdefault("warnings", []).extend(renamed)
             _spread_record(resolved, output)
             _spread_dict(resolved, output)
             _apply_naming(resolved, output, step_id, self.default_name_rule(resolved))
@@ -4006,6 +4008,7 @@ from .output import (  # noqa: E402
     _unversioned,
     _failed_output,
     _str_columns,
+    _tidy_columns,
     _uncaught_failure,
     is_id_column,
     VALUE_COLUMN,
